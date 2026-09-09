@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from draft import drafter
 from draft.drafter import (
     DraftRejected,
     check_hard_rules,
@@ -331,3 +332,37 @@ def test_no_claude_model_literal_in_drafter():
 
     src = Path(mod.__file__).read_text(encoding="utf-8")
     assert not re.search(r"claude-", src), "model IDs belong in config, not draft/drafter.py"
+
+
+def test_retry_prompt_feeds_violations_back_to_the_model():
+    assert drafter.retry_prompt("USER", []) == "USER"
+    prompt = drafter.retry_prompt("USER", ["thread[4] is 281 chars (> 280)"])
+    assert prompt.startswith("USER\n\n")
+    assert "thread[4] is 281 chars" in prompt
+    assert "260 characters" in prompt
+
+
+def test_draft_item_retries_with_the_violation_in_the_prompt():
+    seen: list[str] = []
+
+    def call(system, user, model):
+        seen.append(user)
+        long = "x" * 281
+        good = f"ok {URL}"
+        thread = [long if len(seen) == 1 else good, good, good]
+        return json.dumps(
+            {
+                "single_post": good,
+                "thread": thread,
+                "why_it_matters": "w",
+                "claims_to_verify": [],
+                "suggested_visual": "none",
+            }
+        )
+
+    result = drafter.draft_item(
+        title="t", abstract="a", url=URL, source="rss", call=call, model="m", sleep=lambda s: None
+    )
+    assert result.attempts == 2
+    assert "PREVIOUS ATTEMPT" not in seen[0]
+    assert "thread[0] is 281 chars" in seen[1]
