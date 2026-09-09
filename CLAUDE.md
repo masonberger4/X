@@ -6,8 +6,9 @@ Project guidance for Claude Code. Read PLAN.md before making changes.
 A human-in-the-loop pipeline that ingests oncology news, scores it with the
 Anthropic API, and drafts X posts for human approval. Python 3.11+, SQLite.
 Step 1 (ingest + dedup + prefilter + score + digest), step 2 (draft + human
-approval queue), step 3 (publish to X) and step 4 (feedback loop) are
-implemented. Nothing posts unless `PUBLISH_ENABLED=1` **and** `--live`.
+approval queue), step 3 (publish to X), step 4 (feedback loop) and step 5
+(operations: orchestrator, health, alerts, backups) are implemented. Nothing
+posts unless `PUBLISH_ENABLED=1` **and** `--live`.
 
 ## Commands
 - Install: `pip install -e ".[dev]"`
@@ -16,18 +17,30 @@ implemented. Nothing posts unless `PUBLISH_ENABLED=1` **and** `--live`.
 - Run: `python run_ingest.py`, `python run_score.py`, `python digest.py [--rate]`,
   `python run_draft.py`, `python run_queue.py` (approval UI on localhost:8000),
   `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`),
-  `python run_feedback.py snapshot|report|followers`
+  `python run_feedback.py snapshot|report|followers`,
+  `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
+  `ops/config.yaml` and `deploy/`)
 
 ## Rules
 - **Config drives everything.** Feeds, queries, company list, keywords,
   cadences, thresholds, and model names live in `config.yaml`. Never hardcode
   queries, URLs, feeds, or `claude-*` model IDs in code. `config.load_config()`
-  expands `companies.feeds` into `rss` sources named `company_<key>`.
-- **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`),
+  expands `companies.feeds` into `rss` sources named `company_<key>`,
+  `conferences.meetings` into `crossref` sources `conf_<key>_abstracts` (plus
+  `conf_<key>_news` rss when `news_rss` is set) and `kol` into one `x_list`
+  source `kol_x_list`; an explicit `enabled:` is copied through expansion.
+- **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`;
+  the only caller of `httpx.get` is its private `_request`, which retries
+  429/5xx/transport errors and never logs headers),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
   (Anthropic), `draft/drafter.py:call_anthropic`, and `publish/client.py`
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
+  `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
+  network methods of the step 6 sources (both call `http.get_json`).
+- **Meeting windows:** `Source.is_due` honours `windows: [{start, end,
+  cadence_minutes}]` (inclusive UTC dates); conference sources run hourly in a
+  window and daily outside. Window dates in `config.yaml` are updated yearly.
 - **Tests use real saved feeds** in `tests/fixtures/` where a live sample could
   be captured; synthetic fixtures only for bot-protected endpoints (FDA OCE
   page, ClinicalTrials.gov API).
@@ -81,12 +94,22 @@ implemented. Nothing posts unless `PUBLISH_ENABLED=1` **and** `--live`.
   module that calls the X API (httpx, `X_BEARER_TOKEN`, read-only). Reports
   PROPOSE rubric/prefilter/slot changes; a human applies them and bumps
   `PROMPT_VERSION`. Analysis and suggestions are pure (no DB, no network).
+- Step 5 (`ops/`) never imports another step's modules: `run_ops.py run`
+  executes the other CLIs as subprocesses (order, timeouts, enabled/required in
+  `ops/config.yaml`, which must never contain `--live`; a test asserts it) under
+  an `fcntl` lock. It reads other steps' tables only through the read-only
+  adapters in `ops/store.py` (each returns empty when a table is missing) and
+  owns `pipeline_runs`, `health_checks`, `alerts_sent`. `ops/health.py` is pure
+  (`now` is a parameter). The only network call in `ops/` is
+  `alert.py:post_webhook` (plus `send_email` via smtplib); alerts carry check
+  names, summaries and counts, never secrets or post text.
 - Commit after each working module.
 
 ## Layout
 ```
-ingest/   base.py (Item, Source ABC), http.py, rss.py, biorxiv.py, pubmed.py,
-          clinicaltrials.py, fda_oce.py
+ingest/   base.py (Item, Source ABC, windows), http.py (retry), rss.py,
+          biorxiv.py, pubmed.py, clinicaltrials.py, fda_oce.py,
+          crossref.py (conference abstracts), x_list.py (KOL list, read-only)
 filter/   prefilter.py, dedup.py
 score/    rubric.py, scorer.py
 db.py     sqlite: items, clusters, scores, ratings, source_runs
@@ -101,6 +124,10 @@ publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
           store.py (tweet_metrics, follower_snapshots, feedback_reports,
           fetch_posted, fetch_post_context, due_for_snapshot), client.py
+ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
+          backup.py, store.py (pipeline_runs, health_checks, alerts_sent +
+          read-only adapters)
+deploy/   crontab.example, pipeline.service, pipeline.timer, README.md
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_queue.py
-run_publish.py  run_feedback.py   (CLIs)
+run_publish.py  run_feedback.py  run_ops.py   (CLIs)
 ```

@@ -7,7 +7,7 @@ import json
 import re
 import unicodedata
 from abc import ABC, abstractmethod
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -113,9 +113,49 @@ class Item(BaseModel):
         )
 
 
+def _as_date(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value.strip():
+        return date.fromisoformat(value.strip()[:10])
+    return None
+
+
+def parse_windows(raw: Any) -> list[tuple[date, date, int | None]]:
+    """Normalise a `windows:` config list into (start, end, cadence_minutes|None).
+
+    Malformed entries are skipped. Both days are inclusive.
+    """
+    out: list[tuple[date, date, int | None]] = []
+    for w in raw or []:
+        if not isinstance(w, dict):
+            continue
+        try:
+            start, end = _as_date(w.get("start")), _as_date(w.get("end"))
+        except ValueError:
+            continue
+        if start is None or end is None or end < start:
+            continue
+        cad = w.get("cadence_minutes")
+        out.append((start, end, int(cad) if cad is not None else None))
+    return out
+
+
 class Source(ABC):
     """A configured source. Subclasses implement fetch(); network calls go through
-    small, mockable methods so tests never touch the network."""
+    small, mockable methods so tests never touch the network.
+
+    Meeting windows (step 6): a config may carry
+        windows: [{start: YYYY-MM-DD, end: YYYY-MM-DD, cadence_minutes: N}]
+    When the UTC date of `now` falls inside a window (inclusive) that window's
+    cadence replaces `cadence_minutes`. No windows -> plain cadence.
+
+    `enabled` pass-through: config.py copies `enabled: false` into every
+    expanded source (company feeds, conference sources, the KOL list) so a
+    health check can tell "deliberately off" from "never ran".
+    """
 
     type: str = "base"
 
@@ -125,10 +165,27 @@ class Source(ABC):
         self.name: str = cfg["name"]
         self.cadence_minutes: int = int(cfg.get("cadence_minutes", 60))
         self.enabled: bool = bool(cfg.get("enabled", True))
+        self.windows = parse_windows(cfg.get("windows"))
 
     @abstractmethod
     def fetch(self) -> list[Item]:
         """Return all currently available items (new or not); the caller dedups."""
+
+    def active_window(self, now: datetime | None = None) -> tuple[date, date, int | None] | None:
+        """The first configured window containing `now` (UTC date), if any."""
+        if not self.windows:
+            return None
+        today = (now or utcnow()).astimezone(UTC).date()
+        for w in self.windows:
+            if w[0] <= today <= w[1]:
+                return w
+        return None
+
+    def effective_cadence_minutes(self, now: datetime | None = None) -> int:
+        w = self.active_window(now)
+        if w is not None and w[2] is not None:
+            return w[2]
+        return self.cadence_minutes
 
     def is_due(self, last_run: datetime | None, now: datetime | None = None) -> bool:
         if not self.enabled:
@@ -136,4 +193,4 @@ class Source(ABC):
         if last_run is None:
             return True
         now = now or utcnow()
-        return (now - last_run).total_seconds() >= self.cadence_minutes * 60
+        return (now - last_run).total_seconds() >= self.effective_cadence_minutes(now) * 60

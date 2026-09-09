@@ -1,0 +1,101 @@
+{
+  "data": [
+    {
+      "id": "1830000000000000001",
+      "author_id": "20001",
+      "created_at": "2026-09-08T14:02:11.000Z",
+      "text": "Phase 3 readout: overall survival benefit holds up at 3 years. Full paper in Nature Medicine https://t.co/aaa111 #oncology",
+      "entities": {
+        "urls": [
+          {"start": 94, "end": 117, "url": "https://t.co/aaa111", "expanded_url": "https://www.nature.com/articles/s41591-026-01234-5", "display_url": "nature.com/articles/s4159…"}
+        ]
+      },
+      "public_metrics": {"retweet_count": 12, "reply_count": 3, "like_count": 88, "quote_count": 2, "bookmark_count": 9, "impression_count": 5120}
+    },
+    {
+      "id": "1830000000000000002",
+      "author_id": "20002",
+      "created_at": "2026-09-08T13:40:00.000Z",
+      "text": "Tal + Tec in extramedullary myeloma: the RP2R dose-selection abstract is worth a close read https://t.co/bbb222",
+      "entities": {
+        "urls": [
+          {"start": 93, "end": 116, "url": "https://t.co/bbb222", "expanded_url": "https://doi.org/10.1200/JCO.2026.44.16_suppl.7524", "display_url": "doi.org/10.1200/JCO.20…"}
+        ]
+      },
+      "public_metrics": {"retweet_count": 4, "reply_count": 1, "like_count": 31, "quote_count": 0, "bookmark_count": 6, "impression_count": 2210}
+    },
+    {
+      "id": "1830000000000000003",
+      "author_id": "20003",
+      "created_at": "2026-09-08T13:10:45.000Z",
+      "text": "RT @montypal: Phase 3 readout: overall survival benefit holds up at 3 years. Full paper in Nature Medicine https://t.co/aaa111",
+      "referenced_tweets": [{"type": "retweeted", "id": "1830000000000000001"}],
+      "entities": {
+        "urls": [
+          {"start": 105, "end": 128, "url": "https://t.co/aaa111", "expanded_url": "https://www.nature.com/articles/s41591-026-01234-5", "display_url": "nature.com/articles/s4159…"}
+        ]
+      },
+      "public_metrics": {"retweet_count": 0, "reply_count": 0, "like_count": 0, "quote_count": 0, "bookmark_count": 0, "impression_count": 0}
+    },
+    {
+      "id": "1830000000000000004",
+      "author_id": "20001",
+      "created_at": "2026-09-08T12:55:02.000Z",
+      "text": "@someone Agreed, the subgroup analysis is underpowered. See the supplement: https://t.co/ccc333",
+      "referenced_tweets": [{"type": "replied_to", "id": "1829999999999999999"}],
+      "entities": {
+        "urls": [
+          {"start": 75, "end": 98, "url": "https://t.co/ccc333", "expanded_url": "https://www.nejm.org/doi/suppl/10.1056/NEJMoa2600001", "display_url": "nejm.org/doi/suppl/10.1…"}
+        ]
+      },
+      "public_metrics": {"retweet_count": 0, "reply_count": 1, "like_count": 5, "quote_count": 0, "bookmark_count": 0, "impression_count": 410}
+    },
+    {
+      "id": "1830000000000000005",
+      "author_id": "20004",
+      "created_at": "2026-09-08T12:30:00.000Z",
+      "text": "Big if true. https://t.co/ddd444",
+      "referenced_tweets": [{"type": "quoted", "id": "1829999999999999998"}],
+      "entities": {
+        "urls": [
+          {"start": 13, "end": 36, "url": "https://t.co/ddd444", "expanded_url": "https://x.com/biotechnews/status/1829999999999999998", "display_url": "x.com/biotechnews/st…"}
+        ]
+      },
+      "public_metrics": {"retweet_count": 1, "reply_count": 0, "like_count": 14, "quote_count": 0, "bookmark_count": 1, "impression_count": 1900}
+    },
+    {
+      "id": "1830000000000000006",
+      "author_id": "20005",
+      "created_at": "2026-09-08T11:48:19.000Z",
+      "text": "Our preprint on in vivo CAR-T delivery with LNPs is up on bioRxiv https://t.co/eee555",
+      "entities": {
+        "urls": [
+          {"start": 66, "end": 89, "url": "https://t.co/eee555", "expanded_url": "https://www.biorxiv.org/content/10.64898/2026.09.01.700001v1", "display_url": "biorxiv.org/content/10.648…"}
+        ]
+      },
+      "public_metrics": {"retweet_count": 7, "reply_count": 2, "like_count": 40, "quote_count": 1, "bookmark_count": 12, "impression_count": 3300}
+    },
+    {
+      "id": "1830000000000000007",
+      "author_id": "20003",
+      "created_at": "2026-09-08T11:05:00.000Z",
+      "text": "Today OCE approved a new indication for a bispecific antibody in relapsed lymphoma. Details in the approval notice.",
+      "public_metrics": {"retweet_count": 30, "reply_count": 4, "like_count": 150, "quote_count": 6, "bookmark_count": 20, "impression_count": 12000}
+    }
+  ],
+  "includes": {
+    "users": [
+      {"id": "20001", "username": "montypal", "name": "Sumanta (Monty) Pal"},
+      {"id": "20002", "username": "RahulBanerjeeMD", "name": "Rahul Banerjee"},
+      {"id": "20003", "username": "FDAOncology", "name": "FDA Oncology"},
+      {"id": "20004", "username": "adamfeuerstein", "name": "Adam Feuerstein"},
+      {"id": "20005", "username": "notonthelist99", "name": "Not On The List"}
+    ]
+  },
+  "meta": {
+    "result_count": 7,
+    "newest_id": "1830000000000000001",
+    "oldest_id": "1830000000000000007",
+    "next_token": "7140dibdnow9c7btw4b1rs4x7ohsfjo1x0ed6vn5zdxms"
+  }
+}

@@ -149,6 +149,103 @@ The report **proposes** changes and applies none. A human edits
 keywords, source cadences), `publish/config.yaml` (slots, `post_format`) or
 `draft/voice.md`, as each suggestion names.
 
+## Operations (step 5)
+
+`run_ops.py` runs the whole pipeline unattended under cron or a systemd timer,
+detects when a source or stage has silently stopped, backs up the database, and
+tells you when something needs attention. It never posts, never calls the
+Anthropic API, and never edits content; it runs the other CLIs as subprocesses.
+
+```bash
+python run_ops.py run                 # lock; ingest -> score -> draft [-> publish -> feedback]
+python run_ops.py run --only ingest   # a subset
+python run_ops.py run --dry-run       # print the argv per step, run and record nothing
+python run_ops.py health [--json] [--alert]   # checks; exit 1 if anything is 'fail'
+python run_ops.py backup [--keep N]   # verified SQLite online backup into backups/
+python run_ops.py status              # last run per step, last health, row counts, backup age
+python run_ops.py prune --days 90     # ops-owned tables only (pipeline_runs, health_checks, alerts_sent)
+```
+
+Settings live in `ops/config.yaml` (step order, timeouts, health thresholds and
+budget caps, backup dir/keep, alert channels and cooldown). The `publish` step is
+disabled there and its argv is the dry-run default; enable it and add `--live`
+yourself, together with `PUBLISH_ENABLED=1`, after reading the publishing section
+above. Steps whose CLI has not merged yet are skipped with a warning.
+
+Health checks: sources (error / never ran / stale), staleness of ingest, score
+and draft, unscored backlog and pending-draft age, per-day scoring and drafting
+budget, publish `partial`/`failed`/stuck claims, feedback snapshots, backup age,
+DB size and disk free, and required env var names (never values). Alerts go to
+the log always, and optionally to a webhook (`ALERT_WEBHOOK_URL`, works for
+Slack/Discord/Mattermost incoming webhooks) or email (`SMTP_*`,
+`ALERT_EMAIL_FROM/TO`). A check that keeps failing is re-sent only after
+`alerts.cooldown_hours`; a recovery sends one message. Alerts carry check names,
+summaries and counts only.
+
+Deploy files: `deploy/crontab.example`, `deploy/pipeline.service`,
+`deploy/pipeline.timer`, and `deploy/README.md` (VPS setup, lock/backup/log
+locations, how to restore a backup).
+
+## Conference abstracts and KOL list (step 6)
+
+Two more ingest sources plus retry in the HTTP layer. Nothing here calls the
+Anthropic API or writes to X.
+
+**HTTP retry.** `ingest/http.py` retries 429 and 5xx responses and transport
+errors (connection failures, timeouts) up to three attempts with exponential
+backoff, honours a numeric `Retry-After` (capped at 60 s), and never retries
+other 4xx. The DEBUG log line prints the URL and query only, never headers.
+
+**Meeting windows.** Any source may carry
+`windows: [{start, end, cadence_minutes}]`; on days inside a window
+(inclusive) that cadence replaces `cadence_minutes`. `config.yaml` uses this
+to run the conference sources hourly from abstract release through the
+meeting and daily otherwise. The window dates must be updated every year from
+the society pages linked in `config.yaml`.
+
+**Conference abstracts (`type: crossref`).** Societies publish their meeting
+abstracts as journal supplements (JCO for ASCO, Cancer Research for AACR,
+Blood for ASH, Annals of Oncology for ESMO) that Crossref indexes under the
+journal's ISSN. `conferences.meetings` expands into `conf_<key>_abstracts`
+sources that query `api.crossref.org/works` by ISSN and created date, keep
+only works whose issue or DOI matches `issue_pattern`, gate on
+`prefilter.allow_keywords`, put late-breaking / plenary abstracts first, then
+newest, and cap each run at `max_items_per_run`. Abstracts get one factual
+line prepended (`ASCO Annual Meeting 2026 abstract (Journal of Clinical
+Oncology 44, 16_suppl).`); titles are untouched so the later full paper joins
+the same cluster by DOI or title. A meeting's `news_rss` becomes
+`conf_<key>_news` with the same windows. ESMO is shipped `enabled: false`:
+Elsevier deposits the Annals of Oncology abstract book in Crossref after the
+congress, without abstracts. Set `CROSSREF_MAILTO` in `.env` (or
+`crossref.mailto`) to use Crossref's polite pool.
+
+The flood of a meeting week is handled inside the source (issue filter,
+keyword gate, priority order, per-run cap). Prefilter and scoring policy are
+unchanged; if the daily cap in `prefilter.daily_cap` turns out to be the
+binding constraint during ASCO, raise it for the window rather than changing
+the prefilter code.
+
+**KOL X list (`type: x_list`, disabled).** `kol` expands into one read-only
+source, `kol_x_list`, that reads recent posts from a single X list via
+`GET /2/lists/:id/tweets` with app-only bearer auth. To turn it on:
+
+1. Create the list by hand on X from the accounts documented under
+   `kol.handles` (public professional accounts only) and put its id in
+   `X_KOL_LIST_ID`.
+2. Reading a list needs X API read access, which is a paid tier. The bearer
+   token (`X_BEARER_TOKEN`) is shared with step 4's feedback snapshots, so the
+   read budget is shared too; `kol.monthly_request_cap` is this source's
+   share and a test checks `cadence_minutes` x `max_pages` stays under it.
+3. Set `kol.enabled: true`. Until then the source is listed but never runs; if
+   it is enabled without a token or list id it fails soft with a clear error
+   in `source_runs.error`.
+
+Retweets and replies are skipped, posts without an off-platform link are
+skipped, t.co links are replaced by their expanded URLs, and a post that links
+a DOI joins that paper's cluster. `lookback_hours` must exceed
+`cadence_minutes` so consecutive runs overlap; the dedup hash makes the
+overlap harmless. The token is never logged.
+
 ## Voice learning (step 7)
 
 Every edit and rejection in the approval queue is training data. Step 7 reads
