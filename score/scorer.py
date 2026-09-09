@@ -232,10 +232,21 @@ class Scorer:
             self.batch_size,
         )
         scores: list[Score] = []
+        total_batches = (len(clusters) + self.batch_size - 1) // self.batch_size
         for i in range(0, len(clusters), self.batch_size):
             batch = clusters[i : i + self.batch_size]
+            started = time.monotonic()
             try:
-                scores.extend(self.score_batch(db, batch))
+                got = self.score_batch(db, batch)
+                scores.extend(got)
+                log.info(
+                    "batch %d/%d: scored %d of %d clusters in %.0fs",
+                    i // self.batch_size + 1,
+                    total_batches,
+                    len(got),
+                    len(batch),
+                    time.monotonic() - started,
+                )
             except claude_cli.ClaudeCliUnavailable as exc:
                 log.error("stopping: %s", exc)
                 break
