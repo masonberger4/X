@@ -58,7 +58,8 @@ def test_build_argv_is_print_mode_without_tools():
     assert argv[argv.index("--model") + 1] == "claude-haiku-4-5"
     assert argv[argv.index("--system-prompt-file") + 1] == "sys.md"
     assert "--system-prompt" not in argv  # long prompt never goes on the command line
-    assert "--no-session-persistence" in argv and "--bare" in argv
+    assert "--no-session-persistence" in argv
+    assert "--bare" not in argv  # --bare skips the stored login: "Not logged in"
     assert argv[-1] == "-x"
 
 
@@ -105,6 +106,7 @@ def test_run_claude_pipes_prompt_on_stdin(monkeypatch):
     assert seen["argv"][0] == "C:\\npm\\claude.CMD"  # resolved path, not the bare name
     assert seen["kw"]["input"] == "USER"
     assert seen["kw"]["timeout"] == 7.0
+    assert seen["kw"]["cwd"] == claude_cli.tempfile.gettempdir()  # no CLAUDE.md pickup
     assert "USER" not in seen["argv"] and "SYS" not in seen["argv"]
     system_file = seen["argv"][seen["argv"].index("--system-prompt-file") + 1]
     assert seen["system_text"] == "SYS"

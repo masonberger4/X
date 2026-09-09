@@ -137,8 +137,9 @@ class Scorer:
                     raise
                 delay = self.backoff * (2**attempt)
                 log.warning(
-                    "API error (%s); retry %d/%d in %.1fs",
+                    "API error (%s: %s); retry %d/%d in %.1fs",
                     type(exc).__name__,
+                    str(exc)[:200],
                     attempt + 1,
                     self.max_retries,
                     delay,
