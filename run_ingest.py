@@ -14,15 +14,25 @@ from filter.dedup import assign_cluster
 from ingest.base import Source, utcnow
 from ingest.biorxiv import BiorxivSource
 from ingest.clinicaltrials import ClinicalTrialsSource
+from ingest.crossref import CrossrefSource
 from ingest.fda_oce import FDAOCESource
 from ingest.pubmed import PubMedSource
 from ingest.rss import RSSSource
+from ingest.x_list import XListSource
 
 log = logging.getLogger("run_ingest")
 
 SOURCE_TYPES: dict[str, type[Source]] = {
     cls.type: cls
-    for cls in (RSSSource, BiorxivSource, ClinicalTrialsSource, FDAOCESource, PubMedSource)
+    for cls in (
+        RSSSource,
+        BiorxivSource,
+        ClinicalTrialsSource,
+        FDAOCESource,
+        PubMedSource,
+        CrossrefSource,
+        XListSource,
+    )
 }
 
 

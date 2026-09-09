@@ -209,3 +209,176 @@ companies:
     - {key: xencor,       name: Xencor,                  url: https://investors.xencor.com/rss/news-releases.xml}
     - {key: carisma,      name: Carisma Therapeutics,    url: https://ir.carismatx.com/rss/news-releases.xml}
     - {key: alx,          name: ALX Oncology,            url: https://ir.alxoncology.com/rss/news-releases.xml}
+
+# ---------------------------------------------------------------------------
+# Step 6: conference abstracts (Crossref) and the curated KOL X list.
+# ---------------------------------------------------------------------------
+
+# Crossref REST API (polite pool). CROSSREF_MAILTO in .env overrides mailto.
+crossref:
+  api_url: https://api.crossref.org/works
+  mailto: masonpberger@gmail.com
+  rows: 200                       # works per page (Crossref allows up to 1000)
+  max_pages: 5                    # cursor pages per run
+
+# Society meeting abstracts are published as journal supplements that Crossref
+# indexes under the journal's ISSN. Each meeting becomes a `crossref` source
+# named conf_<key>_abstracts; `news_rss` (if set) becomes conf_<key>_news (rss)
+# with the same windows. Outside a window the source runs daily; inside a
+# window (abstract-release day through meeting end + 3 days) it runs hourly.
+# Windows are dated: UPDATE YEARLY from the society pages linked below.
+conferences:
+  default_cadence_minutes: 1440   # outside windows
+  window_cadence_minutes: 60      # inside a window
+  news_cadence_minutes: 360       # society newsroom feeds outside windows
+  lookback_days: 3                # from-created-date filter
+  max_items_per_run: 40           # per source per run, after priority ordering
+  boost_patterns: [LBA, late-breaking, plenary]   # DOI or title; these go first
+  # keywords: omitted -> prefilter.allow_keywords gates title+abstract
+  meetings:
+    - key: asco
+      name: "ASCO Annual Meeting"
+      journal: "Journal of Clinical Oncology"
+      issn: 0732-183X
+      # Verified Sept 2026: the 2026 meeting abstracts are JCO 44(16_suppl)
+      # (4,700+ works, registered 2026-05-27/28) and the late-breakers are
+      # 44(17_suppl) (registered 2026-06-03); both carry JATS abstracts.
+      issue_pattern: suppl
+      windows:
+        # 2027 ASCO Annual Meeting: June 4-8, 2027, Chicago
+        # (https://www.asco.org/annual-meeting). Regular abstracts are released
+        # online the week before the meeting; the 2026 supplement hit Crossref
+        # the day before the meeting opened. Update yearly.
+        - {start: 2027-05-27, end: 2027-06-11}
+      # asco.org sits behind bot protection (403) and publishes no newsroom
+      # RSS; ASCO Post's feed is 24 MB per fetch and was left out.
+    - key: aacr
+      name: "AACR Annual Meeting"
+      journal: "Cancer Research"
+      issn: 0008-5472
+      # Verified Sept 2026: the 2026 annual meeting abstracts are Cancer Research
+      # 86(7_Supplement) with DOIs 10.1158/1538-7445.am2026-<n>, registered
+      # 2026-04-03, with abstracts. Other AACR special-conference supplements
+      # share the ISSN, so the DOI fragment below selects the annual meeting.
+      issue_pattern: 'am20\d\d-'
+      windows:
+        # AACR Annual Meeting 2027: April 2-7, 2027, Orlando
+        # (https://www.aacr.org/meeting/aacr-annual-meeting-2027/). Abstracts
+        # reach Crossref about two weeks before the meeting. Update yearly.
+        - {start: 2027-03-19, end: 2027-04-10}
+      # AACR site-wide RSS (news + blog), verified live Sept 2026.
+      news_rss: https://www.aacr.org/feed/
+    - key: esmo
+      name: "ESMO Congress"
+      journal: "Annals of Oncology"
+      issn: 0923-7534
+      # Verified Sept 2026: the ESMO 2025 abstract book (Annals of Oncology 36,
+      # Supplement 2) was registered in Crossref on 2025-11-06, AFTER the
+      # congress, with no `issue` and no `abstract`, so this source cannot
+      # yield scorable items; the prefilter would drop abstract-less records
+      # anyway. Disabled until Elsevier deposits abstracts. Re-check yearly.
+      enabled: false
+      issue_pattern: 'suppl|^S\d+'
+      windows:
+        # ESMO Congress 2026: 23-27 October 2026, Madrid
+        # (https://www.esmo.org/meeting-calendar/esmo-congress-2026). ESMO
+        # publishes regular abstracts online in the week before the congress.
+        # Update yearly.
+        - {start: 2026-10-16, end: 2026-10-30}
+      # esmo.org publishes no RSS feed (checked /rss, /rss.xml, /feed).
+    - key: ash
+      name: "ASH Annual Meeting"
+      journal: "Blood"
+      issn: 0006-4971
+      # Verified Sept 2026: the ASH 2025 abstracts are Blood 146(Supplement 1),
+      # registered 2025-12-04 (two days before the meeting), with abstracts.
+      issue_pattern: Supplement
+      windows:
+        # 68th ASH Annual Meeting: December 12-15, 2026, New Orleans; abstracts
+        # available online November 4, 2026; late-breaking abstracts online
+        # December 9, 2026 (https://www.hematology.org/meetings/annual-meeting).
+        # Update yearly.
+        - {start: 2026-11-04, end: 2026-12-18}
+      # hematology.org publishes no RSS feed (checked /rss, /rss.xml, /newsroom/rss).
+
+# Curated X list of oncology KOLs (read-only). The list itself is created by
+# hand on X; put its id in X_KOL_LIST_ID (.env) or list_id below. Reading it
+# needs X API read access (paid tier) and X_BEARER_TOKEN, which is shared with
+# step 4's feedback snapshots: monthly_request_cap is this source's share.
+# Stays disabled until the list exists and the token is in .env.
+kol:
+  enabled: false                  # needs X API read access
+  list_id: ""                     # X_KOL_LIST_ID overrides
+  api_url: https://api.x.com/2
+  cadence_minutes: 120
+  max_results: 100                # per page (API max)
+  max_pages: 1
+  lookback_hours: 6               # must exceed cadence_minutes so runs overlap
+  require_link: true              # skip posts with no link off x.com
+  skip_retweets: true
+  skip_replies: true
+  enforce_handles: false          # true -> only authors listed below are kept
+  monthly_request_cap: 500        # 30 days / cadence x max_pages must stay under this
+  # Documentation of who belongs on the list and an optional author filter.
+  # Public professional accounts only (clinicians, scientists, editors,
+  # agencies, analysts); no patients or private individuals. Curate on X.
+  handles:
+    # --- clinical trialists / academic oncologists ---
+    - {handle: montypal,          name: Sumanta Pal,            focus: GU oncology; JCO editor}
+    - {handle: DrChoueiri,        name: Toni Choueiri,          focus: kidney cancer trials}
+    - {handle: brian_rini,        name: Brian Rini,             focus: GU oncology, trial design}
+    - {handle: JackWestMD,        name: H. Jack West,           focus: thoracic oncology}
+    - {handle: StephenVLiu,       name: Stephen Liu,            focus: lung cancer trials}
+    - {handle: NarjustFlorezMD,   name: Narjust Florez,         focus: thoracic oncology, equity}
+    - {handle: CharuAggarwalMD,   name: Charu Aggarwal,         focus: lung cancer, immunotherapy}
+    - {handle: DrJNaidoo,         name: Jarushka Naidoo,        focus: thoracic oncology, immunotherapy}
+    - {handle: hoperugo,          name: Hope Rugo,              focus: breast cancer trials}
+    - {handle: ErikaHamilton9,    name: Erika Hamilton,         focus: breast cancer, early-phase drug development}
+    - {handle: marklewismd,       name: Mark Lewis,             focus: GI oncology}
+    - {handle: pashtoonkasi,      name: Pashtoon Kasi,          focus: GI oncology, ctDNA}
+    - {handle: ShaalanBeg,        name: Shaalan Beg,            focus: GI oncology, precision medicine}
+    - {handle: drdonsdizon,       name: Don Dizon,              focus: gynecologic oncology, patient communication}
+    - {handle: fumikochino,       name: Fumiko Chino,           focus: radiation oncology, financial toxicity}
+    - {handle: VivekSubbiah,      name: Vivek Subbiah,          focus: precision oncology, tumour-agnostic drugs}
+    - {handle: ravi_b_parikh,     name: Ravi Parikh,            focus: oncology AI, health policy}
+    - {handle: oncology_bg,       name: Bishal Gyawali,         focus: trial evidence, global oncology}
+    - {handle: VPrasadMDMPH,      name: Vinay Prasad,           focus: trial design, evidence critique}
+    - {handle: AaronGoodman33,    name: Aaron Goodman,          focus: hematologic malignancies, evidence}
+    - {handle: ADesaiMD,          name: Aakash Desai,           focus: thoracic oncology, drug development}
+    # --- hematology, myeloma, cell therapy clinicians ---
+    - {handle: VincentRK,         name: S. Vincent Rajkumar,    focus: multiple myeloma; journal editor}
+    - {handle: RahulBanerjeeMD,   name: Rahul Banerjee,         focus: myeloma, CAR-T, bispecifics}
+    - {handle: ManniMD1,          name: Manni Mohyuddin,        focus: myeloma, trial appraisal}
+    - {handle: DrMiguelPerales,   name: Miguel-Angel Perales,   focus: transplant and CAR-T}
+    - {handle: doctorpemm,        name: Naveen Pemmaraju,       focus: leukemia, MPN, BPDCN}
+    - {handle: MikkaelSekeres,    name: Mikkael Sekeres,        focus: leukemia, MDS, FDA advisory}
+    - {handle: DavidSteensma,     name: David Steensma,         focus: MDS, hematology drug development}
+    # --- cell and gene therapy science ---
+    - {handle: MarcelaMaus,       name: Marcela Maus,           focus: CAR-T engineering}
+    - {handle: CrystalMackall,    name: Crystal Mackall,        focus: CAR-T for solid and pediatric tumours}
+    - {handle: davidrliu,         name: David Liu,              focus: base and prime editing}
+    - {handle: UrnovFyodor,       name: Fyodor Urnov,           focus: genome editing therapeutics}
+    - {handle: kiranmusunuru,     name: Kiran Musunuru,         focus: in vivo gene editing}
+    - {handle: doudna_lab,        name: Doudna Lab,             focus: CRISPR}
+    # --- regulators, societies, journals ---
+    - {handle: FDAOncology,       name: FDA Oncology Center of Excellence, focus: oncology approvals}
+    - {handle: tmprowell,         name: Tatiana Prowell,        focus: FDA OCE, breast oncology}
+    - {handle: US_FDA,            name: U.S. FDA,               focus: agency announcements}
+    - {handle: ASCO,              name: ASCO,                   focus: society news, annual meeting}
+    - {handle: AACR,              name: AACR,                   focus: society news, annual meeting}
+    - {handle: myESMO,            name: ESMO,                   focus: society news, congress}
+    - {handle: ASH_hematology,    name: ASH,                    focus: society news, annual meeting}
+    - {handle: JCO_ASCO,          name: Journal of Clinical Oncology, focus: journal}
+    - {handle: NEJM,              name: NEJM,                   focus: journal}
+    - {handle: TheLancetOncol,    name: The Lancet Oncology,    focus: journal}
+    - {handle: NatureMedicine,    name: Nature Medicine,        focus: journal}
+    - {handle: BloodJournal,      name: Blood,                  focus: journal}
+    - {handle: CD_AACR,           name: Cancer Discovery,       focus: journal}
+    - {handle: JAMAOnc,           name: JAMA Oncology,          focus: journal}
+    # --- biotech analysts and reporters ---
+    - {handle: adamfeuerstein,    name: Adam Feuerstein,        focus: biotech reporting (STAT)}
+    - {handle: matthewherper,     name: Matthew Herper,         focus: pharma reporting (STAT)}
+    - {handle: ldtimmerman,       name: Luke Timmerman,         focus: biotech (Timmerman Report)}
+    - {handle: bradloncar,        name: Brad Loncar,            focus: cancer immunotherapy investing}
+    - {handle: JacobPlieth,       name: Jacob Plieth,           focus: oncology drug development analysis}
+    - {handle: AndyBiotech,       name: Andy Biotech,           focus: biotech analysis}
