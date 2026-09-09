@@ -1,6 +1,6 @@
 """CLI: draft every scored candidate above threshold that has no draft yet.
 
-Usage: python run_draft.py [--min-score 7] [--since-hours 48] [--limit N] [--dry-run]
+Usage: python run_draft.py [--min-score 30] [--since-hours 48] [--limit N] [--dry-run]
                            [--no-examples]
 
 Drafts that pass every hard rule are stored as pending. Drafts the model could not get
@@ -62,10 +62,26 @@ def build_examples(
     return block, edits, rejections
 
 
+def _default_min_score() -> float:
+    """config.yaml scoring.threshold (the digest's bar), else 30 on the 0-50 scale."""
+    try:
+        import config as root_config
+
+        return float((root_config.load_config().get("scoring") or {}).get("threshold", 30))
+    except Exception:  # root config missing or unreadable
+        return 30.0
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--min-score", type=float, default=7.0)
+    ap.add_argument(
+        "--min-score",
+        type=float,
+        default=None,
+        help="score total (0-50) a story needs to be drafted; default: config.yaml "
+        "scoring.threshold",
+    )
     ap.add_argument("--since-hours", type=float, default=48.0)
     ap.add_argument("--limit", type=int, default=10, help="max items to draft this run")
     ap.add_argument("--dry-run", action="store_true", help="list candidates, do not call the API")
@@ -80,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if args.min_score is None:
+        args.min_score = _default_min_score()
 
     conn = store.connect()
     try:

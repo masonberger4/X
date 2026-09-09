@@ -32,6 +32,9 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 - Always link the primary source; label preprints as preprints.
 - Never fabricate numbers.
 
+**Step-by-step operator guide:** [HOWTO.md](HOWTO.md) has every command in
+order, from install to scheduled publishing, with Windows commands.
+
 ## Setup
 
 ```bash
