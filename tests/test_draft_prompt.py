@@ -32,6 +32,7 @@ def test_preprint_flagged_in_user_prompt():
     _, user = build_prompt(title="t", abstract="a", url="https://x.y", source="biorxiv")
     assert "THIS IS A PREPRINT" in user
     assert is_preprint("medRxiv")
+    assert is_preprint("biorxiv_cancer_biology") and is_preprint("medrxiv_oncology")
     assert not is_preprint("pubmed")
     assert not is_preprint(None)
 

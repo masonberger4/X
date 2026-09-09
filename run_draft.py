@@ -40,12 +40,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not store.step1_tables_present(conn):
             log.error(
-                "no items/scores tables in %s; run step 1 (run_ingest/run_score) first",
+                "no items/clusters/scores tables in %s; run step 1 (run_ingest/run_score) first",
                 store.db_path(),
             )
             return 1
         candidates = store.fetch_candidates(args.min_score, args.since_hours, conn=conn)
-        todo = [c for c in candidates if not store.has_draft(conn, c.item_id)][: args.limit]
+        todo = [c for c in candidates if not store.has_draft(conn, c.item_id, c.cluster_id)][
+            : args.limit
+        ]
         log.info(
             "%d candidates >= %.1f in last %.0fh, %d without a draft",
             len(candidates),
@@ -73,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
                 store.insert_draft(
                     conn,
                     item_id=c.item_id,
+                    cluster_id=c.cluster_id,
                     model=exc.__class__.__name__,
                     draft=Draft("", [], "", ""),
                     status=store.STATUS_FAILED,
@@ -82,7 +85,13 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 log.exception("API failure drafting %s; will retry next run", c.item_id)
                 continue
-            store.insert_draft(conn, item_id=c.item_id, model=result.model, draft=result.draft)
+            store.insert_draft(
+                conn,
+                item_id=c.item_id,
+                cluster_id=c.cluster_id,
+                model=result.model,
+                draft=result.draft,
+            )
             drafted += 1
             if result.flagged_numbers:
                 log.warning("%s: numbers flagged for review: %s", c.item_id, result.flagged_numbers)

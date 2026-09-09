@@ -36,7 +36,9 @@ def load_voice_guide(path: Path = VOICE_PATH) -> str:
 
 
 def is_preprint(source: str | None) -> bool:
-    return (source or "").strip().lower() in PREPRINT_SOURCES
+    """Step 1 names preprint sources like 'biorxiv_cancer_biology' / 'medrxiv_oncology'."""
+    name = (source or "").strip().lower()
+    return any(p in name for p in PREPRINT_SOURCES)
 
 
 def build_system_prompt() -> str:

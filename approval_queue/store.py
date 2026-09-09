@@ -2,7 +2,7 @@
 
 Owns two tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline DB):
 
-  drafts(id INTEGER PK, item_id TEXT UNIQUE, model, single_post, thread_json,
+  drafts(id INTEGER PK, item_id TEXT UNIQUE, cluster_id, model, single_post, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
          snoozed_until, created_at, updated_at)
   decisions(id INTEGER PK, draft_id FK, action, original_text, edited_text, note, created_at)
@@ -43,6 +43,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS drafts (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id          TEXT NOT NULL UNIQUE,
+    cluster_id       INTEGER,
     model            TEXT NOT NULL,
     single_post      TEXT NOT NULL,
     thread_json      TEXT NOT NULL,
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     updated_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status);
+CREATE INDEX IF NOT EXISTS idx_drafts_cluster ON drafts(cluster_id);
 
 CREATE TABLE IF NOT EXISTS decisions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +73,16 @@ CREATE INDEX IF NOT EXISTS idx_decisions_draft ON decisions(draft_id);
 
 
 def db_path() -> Path:
-    return Path(os.environ.get("DB_PATH", DEFAULT_DB_PATH))
+    """DB_PATH env var, else config.yaml's db_path (same file step 1 uses), else ./pipeline.db."""
+    env = os.environ.get("DB_PATH")
+    if env:
+        return Path(env)
+    try:
+        from config import load_config
+
+        return Path(load_config().get("db_path", DEFAULT_DB_PATH))
+    except Exception:  # config.yaml missing or unreadable
+        return Path(DEFAULT_DB_PATH)
 
 
 def _now() -> str:
@@ -99,6 +110,7 @@ class Candidate:
     """A scored item ready for drafting. Built only by fetch_candidates()."""
 
     item_id: str
+    cluster_id: int | None
     source: str
     url: str
     title: str
@@ -110,21 +122,27 @@ class Candidate:
     scores: dict[str, float] = field(default_factory=dict)
 
 
-# ASSUMED STEP 1 SCHEMA (reconcile with db.py when branches merge):
-#   items(id TEXT PK, source, url, title, abstract, published_at, fetched_at,
-#         dedup_hash UNIQUE, raw_json)
-#   scores(item_id FK, novelty, clinical_significance, audience_interest,
-#          expertise_fit, timeliness, total, rationale, suggested_angle, scored_at)
-# If an item has been scored more than once, the latest scored_at wins.
+# STEP 1 SCHEMA (db.py): scores are per *cluster* (one cluster = one story), items carry
+# cluster_id. The latest score for a cluster is the one with the highest scores.id.
+#   items(id TEXT PK, source, url, doi, title, abstract, published_at, fetched_at,
+#         dedup_hash UNIQUE, cluster_id FK, raw_json)
+#   clusters(id PK, title, norm_title, doi, published_at, created_at, prefilter_status, ...)
+#   scores(id PK, cluster_id FK, model, prompt_version, novelty, clinical_significance,
+#          audience_interest, expertise_fit, timeliness, evidence_level, hype_risk, total,
+#          rationale, suggested_angle, raw_response, scored_at)
+# One candidate per cluster: the member with the longest abstract (best for verifying numbers),
+# then earliest published_at, then id.
 _CANDIDATES_SQL = """
-SELECT i.id, i.source, i.url, i.title, i.abstract, i.published_at,
+SELECT i.id, i.cluster_id, i.source, i.url, i.title, i.abstract, i.published_at,
        s.novelty, s.clinical_significance, s.audience_interest, s.expertise_fit,
        s.timeliness, s.total, s.rationale, s.suggested_angle
-FROM items i
-JOIN scores s ON s.item_id = i.id
+FROM clusters c
+JOIN scores s ON s.id = (SELECT id FROM scores WHERE cluster_id = c.id ORDER BY id DESC LIMIT 1)
+JOIN items i ON i.id = (SELECT id FROM items WHERE cluster_id = c.id
+                        ORDER BY LENGTH(abstract) DESC, published_at IS NULL, published_at, id
+                        LIMIT 1)
 WHERE s.total >= :min_score
   AND s.scored_at >= :since
-  AND s.scored_at = (SELECT MAX(s2.scored_at) FROM scores s2 WHERE s2.item_id = i.id)
 ORDER BY s.total DESC, s.scored_at DESC
 """
 
@@ -151,6 +169,7 @@ def fetch_candidates(
         out.append(
             Candidate(
                 item_id=r["id"],
+                cluster_id=r["cluster_id"],
                 source=r["source"] or "",
                 url=r["url"] or "",
                 title=r["title"] or "",
@@ -183,6 +202,7 @@ def fetch_candidates(
 class DraftRow:
     id: int
     item_id: str
+    cluster_id: int | None
     model: str
     draft: Draft
     status: str
@@ -212,6 +232,7 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
     return DraftRow(
         id=r["id"],
         item_id=r["item_id"],
+        cluster_id=r["cluster_id"],
         model=r["model"],
         draft=draft,
         status=r["status"],
@@ -229,8 +250,15 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
     )
 
 
-def has_draft(conn: sqlite3.Connection, item_id: str) -> bool:
-    return conn.execute("SELECT 1 FROM drafts WHERE item_id = ?", (item_id,)).fetchone() is not None
+def has_draft(conn: sqlite3.Connection, item_id: str, cluster_id: int | None = None) -> bool:
+    """True if this item, or any item in the same cluster (same story), already has a draft."""
+    if cluster_id is None:
+        row = conn.execute("SELECT 1 FROM drafts WHERE item_id = ?", (item_id,)).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM drafts WHERE item_id = ? OR cluster_id = ?", (item_id, cluster_id)
+        ).fetchone()
+    return row is not None
 
 
 def insert_draft(
@@ -239,6 +267,7 @@ def insert_draft(
     item_id: str,
     model: str,
     draft: Draft,
+    cluster_id: int | None = None,
     status: str = STATUS_PENDING,
     rejection_reason: str | None = None,
 ) -> int:
@@ -246,12 +275,13 @@ def insert_draft(
         raise ValueError(f"unknown status {status!r}")
     now = _now()
     cur = conn.execute(
-        """INSERT INTO drafts (item_id, model, single_post, thread_json, suggested_visual,
-                               why_it_matters, claims_json, status, rejection_reason,
-                               created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO drafts (item_id, cluster_id, model, single_post, thread_json,
+                               suggested_visual, why_it_matters, claims_json, status,
+                               rejection_reason, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             item_id,
+            cluster_id,
             model,
             draft.single_post,
             json.dumps(draft.thread),
@@ -270,9 +300,10 @@ def insert_draft(
 
 def step1_tables_present(conn: sqlite3.Connection) -> bool:
     rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('items','scores')"
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name IN ('items','clusters','scores')"
     ).fetchall()
-    return len(rows) == 2
+    return len(rows) == 3
 
 
 def _select_drafts_sql(conn: sqlite3.Connection) -> str:
@@ -282,8 +313,8 @@ def _select_drafts_sql(conn: sqlite3.Connection) -> str:
                s.total, s.rationale, s.suggested_angle
         FROM drafts d
         LEFT JOIN items i ON i.id = d.item_id
-        LEFT JOIN scores s ON s.item_id = d.item_id
-             AND s.scored_at = (SELECT MAX(scored_at) FROM scores WHERE item_id = d.item_id)
+        LEFT JOIN scores s ON s.id = (SELECT id FROM scores WHERE cluster_id = i.cluster_id
+                                      ORDER BY id DESC LIMIT 1)
         """
     return "SELECT d.* FROM drafts d"
 

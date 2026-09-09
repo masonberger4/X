@@ -51,15 +51,33 @@ def test_fetch_candidates_filters_by_score_and_age(conn):
     assert "88%" in c.abstract
 
 
-def test_fetch_candidates_uses_latest_score_per_item(conn):
-    seed_item(conn, "x", total=2.0, hours_ago=5)
+def test_fetch_candidates_uses_latest_score_per_cluster(conn):
+    cid = seed_item(conn, "x", total=2.0, hours_ago=5)
     conn.execute(
-        "INSERT INTO scores VALUES (?, 9, 9, 9, 9, 9, 9.5, 'new', 'new angle', ?)",
-        ("x", "2999-01-01T00:00:00+00:00"),
+        """INSERT INTO scores (cluster_id, model, prompt_version, total, rationale,
+                               suggested_angle, raw_response, scored_at)
+           VALUES (?, 'm', 'v2', 9.5, 'new', 'new angle', '{}', ?)""",
+        (cid, "2999-01-01T00:00:00+00:00"),
     )
     conn.commit()
     cands = store.fetch_candidates(min_score=7.0, since_hours=48, conn=conn)
     assert len(cands) == 1 and cands[0].total == 9.5 and cands[0].suggested_angle == "new angle"
+    assert cands[0].cluster_id == cid
+
+
+def test_fetch_candidates_one_per_cluster_prefers_longest_abstract(conn):
+    cid = seed_item(conn, "pr", source="company_x", total=9.0, abstract="short")
+    seed_item(conn, "paper", source="pubmed", total=9.0, cluster_id=cid)
+    cands = store.fetch_candidates(min_score=7.0, since_hours=48, conn=conn)
+    assert [c.item_id for c in cands] == ["paper"]
+
+
+def test_has_draft_covers_whole_cluster(conn):
+    cid = seed_item(conn, "a", total=9.0)
+    seed_item(conn, "b", total=9.0, cluster_id=cid)
+    store.insert_draft(conn, item_id="a", cluster_id=cid, model="m", draft=make_draft())
+    assert store.has_draft(conn, "b", cid)
+    assert not store.has_draft(conn, "b")
 
 
 def test_insert_get_and_one_draft_per_item(conn):
