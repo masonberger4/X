@@ -12,16 +12,32 @@ from score.scorer import Scorer, ScoringError
 
 CFG = {
     "models": {"scorer": "test-model-from-config"},
-    "scoring": {"batch_size": 2, "max_tokens": 512, "max_retries": 2, "backoff_seconds": 0,
-                "force_tool_choice": True, "abstract_max_chars": 100},
+    "scoring": {
+        "batch_size": 2,
+        "max_tokens": 512,
+        "max_retries": 2,
+        "backoff_seconds": 0,
+        "force_tool_choice": True,
+        "abstract_max_chars": 100,
+    },
     "expertise": {"bonus_topics": ["CAR-T cell therapy", "CRISPR"]},
     "prefilter": {"require_abstract": False, "allow_keywords": [], "daily_cap": 0},
 }
 
 
 def _entry(i, **over):
-    d = dict(index=i, novelty=5, clinical_significance=6, audience_interest=7, expertise_fit=8,
-             timeliness=9, evidence_level="phase2", hype_risk=4, rationale="r", suggested_angle="a")
+    d = dict(
+        index=i,
+        novelty=5,
+        clinical_significance=6,
+        audience_interest=7,
+        expertise_fit=8,
+        timeliness=9,
+        evidence_level="phase2",
+        hype_risk=4,
+        rationale="r",
+        suggested_angle="a",
+    )
     d.update(over)
     return d
 
@@ -29,18 +45,37 @@ def _entry(i, **over):
 class FakeResponse:
     def __init__(self, scores, stop_reason="tool_use"):
         self.stop_reason = stop_reason
-        self.content = [SimpleNamespace(type="text", text="ok"),
-                        SimpleNamespace(type="tool_use", name=rubric.TOOL_NAME, input={"scores": scores})]
+        self.content = [
+            SimpleNamespace(type="text", text="ok"),
+            SimpleNamespace(type="tool_use", name=rubric.TOOL_NAME, input={"scores": scores}),
+        ]
 
     def model_dump_json(self):
-        return json.dumps({"content": [{"type": "tool_use", "input": {"scores": [
-            c.input for c in self.content if c.type == "tool_use"][0]}}]})
+        return json.dumps(
+            {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "input": {
+                            "scores": [c.input for c in self.content if c.type == "tool_use"][0]
+                        },
+                    }
+                ]
+            }
+        )
 
 
 def _seed(db, n):
     for i in range(n):
-        assign_cluster(db, Item.build(source="s", url=f"https://x/{i}", title=f"Cancer story number {i} about {['lung', 'breast', 'colon'][i]} tumors",
-                                      abstract="A" * 300))
+        assign_cluster(
+            db,
+            Item.build(
+                source="s",
+                url=f"https://x/{i}",
+                title=f"Cancer story number {i} about {['lung', 'breast', 'colon'][i]} tumors",
+                abstract="A" * 300,
+            ),
+        )
     run_prefilter(db, CFG["prefilter"])
 
 

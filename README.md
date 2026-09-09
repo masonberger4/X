@@ -1,9 +1,19 @@
-# Cancer research news pipeline — step 1
+# Cancer Research X — AI-assisted pipeline
 
-Ingest, dedup, prefilter, score, and digest cancer-research news from journals,
-preprint servers, PubMed, ClinicalTrials.gov, FDA, and company press releases.
-See `PLAN.md` for the full roadmap; this repo implements step 1 only (no
-drafting or posting).
+An AI pipeline that monitors oncology sources (PubMed, bioRxiv/medRxiv,
+ClinicalTrials.gov, FDA, company PR), scores new items, and drafts posts for a
+cancer-research X account. A human approves, edits, and adds commentary before
+anything is published.
+
+See [PLAN.md](PLAN.md) for the full design, principles, and build order.
+
+## Principles
+
+- Human-in-the-loop by default.
+- Every post adds interpretation, never just description.
+- No medical advice or treatment recommendations, ever.
+- Always link the primary source; label preprints as preprints.
+- Never fabricate numbers.
 
 ## Setup
 
@@ -11,7 +21,7 @@ drafting or posting).
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env        # add ANTHROPIC_API_KEY (and optionally NCBI_API_KEY)
-python -m pytest
+ruff check . && ruff format --check . && pytest
 ```
 
 Edit `config.yaml` to change feeds, PubMed queries, company list, keywords,

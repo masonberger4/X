@@ -11,11 +11,12 @@ Config:
     url: https://www.fda.gov/drugs/resources-information-approved-drugs/oncology-cancer-hematologic-malignancies-approval-notifications
     max_items: 40
 """
+
 from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
@@ -24,8 +25,10 @@ from ingest.base import Item, Source
 from ingest.rss import strip_html
 
 log = logging.getLogger(__name__)
-_DATE_RE = re.compile(r"\b(January|February|March|April|May|June|July|August|September|October|"
-                      r"November|December)\s+(\d{1,2}),\s+(\d{4})\b")
+_DATE_RE = re.compile(
+    r"\b(January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+(\d{1,2}),\s+(\d{4})\b"
+)
 _LINK_PATH = "/drugs/resources-information-approved-drugs/"
 
 
@@ -61,8 +64,9 @@ class _Blocks(HTMLParser):
             self._buf, self._link = [], None
 
 
-def parse_oce_page(html_text: str, source_name: str, base_url: str, max_items: int = 40
-                   ) -> list[Item]:
+def parse_oce_page(
+    html_text: str, source_name: str, base_url: str, max_items: int = 40
+) -> list[Item]:
     p = _Blocks()
     p.feed(html_text)
     items = []
@@ -73,15 +77,23 @@ def parse_oce_page(html_text: str, source_name: str, base_url: str, max_items: i
         if not link:
             continue
         try:
-            published = datetime.strptime(" ".join(m.groups()), "%B %d %Y").replace(tzinfo=timezone.utc)
+            published = datetime.strptime(" ".join(m.groups()), "%B %d %Y").replace(tzinfo=UTC)
         except ValueError:
             published = None
         url = urljoin(base_url, link)
         # Title = the sentence after the date, trimmed
-        title = text[m.end():].lstrip(" ,").split(". ")[0]
+        title = text[m.end() :].lstrip(" ,").split(". ")[0]
         title = re.sub(r"^the Food and Drug Administration ", "FDA ", title, flags=re.I)
-        items.append(Item.build(source=source_name, url=url, title=title[:300], abstract=text,
-                                published_at=published, raw={"text": text}))
+        items.append(
+            Item.build(
+                source=source_name,
+                url=url,
+                title=title[:300],
+                abstract=text,
+                published_at=published,
+                raw={"text": text},
+            )
+        )
         if len(items) >= max_items:
             break
     return items
@@ -91,13 +103,15 @@ class FDAOCESource(Source):
     type = "fda_oce"
 
     def fetch_html(self) -> str:
-        return http.get_text(self.cfg["url"],
-                             user_agent=(self.global_cfg.get("http") or {}).get("user_agent"))
+        return http.get_text(
+            self.cfg["url"], user_agent=(self.global_cfg.get("http") or {}).get("user_agent")
+        )
 
     def fetch(self) -> list[Item]:
         try:
-            items = parse_oce_page(self.fetch_html(), self.name, self.cfg["url"],
-                                   int(self.cfg.get("max_items", 40)))
+            items = parse_oce_page(
+                self.fetch_html(), self.name, self.cfg["url"], int(self.cfg.get("max_items", 40))
+            )
         except Exception as exc:  # fail soft: this page is fragile and bot-protected
             log.warning("%s: fetch/parse failed, returning no items (%s)", self.name, exc)
             return []

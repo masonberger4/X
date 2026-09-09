@@ -1,7 +1,7 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from db import Score
-from ingest.base import Item, compute_dedup_hash, normalize_title, normalize_url, normalize_doi
+from ingest.base import Item, compute_dedup_hash, normalize_doi, normalize_title, normalize_url
 
 
 def _item(source="s", url="https://x.org/a", title="Hello World", **kw):
@@ -10,7 +10,10 @@ def _item(source="s", url="https://x.org/a", title="Hello World", **kw):
 
 def test_normalizers():
     assert normalize_title("  Héllo,  World! ") == "hello world"
-    assert normalize_url("HTTPS://Example.com/Path/?utm_source=x&b=2#frag") == "https://example.com/Path?b=2"
+    assert (
+        normalize_url("HTTPS://Example.com/Path/?utm_source=x&b=2#frag")
+        == "https://example.com/Path?b=2"
+    )
     assert normalize_doi("https://doi.org/10.1056/NEJMoa2400001.") == "10.1056/nejmoa2400001"
     assert normalize_doi("no doi here") is None
     assert compute_dedup_hash("A b", "http://X.com/") == compute_dedup_hash("a  B", "http://x.com")
@@ -33,8 +36,8 @@ def test_insert_and_dedup_unique(db):
 
 
 def test_cluster_roundtrip_and_earliest_published(db):
-    t1 = datetime(2026, 1, 2, tzinfo=timezone.utc)
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 2, tzinfo=UTC)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
     cid = db.create_cluster("T", normalize_title("T"), None, t1)
     db.update_cluster_published(cid, t0, "10.1056/abc")
     cl = db.get_cluster(cid)
@@ -49,17 +52,31 @@ def test_cluster_roundtrip_and_earliest_published(db):
 
 
 def test_scores_ratings_and_top(db):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cids = [db.create_cluster(f"T{i}", f"t{i}", None, now) for i in range(3)]
     for cid in cids:
         db.set_prefilter(cid, "pass")
     assert len(db.unscored_clusters("m", "v1")) == 3
-    for cid, total in zip(cids, (10, 50, 30)):
-        db.insert_score(Score(
-            cluster_id=cid, model="m", prompt_version="v1", novelty=1, clinical_significance=1,
-            audience_interest=1, expertise_fit=1, timeliness=1, evidence_level="phase3",
-            hype_risk=1, total=total, rationale="r", suggested_angle="a", raw_response="{}",
-            scored_at=now))
+    for cid, total in zip(cids, (10, 50, 30), strict=True):
+        db.insert_score(
+            Score(
+                cluster_id=cid,
+                model="m",
+                prompt_version="v1",
+                novelty=1,
+                clinical_significance=1,
+                audience_interest=1,
+                expertise_fit=1,
+                timeliness=1,
+                evidence_level="phase3",
+                hype_risk=1,
+                total=total,
+                rationale="r",
+                suggested_angle="a",
+                raw_response="{}",
+                scored_at=now,
+            )
+        )
     assert db.unscored_clusters("m", "v1") == []
     assert len(db.unscored_clusters("m", "v2")) == 3
     top = db.top_scored_clusters(now - timedelta(hours=1), limit=2, min_total=20)

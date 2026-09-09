@@ -3,12 +3,14 @@
 
 `--rate` walks the same list interactively and stores a 1-5 rating plus a note
 per cluster in the ratings table (training data for rubric tuning)."""
+
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from config import load_config, setup_logging
 from db import Cluster, Database, Score, window_start
@@ -23,9 +25,11 @@ def render_entry(rank: int, db: Database, cl: Cluster, sc: Score) -> str:
     primary = items[0] if items else None
     when = cl.published_at.strftime("%Y-%m-%d") if cl.published_at else "n/a"
     lines = [f"## {rank}. {title}", ""]
-    lines.append(f"**Score {sc.total}/50** · {sc.evidence_level} · hype {sc.hype_risk}/10 · "
-                 f"novelty {sc.novelty} · clinical {sc.clinical_significance} · audience "
-                 f"{sc.audience_interest} · fit {sc.expertise_fit} · timely {sc.timeliness}")
+    lines.append(
+        f"**Score {sc.total}/50** · {sc.evidence_level} · hype {sc.hype_risk}/10 · "
+        f"novelty {sc.novelty} · clinical {sc.clinical_significance} · audience "
+        f"{sc.audience_interest} · fit {sc.expertise_fit} · timely {sc.timeliness}"
+    )
     lines.append("")
     if primary:
         lines.append(f"- Source: {primary.source} · {when} · <{primary.url}>")
@@ -42,9 +46,14 @@ def render_entry(rank: int, db: Database, cl: Cluster, sc: Score) -> str:
     return "\n".join(lines)
 
 
-def build_digest(db: Database, cfg: dict[str, Any], *, top_n: int | None = None,
-                 hours: int | None = None, min_total: int | None = None
-                 ) -> tuple[str, list[tuple[Cluster, Score]]]:
+def build_digest(
+    db: Database,
+    cfg: dict[str, Any],
+    *,
+    top_n: int | None = None,
+    hours: int | None = None,
+    min_total: int | None = None,
+) -> tuple[str, list[tuple[Cluster, Score]]]:
     dcfg = cfg.get("digest") or {}
     top_n = top_n or int(dcfg.get("top_n", 10))
     hours = hours or int(dcfg.get("window_hours", 24))
@@ -58,8 +67,7 @@ def build_digest(db: Database, cfg: dict[str, Any], *, top_n: int | None = None,
     return "\n".join(head + body), rows
 
 
-def rate(db: Database, rows: list[tuple[Cluster, Score]],
-         ask: Callable[[str], str] = input) -> int:
+def rate(db: Database, rows: list[tuple[Cluster, Score]], ask: Callable[[str], str] = input) -> int:
     """Prompt for a 1-5 rating and note per cluster. Returns number saved."""
     saved = 0
     for i, (cl, sc) in enumerate(rows):
@@ -93,8 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(args.config)
     db = Database(cfg.get("db_path", "pipeline.db"))
     try:
-        md, rows = build_digest(db, cfg, top_n=args.top, hours=args.hours,
-                                min_total=0 if args.all else None)
+        md, rows = build_digest(
+            db, cfg, top_n=args.top, hours=args.hours, min_total=0 if args.all else None
+        )
         if args.rate:
             n = rate(db, rows)
             log.info("saved %d ratings", n)

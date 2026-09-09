@@ -3,6 +3,7 @@
 One cluster = one story. `assign_cluster` inserts the item (if new) and links it
 to an existing cluster or creates a new one. Returns (inserted, cluster_id).
 """
+
 from __future__ import annotations
 
 import difflib
@@ -36,8 +37,9 @@ def tokens_conflict(a: str, b: str) -> bool:
     return any((t.isalpha() and len(t) >= 4) or _YEAR_RE.match(t) for t in diff)
 
 
-def find_near_duplicate(db: Database, norm_title: str, source: str, threshold: float,
-                        window_days: int) -> int | None:
+def find_near_duplicate(
+    db: Database, norm_title: str, source: str, threshold: float, window_days: int
+) -> int | None:
     """Return the id of the most similar recent cluster above threshold, if any.
 
     Only clusters with no member from `source` are candidates: exact repeats
@@ -63,8 +65,9 @@ def find_near_duplicate(db: Database, norm_title: str, source: str, threshold: f
     return None
 
 
-def assign_cluster(db: Database, item: Item, dedup_cfg: dict[str, Any] | None = None
-                   ) -> tuple[bool, int | None]:
+def assign_cluster(
+    db: Database, item: Item, dedup_cfg: dict[str, Any] | None = None
+) -> tuple[bool, int | None]:
     """Insert item and attach it to a cluster.
 
     Order: (1) exact dedup_hash -> not inserted; (2) DOI match -> join cluster;

@@ -5,13 +5,14 @@ abstract, and a daily cap on clusters passed to the scorer. Clusters are
 processed newest-first so the cap keeps the freshest stories. Results are stored
 on clusters.prefilter_status ('pass'|'drop') with a reason.
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from db import Cluster, Database
+from db import Database
 from ingest.base import Item
 
 log = logging.getLogger(__name__)
@@ -40,13 +41,12 @@ def check(title: str, abstract: str, cfg: dict[str, Any]) -> tuple[bool, str | N
 
 
 def _day_start(now: datetime) -> datetime:
-    return now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def run_prefilter(db: Database, cfg: dict[str, Any], now: datetime | None = None
-                  ) -> dict[str, int]:
+def run_prefilter(db: Database, cfg: dict[str, Any], now: datetime | None = None) -> dict[str, int]:
     """Prefilter every cluster with prefilter_status IS NULL. Returns counts by reason."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cap = int(cfg.get("daily_cap", 0) or 0)
     passed_today = db.count_prefilter_passed_since(_day_start(now)) if cap else 0
     counts: dict[str, int] = {"pass": 0}

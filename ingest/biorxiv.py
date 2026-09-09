@@ -9,10 +9,11 @@ Config:
     lookback_days: 2
     max_pages: 5
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ingest import http
@@ -32,10 +33,18 @@ def parse_collection(records: list[dict[str, Any]], source_name: str, server: st
         url = f"https://www.{server}.org/content/{doi}v{rec.get('version', '1')}"
         published = None
         if rec.get("date"):
-            published = datetime.strptime(rec["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        items.append(Item.build(source=source_name, url=url, title=title,
-                                abstract=rec.get("abstract") or "", doi=doi,
-                                published_at=published, raw=rec))
+            published = datetime.strptime(rec["date"], "%Y-%m-%d").replace(tzinfo=UTC)
+        items.append(
+            Item.build(
+                source=source_name,
+                url=url,
+                title=title,
+                abstract=rec.get("abstract") or "",
+                doi=doi,
+                published_at=published,
+                raw=rec,
+            )
+        )
     return items
 
 
@@ -46,8 +55,9 @@ class BiorxivSource(Source):
         server = self.cfg.get("server", "biorxiv")
         url = f"{self.cfg['api_url'].rstrip('/')}/{server}/{start}/{end}/{cursor}"
         params = {"category": self.cfg["category"]} if self.cfg.get("category") else None
-        return http.get_json(url, params=params,
-                             user_agent=(self.global_cfg.get("http") or {}).get("user_agent"))
+        return http.get_json(
+            url, params=params, user_agent=(self.global_cfg.get("http") or {}).get("user_agent")
+        )
 
     def fetch(self) -> list[Item]:
         server = self.cfg.get("server", "biorxiv")

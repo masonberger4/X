@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import UTC
 from pathlib import Path
 
 from ingest import http
@@ -8,8 +8,10 @@ FIX = Path(__file__).parent / "fixtures"
 
 
 def _src(name, url="https://example.org/feed"):
-    return RSSSource({"name": name, "type": "rss", "url": url, "cadence_minutes": 60},
-                     {"http": {"user_agent": "test-agent"}})
+    return RSSSource(
+        {"name": name, "type": "rss", "url": url, "cadence_minutes": 60},
+        {"http": {"user_agent": "test-agent"}},
+    )
 
 
 def test_parse_rss20_fda_press():
@@ -19,7 +21,7 @@ def test_parse_rss20_fda_press():
     assert it.source == "fda_press"
     assert it.title.startswith("FDA Takes Steps")
     assert it.url.startswith("http://www.fda.gov/news-events/press-announcements/")
-    assert it.published_at is not None and it.published_at.tzinfo == timezone.utc
+    assert it.published_at is not None and it.published_at.tzinfo == UTC
     assert it.abstract.startswith("The U.S. Food and Drug Administration")
     assert "<" not in it.abstract
     assert it.doi is None
@@ -45,6 +47,7 @@ def test_parse_company_feed_regeneron():
 
 def test_unparseable_raises():
     import pytest
+
     with pytest.raises(ValueError):
         parse_feed("<html><body>Not a feed</body></html>", "x")
 

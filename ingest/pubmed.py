@@ -10,13 +10,14 @@
 NCBI etiquette: Entrez.email/tool from config; rate limited to 3 req/s
 without NCBI_API_KEY and 10 req/s with one.
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from Bio import Entrez
@@ -25,8 +26,12 @@ from ingest.base import Item, Source, utcnow
 
 log = logging.getLogger(__name__)
 
-_MONTHS = {m: i for i, m in enumerate(
-    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1)}
+_MONTHS = {
+    m: i
+    for i, m in enumerate(
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1
+    )
+}
 
 
 class RateLimiter:
@@ -50,7 +55,7 @@ _limiter: RateLimiter | None = None
 def configure_entrez(ncbi_cfg: dict[str, Any]) -> RateLimiter:
     """Set Entrez.email/tool/api_key from config + env and return the rate limiter."""
     global _limiter
-    Entrez.email = ncbi_cfg.get("email")
+    Entrez.email = os.environ.get("NCBI_EMAIL") or ncbi_cfg.get("email")
     Entrez.tool = ncbi_cfg.get("tool", "cancer-news-pipeline")
     key = os.environ.get("NCBI_API_KEY") or None
     Entrez.api_key = key
@@ -67,7 +72,7 @@ def _pub_date(article: dict[str, Any]) -> datetime | None:
     # Prefer ArticleDate (electronic), then JournalIssue PubDate
     for ad in article.get("ArticleDate") or []:
         try:
-            return datetime(int(ad["Year"]), int(ad["Month"]), int(ad["Day"]), tzinfo=timezone.utc)
+            return datetime(int(ad["Year"]), int(ad["Month"]), int(ad["Day"]), tzinfo=UTC)
         except (KeyError, ValueError):
             pass
     pd = (article.get("Journal") or {}).get("JournalIssue", {}).get("PubDate", {})
@@ -76,7 +81,7 @@ def _pub_date(article: dict[str, Any]) -> datetime | None:
         m = pd.get("Month", "Jan")
         m = int(m) if str(m).isdigit() else _MONTHS.get(str(m)[:3], 1)
         d = int(pd.get("Day", 1))
-        return datetime(y, m, d, tzinfo=timezone.utc)
+        return datetime(y, m, d, tzinfo=UTC)
     except (KeyError, ValueError, TypeError):
         return None
 
@@ -106,11 +111,23 @@ def parse_efetch(records: dict[str, Any], source_name: str) -> list[Item]:
             chunks.append(f"{label}: {p}" if label else _text(p))
         abstract = " ".join(chunks).strip()
         journal = _text((art.get("Journal") or {}).get("Title"))
-        raw = {"pmid": pmid, "journal": journal, "doi": doi,
-               "pub_types": [_text(t) for t in art.get("PublicationTypeList", [])]}
-        items.append(Item.build(
-            source=source_name, url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/", title=title,
-            abstract=abstract, doi=doi, published_at=_pub_date(art), raw=raw))
+        raw = {
+            "pmid": pmid,
+            "journal": journal,
+            "doi": doi,
+            "pub_types": [_text(t) for t in art.get("PublicationTypeList", [])],
+        }
+        items.append(
+            Item.build(
+                source=source_name,
+                url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                title=title,
+                abstract=abstract,
+                doi=doi,
+                published_at=_pub_date(art),
+                raw=raw,
+            )
+        )
     return items
 
 
@@ -119,13 +136,20 @@ class PubMedSource(Source):
 
     def __init__(self, cfg, global_cfg=None):
         super().__init__(cfg, global_cfg)
-        self.limiter = configure_entrez((self.global_cfg.get("ncbi") or {}))
+        self.limiter = configure_entrez(self.global_cfg.get("ncbi") or {})
 
     # ---- network (mocked in tests) ----
     def esearch(self, term: str, mindate: str, maxdate: str, retmax: int) -> list[str]:
         self.limiter.wait()
-        h = Entrez.esearch(db="pubmed", term=term, retmax=retmax, datetype="edat",
-                           mindate=mindate, maxdate=maxdate, sort="date")
+        h = Entrez.esearch(
+            db="pubmed",
+            term=term,
+            retmax=retmax,
+            datetype="edat",
+            mindate=mindate,
+            maxdate=maxdate,
+            sort="date",
+        )
         try:
             return list(Entrez.read(h)["IdList"])
         finally:
@@ -142,10 +166,14 @@ class PubMedSource(Source):
     def fetch(self) -> list[Item]:
         end = utcnow()
         start = end - timedelta(days=int(self.cfg.get("lookback_days", 2)))
-        ids = self.esearch(self.cfg["query"], start.strftime("%Y/%m/%d"),
-                           end.strftime("%Y/%m/%d"), int(self.cfg.get("max_results", 100)))
+        ids = self.esearch(
+            self.cfg["query"],
+            start.strftime("%Y/%m/%d"),
+            end.strftime("%Y/%m/%d"),
+            int(self.cfg.get("max_results", 100)),
+        )
         items: list[Item] = []
         for i in range(0, len(ids), 50):
-            items.extend(parse_efetch(self.efetch(ids[i:i + 50]), self.name))
+            items.extend(parse_efetch(self.efetch(ids[i : i + 50]), self.name))
         log.info("%s: %d pmids, %d parsed", self.name, len(ids), len(items))
         return items

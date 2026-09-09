@@ -1,12 +1,14 @@
 """SQLite storage: items, clusters, scores, ratings, source_runs."""
+
 from __future__ import annotations
 
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-from typing import Any, Iterator
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -86,15 +88,15 @@ def _iso(dt: datetime | None) -> str | None:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat()
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat()
 
 
 def _parse(s: str | None) -> datetime | None:
     if not s:
         return None
     dt = datetime.fromisoformat(s)
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 class Cluster(BaseModel):
@@ -151,7 +153,9 @@ class Database:
 
     # ---- items -------------------------------------------------------------
     def item_exists(self, dedup_hash: str) -> bool:
-        row = self.conn.execute("SELECT 1 FROM items WHERE dedup_hash = ?", (dedup_hash,)).fetchone()
+        row = self.conn.execute(
+            "SELECT 1 FROM items WHERE dedup_hash = ?", (dedup_hash,)
+        ).fetchone()
         return row is not None
 
     def insert_item(self, item: Item) -> bool:
@@ -163,9 +167,17 @@ class Database:
                        fetched_at, dedup_hash, cluster_id, raw_json)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                     (
-                        item.id, item.source, item.url, item.doi, item.title, item.abstract,
-                        _iso(item.published_at), _iso(item.fetched_at), item.dedup_hash,
-                        item.cluster_id, item.raw_json,
+                        item.id,
+                        item.source,
+                        item.url,
+                        item.doi,
+                        item.title,
+                        item.abstract,
+                        _iso(item.published_at),
+                        _iso(item.fetched_at),
+                        item.dedup_hash,
+                        item.cluster_id,
+                        item.raw_json,
                     ),
                 )
             return True
@@ -174,10 +186,17 @@ class Database:
 
     def _row_to_item(self, r: sqlite3.Row) -> Item:
         return Item(
-            id=r["id"], source=r["source"], url=r["url"], doi=r["doi"], title=r["title"],
-            abstract=r["abstract"], published_at=_parse(r["published_at"]),
-            fetched_at=_parse(r["fetched_at"]) or utcnow(), dedup_hash=r["dedup_hash"],
-            cluster_id=r["cluster_id"], raw_json=r["raw_json"],
+            id=r["id"],
+            source=r["source"],
+            url=r["url"],
+            doi=r["doi"],
+            title=r["title"],
+            abstract=r["abstract"],
+            published_at=_parse(r["published_at"]),
+            fetched_at=_parse(r["fetched_at"]) or utcnow(),
+            dedup_hash=r["dedup_hash"],
+            cluster_id=r["cluster_id"],
+            raw_json=r["raw_json"],
         )
 
     def get_item(self, item_id: str) -> Item | None:
@@ -199,11 +218,13 @@ class Database:
             c.execute("UPDATE items SET cluster_id = ? WHERE id = ?", (cluster_id, item_id))
 
     # ---- clusters ----------------------------------------------------------
-    def create_cluster(self, title: str, norm_title: str, doi: str | None,
-                       published_at: datetime | None) -> int:
+    def create_cluster(
+        self, title: str, norm_title: str, doi: str | None, published_at: datetime | None
+    ) -> int:
         with self.tx() as c:
             cur = c.execute(
-                "INSERT INTO clusters (title, norm_title, doi, published_at, created_at) VALUES (?,?,?,?,?)",
+                "INSERT INTO clusters (title, norm_title, doi, published_at, created_at) "
+                "VALUES (?,?,?,?,?)",
                 (title, norm_title, doi, _iso(published_at), _iso(utcnow())),
             )
             return int(cur.lastrowid)
@@ -215,10 +236,16 @@ class Database:
         ids = [x["id"] for x in members]
         sources = sorted({x["source"] for x in members})
         return Cluster(
-            id=r["id"], title=r["title"], norm_title=r["norm_title"], doi=r["doi"],
-            published_at=_parse(r["published_at"]), created_at=_parse(r["created_at"]),
-            prefilter_status=r["prefilter_status"], prefilter_reason=r["prefilter_reason"],
-            member_ids=ids, sources=sources,
+            id=r["id"],
+            title=r["title"],
+            norm_title=r["norm_title"],
+            doi=r["doi"],
+            published_at=_parse(r["published_at"]),
+            created_at=_parse(r["created_at"]),
+            prefilter_status=r["prefilter_status"],
+            prefilter_reason=r["prefilter_reason"],
+            member_ids=ids,
+            sources=sources,
         )
 
     def get_cluster(self, cluster_id: int) -> Cluster | None:
@@ -236,30 +263,38 @@ class Database:
         ).fetchall()
         return [self._row_to_cluster(r) for r in rows]
 
-    def update_cluster_published(self, cluster_id: int, published_at: datetime | None,
-                                 doi: str | None = None) -> None:
+    def update_cluster_published(
+        self, cluster_id: int, published_at: datetime | None, doi: str | None = None
+    ) -> None:
         """Keep the earliest published_at; fill DOI if the cluster lacks one."""
         if published_at is None and doi is None:
             return
         with self.tx() as c:
-            r = c.execute("SELECT published_at, doi FROM clusters WHERE id = ?", (cluster_id,)).fetchone()
+            r = c.execute(
+                "SELECT published_at, doi FROM clusters WHERE id = ?", (cluster_id,)
+            ).fetchone()
             cur = _parse(r["published_at"])
             new_pub = cur
             if published_at is not None and (cur is None or published_at < cur):
                 new_pub = published_at
             new_doi = r["doi"] or doi
-            c.execute("UPDATE clusters SET published_at = ?, doi = ? WHERE id = ?",
-                      (_iso(new_pub), new_doi, cluster_id))
+            c.execute(
+                "UPDATE clusters SET published_at = ?, doi = ? WHERE id = ?",
+                (_iso(new_pub), new_doi, cluster_id),
+            )
 
     def set_prefilter(self, cluster_id: int, status: str, reason: str | None = None) -> None:
         with self.tx() as c:
-            c.execute("UPDATE clusters SET prefilter_status = ?, prefilter_reason = ? WHERE id = ?",
-                      (status, reason, cluster_id))
+            c.execute(
+                "UPDATE clusters SET prefilter_status = ?, prefilter_reason = ? WHERE id = ?",
+                (status, reason, cluster_id),
+            )
 
     def unprefiltered_clusters(self) -> list[Cluster]:
         rows = self.conn.execute(
             """SELECT * FROM clusters WHERE prefilter_status IS NULL
-               ORDER BY published_at IS NULL, published_at DESC, id""").fetchall()
+               ORDER BY published_at IS NULL, published_at DESC, id"""
+        ).fetchall()
         return [self._row_to_cluster(r) for r in rows]
 
     def unscored_clusters(self, model: str, prompt_version: str) -> list[Cluster]:
@@ -289,9 +324,20 @@ class Database:
                    evidence_level, hype_risk, total, rationale, suggested_angle,
                    raw_response, scored_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    s.cluster_id, s.model, s.prompt_version, s.novelty, s.clinical_significance,
-                    s.audience_interest, s.expertise_fit, s.timeliness, s.evidence_level,
-                    s.hype_risk, s.total, s.rationale, s.suggested_angle, s.raw_response,
+                    s.cluster_id,
+                    s.model,
+                    s.prompt_version,
+                    s.novelty,
+                    s.clinical_significance,
+                    s.audience_interest,
+                    s.expertise_fit,
+                    s.timeliness,
+                    s.evidence_level,
+                    s.hype_risk,
+                    s.total,
+                    s.rationale,
+                    s.suggested_angle,
+                    s.raw_response,
                     _iso(s.scored_at),
                 ),
             )
@@ -308,8 +354,9 @@ class Database:
         ).fetchone()
         return self._row_to_score(r) if r else None
 
-    def top_scored_clusters(self, since: datetime, limit: int, min_total: int = 0
-                            ) -> list[tuple[Cluster, Score]]:
+    def top_scored_clusters(
+        self, since: datetime, limit: int, min_total: int = 0
+    ) -> list[tuple[Cluster, Score]]:
         """Top clusters (by latest score total) published or created since `since`."""
         rows = self.conn.execute(
             """SELECT c.id AS cid, s.id AS sid FROM clusters c
@@ -322,8 +369,9 @@ class Database:
         out = []
         for r in rows:
             cl = self.get_cluster(r["cid"])
-            sc = self._row_to_score(self.conn.execute(
-                "SELECT * FROM scores WHERE id = ?", (r["sid"],)).fetchone())
+            sc = self._row_to_score(
+                self.conn.execute("SELECT * FROM scores WHERE id = ?", (r["sid"],)).fetchone()
+            )
             out.append((cl, sc))
         return out
 
@@ -337,16 +385,28 @@ class Database:
             return int(cur.lastrowid)
 
     def ratings_for(self, cluster_id: int) -> list[dict[str, Any]]:
-        return [dict(r) for r in self.conn.execute(
-            "SELECT * FROM ratings WHERE cluster_id = ? ORDER BY id", (cluster_id,))]
+        return [
+            dict(r)
+            for r in self.conn.execute(
+                "SELECT * FROM ratings WHERE cluster_id = ? ORDER BY id", (cluster_id,)
+            )
+        ]
 
     # ---- source runs -------------------------------------------------------
     def last_run(self, source: str) -> datetime | None:
-        r = self.conn.execute("SELECT last_run_at FROM source_runs WHERE source = ?", (source,)).fetchone()
+        r = self.conn.execute(
+            "SELECT last_run_at FROM source_runs WHERE source = ?", (source,)
+        ).fetchone()
         return _parse(r["last_run_at"]) if r else None
 
-    def record_run(self, source: str, fetched: int, inserted: int, error: str | None = None,
-                   at: datetime | None = None) -> None:
+    def record_run(
+        self,
+        source: str,
+        fetched: int,
+        inserted: int,
+        error: str | None = None,
+        at: datetime | None = None,
+    ) -> None:
         with self.tx() as c:
             c.execute(
                 """INSERT INTO source_runs (source, last_run_at, fetched, inserted, error)

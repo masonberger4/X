@@ -2,12 +2,13 @@
 
 Network is confined to `Scorer.create_message`, which tests replace.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import time
-from datetime import timezone
+from datetime import UTC
 from typing import Any
 
 import anthropic
@@ -66,9 +67,14 @@ class Scorer:
             except RETRYABLE as exc:
                 if attempt >= self.max_retries:
                     raise
-                delay = self.backoff * (2 ** attempt)
-                log.warning("API error (%s); retry %d/%d in %.1fs", type(exc).__name__,
-                            attempt + 1, self.max_retries, delay)
+                delay = self.backoff * (2**attempt)
+                log.warning(
+                    "API error (%s); retry %d/%d in %.1fs",
+                    type(exc).__name__,
+                    attempt + 1,
+                    self.max_retries,
+                    delay,
+                )
                 time.sleep(delay)
         raise ScoringError("unreachable")
 
@@ -97,11 +103,16 @@ class Scorer:
             title, abstract = cluster_text(items) if items else (cl.title, "")
             sources = sorted({i.source for i in items}) or ["?"]
             doi = cl.doi or next((i.doi for i in items if i.doi), None)
-            out.append({
-                "cluster_id": cl.id, "source": ", ".join(sources), "title": title,
-                "abstract": abstract[: self.abstract_max_chars], "doi": doi,
-                "published_at": cl.published_at.isoformat() if cl.published_at else None,
-            })
+            out.append(
+                {
+                    "cluster_id": cl.id,
+                    "source": ", ".join(sources),
+                    "title": title,
+                    "abstract": abstract[: self.abstract_max_chars],
+                    "doi": doi,
+                    "published_at": cl.published_at.isoformat() if cl.published_at else None,
+                }
+            )
         return out
 
     def score_batch(self, db: Database, clusters: list[Cluster]) -> list[Score]:
@@ -109,7 +120,7 @@ class Scorer:
         response = self.create_with_retry(rubric.build_user_message(payload))
         raw = self.raw_json(response)
         by_index = {int(s["index"]): s for s in self.extract_scores(response)}
-        now = utcnow().astimezone(timezone.utc)
+        now = utcnow().astimezone(UTC)
         out: list[Score] = []
         for i, p in enumerate(payload):
             s = by_index.get(i)
@@ -117,29 +128,43 @@ class Scorer:
                 log.warning("cluster %s missing from model output; skipping", p["cluster_id"])
                 continue
             score = Score(
-                cluster_id=p["cluster_id"], model=self.model,
+                cluster_id=p["cluster_id"],
+                model=self.model,
                 prompt_version=rubric.PROMPT_VERSION,
-                novelty=int(s["novelty"]), clinical_significance=int(s["clinical_significance"]),
-                audience_interest=int(s["audience_interest"]), expertise_fit=int(s["expertise_fit"]),
-                timeliness=int(s["timeliness"]), evidence_level=str(s["evidence_level"]),
-                hype_risk=int(s["hype_risk"]), total=rubric.compute_total(s),
-                rationale=str(s["rationale"])[:300], suggested_angle=str(s["suggested_angle"]),
-                raw_response=raw, scored_at=now,
+                novelty=int(s["novelty"]),
+                clinical_significance=int(s["clinical_significance"]),
+                audience_interest=int(s["audience_interest"]),
+                expertise_fit=int(s["expertise_fit"]),
+                timeliness=int(s["timeliness"]),
+                evidence_level=str(s["evidence_level"]),
+                hype_risk=int(s["hype_risk"]),
+                total=rubric.compute_total(s),
+                rationale=str(s["rationale"])[:300],
+                suggested_angle=str(s["suggested_angle"]),
+                raw_response=raw,
+                scored_at=now,
             )
             db.insert_score(score)
             out.append(score)
-            log.debug("scored cluster %s total=%d: %s", score.cluster_id, score.total, p["title"][:70])
+            log.debug(
+                "scored cluster %s total=%d: %s", score.cluster_id, score.total, p["title"][:70]
+            )
         return out
 
     def score_unscored(self, db: Database, limit: int | None = None) -> list[Score]:
         clusters = db.unscored_clusters(self.model, rubric.PROMPT_VERSION)
         if limit is not None:
             clusters = clusters[:limit]
-        log.info("scoring %d clusters with %s (%s) in batches of %d",
-                 len(clusters), self.model, rubric.PROMPT_VERSION, self.batch_size)
+        log.info(
+            "scoring %d clusters with %s (%s) in batches of %d",
+            len(clusters),
+            self.model,
+            rubric.PROMPT_VERSION,
+            self.batch_size,
+        )
         scores: list[Score] = []
         for i in range(0, len(clusters), self.batch_size):
-            batch = clusters[i:i + self.batch_size]
+            batch = clusters[i : i + self.batch_size]
             try:
                 scores.extend(self.score_batch(db, batch))
             except (ScoringError, anthropic.APIError) as exc:

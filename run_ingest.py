@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fetch every source that is due by cadence, insert new items, and cluster them."""
+
 from __future__ import annotations
 
 import argparse
@@ -20,7 +21,8 @@ from ingest.rss import RSSSource
 log = logging.getLogger("run_ingest")
 
 SOURCE_TYPES: dict[str, type[Source]] = {
-    cls.type: cls for cls in (RSSSource, BiorxivSource, ClinicalTrialsSource, FDAOCESource, PubMedSource)
+    cls.type: cls
+    for cls in (RSSSource, BiorxivSource, ClinicalTrialsSource, FDAOCESource, PubMedSource)
 }
 
 
@@ -29,14 +31,17 @@ def build_sources(cfg: dict[str, Any]) -> list[Source]:
     for scfg in cfg.get("sources", []):
         cls = SOURCE_TYPES.get(scfg.get("type"))
         if cls is None:
-            log.warning("unknown source type %r for %s; skipping", scfg.get("type"), scfg.get("name"))
+            log.warning(
+                "unknown source type %r for %s; skipping", scfg.get("type"), scfg.get("name")
+            )
             continue
         out.append(cls(scfg, cfg))
     return out
 
 
-def ingest(db: Database, cfg: dict[str, Any], *, force: bool = False,
-           only: set[str] | None = None) -> dict[str, dict[str, int]]:
+def ingest(
+    db: Database, cfg: dict[str, Any], *, force: bool = False, only: set[str] | None = None
+) -> dict[str, dict[str, int]]:
     """Run due sources. Returns {source: {fetched, inserted, clusters_new}}."""
     summary: dict[str, dict[str, int]] = {}
     now = utcnow()
@@ -60,8 +65,18 @@ def ingest(db: Database, cfg: dict[str, Any], *, force: bool = False,
             inserted += int(ok)
         new_clusters = db.counts()["clusters"] - before
         db.record_run(src.name, len(items), inserted)
-        summary[src.name] = {"fetched": len(items), "inserted": inserted, "clusters_new": new_clusters}
-        log.info("%s: fetched=%d inserted=%d new_clusters=%d", src.name, len(items), inserted, new_clusters)
+        summary[src.name] = {
+            "fetched": len(items),
+            "inserted": inserted,
+            "clusters_new": new_clusters,
+        }
+        log.info(
+            "%s: fetched=%d inserted=%d new_clusters=%d",
+            src.name,
+            len(items),
+            inserted,
+            new_clusters,
+        )
     return summary
 
 
@@ -82,8 +97,14 @@ def main(argv: list[str] | None = None) -> int:
     tot_f = sum(s["fetched"] for s in summary.values())
     tot_i = sum(s["inserted"] for s in summary.values())
     errs = [n for n, s in summary.items() if s.get("error")]
-    log.info("done: %d sources run, %d fetched, %d inserted, %d errors%s",
-             len(summary), tot_f, tot_i, len(errs), f" ({', '.join(errs)})" if errs else "")
+    log.info(
+        "done: %d sources run, %d fetched, %d inserted, %d errors%s",
+        len(summary),
+        tot_f,
+        tot_i,
+        len(errs),
+        f" ({', '.join(errs)})" if errs else "",
+    )
     return 0
 
 

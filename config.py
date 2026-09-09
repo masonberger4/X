@@ -1,4 +1,5 @@
 """Configuration loading. Everything the pipeline does is driven by config.yaml."""
+
 from __future__ import annotations
 
 import logging

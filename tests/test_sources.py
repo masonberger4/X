@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from Bio import Entrez
@@ -22,7 +22,7 @@ def test_biorxiv_parse_fixture():
     it = items[0]
     assert it.doi == "10.64898/2026.04.19.716936"
     assert it.url == "https://www.biorxiv.org/content/10.64898/2026.04.19.716936v2"
-    assert it.published_at == datetime(2026, 9, 7, tzinfo=timezone.utc)
+    assert it.published_at == datetime(2026, 9, 7, tzinfo=UTC)
     assert it.abstract.startswith("Hepatocellular carcinoma")
 
 
@@ -37,9 +37,18 @@ def test_biorxiv_fetch_paginates(monkeypatch):
         return page
 
     monkeypatch.setattr(http, "get_json", fake_get_json)
-    src = BiorxivSource({"name": "b", "type": "biorxiv", "server": "biorxiv",
-                         "api_url": "https://api.biorxiv.org/details", "category": "cancer_biology",
-                         "lookback_days": 2, "max_pages": 5}, GLOBAL)
+    src = BiorxivSource(
+        {
+            "name": "b",
+            "type": "biorxiv",
+            "server": "biorxiv",
+            "api_url": "https://api.biorxiv.org/details",
+            "category": "cancer_biology",
+            "lookback_days": 2,
+            "max_pages": 5,
+        },
+        GLOBAL,
+    )
     items = src.fetch()
     assert len(calls) == 2
     assert calls[0][0].startswith("https://api.biorxiv.org/details/biorxiv/")
@@ -66,11 +75,16 @@ def test_pubmed_fetch_mocked(monkeypatch):
         records = Entrez.read(fh)
     ids = json.loads((FIX / "pubmed_esearch.json").read_text())["esearchresult"]["idlist"]
     seen = {}
-    monkeypatch.setattr(PubMedSource, "esearch", lambda self, term, mindate, maxdate, retmax:
-                        seen.update(term=term, retmax=retmax) or ids)
+    monkeypatch.setattr(
+        PubMedSource,
+        "esearch",
+        lambda self, term, mindate, maxdate, retmax: seen.update(term=term, retmax=retmax) or ids,
+    )
     monkeypatch.setattr(PubMedSource, "efetch", lambda self, ids_: seen.update(ids=ids_) or records)
-    src = PubMedSource({"name": "pubmed_x", "type": "pubmed", "query": "cancer AND CAR-T",
-                        "max_results": 50}, GLOBAL)
+    src = PubMedSource(
+        {"name": "pubmed_x", "type": "pubmed", "query": "cancer AND CAR-T", "max_results": 50},
+        GLOBAL,
+    )
     items = src.fetch()
     assert seen["term"] == "cancer AND CAR-T" and seen["retmax"] == 50 and seen["ids"] == ids
     assert len(items) == 4
@@ -85,7 +99,7 @@ def test_ct_parse_fixture():
     a, b = items
     assert a.url == "https://clinicaltrials.gov/study/NCT09990001"
     assert "(NCT09990001)" in a.title
-    assert a.published_at == datetime(2026, 9, 8, tzinfo=timezone.utc)
+    assert a.published_at == datetime(2026, 9, 8, tzinfo=UTC)
     assert "Phase: PHASE2" in a.abstract and "bispecific" in a.abstract
     assert "Why stopped: Lack of efficacy" in b.abstract
 
@@ -101,10 +115,19 @@ def test_ct_fetch_params_and_pagination(monkeypatch):
         return data
 
     monkeypatch.setattr(http, "get_json", fake_get_json)
-    src = ClinicalTrialsSource({"name": "ct", "type": "clinicaltrials",
-                                "url": "https://clinicaltrials.gov/api/v2/studies",
-                                "query_cond": "cancer", "phases": ["PHASE2", "PHASE3"],
-                                "statuses": ["RECRUITING"], "lookback_days": 2, "max_pages": 5}, GLOBAL)
+    src = ClinicalTrialsSource(
+        {
+            "name": "ct",
+            "type": "clinicaltrials",
+            "url": "https://clinicaltrials.gov/api/v2/studies",
+            "query_cond": "cancer",
+            "phases": ["PHASE2", "PHASE3"],
+            "statuses": ["RECRUITING"],
+            "lookback_days": 2,
+            "max_pages": 5,
+        },
+        GLOBAL,
+    )
     items = src.fetch()
     assert len(items) == 3
     assert len(calls) == 2 and calls[1]["pageToken"] == "tok2"
@@ -121,11 +144,13 @@ def test_fda_oce_parse_fixture():
     items = parse_oce_page((FIX / "fda_oce.html").read_text(), "fda_oce", base)
     assert len(items) == 2
     a, b = items
-    assert a.url == ("https://www.fda.gov/drugs/resources-information-approved-drugs/"
-                     "fda-approves-examplimab-advanced-urothelial-carcinoma")
+    assert a.url == (
+        "https://www.fda.gov/drugs/resources-information-approved-drugs/"
+        "fda-approves-examplimab-advanced-urothelial-carcinoma"
+    )
     assert a.title.startswith("FDA approved examplimab")
-    assert a.published_at == datetime(2026, 9, 3, tzinfo=timezone.utc)
-    assert b.published_at == datetime(2026, 8, 28, tzinfo=timezone.utc)
+    assert a.published_at == datetime(2026, 9, 3, tzinfo=UTC)
+    assert b.published_at == datetime(2026, 8, 28, tzinfo=UTC)
     assert "CAR T-cell" in b.abstract
 
 
@@ -136,5 +161,7 @@ def test_fda_oce_fails_soft(monkeypatch):
     monkeypatch.setattr(http, "get_text", boom)
     src = FDAOCESource({"name": "fda_oce", "type": "fda_oce", "url": "https://x"}, GLOBAL)
     assert src.fetch() == []
-    monkeypatch.setattr(http, "get_text", lambda url, **kw: "<html><body><p>nothing</p></body></html>")
+    monkeypatch.setattr(
+        http, "get_text", lambda url, **kw: "<html><body><p>nothing</p></body></html>"
+    )
     assert src.fetch() == []

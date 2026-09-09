@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Prefilter unfiltered clusters, then score every cluster the prefilter passed
 that has no score for the configured model + prompt version."""
+
 from __future__ import annotations
 
 import argparse
@@ -20,7 +21,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", default=None)
     ap.add_argument("--limit", type=int, default=None, help="score at most N clusters")
-    ap.add_argument("--dry-run", action="store_true", help="prefilter only; list what would be scored")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="prefilter only; list what would be scored"
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     setup_logging(args.verbose)

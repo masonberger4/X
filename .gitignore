@@ -1,9 +1,22 @@
-.env
-*.db
-*.db-journal
+# Python
 __pycache__/
-*.pyc
-.pytest_cache/
+*.py[cod]
 *.egg-info/
+.venv/
+venv/
 build/
 dist/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets and local data
+.env
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

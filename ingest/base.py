@@ -1,4 +1,5 @@
 """Item model, normalisation helpers, and the Source ABC."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,7 +7,7 @@ import json
 import re
 import unicodedata
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -18,7 +19,7 @@ _TRACKING_PARAMS = ("utm_", "fbclid", "gclid", "mc_cid", "mc_eid", "ref")
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def normalize_title(title: str | None) -> str:
@@ -44,9 +45,7 @@ def normalize_url(url: str | None) -> str:
         if not k.lower().startswith(_TRACKING_PARAMS)
     ]
     path = parts.path.rstrip("/") or "/"
-    return urlunsplit(
-        (parts.scheme.lower(), parts.netloc.lower(), path, urlencode(query), "")
-    )
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, urlencode(query), ""))
 
 
 def normalize_doi(doi: str | None) -> str | None:
@@ -99,7 +98,7 @@ class Item(BaseModel):
         doi: str | None = None,
         published_at: datetime | None = None,
         raw: Any = None,
-    ) -> "Item":
+    ) -> Item:
         title = _WS_RE.sub(" ", (title or "")).strip()
         return cls(
             id=make_item_id(source, title, url),
