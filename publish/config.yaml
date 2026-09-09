@@ -1,0 +1,28 @@
+# Publish-layer settings (step 3). This is NOT the root config.yaml.
+timezone: America/New_York
+
+# Daily posting slots, local time (HH:MM). run_publish.py is meant to run from cron every
+# 15 minutes; a slot is "open" from its start until grace_minutes later, and it is used at
+# most once per day.
+slots:
+  - "08:30"
+  - "12:15"
+grace_minutes: 20
+
+# Hard limits that apply to every post, breaking news included.
+max_posts_per_day: 3
+min_gap_minutes: 90
+
+# Which draft text to publish: "single" posts single_post, "thread" posts the thread.
+post_format: single
+
+# Breaking items may post outside slots (still subject to the caps above).
+breaking:
+  source_prefixes: ["fda", "company_"]
+  # For company_* sources only: title must contain one of these (case-insensitive).
+  company_title_keywords: ["approv"]
+
+# Candidate ordering when several approved drafts compete for one slot.
+policy:
+  prefer_breaking: true
+  order: score_desc   # score_desc | oldest_first
