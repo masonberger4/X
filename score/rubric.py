@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 TOOL_NAME = "score_items"
 
 EVIDENCE_LEVELS = ["preclinical", "preprint", "phase1", "phase2", "phase3", "approval", "other"]
@@ -160,7 +160,7 @@ Score each item on the rubric below. Use the full 0-10 range; most routine items
 Dimensions (0-10 each):
 - novelty: how new is the finding, mechanism, or deal relative to what the field and the market already know? First-in-class, new modality, a surprising result, or an unexpected acquirer scores high; incremental confirmations and expected follow-ups score low.
 - clinical_significance: would this change practice or patient outcomes if it holds? Randomized phase 3 data, approvals, and label changes score high; single cell-line studies score near zero. For pure business news (a financing, a licensing deal) score the clinical significance of the underlying asset, not the deal.
-- audience_interest: would a biotech investor or analyst stop scrolling? Score high when the item moves or tests a company's thesis: pivotal readouts, approvals or CRLs, M&A and licensing, trial holds or discontinuations, competitor data that reads across, dilutive financings after data. Public-company involvement raises this; a named ticker or acquirer raises it further. Conference logistics, investor-meeting notices, inducement grants, and routine hiring news score 0-1.
+- audience_interest: would a biotech investor or analyst stop scrolling? Score high when the item moves or tests a company's thesis: pivotal readouts, approvals or CRLs, M&A and licensing, trial holds or discontinuations, competitor data that reads across, dilutive financings after data. Public-company involvement raises this; a named ticker or acquirer raises it further. A DATED upcoming catalyst for a public company (a scheduled presentation, a PDUFA, a readout window) scores 8-10 even before any data exist, because the post can set up what success or failure would change. Items with no business or investment implication at all (guidelines, grading criteria, consensus statements, reviews, methods papers) score at most 3 here however strong the science. Conference logistics, investor-meeting notices, inducement grants, and routine hiring news score 0-1.
 - expertise_fit: how well does this fit the account's beat? Apply a bonus (+2 to +4, capped at 10) when the item is primarily about any of:
 {topics_txt}
   Items about other oncology topics score on plain relevance; non-oncology items score 0-1.
@@ -170,7 +170,7 @@ Also report:
 - evidence_level: one of {", ".join(EVIDENCE_LEVELS)}. Use 'preprint' for bioRxiv/medRxiv, 'approval' for regulatory actions, 'other' for reviews, guidelines, policy, or business news.
 - hype_risk (0-10): how likely is the headline to overstate the evidence? Company-reported topline numbers with no comparator, tiny n, surrogate endpoints, or animal data described in clinical language raise this.
 - rationale: one line, <= 200 characters, specific to the item.
-- suggested_angle: the interpretation a post could offer: what the result means for the science AND for the company's thesis (competitive position, what the next catalyst is, what the market may be missing), what to watch, what is overhyped. Name the company and the catalyst where the item gives them. Never suggest treatment recommendations and never suggest buying, selling or shorting anything.
+- suggested_angle: the interpretation a post could offer: what the result means for the science AND for the company's thesis (competitive position, what the next catalyst is, what the market may be missing), what to watch, what is overhyped. Name the company and the catalyst where the item gives them. Two things the editor always wants when they apply: the competitive landscape (which other companies pursue the same target, mechanism or modality, and roughly what stage they are at) and the economics (manufacturing and cost structure, e.g. in vivo versus ex vivo, off-the-shelf versus autologous, and what that does to margins or addressable population). Include these only when you are certain of them, and phrase them as points for the editor to verify, since they are not in the item text. Never suggest treatment recommendations and never suggest buying, selling or shorting anything.
 
 Do not invent numbers that are not in the item text. Do not state a drug's mechanism, target, modality, sponsor, or ticker unless the item text states it or you are certain of it; when unsure, describe what the text says ("the sponsor", "the agent") rather than guess. A wrong mechanism or sponsor in the rationale misleads the editor more than a missing one. Score items independently of each other. You MUST respond by calling the `{TOOL_NAME}` tool exactly once with one entry per item, using the item's given index.
 
