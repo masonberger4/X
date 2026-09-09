@@ -275,12 +275,28 @@ to stop it. Four pages:
   ran, how many items it fetched, how many were new, and the last error if
   it failed. A source in red has been failing; one in amber has not run for
   three times its cadence.
+- **Feed** (`/feed`) — the same list `python digest.py` prints: the top scored
+  stories of the last 24 hours, each with its score breakdown, the reason it
+  scored that way and a link to the source. Rate the ones you have an opinion
+  about 1 to 5 and add a note. This is the same rating `digest.py --rate`
+  asks for at the terminal, and it is what the scoring gets tuned against
+  later. It does not change what gets drafted today. Use the window links to
+  look back 72 hours or a week, or to ignore the score threshold.
+- **Publishing** (`/publishing`) — how many drafts are approved and waiting,
+  what has gone out, and anything that needs a human (a thread that stopped
+  halfway is never retried for you). Read-only: there is no post button here.
+- **Feedback** (`/feedback`) — followers over time, your posts ranked by
+  impressions, and the suggestions from the latest weekly report. The
+  suggestions are proposals only; applying one means editing a settings file.
 - **Runs** (`/runs`) — tick the steps you want and press "Run selected
   steps". The log appears on the page as it finishes. This runs exactly what
   the scheduler in part 6 runs; if the scheduler happens to be running at
   that moment the page says so and does nothing, rather than running twice.
 - **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
   approval pages from part 3, unchanged.
+
+The one thing it writes outside its own pages is a rating on the feed page.
+Everything else is a view.
 
 Two things it deliberately will not do. It never posts to X: publishing is
 off in `ops\config.yaml` and stays off, and there is no publish button. And

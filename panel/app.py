@@ -3,6 +3,10 @@
 Routes owned here:
   GET  /                dashboard: health checks, per-step last run, counts, backup, disk
   GET  /sources         every configured ingest source with its freshness and last error
+  GET  /feed            scored clusters of the last N hours (what digest.py prints)
+  POST /feed/{id}/rate  save a 1-5 human rating and note for a cluster
+  GET  /publishing      the schedule, what has posted, and anything needing a human
+  GET  /feedback        follower trend, per-post metrics, and the latest report's proposals
   GET  /runs            recent runs started from the panel, with per-step logs
   GET  /runs/current    HTML fragment for the in-page poll while a run is in flight
   POST /runs            start a run of the selected orchestrator steps
@@ -21,23 +25,26 @@ from __future__ import annotations
 import logging
 import shutil
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import ChoiceLoader, FileSystemLoader
 
+import config as root_config
 import run_ops
 from approval_queue import app as queue_app
+from db import Database
 from ops import backup as ops_backup
 from ops import store as ops_store
 from ops.config import load_ops_config
 from ops.health import Thresholds
-from panel import views
+from panel import feed, views
 from panel.jobs import JobError, JobManager
 
 log = logging.getLogger(__name__)
@@ -134,6 +141,122 @@ def sources(request: Request, conn: Conn):
             "rows": rows,
             "enabled": sum(1 for r in rows if r["enabled"]),
             "failing": sum(1 for r in rows if r["status"] in ("fail", "warn")),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# feed (step 1: what digest.py prints, with its rating prompt inline)
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def open_db() -> Iterator[Database]:
+    """Step 1's own API. The feed page reads and rates clusters exactly as digest.py does.
+
+    Opened inside the route rather than as a dependency: `db.Database` keeps its sqlite
+    connection to one thread, and a dependency can run on a different one from the route.
+    """
+    database = Database(str(ops_store.db_path()))
+    try:
+        yield database
+    finally:
+        database.close()
+
+
+@app.get("/feed", response_class=HTMLResponse)
+def feed_page(
+    request: Request,
+    hours: int | None = None,
+    top: int | None = None,
+    all: bool = False,
+    saved: int | None = None,
+):
+    settings = feed.feed_settings(root_config.load_config())
+    hours = hours or settings["hours"]
+    top_n = top or settings["top_n"]
+    min_total = 0 if all else settings["threshold"]
+    with open_db() as database:
+        rows = feed.fetch_entries(database, hours=hours, top_n=top_n, min_total=min_total)
+        entries = feed.entry_views(database, rows)
+    return templates.TemplateResponse(
+        request,
+        "feed.html",
+        {
+            "entries": entries,
+            "hours": hours,
+            "top_n": top_n,
+            "min_total": min_total,
+            "show_all": all,
+            "labels": feed.RATING_LABELS,
+            "saved": saved,
+        },
+    )
+
+
+@app.post("/feed/{cluster_id}/rate")
+async def rate_cluster(cluster_id: int, request: Request):
+    """Save a human 1-5 rating: the ground truth step 4 tunes the rubric against."""
+    form = await read_form(request)
+    try:
+        rating = feed.parse_rating(_first(form, "rating"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    note = (_first(form, "note") or "").strip() or None
+    with open_db() as database:
+        if database.get_cluster(cluster_id) is None:
+            raise HTTPException(status_code=404, detail="no such cluster")
+        database.insert_rating(cluster_id, rating, note)
+    query = _first(form, "back") or ""
+    return RedirectResponse(f"/feed?{query}&saved={cluster_id}".lstrip("&"), status_code=303)
+
+
+def _first(form: dict[str, list[str]], key: str) -> str | None:
+    values = form.get(key) or []
+    return values[0] if values else None
+
+
+# ---------------------------------------------------------------------------
+# publishing and feedback (read-only views of steps 3 and 4)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/publishing", response_class=HTMLResponse)
+def publishing(request: Request, conn: Conn):
+    now = _now()
+    state = ops_store.fetch_publish_state(conn, now)
+    rows = ops_store.fetch_publish_rows(conn)
+    activity = ops_store.fetch_stage_activity(conn, now)
+    publish_step = next((s for s in JOBS.steps() if s.name == "publish"), None)
+    return templates.TemplateResponse(
+        request,
+        "publishing.html",
+        {
+            "state": state,
+            "posts": rows["posts"],
+            "needs_attention": rows["needs_attention"],
+            "approved_waiting": activity.approved_drafts,
+            "last_posted": views.fmt_age(now, state.latest_posted_at),
+            "publish_enabled": bool(publish_step and publish_step.enabled),
+        },
+    )
+
+
+@app.get("/feedback", response_class=HTMLResponse)
+def feedback_page(request: Request, conn: Conn):
+    now = _now()
+    series = ops_store.fetch_follower_series(conn)
+    return templates.TemplateResponse(
+        request,
+        "feedback.html",
+        {
+            "series": series,
+            "spark": views.sparkline([s["followers"] for s in series]),
+            "growth": views.series_growth(series),
+            "posts": ops_store.fetch_post_metrics(conn),
+            "report": ops_store.fetch_latest_feedback_report(conn),
+            "state": ops_store.fetch_feedback_state(conn),
+            "now": now,
         },
     )
 

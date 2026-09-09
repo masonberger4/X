@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Feedback{% endblock %}
+{% block content %}
+<h1>Feedback</h1>
+{% if not state.tables_present %}
+<p class="meta">No metrics yet. <code>run_feedback.py snapshot</code> fills this in once
+the X API read tier is set up; it is an optional step in <code>ops/config.yaml</code>.</p>
+{% endif %}
+
+{% if growth %}
+<h2>Followers</h2>
+<p>
+  <span style="font-size:2em;font-weight:600">{{ growth.followers }}</span>
+  <span class="{{ 'high' if growth.change > 0 else ('low' if growth.change < 0 else 'meta') }}">
+    {{ growth.sign }}{{ growth.change }}</span>
+  <span class="meta">over {{ growth.days }} snapshots, {{ growth.since }} to {{ growth.on }}</span>
+</p>
+{% if spark %}
+<figure style="margin:0 0 1rem">
+  <svg viewBox="0 0 {{ spark.width }} {{ spark.height }}" width="100%" height="{{ spark.height }}"
+       role="img" aria-label="Followers over time, {{ spark.min }} to {{ spark.max }}">
+    <polyline points="{{ spark.points }}" fill="none" stroke="#1a4f8a" stroke-width="2"
+              stroke-linejoin="round" stroke-linecap="round"></polyline>
+    <circle cx="{{ spark.last[0] }}" cy="{{ spark.last[1] }}" r="4" fill="#1a4f8a"></circle>
+  </svg>
+  <figcaption class="meta">{{ spark.min }} to {{ spark.max }} followers. Exact numbers are in the table below.</figcaption>
+</figure>
+{% endif %}
+<details>
+  <summary class="meta">Snapshots as a table</summary>
+  <table>
+    <tr><th>Day</th><th>Followers</th><th>Following</th><th>Posts</th></tr>
+    {% for s in series %}
+    <tr><td class="meta">{{ s.captured_on }}</td><td>{{ s.followers }}</td>
+      <td class="meta">{{ s.following }}</td><td class="meta">{{ s.tweet_count }}</td></tr>
+    {% endfor %}
+  </table>
+</details>
+{% endif %}
+
+{% if posts %}
+<h2>Posts by impressions</h2>
+<table>
+  <tr><th>Draft</th><th>Impressions</th><th>Likes</th><th>Reposts</th><th>Replies</th><th>Bookmarks</th><th>Seen</th></tr>
+  {% for p in posts %}
+  <tr>
+    <td><a href="/drafts/{{ p.draft_id }}">{{ p.draft_id }}</a>{% if p.deleted %} <span class="pill skip">deleted</span>{% endif %}</td>
+    <td><strong>{{ p.impressions }}</strong></td>
+    <td>{{ p.likes }}</td><td>{{ p.reposts }}</td><td>{{ p.replies }}</td><td>{{ p.bookmarks }}</td>
+    <td class="meta">{{ p.captured_on }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if report %}
+<h2>Latest report</h2>
+<p class="meta">{{ report.window_start }} to {{ report.window_end }}, generated
+  {{ report.generated_at.strftime('%Y-%m-%d') if report.generated_at else '' }}.</p>
+{% if report.suggestions %}
+<p class="meta">These are PROPOSALS. Applying one means editing <code>config.yaml</code> or
+<code>publish/config.yaml</code> by hand and bumping <code>PROMPT_VERSION</code>.</p>
+{% for s in report.suggestions %}
+<div class="proposal">
+  <strong>{{ s.get('title') or s.get('kind') or 'suggestion' }}</strong>
+  <div>{{ s.get('detail') or s.get('rationale') or '' }}</div>
+</div>
+{% endfor %}
+{% endif %}
+<details><summary class="meta">Full report</summary><pre class="log">{{ report.report_md }}</pre></details>
+{% endif %}
+{% endblock %}

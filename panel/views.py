@@ -129,3 +129,56 @@ def source_rows(runs: list[SourceRun], now: datetime, stale_multiplier: float) -
         )
     rows.sort(key=lambda r: (_SEVERITY.get(r["status"], 9), r["source"]))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# follower trend
+# ---------------------------------------------------------------------------
+
+SPARK_WIDTH = 640
+SPARK_HEIGHT = 90
+SPARK_PAD = 6
+
+
+def sparkline(values: list[int], width: int = SPARK_WIDTH, height: int = SPARK_HEIGHT) -> dict:
+    """Geometry for one series over time. Returns coordinates, never markup.
+
+    One series, so the template draws a single line with no legend and labels only the
+    first and last point. A flat series is centred rather than divided by a zero range.
+    """
+    if len(values) < 2:
+        return {}
+    lo, hi = min(values), max(values)
+    span = hi - lo
+    inner_h = height - 2 * SPARK_PAD
+    step = (width - 2 * SPARK_PAD) / (len(values) - 1)
+    points = []
+    for i, v in enumerate(values):
+        x = SPARK_PAD + i * step
+        y = SPARK_PAD + inner_h / 2 if span == 0 else SPARK_PAD + inner_h * (1 - (v - lo) / span)
+        points.append((round(x, 1), round(y, 1)))
+    return {
+        "points": " ".join(f"{x},{y}" for x, y in points),
+        "last": points[-1],
+        "first": points[0],
+        "min": lo,
+        "max": hi,
+        "width": width,
+        "height": height,
+    }
+
+
+def series_growth(series: list[dict]) -> dict:
+    """Followers now, and the change over the window the snapshots cover."""
+    if not series:
+        return {}
+    first, last = series[0], series[-1]
+    change = last["followers"] - first["followers"]
+    return {
+        "followers": last["followers"],
+        "change": change,
+        "sign": "+" if change > 0 else "",
+        "days": len(series),
+        "since": first["captured_on"],
+        "on": last["captured_on"],
+    }

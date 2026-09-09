@@ -43,6 +43,9 @@
     .card { flex: 1 1 150px; border: 1px solid #ddd; border-radius: 8px; padding: .5rem .7rem; }
     .card .n { font-size: 1.4em; font-weight: 600; }
     pre.log { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; background: #f6f6f6; border: 1px solid #ddd; border-radius: 6px; padding: .5rem; max-height: 20rem; overflow: auto; }
+    .entry { border-top: 1px solid #ddd; padding-top: .5rem; margin-top: 1.5rem; }
+    .entry h2 { margin-bottom: .2rem; }
+    .entry blockquote { margin: .5rem 0; padding-left: .8rem; border-left: 3px solid #ddd; }
     details.run { border: 1px solid #ddd; border-radius: 8px; padding: .5rem .8rem; margin: .5rem 0; }
     .badge.contradicted { background: #fde7e9; color: #8a1c1c; } .badge.supported { background: #e6f4ea; color: #1b5e20; }
   </style>
@@ -51,6 +54,7 @@
 <nav>
   {% if HAS_PANEL %}<a href="/">Dashboard</a>
   <a href="/sources">Sources</a>
+  <a href="/feed">Feed</a>
   <a href="/runs">Runs</a>
   <span class="sep">|</span>
   {% endif %}<a href="/queue">Pending</a>
@@ -59,6 +63,9 @@
   <a href="/status/rejected">Rejected</a>
   <a href="/status/failed">Failed</a>
   <a href="/voice">Voice report</a>
+  {% if HAS_PANEL %}<span class="sep">|</span>
+  <a href="/publishing">Publishing</a>
+  <a href="/feedback">Feedback</a>{% endif %}
 </nav>
 <main>{% block content %}{% endblock %}</main>
 </body>

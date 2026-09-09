@@ -80,7 +80,10 @@ def db_path() -> Path:
 
 
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path or db_path()), timeout=30)
+    # check_same_thread=False: the control panel opens the connection in a worker thread and
+    # may use it on the event loop; each request uses its own connection sequentially, so this
+    # is safe. The CLIs are single-threaded and unaffected.
+    conn = sqlite3.connect(str(path or db_path()), timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
     return conn
@@ -323,6 +326,93 @@ def fetch_feedback_state(conn: sqlite3.Connection) -> FeedbackState:
             _scalar(conn, "SELECT MAX(generated_at) FROM feedback_reports")
         )
     return st
+
+
+def fetch_publish_rows(conn: sqlite3.Connection, limit: int = 20) -> dict[str, list[dict]]:
+    """Step 3's schedule and posts, row by row, for the control panel's publishing page.
+
+    Read-only like every adapter here, and empty when the tables are absent. `posts.text`
+    IS selected: the operator needs to see what went out (or what a partial thread left
+    behind). Nothing here writes, retries or clears a row — a partial thread is still a
+    human's job, exactly as step 3 documents.
+    """
+    out: dict[str, list[dict]] = {"posts": [], "needs_attention": []}
+    present = tables(conn)
+    if not {"schedule", "posts"} <= present:
+        return out
+    rows = conn.execute(
+        """SELECT draft_id, tweet_id, text, kind, position, posted_at, slot, status, error
+           FROM posts ORDER BY COALESCE(posted_at, '') DESC, id DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    for r in rows:
+        d = dict(r)
+        d["posted_at"] = _parse(d["posted_at"])
+        out["posts"].append(d)
+    stuck = conn.execute(
+        """SELECT draft_id, status, scheduled_for, claimed_at, finished_at, error
+           FROM schedule WHERE status IN ('partial', 'failed', 'claimed')
+           ORDER BY id DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    for r in stuck:
+        d = dict(r)
+        for key in ("scheduled_for", "claimed_at", "finished_at"):
+            d[key] = _parse(d[key])
+        out["needs_attention"].append(d)
+    return out
+
+
+def fetch_follower_series(conn: sqlite3.Connection, limit: int = 90) -> list[dict[str, Any]]:
+    """Step 4's follower_snapshots, oldest first, at most `limit` days. Empty when absent."""
+    if "follower_snapshots" not in tables(conn):
+        return []
+    rows = conn.execute(
+        """SELECT captured_on, followers, following, tweet_count FROM follower_snapshots
+           ORDER BY captured_on DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+def fetch_post_metrics(conn: sqlite3.Connection, limit: int = 20) -> list[dict[str, Any]]:
+    """Latest snapshot per tweet from step 4's tweet_metrics, best impressions first."""
+    if "tweet_metrics" not in tables(conn):
+        return []
+    rows = conn.execute(
+        """SELECT m.tweet_id, m.draft_id, m.captured_on, m.impressions, m.likes, m.reposts,
+                  m.replies, m.quotes, m.bookmarks, m.deleted
+           FROM tweet_metrics m
+           JOIN (SELECT tweet_id, MAX(id) AS id FROM tweet_metrics GROUP BY tweet_id) latest
+             ON latest.id = m.id
+           ORDER BY m.impressions DESC, m.tweet_id LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def fetch_latest_feedback_report(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """Step 4's most recent report: its markdown and the changes it PROPOSES.
+
+    The panel renders these; it never applies one. A human edits the rubric or the slots
+    and bumps PROMPT_VERSION, exactly as step 4 documents.
+    """
+    if "feedback_reports" not in tables(conn):
+        return None
+    r = conn.execute("SELECT * FROM feedback_reports ORDER BY id DESC LIMIT 1").fetchone()
+    if r is None:
+        return None
+    try:
+        suggestions = json.loads(r["suggestions_json"] or "[]")
+    except ValueError:
+        suggestions = []
+    return {
+        "window_start": r["window_start"],
+        "window_end": r["window_end"],
+        "generated_at": _parse(r["generated_at"]),
+        "report_md": r["report_md"],
+        "suggestions": suggestions,
+    }
 
 
 def table_counts(conn: sqlite3.Connection) -> dict[str, int]:

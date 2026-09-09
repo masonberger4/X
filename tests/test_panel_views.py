@@ -89,3 +89,30 @@ def test_source_rows_flag_errors_then_never_ran_then_stale():
     assert rows["off"]["status"] == "skip"
     # worst first
     assert views.source_rows(runs, NOW, 3)[0]["source"] == "broken"
+
+
+def test_sparkline_needs_at_least_two_points():
+    assert views.sparkline([]) == {}
+    assert views.sparkline([5]) == {}
+
+
+def test_sparkline_maps_the_range_to_the_box_and_centres_a_flat_series():
+    spark = views.sparkline([0, 5, 10], width=100, height=50)
+    xs = [float(p.split(",")[0]) for p in spark["points"].split()]
+    ys = [float(p.split(",")[1]) for p in spark["points"].split()]
+    assert xs[0] < xs[1] < xs[2]
+    assert ys[0] > ys[1] > ys[2], "a rising series climbs, so y decreases"
+    assert spark["min"] == 0 and spark["max"] == 10
+    flat = views.sparkline([7, 7, 7], width=100, height=50)
+    assert len({p.split(",")[1] for p in flat["points"].split()}) == 1
+
+
+def test_series_growth_reports_the_change_over_the_window():
+    series = [
+        {"followers": 100, "captured_on": "2026-04-01"},
+        {"followers": 93, "captured_on": "2026-04-08"},
+    ]
+    growth = views.series_growth(series)
+    assert growth["followers"] == 93 and growth["change"] == -7 and growth["sign"] == ""
+    assert growth["days"] == 2 and growth["since"] == "2026-04-01"
+    assert views.series_growth([]) == {}

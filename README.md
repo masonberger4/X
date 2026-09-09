@@ -31,16 +31,23 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 |---|---|
 | `/` | health checks, the last outcome of every orchestrator step, row counts, database size, latest backup |
 | `/sources` | every configured ingest source with its freshness, last error and item counts |
+| `/feed` | the scored clusters `digest.py` prints, with its 1-5 rating prompt inline |
+| `/publishing` | approved and waiting, what has posted, and any partial thread needing a human |
+| `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | start a run of any enabled step and watch its log; recent runs with per-step output |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue, unchanged |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
-`ops/store.py` and the pure checks in `ops/health.py`, and the run buttons execute
+`ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
+step 1's own `db.Database` API — the same one `digest.py` uses, and the run buttons execute
 `ops/config.yaml`'s steps through `ops/runner.py` under the same `ops/lock.py` lock
 cron takes, so a run started in the browser is the run cron would have started. A step
 disabled in `ops/config.yaml` is skipped, never run: publishing stays off. The panel
 never edits `config.yaml`, `draft/voice.md` or a draft's text, and has no publish
-button.
+button. The feedback page renders a report's suggestions; applying one is still a human
+editing a settings file and bumping `PROMPT_VERSION`. The one thing the panel writes
+outside its own steps is a human 1-5 rating on the feed page, through step 1's API, which
+is exactly what `digest.py --rate` writes.
 
 There is no authentication. Bind it to localhost and reach it over an SSH tunnel or a
 private network; the run buttons execute the pipeline's CLIs.

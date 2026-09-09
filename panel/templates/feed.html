@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Feed{% endblock %}
+{% block content %}
+<h1>Feed</h1>
+<p class="meta">
+  Top {{ top_n }} scored clusters of the last {{ hours }}h{% if min_total %}, score {{ min_total }}+{% endif %}.
+  Window: <a href="/feed?hours=24">24h</a> · <a href="/feed?hours=72">72h</a> ·
+  <a href="/feed?hours=168">7d</a> ·
+  {% if show_all %}<a href="/feed?hours={{ hours }}">threshold only</a>{% else %}<a href="/feed?hours={{ hours }}&amp;all=1">ignore threshold</a>{% endif %}
+</p>
+<p class="meta">Rating a story here is what tunes the rubric: your 1-5 is the ground truth
+the score is measured against. It changes nothing about what gets drafted today.</p>
+
+{% for e in entries %}
+<div class="entry">
+  <h2>{{ e.rank }}. {{ e.title }}</h2>
+  <p>
+    <strong>{{ e.total }}/50</strong>
+    <span class="meta">{{ e.evidence_level }} · hype {{ e.hype_risk }}/10 ·
+      {% for name, value in e.parts %}{{ name }} {{ value }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
+  </p>
+  <p class="meta">
+    {{ e.source }} · {{ e.published }}
+    {% if e.url %}· <a href="{{ e.url }}" rel="noreferrer">source</a>{% endif %}
+    {% if e.doi %}· <a href="https://doi.org/{{ e.doi }}" rel="noreferrer">doi</a>{% endif %}
+    {% if e.also_in %}· also in {{ e.also_in|join(', ') }}{% endif %}
+  </p>
+  <p><strong>Why:</strong> {{ e.rationale }}</p>
+  <p><strong>Angle:</strong> {{ e.suggested_angle }}</p>
+  {% if e.abstract %}<blockquote class="meta">{{ e.abstract }}</blockquote>{% endif %}
+  {% if e.model_rating %}
+  <p class="meta">Model rating ({{ e.model_rating.rater }}): {{ e.model_rating.rating }}/5
+    {% if e.model_rating.note %}— {{ e.model_rating.note }}{% endif %}</p>
+  {% endif %}
+  {% if e.human_rating %}
+  <p class="high">You rated this {{ e.human_rating.rating }}/5{% if e.human_rating.note %} — {{ e.human_rating.note }}{% endif %}</p>
+  {% endif %}
+  <form method="post" action="/feed/{{ e.cluster_id }}/rate">
+    <input type="hidden" name="back" value="hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}">
+    <select name="rating" aria-label="rating">
+      {% for value, label in labels.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <input type="text" name="note" placeholder="why (optional)" size="40">
+    <button type="submit">{{ 'Re-rate' if e.human_rating else 'Save rating' }}</button>
+  </form>
+  <p class="meta">scored by {{ e.model }} ({{ e.prompt_version }})</p>
+</div>
+{% else %}
+<p class="meta">Nothing scored in this window. Run ingest and score from
+  <a href="/runs">the runs page</a>, or widen the window above.</p>
+{% endfor %}
+{% endblock %}
