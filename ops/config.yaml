@@ -23,6 +23,14 @@ steps:
     enabled: true
     required: true
     timeout_seconds: 1200
+  # Step 2b: check each new draft's claims against the web and attach the evidence so
+  # the queue shows it. Optional: a failure here leaves the claims "unchecked", never
+  # blocks the run.
+  - name: verify
+    argv: ["python", "run_verify.py"]
+    enabled: true
+    required: false
+    timeout_seconds: 1500
   # Publishing stays OFF and in dry-run mode here. run_publish.py without
   # flags only prints what it would post. The human enables this step and
   # appends run_publish.py's live flag to argv (and sets PUBLISH_ENABLED=1 in

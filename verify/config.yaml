@@ -1,0 +1,32 @@
+# Claim verification settings (step 2b). Read by verify/settings.py.
+model: claude-opus-5          # the verifier: web search on, one call per claim
+effort: medium
+max_claims_per_draft: 6       # extra claims stay "unchecked" and are listed as such
+max_searches_per_claim: 5     # web_search max_uses on the API backend
+timeout_seconds: 240          # per claim, claude_code backend
+
+# A "supported" or "contradicted" verdict counts as verified only when the source is on
+# one of these hosts (subdomains included). Anything else is shown as a lead the human
+# must check. Company domains are not listed: an IR press release page on the company's
+# own site is matched through companies.feeds in the root config.yaml.
+trusted_domains:
+  - clinicaltrials.gov
+  - pubmed.ncbi.nlm.nih.gov
+  - ncbi.nlm.nih.gov
+  - fda.gov
+  - sec.gov
+  - nejm.org
+  - thelancet.com
+  - nature.com
+  - science.org
+  - ashpublications.org
+  - ascopubs.org
+  - aacrjournals.org
+  - cell.com
+  - jamanetwork.com
+  - biorxiv.org
+  - medrxiv.org
+  - ema.europa.eu
+  - businesswire.com
+  - globenewswire.com
+  - prnewswire.com

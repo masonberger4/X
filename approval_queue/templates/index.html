@@ -17,6 +17,13 @@
         <a href="/drafts/{{ d.id }}"><strong>{{ d.title or d.item_id }}</strong></a>
         <div class="meta">{{ d.draft.single_post }}</div>
         {% if d.rejection_reason %}<div class="meta over">{{ d.rejection_reason }}</div>{% endif %}
+        {% set k = checks.get(d.id) %}
+        {% if k %}<div class="meta">claims:
+          {% if k.contradicted %}<span class="badge contradicted">{{ k.contradicted }} contradicted</span>{% endif %}
+          {% if k.supported %}<span class="badge supported">{{ k.supported }} supported</span>{% endif %}
+          {% if k.unverified %}<span class="badge">{{ k.unverified }} unverified</span>{% endif %}
+          {% if k.unchecked %}<span class="badge">{{ k.unchecked }} unchecked</span>{% endif %}
+        </div>{% endif %}
       </td>
       <td class="meta">{{ d.rationale }}</td>
     </tr>

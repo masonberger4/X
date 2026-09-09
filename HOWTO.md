@@ -101,7 +101,22 @@ source only when it is due, and score only scores what is new.
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
    python run_draft.py --retry-failed            # try again on stories whose draft failed
    ```
-2. Open the approval page.
+2. Check the claims. Each draft lists the facts the model added from its own
+   knowledge (competitor pipelines, deal terms, cost claims). This step sends
+   each one to Claude with web search on, which finds a primary source and
+   quotes the sentence that supports or contradicts it.
+   ```
+   python run_verify.py
+   ```
+   ```
+   python run_verify.py --dry-run     # list the claims, no calls
+   python run_verify.py --redo        # check again, replacing old verdicts
+   python run_verify.py --draft 12    # one draft
+   ```
+   About one to two minutes per claim. Verdicts are only "verified" when
+   the source is on a trusted site (`verify\config.yaml`, plus every company
+   site in `config.yaml`); anything else is shown as a lead.
+3. Open the approval page.
    ```
    python run_queue.py
    ```
@@ -109,10 +124,11 @@ source only when it is due, and score only scores what is new.
    edit, reject or snooze. When you edit or reject, pick a reason (voice,
    factual, not newsworthy, hard rule, other). Press Ctrl+C in the window to
    stop the server when done.
-   Check the "claims to verify" list on each draft before approving:
-   competitor pipelines and cost claims come from the model's knowledge, not
-   the source.
-3. After a couple of weeks, see what your edits are asking for and paste the
+   Under "Claims to verify" each claim shows its verdict, the source link and
+   the quoted sentence. Open the link and read the sentence before approving;
+   the verdict is a lead, the link is the proof. A contradicted claim blocks
+   Approve until you edit the draft or tick "approve anyway".
+4. After a couple of weeks, see what your edits are asking for and paste the
    suggestions you agree with into `draft\voice.md`.
    ```
    python -m draft.voice_report
@@ -175,8 +191,8 @@ source only when it is due, and score only scores what is new.
 
 ## Part 6. Running it on a schedule (Windows Task Scheduler)
 
-1. Try the orchestrator by hand first. It runs ingest, score and draft in
-   order under a lock, and records each step.
+1. Try the orchestrator by hand first. It runs ingest, score, draft and
+   verify in order under a lock, and records each step.
    ```
    mkdir logs
    python run_ops.py run --dry-run

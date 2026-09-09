@@ -31,10 +31,10 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_publish", "run_feedback", "run_ops"]
+py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_publish", "run_feedback", "run_ops", "run_verify"]
 
 [tool.setuptools.packages.find]
-include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "publish*", "feedback*", "ops*"]
+include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "publish*", "feedback*", "ops*", "verify*"]
 
 [tool.ruff]
 line-length = 100
@@ -46,6 +46,7 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.ruff.lint.per-file-ignores]
 "score/rubric.py" = ["E501"]  # prompt text and few-shot examples are long by nature
 "score/rater.py" = ["E501"]   # same: the rater's prompt text
+"verify/verifier.py" = ["E501"]  # same: the verifier's prompt text
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
