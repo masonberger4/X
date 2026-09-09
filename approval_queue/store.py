@@ -80,7 +80,9 @@ def _now() -> str:
 
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
     """Open the shared pipeline DB and make sure our tables exist."""
-    conn = sqlite3.connect(str(path or db_path()))
+    # check_same_thread=False: FastAPI opens the connection in a worker thread and uses it
+    # on the event loop; each request uses its connection sequentially, so this is safe.
+    conn = sqlite3.connect(str(path or db_path()), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
@@ -266,7 +268,7 @@ def insert_draft(
     return int(cur.lastrowid)
 
 
-def _step1_tables_present(conn: sqlite3.Connection) -> bool:
+def step1_tables_present(conn: sqlite3.Connection) -> bool:
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('items','scores')"
     ).fetchall()
@@ -274,7 +276,7 @@ def _step1_tables_present(conn: sqlite3.Connection) -> bool:
 
 
 def _select_drafts_sql(conn: sqlite3.Connection) -> str:
-    if _step1_tables_present(conn):
+    if step1_tables_present(conn):
         return """
         SELECT d.*, i.source, i.url, i.title, i.abstract,
                s.total, s.rationale, s.suggested_angle

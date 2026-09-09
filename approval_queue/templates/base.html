@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Approval queue{% endblock %}</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    nav a { margin-right: 1rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+    .post { white-space: pre-wrap; border: 1px solid #ccc; border-radius: 6px; padding: .6rem .8rem; margin: .4rem 0; background: #fafafa; }
+    .meta { color: #666; font-size: .9em; }
+    .over { color: #b00020; font-weight: bold; }
+    .low { color: #b00020; } .medium { color: #b26a00; } .high { color: #2e7d32; }
+    form.inline { display: inline; }
+    textarea { width: 100%; font: inherit; }
+    button { margin-right: .5rem; }
+    .actions { margin: 1rem 0; }
+    .flash { background: #fff8e1; padding: .5rem; border-radius: 6px; }
+  </style>
+</head>
+<body>
+<nav>
+  <a href="/">Pending</a>
+  <a href="/status/approved">Approved</a>
+  <a href="/status/snoozed">Snoozed</a>
+  <a href="/status/rejected">Rejected</a>
+  <a href="/status/failed">Failed</a>
+</nav>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>
