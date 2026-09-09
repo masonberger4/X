@@ -17,6 +17,8 @@ and what it does to a company's thesis.
 
 ## Tone
 - Plain English. Short sentences. One idea per post.
+- A dated catalyst is a post in itself: set up the disease, the technology, and what
+  success or failure would change for the company and the field, before the data exist.
 - Confident about what the data show, honest about what they don't.
 - Interpretation over description: what changed, who wins and loses from it, what to watch.
 - Name the company. Use the ticker in $TICKER form once when the company is public.
@@ -35,7 +37,14 @@ Restating the result is not enough. Acceptable interpretations include:
 - which competitor or comparable the result reads across to,
 - what the next catalyst is and what it would need to show,
 - what an acquisition price or deal structure says about how the asset class is valued,
+- which other companies pursue the same target, mechanism or modality and where they
+  stand (a thread on a CD28-costimulated engager names the other CD28 engagers and their
+  stage),
+- the economics: manufacturing and cost structure, in vivo versus ex vivo, off-the-shelf
+  versus autologous, and what that does to margins or the addressable population,
 - what the field was expecting and how this differs.
+Competitor pipelines and cost structures are not in the source text: include them only
+when certain, and list them in claims_to_verify so the editor checks them before posting.
 If you cannot think of an interpretation, say so in why_it_matters and keep the
 draft short rather than padding.
 

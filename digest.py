@@ -13,6 +13,7 @@ import argparse
 import logging
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from config import load_config, setup_logging
@@ -71,6 +72,11 @@ def build_digest(
     return "\n".join(head + body), rows
 
 
+def _parse_ts(value: Any) -> datetime:
+    dt = datetime.fromisoformat(str(value)) if value else datetime.min.replace(tzinfo=UTC)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
 def _auto_ratings(db: Database, cluster_id: int) -> list[dict[str, Any]]:
     return [r for r in db.ratings_for(cluster_id) if (r.get("rater") or "human") != "human"]
 
@@ -103,14 +109,16 @@ def auto_rate(
     rows: list[tuple[Cluster, Score]],
     call: rater.CallFn = rater.call_model,
 ) -> int:
-    """Store one model rating per entry (skipping entries this model already rated).
-    Returns number saved."""
+    """Store one model rating per entry. An entry is skipped when this model already rated
+    it after its latest score; a re-score (rubric bump) gets a fresh rating. Returns number
+    saved."""
     name = rater.rater_name(cfg)
     saved = 0
     for i, (cl, sc) in enumerate(rows):
-        if any(r.get("rater") == name for r in db.ratings_for(cl.id)):
-            log.debug("cluster %s already rated by %s", cl.id, name)
-            continue
+        mine = [r for r in db.ratings_for(cl.id) if r.get("rater") == name]
+        if mine and _parse_ts(mine[-1].get("rated_at")) >= sc.scored_at:
+            log.debug("cluster %s already rated by %s since its last score", cl.id, name)
+            continue  # a newer score (rubric bump) gets a fresh rating
         items = db.items_in_cluster(cl.id)
         title, abstract = cluster_text(items) if items else (cl.title, "")
         entry = {

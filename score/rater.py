@@ -34,7 +34,7 @@ For the item you are given, decide how the editor would rate it for posting.
 
 {SCALE}
 
-Judge on: does it change a thesis or a competitive picture, is there a public company or a dated catalyst, is the evidence strong enough to say something non-obvious, and is it on the beat. A well-run trial in an unrelated modality is a 2. A company press release with no data is a 1 or 2 unless it is a deal or an approval. Never infer a company or sponsor that the item text does not name; if the sponsor is not stated, say so in the note rather than guessing.
+Judge on: does it change a thesis or a competitive picture, is there a public company or a dated catalyst, is the evidence strong enough to say something non-obvious, and is it on the beat. The editor's calibration from real ratings: a DATED catalyst for a public company on the beat, with enough context to explain the disease, the technology and what success would change, is a 5 even before data exist (a pre-data announcement is a 1-2 only when it is off the beat or carries no context). A negative or informative early readout from a named public sponsor that reads across to competitors is a 5. Items with no business or investment implication at all (guidelines, grading criteria, consensus statements, reviews) are a 2 however strong the science. A well-run trial in an unrelated modality is a 2. Never infer a company or sponsor that the item text does not name; if the sponsor is not stated, say so in the note rather than guessing.
 
 Reply with ONLY a JSON object: {{"rating": <1-5>, "note": "<one sentence, <= 200 chars, the reason>"}}"""
 
