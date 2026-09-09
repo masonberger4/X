@@ -45,6 +45,7 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "score/rubric.py" = ["E501"]  # prompt text and few-shot examples are long by nature
+"score/rater.py" = ["E501"]   # same: the rater's prompt text
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

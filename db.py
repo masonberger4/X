@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS ratings (
     cluster_id  INTEGER NOT NULL REFERENCES clusters(id),
     rating      INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
     note        TEXT,
-    rated_at    TEXT NOT NULL
+    rated_at    TEXT NOT NULL,
+    rater       TEXT                           -- NULL/'human', or 'auto:<model>'
 );
 
 CREATE TABLE IF NOT EXISTS source_runs (
@@ -144,6 +145,7 @@ class Database:
     # Additive, guarded migrations for databases created before a column existed.
     _MIGRATIONS = (
         ("clusters", "prefiltered_at", "ALTER TABLE clusters ADD COLUMN prefiltered_at TEXT"),
+        ("ratings", "rater", "ALTER TABLE ratings ADD COLUMN rater TEXT"),
     )
 
     def _migrate(self) -> None:
@@ -414,11 +416,14 @@ class Database:
         return out
 
     # ---- ratings -----------------------------------------------------------
-    def insert_rating(self, cluster_id: int, rating: int, note: str | None = None) -> int:
+    def insert_rating(
+        self, cluster_id: int, rating: int, note: str | None = None, rater: str = "human"
+    ) -> int:
         with self.tx() as c:
             cur = c.execute(
-                "INSERT INTO ratings (cluster_id, rating, note, rated_at) VALUES (?,?,?,?)",
-                (cluster_id, rating, note, _iso(utcnow())),
+                "INSERT INTO ratings (cluster_id, rating, note, rated_at, rater) "
+                "VALUES (?,?,?,?,?)",
+                (cluster_id, rating, note, _iso(utcnow()), rater),
             )
             return int(cur.lastrowid)
 
