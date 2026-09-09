@@ -47,7 +47,12 @@
   <form class="inline" method="post" action="/drafts/{{ d.id }}/approve"><button>Approve</button></form>
   <form class="inline" method="post" action="/drafts/{{ d.id }}/snooze"><button>Snooze 24h</button></form>
   <form class="inline" method="post" action="/drafts/{{ d.id }}/reject">
-    <input name="note" placeholder="reason (optional)"> <button>Reject</button>
+    <input name="note" placeholder="reason (optional)">
+    <select name="category" title="why (optional)">
+      <option value="">why?</option>
+      {% for c in DECISION_CATEGORIES %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+    <button>Reject</button>
   </form>
 </div>
 
@@ -57,6 +62,13 @@
   <p class="meta">Thread: separate posts with a line containing only <code>---</code>.</p>
   <label>Thread<br><textarea name="thread" rows="10">{{ thread_text }}</textarea></label>
   <label>Note<br><input name="note" placeholder="what you changed and why (optional)"></label>
+  <label>Why<br>
+    <select name="category">
+      <option value="">(no category)</option>
+      {% for c in DECISION_CATEGORIES %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+  </label>
+  <p class="meta">Voice edits become examples for the next drafts; factual and hard-rule fixes do not.</p>
   <p>
     <button>Save &amp; approve</button>
     <button name="keep_pending" value="1">Save, keep pending</button>
@@ -66,10 +78,21 @@
 {% if decisions %}
 <h2>Decision history</h2>
 <table>
-  <thead><tr><th>When</th><th>Action</th><th>Note</th></tr></thead>
+  <thead><tr><th>When</th><th>Action</th><th>Why</th><th>Note</th></tr></thead>
   <tbody>
   {% for x in decisions %}
-    <tr><td class="meta">{{ x["created_at"] }}</td><td>{{ x["action"] }}</td><td>{{ x["note"] or "" }}</td></tr>
+    <tr>
+      <td class="meta">{{ x.created_at }}</td>
+      <td>{{ x.action }}</td>
+      <td>{{ x.category }}</td>
+      <td>{{ x.note }}</td>
+    </tr>
+    {% if x.diff %}
+    <tr><td colspan="4">
+      <pre class="diff">{% for cls, line in x.diff %}<span class="{{ cls or 'same' }}">{% if cls == 'del' %}- {% elif cls == 'add' %}+ {% else %}  {% endif %}{{ line }}</span>
+{% endfor %}</pre>
+    </td></tr>
+    {% endif %}
   {% endfor %}
   </tbody>
 </table>

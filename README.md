@@ -245,3 +245,52 @@ skipped, t.co links are replaced by their expanded URLs, and a post that links
 a DOI joins that paper's cluster. `lookback_hours` must exceed
 `cadence_minutes` so consecutive runs overlap; the dedup hash makes the
 overlap harmless. The token is never logged.
+
+## Voice learning (step 7)
+
+Every edit and rejection in the approval queue is training data. Step 7 reads
+it back: `run_draft.py` turns recent human edits into BEFORE/AFTER few-shot
+examples in the drafting prompt, the queue records **why** a draft was edited
+or rejected (`voice`, `factual`, `not_newsworthy`, `hard_rule`, `other`), and
+a voice report tells you which `draft/voice.md` changes the edits are asking
+for. Nothing posts; the Anthropic API is called only where step 2 already
+calls it, with a longer system prompt.
+
+```bash
+python run_draft.py                     # examples on by default (draft/config.yaml)
+python run_draft.py --no-examples       # plain prompt, exactly as before step 7
+python run_draft.py --dry-run           # prints block length + example decision ids
+python -m draft.voice_report            # last 4 weeks, markdown to stdout, no network
+python -m draft.voice_report --weeks 8 --out voice.md
+python -m draft.voice_report --json     # same data as JSON
+python -m draft.voice_report --examples # the exact block the next run_draft sends
+```
+
+The approval UI (`run_queue.py`) gets a "why" select on the edit and reject
+forms, a before/after diff under each edit in the decision history, and a
+**Voice report** page at `/voice?weeks=N`.
+
+How examples are chosen (`draft/config.yaml`, section `examples`): only
+`edit` decisions from the last `lookback_days` whose text actually changed by
+at least `min_change_ratio`, whose category is not in `skip_categories`
+(factual and hard-rule fixes are not voice lessons), and whose **edited** text
+passes `check_hard_rules` for its own URL and source. An edit that slipped in
+advice or dropped the link is logged as a WARNING and never taught. Newest
+first, at most `max_examples` pairs and `max_rejections` rejected posts, each
+post cut at `max_chars_per_post`. The block is built once per run, goes into
+the system prompt after the voice guide and before the hard rules, and every
+output is still checked in code: examples can never relax a rule. Table
+`draft_examples` records which decisions each draft was shown.
+
+The report **proposes** and applies nothing. Each proposal names the
+`draft/voice.md` section to paste into: a phrase you deleted
+`propose_banned_after` times becomes a proposed banned phrase, a median
+single-post length change below -40 chars means posts run long, a thread cut
+in more than half of the edits means lead with the single post, and a note
+word such as "hype" or "jargon" recurring three times is a tone proposal. Edit
+`voice.md` by hand; the next run picks it up.
+
+Drafting model resolution: `DRAFT_MODEL` in `.env`, else `models.drafter` in
+the root `config.yaml` if you add that key, else `model` in
+`draft/config.yaml`. Databases created before step 7 are migrated in place
+(`decisions.category` is added with a guarded `ALTER TABLE`).

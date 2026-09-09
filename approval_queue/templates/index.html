@@ -2,6 +2,7 @@
 {% block title %}{{ status|capitalize }} drafts{% endblock %}
 {% block content %}
 <h1>{{ status|capitalize }} drafts <span class="meta">({{ drafts|length }})</span></h1>
+<p class="meta">Your edits and rejection reasons teach the drafter: see the <a href="/voice">voice report</a>.</p>
 {% if not drafts %}
   <p class="meta">Nothing here.</p>
 {% else %}

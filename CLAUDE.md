@@ -71,6 +71,16 @@ posts unless `PUBLISH_ENABLED=1` **and** `--live`.
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
   tables are `drafts` and `decisions`; edits log original vs edited text.
+- Step 7 (voice learning) turns recent `decisions` into few-shot examples via
+  `draft/examples.py` and builds the block once per `run_draft.py` run. Examples
+  never override the hard rules: an edited text that fails `check_hard_rules` is
+  never selected, the block sits before `HARD_RULES` in the system prompt, and
+  every output is still checked in code. `draft/voice_report.py` only PROPOSES
+  `voice.md` changes; a human edits `draft/voice.md` by hand. Settings live in
+  `draft/config.yaml`; `decisions.category` is added by a guarded migration in
+  `approval_queue/store.py:connect`; `draft_examples` records what each draft
+  was shown. Step 7 reads `items` only through `fetch_decisions_for_voice` /
+  `fetch_draft_stats` (source and url).
 - Step 3 reads step 2's tables only through `publish/store.py:fetch_approved`
   (edited_text from `decisions` wins over `single_post`). Its own tables are
   `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
@@ -103,8 +113,12 @@ ingest/   base.py (Item, Source ABC, windows), http.py (retry), rss.py,
 filter/   prefilter.py, dedup.py
 score/    rubric.py, scorer.py
 db.py     sqlite: items, clusters, scores, ratings, source_runs
-draft/    schema.py, prompt.py, voice.md, drafter.py
-approval_queue/  store.py (drafts, decisions, fetch_candidates), app.py, templates/
+draft/    schema.py, prompt.py, voice.md, drafter.py, config.yaml, settings.py,
+          examples.py (EditExample, select_edit_examples, format_examples_block),
+          voice_report.py (VoiceReport, build_report, render_markdown, CLI)
+approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
+          fetch_decisions_for_voice, fetch_draft_stats, record_examples),
+          app.py (/voice), templates/
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
           fetch_approved), client.py
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,

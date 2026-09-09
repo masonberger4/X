@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Voice report{% endblock %}
+{% block content %}
+<h1>Voice report <span class="meta">last {{ weeks }} week{{ "s" if weeks != 1 }}</span></h1>
+<p class="meta">
+  {{ r.window_start }} to {{ r.window_end }} ·
+  window: <a href="/voice?weeks=1">1</a> · <a href="/voice?weeks=2">2</a> ·
+  <a href="/voice?weeks=4">4</a> · <a href="/voice?weeks=12">12</a> weeks ·
+  <code>python -m draft.voice_report --weeks {{ weeks }}</code> gives the markdown version.
+</p>
+<p class="meta">This page proposes changes to <code>draft/voice.md</code> and applies none. Edit the file by hand.</p>
+
+<h2>Summary</h2>
+<table>
+  <thead><tr><th>Drafts</th><th>Approved unedited</th><th>Edited</th><th>Rejected</th><th>Snoozed</th><th>Failed</th><th>Edit rate</th></tr></thead>
+  <tbody><tr>
+    <td>{{ r.drafts_total }}</td><td>{{ r.approved_unedited }}</td><td>{{ r.edited }}</td>
+    <td>{{ r.rejected }}</td><td>{{ r.snoozed }}</td><td>{{ r.failed }}</td>
+    <td>{{ "%.0f%%"|format(r.edit_rate * 100) if r.edit_rate is not none else "n/a" }}</td>
+  </tr></tbody>
+</table>
+<p class="meta">Edit rate = edited / (approved unedited + edited + rejected).</p>
+
+<h2>Proposals</h2>
+{% if r.proposals %}
+  {% for p in r.proposals %}
+  <div class="proposal"><strong>{{ p.kind }}</strong>: {{ p.text }}<div class="meta">evidence: {{ p.evidence }}</div></div>
+  {% endfor %}
+{% else %}
+  <p class="meta">Nothing to propose yet. That is the expected state early on.</p>
+{% endif %}
+
+<h2>By source</h2>
+{% if r.by_source %}
+<table>
+  <thead><tr><th>Source</th><th>Drafts</th><th>Edited</th><th>Rejected</th></tr></thead>
+  <tbody>{% for src, n, e, rj in r.by_source %}<tr><td>{{ src }}</td><td>{{ n }}</td><td>{{ e }}</td><td>{{ rj }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="meta">No drafts in the window.</p>{% endif %}
+
+<h2>By category</h2>
+{% if r.by_category %}
+<table>
+  <thead><tr><th>Category</th><th>Decisions</th></tr></thead>
+  <tbody>{% for c, n in r.by_category %}<tr><td>{{ c }}</td><td>{{ n }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="meta">No categorised decisions yet. Pick a "why" in the edit or reject form.</p>{% endif %}
+
+<h2>Length and threads</h2>
+{% if r.length_delta_median is none %}
+  <p class="meta">No edits yet.</p>
+{% else %}
+  <ul>
+    <li>Median single-post length change: {{ "%+.0f"|format(r.length_delta_median) }} chars (negative = the reviewer shortens).</li>
+    <li>Edits that shortened the thread: {{ "%.0f%%"|format(r.thread_dropped_rate * 100) if r.thread_dropped_rate is not none else "n/a" }}.</li>
+  </ul>
+{% endif %}
+
+<h2>Banned phrase hits</h2>
+{% if r.banned_phrase_hits %}
+<p class="meta">Banned phrases (from voice.md) found in the model's original text.</p>
+<table>
+  <thead><tr><th>Phrase</th><th>Drafts</th></tr></thead>
+  <tbody>{% for ph, n in r.banned_phrase_hits %}<tr><td>{{ ph }}</td><td>{{ n }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="meta">None found in the model's original text.</p>{% endif %}
+
+<h2>Words the reviewer deletes and adds</h2>
+{% if r.deleted_words or r.added_words %}
+<p><strong>Deleted:</strong> {% for w, n in r.deleted_words %}{{ w }} ({{ n }}){{ ", " if not loop.last }}{% else %}none{% endfor %}</p>
+<p><strong>Added:</strong> {% for w, n in r.added_words %}{{ w }} ({{ n }}){{ ", " if not loop.last }}{% else %}none{% endfor %}</p>
+{% else %}<p class="meta">No edits yet.</p>{% endif %}
+
+<h2>Top edits</h2>
+{% if r.top_pairs %}
+<table>
+  <thead><tr><th>When</th><th>Source</th><th>Before (model)</th><th>After (human)</th><th>Why</th></tr></thead>
+  <tbody>
+  {% for e in r.top_pairs %}
+    <tr>
+      <td class="meta"><a href="/drafts/{{ e.draft_id }}">{{ e.created_at[:10] }}</a></td>
+      <td>{{ e.source or "?" }}</td>
+      <td><div class="post">{{ e.original_single }}</div></td>
+      <td><div class="post">{{ e.edited_single }}</div>{% if e.thread_changed %}<div class="meta">thread: {{ e.original_thread|length }} posts before, {{ e.edited_thread|length }} after</div>{% endif %}</td>
+      <td class="meta">{{ e.why }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="meta">No edits yet.</p>{% endif %}
+
+<h2>Rejection reasons</h2>
+{% if r.rejection_notes %}
+<table>
+  <thead><tr><th>Reason</th><th>Rejections</th></tr></thead>
+  <tbody>{% for reason, n in r.rejection_notes %}<tr><td>{{ reason }}</td><td>{{ n }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="meta">No rejection reasons recorded.</p>{% endif %}
+
+<h2>Caveats</h2>
+<ul class="caveats">
+  <li>Small n: a handful of edits is anecdote, not a trend. Read the counts before acting.</li>
+  <li>These edits reflect one reviewer's taste on the drafts they happened to see.</li>
+  <li>Hard rules (no medical advice, source URL, preprint label, verbatim numbers, 280 chars) are enforced in code, never learned from examples, and no proposal changes them.</li>
+  <li>The report proposes; a human edits <code>draft/voice.md</code> by hand.</li>
+</ul>
+{% endblock %}
