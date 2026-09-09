@@ -145,6 +145,22 @@ def configured_sources() -> list[dict[str, Any]]:
     return out
 
 
+def configured_backend() -> str:
+    """'api' or 'claude_code': LLM_BACKEND env, else the root config.yaml's models.backend.
+
+    Resolved by claude_cli.llm_backend, the one place that rule lives, so the health check
+    agrees with what the scorer and drafter actually do. 'api' if it cannot be determined.
+    """
+    try:
+        from claude_cli import llm_backend
+        from config import load_config
+
+        return llm_backend(load_config())
+    except Exception as exc:  # config missing or a bad value: assume the default backend
+        log.warning("could not determine the LLM backend, assuming api: %s", exc)
+        return "api"
+
+
 def fetch_source_runs(
     conn: sqlite3.Connection, sources: list[dict[str, Any]] | None = None
 ) -> list[SourceRun]:

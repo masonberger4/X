@@ -299,13 +299,31 @@ def check_storage(
     return Check("storage", STATUS_OK, f"db {size} MB, disk free {free} MB", details)
 
 
-def check_env(present: dict[str, bool], required: tuple[str, ...] | list[str]) -> Check:
-    """`present` maps env var name -> whether it is set and non-empty. Values are never seen."""
-    missing = sorted(n for n in required if not present.get(n, False))
-    details = {"required": list(required), "missing": missing}
+# Env vars only one LLM backend needs. The API key is meaningless on the claude_code
+# backend (the CLI holds its own login), so requiring it there is a false alarm.
+BACKEND_ONLY_ENV = {"ANTHROPIC_API_KEY": "api"}
+
+
+def required_env_for(required: tuple[str, ...] | list[str], backend: str) -> list[str]:
+    """`required` minus the vars that belong to a backend other than `backend`."""
+    return [n for n in required if BACKEND_ONLY_ENV.get(n, backend) == backend]
+
+
+def check_env(
+    present: dict[str, bool], required: tuple[str, ...] | list[str], backend: str = "api"
+) -> Check:
+    """`present` maps env var name -> whether it is set and non-empty. Values are never seen.
+
+    `backend` is the LLM backend in use; vars only another backend needs are not required.
+    """
+    needed = required_env_for(required, backend)
+    missing = sorted(n for n in needed if not present.get(n, False))
+    details = {"required": needed, "missing": missing, "backend": backend}
     if missing:
         return Check("env", STATUS_FAIL, f"missing env: {', '.join(missing)}", details)
-    return Check("env", STATUS_OK, f"{len(required)} required env vars set", details)
+    return Check(
+        "env", STATUS_OK, f"{len(needed)} required env vars set ({backend} backend)", details
+    )
 
 
 def _round(x: float | None, nd: int = 2) -> float | None:
@@ -330,9 +348,10 @@ def run_all(
     disk_free_mb: float | None,
     env_present: dict[str, bool],
     table_counts: dict[str, int] | None = None,
+    backend: str = "api",
 ) -> Report:
     checks = [
-        check_env(env_present, thresholds.required_env),
+        check_env(env_present, thresholds.required_env, backend),
         check_sources(source_runs, now, thresholds),
         check_staleness(activity, now, thresholds),
         check_backlog(activity, now, thresholds),

@@ -71,7 +71,9 @@ def build_report(conn, cfg: dict[str, Any], db_path: Path, now: datetime) -> hea
     except OSError:
         disk_free_mb = None
     env_present = {name: bool(os.environ.get(name)) for name in th.required_env}
+    backend = store.configured_backend()
     return health.run_all(
+        backend=backend,
         now=now,
         thresholds=th,
         source_runs=store.fetch_source_runs(conn),

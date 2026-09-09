@@ -205,6 +205,16 @@ def test_env_lists_missing_names_and_never_values():
     assert all(isinstance(v, bool) for v in present.values())
 
 
+def test_env_does_not_require_the_api_key_on_the_claude_code_backend():
+    nothing = {"ANTHROPIC_API_KEY": False, "OTHER": True}
+    assert health.check_env(nothing, ("ANTHROPIC_API_KEY", "OTHER"), "api").status == "fail"
+    c = health.check_env(nothing, ("ANTHROPIC_API_KEY", "OTHER"), "claude_code")
+    assert c.status == "ok" and "claude_code" in c.summary
+    assert c.details["required"] == ["OTHER"]
+    assert health.required_env_for(("ANTHROPIC_API_KEY", "X"), "claude_code") == ["X"]
+    assert health.required_env_for(("ANTHROPIC_API_KEY", "X"), "api") == ["ANTHROPIC_API_KEY", "X"]
+
+
 # ---- report -------------------------------------------------------------------
 
 
