@@ -1,6 +1,6 @@
 # How to use this project, step by step
 
-Windows commands, run from `C:\Users\mason\X` in a Command Prompt. On Mac or
+Windows commands, run from `C:\Users\you\X` in a Command Prompt. On Mac or
 Linux the only differences are `python3` for `python`, `cp` for `copy`, and
 `cat` for `type`. Every command that talks to Claude uses your Claude Code
 login (`LLM_BACKEND=claude_code` in `.env`); nothing posts to X until part 5.
@@ -187,9 +187,9 @@ source only when it is due, and score only scores what is new.
    ```
 2. Open a Command Prompt as Administrator and create the tasks:
    ```
-   schtasks /Create /TN "pipeline-run" /SC MINUTE /MO 30 /TR "cmd /c cd /d C:\Users\mason\X && python run_ops.py run >> logs\ops.log 2>&1"
-   schtasks /Create /TN "pipeline-health" /SC HOURLY /TR "cmd /c cd /d C:\Users\mason\X && python run_ops.py health --alert >> logs\ops.log 2>&1"
-   schtasks /Create /TN "pipeline-backup" /SC DAILY /ST 03:00 /TR "cmd /c cd /d C:\Users\mason\X && python run_ops.py backup >> logs\ops.log 2>&1"
+   schtasks /Create /TN "pipeline-run" /SC MINUTE /MO 30 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py run >> logs\ops.log 2>&1"
+   schtasks /Create /TN "pipeline-health" /SC HOURLY /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py health --alert >> logs\ops.log 2>&1"
+   schtasks /Create /TN "pipeline-backup" /SC DAILY /ST 03:00 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py backup >> logs\ops.log 2>&1"
    ```
    In the Task Scheduler app, open each task and tick "Run whether user is
    logged on or not" and "Wake the computer to run this task". The PC must be
