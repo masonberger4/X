@@ -109,14 +109,25 @@ A draft that breaks any of these is thrown out and the AI gets another go,
 this time told exactly what it did wrong. If it fails four times the story
 is set aside for me to look at.
 
-## 6. I approve every single post
+## 6. A second pass checks its homework
+
+Every draft comes with a list of "claims to verify": the things the AI added
+from its own knowledge rather than from the source, like a competitor's
+pipeline stage or what a deal was worth. Before I see the draft, each of those
+claims goes to Claude again, this time with web search switched on and one
+job: find the primary source, the company's own press release, the trial
+registry, the journal, the FDA or SEC page, and quote the exact sentence that
+supports or contradicts it. It hands back a verdict, a link and the sentence.
+
+The verdict is a lead. The link is the proof. I open it and read the sentence
+before I approve anything, and a claim the source contradicts locks the
+approve button until I fix the draft.
+
+## 7. I approve every single post
 
 Nothing goes out without me. The drafts land in a small web page on my
 computer where I read each one and approve it, edit it, reject it, or snooze
-it for a day. Each draft comes with a list of "claims to verify": the things
-the AI added from its own knowledge rather than from the source, like a
-competitor's pipeline stage, so I know what to double-check before I hit
-approve.
+it for a day.
 
 When I edit, it remembers both versions and why I changed it. Over time those
 edits get shown back to the AI as examples of how I actually want things
@@ -124,7 +135,7 @@ written, so the drafts drift towards my voice. And once in a while it
 produces a report saying "here's what your edits keep asking for; maybe add
 these lines to the voice guide," which I read and apply by hand if I agree.
 
-## 7. It posts, carefully
+## 8. It posts, carefully
 
 Approved posts go out at set times of day, a few a day at most, spaced out.
 Breaking news like an FDA approval can jump the queue. Posting is off by
@@ -134,7 +145,7 @@ fifty things at 3am. Every text is checked against the hard rules one more
 time right before it goes, and a post is only ever sent once even if the
 program runs twice.
 
-## 8. It learns what worked
+## 9. It learns what worked
 
 A week later it looks at how each post did: views, likes, replies, follower
 count over time. It cross-references that against the score and the ratings

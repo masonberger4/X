@@ -1,0 +1,142 @@
+"""Step 2b's own table, claim_checks, in the shared pipeline DB. Drafts are read only
+through approval_queue.store (list_drafts / get_draft); this module never touches step 1's
+tables."""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from approval_queue import store as queue_store
+from verify.verifier import CONTRADICTED, SUPPORTED, ClaimCheck
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS claim_checks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id    INTEGER NOT NULL REFERENCES drafts(id),
+    claim_index INTEGER NOT NULL,
+    claim       TEXT NOT NULL,
+    verdict     TEXT NOT NULL,
+    source_url  TEXT NOT NULL DEFAULT '',
+    quote       TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    trusted     INTEGER NOT NULL DEFAULT 0,
+    model       TEXT NOT NULL,
+    checked_at  TEXT NOT NULL,
+    UNIQUE(draft_id, claim_index)
+);
+"""
+
+
+@dataclass
+class CheckRow:
+    id: int
+    draft_id: int
+    claim_index: int
+    claim: str
+    verdict: str
+    source_url: str
+    quote: str
+    note: str
+    trusted: bool
+    model: str
+    checked_at: str
+
+    @property
+    def label(self) -> str:
+        if self.verdict == SUPPORTED:
+            return "supported" if self.trusted else "supported (untrusted source)"
+        if self.verdict == CONTRADICTED:
+            return "contradicted" if self.trusted else "contradicted (untrusted source)"
+        return "unverified"
+
+
+def connect(path=None) -> sqlite3.Connection:
+    conn = queue_store.connect(path)
+    conn.executescript(_SCHEMA)
+    return conn
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(_SCHEMA)
+
+
+def _row(r: sqlite3.Row) -> CheckRow:
+    return CheckRow(
+        id=r["id"],
+        draft_id=r["draft_id"],
+        claim_index=r["claim_index"],
+        claim=r["claim"],
+        verdict=r["verdict"],
+        source_url=r["source_url"],
+        quote=r["quote"],
+        note=r["note"],
+        trusted=bool(r["trusted"]),
+        model=r["model"],
+        checked_at=r["checked_at"],
+    )
+
+
+def checks_for_draft(conn: sqlite3.Connection, draft_id: int) -> list[CheckRow]:
+    ensure_schema(conn)
+    rows = conn.execute(
+        "SELECT * FROM claim_checks WHERE draft_id = ? ORDER BY claim_index", (draft_id,)
+    ).fetchall()
+    return [_row(r) for r in rows]
+
+
+def checks_by_draft(conn: sqlite3.Connection, draft_ids: list[int]) -> dict[int, list[CheckRow]]:
+    out: dict[int, list[CheckRow]] = {}
+    for did in draft_ids:
+        out[did] = checks_for_draft(conn, did)
+    return out
+
+
+def insert_check(conn: sqlite3.Connection, draft_id: int, check: ClaimCheck, model: str) -> int:
+    ensure_schema(conn)
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    cur = conn.execute(
+        """INSERT INTO claim_checks (draft_id, claim_index, claim, verdict, source_url, quote,
+                                     note, trusted, model, checked_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(draft_id, claim_index) DO UPDATE SET
+             claim=excluded.claim, verdict=excluded.verdict, source_url=excluded.source_url,
+             quote=excluded.quote, note=excluded.note, trusted=excluded.trusted,
+             model=excluded.model, checked_at=excluded.checked_at""",
+        (
+            draft_id,
+            check.claim_index,
+            check.claim,
+            check.verdict,
+            check.source_url,
+            check.quote,
+            check.note,
+            int(check.trusted),
+            model,
+            now,
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def delete_checks(conn: sqlite3.Connection, draft_id: int) -> None:
+    ensure_schema(conn)
+    conn.execute("DELETE FROM claim_checks WHERE draft_id = ?", (draft_id,))
+    conn.commit()
+
+
+def has_contradiction(conn: sqlite3.Connection, draft_id: int) -> bool:
+    return any(c.verdict == CONTRADICTED for c in checks_for_draft(conn, draft_id))
+
+
+def pending_drafts_with_claims(conn: sqlite3.Connection) -> list[queue_store.DraftRow]:
+    """Pending drafts that have at least one claim to verify, oldest first."""
+    rows = queue_store.list_drafts(conn, queue_store.STATUS_PENDING)
+    return [r for r in rows if r.draft.claims_to_verify]
+
+
+def unchecked_indexes(conn: sqlite3.Connection, draft: queue_store.DraftRow) -> list[int]:
+    done = {c.claim_index for c in checks_for_draft(conn, draft.id)}
+    return [i for i in range(len(draft.draft.claims_to_verify)) if i not in done]

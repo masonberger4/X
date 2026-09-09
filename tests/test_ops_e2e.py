@@ -243,7 +243,15 @@ def test_default_ops_config_never_contains_live():
     assert "--live" not in text
     cfg = load_ops_config()
     steps = {s["name"]: s for s in cfg["steps"]}
-    assert [s["name"] for s in cfg["steps"]] == ["ingest", "score", "draft", "publish", "feedback"]
+    assert [s["name"] for s in cfg["steps"]] == [
+        "ingest",
+        "score",
+        "draft",
+        "verify",
+        "publish",
+        "feedback",
+    ]
+    assert steps["verify"]["enabled"] and not steps["verify"]["required"]
     assert steps["publish"]["enabled"] is False
     assert steps["publish"]["argv"] == ["python", "run_publish.py"]
     assert steps["feedback"]["enabled"] is False and steps["feedback"]["required"] is False

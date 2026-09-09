@@ -2,8 +2,10 @@
 
 Routes:
   GET  /                      pending drafts (source, score, rationale)
-  GET  /drafts/{id}           detail: single_post, thread, claims_to_verify, edit form
-  POST /drafts/{id}/approve
+  GET  /drafts/{id}           detail: single_post, thread, claims_to_verify (+ step 2b
+                              verdicts with source links), edit form
+  POST /drafts/{id}/approve   refused with 409 while a claim is contradicted, unless the
+                              form carries override=1
   POST /drafts/{id}/edit      saves edited text (+ approves unless 'keep_pending' is set)
   POST /drafts/{id}/reject
   POST /drafts/{id}/snooze    hides the draft for 24h
@@ -36,6 +38,7 @@ from draft.prompt import VOICE_PATH
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.settings import load_draft_config
 from draft.voice_report import build_report
+from verify import store as verify_store
 
 log = logging.getLogger(__name__)
 
@@ -131,8 +134,26 @@ def _decision_views(decisions: list[store.sqlite3.Row]) -> list[dict]:
 def index(request: Request, conn: Conn):
     drafts = store.list_drafts(conn, store.STATUS_PENDING)
     return templates.TemplateResponse(
-        request, "index.html", {"drafts": drafts, "status": "pending"}
+        request,
+        "index.html",
+        {"drafts": drafts, "status": "pending", "checks": _check_summaries(conn, drafts)},
     )
+
+
+def _check_summaries(conn, drafts) -> dict[int, dict[str, int]]:
+    """Per draft: how many claims are supported / contradicted / unverified / unchecked."""
+    out: dict[int, dict[str, int]] = {}
+    for d in drafts:
+        n = len(d.draft.claims_to_verify)
+        if not n:
+            continue
+        rows = verify_store.checks_for_draft(conn, d.id)
+        counts = {"supported": 0, "contradicted": 0, "unverified": 0}
+        for c in rows:
+            counts[c.verdict] = counts.get(c.verdict, 0) + 1
+        counts["unchecked"] = n - len(rows)
+        out[d.id] = counts
+    return out
 
 
 @app.get("/status/{status}", response_class=HTMLResponse)
@@ -140,7 +161,11 @@ def by_status(status: str, request: Request, conn: Conn):
     if status not in store.STATUSES:
         raise HTTPException(404, "unknown status")
     drafts = store.list_drafts(conn, status)
-    return templates.TemplateResponse(request, "index.html", {"drafts": drafts, "status": status})
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {"drafts": drafts, "status": status, "checks": _check_summaries(conn, drafts)},
+    )
 
 
 @app.get("/drafts/{draft_id}", response_class=HTMLResponse)
@@ -149,10 +174,17 @@ def detail(draft_id: int, request: Request, conn: Conn):
     if row is None:
         raise HTTPException(404, "no such draft")
     decisions = _decision_views(store.list_decisions(conn, draft_id))
+    checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
     return templates.TemplateResponse(
         request,
         "detail.html",
-        {"d": row, "decisions": decisions, "thread_text": "\n---\n".join(row.draft.thread)},
+        {
+            "d": row,
+            "decisions": decisions,
+            "thread_text": "\n---\n".join(row.draft.thread),
+            "checks": checks,
+            "contradicted": any(c.verdict == "contradicted" for c in checks.values()),
+        },
     )
 
 
@@ -184,11 +216,15 @@ def _redirect_home() -> RedirectResponse:
 @app.post("/drafts/{draft_id}/approve")
 async def approve(draft_id: int, request: Request, conn: Conn):
     form = await read_form(request)
+    if verify_store.has_contradiction(conn, draft_id) and not form.get("override"):
+        raise HTTPException(
+            409, "a claim in this draft was contradicted by its source; edit it or approve anyway"
+        )
     try:
         store.approve(conn, draft_id, note=_note(form))
     except KeyError as exc:
         raise HTTPException(404, "no such draft") from exc
-    log.info("draft %d approved", draft_id)
+    log.info("draft %d approved%s", draft_id, " (override)" if form.get("override") else "")
     return _redirect_home()
 
 

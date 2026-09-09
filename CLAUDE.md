@@ -24,7 +24,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - Run: `python run_ingest.py`, `python run_score.py`,
   `python digest.py [--rate] [--auto-rate]` (model ratings are stored as
   `rater='auto:<model>'`; human ratings stay the ground truth for tuning),
-  `python run_draft.py`, `python run_queue.py` (approval UI on localhost:8000),
+  `python run_draft.py`, `python run_verify.py` (claim checks with web search),
+  `python run_queue.py` (approval UI on localhost:8000),
   `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`),
   `python run_feedback.py snapshot|report|followers`,
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
@@ -102,6 +103,14 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `approval_queue/store.py:connect`; `draft_examples` records what each draft
   was shown. Step 7 reads `items` only through `fetch_decisions_for_voice` /
   `fetch_draft_stats` (source and url).
+- Step 2b (`verify/`) checks `claims_to_verify` against the web. Its only
+  network call is `verify/verifier.py:call_model` (CLI with
+  `tools=["WebSearch","WebFetch"]`, the one caller that passes `tools` to
+  `claude_cli.run_claude`; or the API `web_search` server tool). It owns
+  `claim_checks`, reads drafts only through `approval_queue.store`, never edits a
+  draft, and a verdict is `trusted` only for hosts in `verify/config.yaml` or
+  company feed hosts. The queue blocks approve (409) on a contradicted claim
+  unless `override=1`.
 - Step 3 reads step 2's tables only through `publish/store.py:fetch_approved`
   (edited_text from `decisions` wins over `single_post`). Its own tables are
   `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
@@ -141,6 +150,8 @@ draft/    schema.py, prompt.py, voice.md, drafter.py, config.yaml, settings.py,
 approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
           fetch_decisions_for_voice, fetch_draft_stats, record_examples),
           app.py (/voice), templates/
+verify/   config.yaml, settings.py, verifier.py (ClaimCheck, verify_claim,
+          call_model), store.py (claim_checks)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
           fetch_approved), client.py
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
@@ -150,6 +161,6 @@ ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
           backup.py, store.py (pipeline_runs, health_checks, alerts_sent +
           read-only adapters)
 deploy/   crontab.example, pipeline.service, pipeline.timer, README.md
-run_ingest.py  run_score.py  digest.py  run_draft.py  run_queue.py
+run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
 run_publish.py  run_feedback.py  run_ops.py   (CLIs)
 ```

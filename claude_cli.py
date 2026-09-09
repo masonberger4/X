@@ -83,12 +83,16 @@ def build_argv(
     system_file: str | None,
     settings: dict[str, Any],
     effort: str | None = None,
+    tools: list[str] | None = None,
 ) -> list[str]:
     """Print mode, JSON envelope, no tools, no session files. The system prompt travels
     in a file: it is long and full of quotes, and on Windows the argv goes through a
     .cmd wrapper where that is not safe. No `--bare`: it also skips the stored login
     ("Not logged in" on every call). The project's CLAUDE.md is kept out of the prompt
-    by running the CLI from the temp directory instead (see run_claude)."""
+    by running the CLI from the temp directory instead (see run_claude). `tools` (only
+    the claim verifier passes any: WebSearch/WebFetch) are both made available and
+    pre-approved, since print mode cannot answer a permission prompt."""
+    tool_list = ",".join(tools or [])
     argv = [
         binary,
         "-p",
@@ -96,10 +100,12 @@ def build_argv(
         "json",
         "--no-session-persistence",
         "--tools",
-        "",
+        tool_list,
         "--model",
         model,
     ]
+    if tool_list:
+        argv += ["--allowedTools", tool_list]
     if system_file:
         argv += ["--system-prompt-file", system_file]
     if effort:
@@ -137,9 +143,11 @@ def run_claude(
     model: str,
     cfg: dict[str, Any] | None = None,
     effort: str | None = None,
+    tools: list[str] | None = None,
 ) -> str:
     """The single subprocess call. The user prompt goes in on stdin (no arg-length limit).
-    `effort` (low|medium|high|xhigh|max) maps to the CLI's --effort."""
+    `effort` (low|medium|high|xhigh|max) maps to the CLI's --effort; `tools` is empty for
+    every caller except the claim verifier."""
     settings = cli_settings(cfg)
     binary = resolve_binary(settings)
     system_file = None
@@ -149,7 +157,7 @@ def run_claude(
         ) as fh:
             fh.write(system)
             system_file = fh.name
-    argv = build_argv(binary, model, system_file, settings, effort)
+    argv = build_argv(binary, model, system_file, settings, effort, tools)
     log.debug("running %s (%d chars of prompt)", binary, len(user))
     try:
         proc = _run_with_timeout(argv, user, float(settings["timeout_seconds"]))

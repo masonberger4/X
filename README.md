@@ -104,6 +104,28 @@ snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
 5. **Digest** (`digest.py`): top clusters above `scoring.threshold` in the
    window, as markdown. `--rate` collects human ratings for rubric tuning.
 
+## Claim verification (step 2b)
+
+`draft/` flags every fact the model added from its own knowledge as a claim to
+verify. `run_verify.py` sends each claim to Claude with web search enabled
+(`verify/verifier.py:call_model`, the only network call: the CLI with
+`--tools WebSearch,WebFetch` on the `claude_code` backend, the server-side
+`web_search` tool on the API) and stores a verdict (`supported`,
+`contradicted`, `unverified`), the source URL, the verbatim sentence and a note
+in its own table `claim_checks` (`verify/store.py`). A verdict counts as
+verified only when the source host is in `verify/config.yaml`
+`trusted_domains` or is a company feed host from the root config; otherwise
+it is shown as a lead. The queue shows the evidence beside each claim and
+refuses Approve with 409 while any claim is contradicted, unless the form
+carries `override=1` ("approve anyway"). The verifier never edits a draft.
+`ops/config.yaml` runs it after `draft` as an optional step.
+
+```bash
+python run_verify.py             # pending drafts with unchecked claims
+python run_verify.py --dry-run   # list, no calls
+python run_verify.py --redo      # replace earlier verdicts
+```
+
 ## Publishing (step 3)
 
 `run_publish.py` reads approved drafts through `publish/store.py:fetch_approved`

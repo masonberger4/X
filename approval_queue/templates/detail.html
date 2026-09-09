@@ -31,9 +31,24 @@
 
 <h2>Claims to verify</h2>
 {% if d.draft.claims_to_verify %}
-<ul>
+{% if contradicted %}<p class="flash over">A claim was contradicted by its source. Edit the draft, or tick "approve anyway" below.</p>{% endif %}
+<ul class="claims">
 {% for c in d.draft.claims_to_verify %}
-  <li><span class="{{ c.confidence }}">[{{ c.confidence }}]</span> {{ c.claim }}</li>
+  {% set k = checks.get(loop.index0) %}
+  <li>
+    <span class="{{ c.confidence }}">[{{ c.confidence }}]</span> {{ c.claim }}
+    {% if k %}
+      <div class="check {{ k.verdict }}">
+        <strong>{{ k.label }}</strong>
+        {% if k.source_url %}· <a href="{{ k.source_url }}" rel="noopener">{{ k.source_url }}</a>{% endif %}
+        {% if k.quote %}<blockquote>{{ k.quote }}</blockquote>{% endif %}
+        {% if k.note %}<div class="meta">{{ k.note }}</div>{% endif %}
+        <div class="meta">checked {{ k.checked_at }} by {{ k.model }}. Open the link and read the sentence before approving.</div>
+      </div>
+    {% else %}
+      <div class="meta">not checked yet (run <code>python run_verify.py</code>)</div>
+    {% endif %}
+  </li>
 {% endfor %}
 </ul>
 {% else %}<p class="meta">None flagged.</p>{% endif %}
@@ -44,7 +59,10 @@
 
 <h2>Actions</h2>
 <div class="actions">
-  <form class="inline" method="post" action="/drafts/{{ d.id }}/approve"><button>Approve</button></form>
+  <form class="inline" method="post" action="/drafts/{{ d.id }}/approve">
+    <button>Approve</button>
+    {% if contradicted %}<label><input type="checkbox" name="override" value="1"> approve anyway</label>{% endif %}
+  </form>
   <form class="inline" method="post" action="/drafts/{{ d.id }}/snooze"><button>Snooze 24h</button></form>
   <form class="inline" method="post" action="/drafts/{{ d.id }}/reject">
     <input name="note" placeholder="reason (optional)">
