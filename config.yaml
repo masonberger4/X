@@ -7,7 +7,7 @@ http:
   user_agent: "Mozilla/5.0 (X11; Linux x86_64) cancer-news-pipeline/0.1"
 
 ncbi:
-  email: masonpberger@gmail.com   # Entrez.email (NCBI etiquette)
+  email: you@example.com          # Entrez.email (NCBI etiquette); NCBI_EMAIL in .env overrides
   tool: cancer-news-pipeline
 
 models:
@@ -296,7 +296,7 @@ companies:
 # Crossref REST API (polite pool). CROSSREF_MAILTO in .env overrides mailto.
 crossref:
   api_url: https://api.crossref.org/works
-  mailto: masonpberger@gmail.com
+  mailto: you@example.com         # CROSSREF_MAILTO in .env overrides
   rows: 200                       # works per page (Crossref allows up to 1000)
   max_pages: 5                    # cursor pages per run
 
