@@ -63,8 +63,9 @@ source only when it is due, and score only scores what is new.
    ```
    python run_score.py
    ```
-   Prints one progress line per batch of ten. Up to 150 stories a day are
-   scored; the rest wait for tomorrow.
+   Prints a start and a finish line per batch of ten. Up to 150 stories a day
+   are scored; the rest wait for tomorrow. Do not click inside the window
+   while it runs (see "Fixing things").
 4. Read the top stories with the model's rating beside each, and add yours.
    ```
    python digest.py --auto-rate --rate
@@ -98,6 +99,7 @@ source only when it is due, and score only scores what is new.
    ```
    python run_draft.py --dry-run                 # show what would be drafted
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
+   python run_draft.py --retry-failed            # try again on stories whose draft failed
    ```
 2. Open the approval page.
    ```
@@ -239,6 +241,7 @@ source only when it is due, and score only scores what is new.
 | Symptom | What to do |
 |---|---|
 | `Not logged in` or `OAuth session expired` in a score, draft or rate run | `claude login`, then rerun the command |
+| A run prints nothing for many minutes, then everything at once | the console was paused by a click (press Enter or Esc; untick "QuickEdit Mode" in the window's Properties) or the PC slept (`powercfg /change standby-timeout-ac 0`) |
 | `git pull` refuses because you edited a file | `git checkout <file>` to discard, or ask me to commit the change |
 | Scoring says `scoring 0 clusters` right after a keyword change | `python run_score.py --refilter` |
 | Scoring says `pass: 0, deferred: N` | today's cap of 150 is spent; the N wait for tomorrow, or raise `daily_cap` in `config.yaml` |

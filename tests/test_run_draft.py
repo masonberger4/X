@@ -253,3 +253,34 @@ def test_run_draft_records_examples_for_failed_drafts_too(conn, monkeypatch):
     failed = store.list_drafts(conn, store.STATUS_FAILED)
     assert len(failed) == 1
     assert [r["decision_id"] for r in store.list_examples(conn, failed[0].id)] == [edit_id]
+
+
+def test_run_draft_retry_failed_redrafts_only_with_the_flag(conn, monkeypatch):
+    import run_draft
+    from draft import drafter
+
+    seed_item(conn, "bad", total=9.0)
+    replies = {"text": "no url at all"}
+    monkeypatch.setattr(
+        run_draft,
+        "draft_item",
+        lambda **kw: drafter.draft_item(
+            call=lambda s, u, m: good_json(replies["text"]),
+            sleep=lambda s: None,
+            max_attempts=1,
+            **kw,
+        ),
+    )
+    run_draft.main(["--min-score", "7"])
+    assert len(store.list_drafts(conn, store.STATUS_FAILED)) == 1
+
+    # a plain rerun leaves the failed draft alone
+    run_draft.main(["--min-score", "7"])
+    assert len(store.list_drafts(conn, store.STATUS_FAILED)) == 1
+    assert store.list_drafts(conn) == []
+
+    # --retry-failed replaces it with a good draft
+    replies["text"] = f"fixed {URL}"
+    run_draft.main(["--min-score", "7", "--retry-failed"])
+    assert store.list_drafts(conn, store.STATUS_FAILED) == []
+    assert len(store.list_drafts(conn)) == 1
