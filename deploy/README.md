@@ -32,3 +32,23 @@ pipeline.db`, run `run_ops.py status` to confirm, start the timer again.
 Publishing is **off** and dry-run by default. Enable the `publish` step and add `--live` in
 `ops/config.yaml`, and set `PUBLISH_ENABLED=1` in `.env`, only after reading README's
 "Publishing (step 3)" section and confirming the bio disclosure.
+
+## Windows (Task Scheduler)
+
+Cron and systemd do not exist on Windows; `run_ops.py` itself works there. Create
+three scheduled tasks from an Administrator command prompt, with `C:\Users\you\X`
+replaced by your checkout (and `python` by `.venv\Scripts\python.exe` if you use a
+virtual environment):
+
+```bat
+schtasks /Create /TN "pipeline-run"    /SC MINUTE /MO 30 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py run >> logs\ops.log 2>&1"
+schtasks /Create /TN "pipeline-health" /SC HOURLY        /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py health --alert >> logs\ops.log 2>&1"
+schtasks /Create /TN "pipeline-backup" /SC DAILY /ST 03:00 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py backup >> logs\ops.log 2>&1"
+```
+
+Create the `logs` folder first (`mkdir logs`). The PC must be awake for tasks to
+fire; in Task Scheduler's GUI, tick "Run whether user is logged on or not" and
+"Wake the computer to run this task" for each. `schtasks /Query /TN pipeline-run`
+shows the next run; `schtasks /Delete /TN pipeline-run` removes one. If you use
+the `claude_code` backend, the tasks must run as the Windows user that ran
+`claude login`.

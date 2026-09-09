@@ -38,6 +38,16 @@ ruff check . && ruff format --check . && pytest
 Edit `config.yaml` to change feeds, PubMed queries, company list, keywords,
 cadences, the score threshold, or the scoring model.
 
+### Windows
+
+Everything runs on Windows too (CI tests it). Use `python` instead of
+`python3`, `copy` instead of `cp`, and `.venv\Scripts\activate` to enter the
+virtual environment. Two Windows-only details are handled for you: the
+`tzdata` package supplies the time zone database Windows lacks, and the
+orchestrator's single-instance lock uses a Windows file lock. To run the
+pipeline on a schedule, use Task Scheduler (see `deploy/README.md`) instead of
+cron or systemd.
+
 ## Run
 
 ```bash
