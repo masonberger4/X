@@ -8,9 +8,29 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import config
+import run_draft
+import run_feedback
+import run_ops
+import run_publish
+import run_queue
 from approval_queue import store
 from db import Database
+from draft import drafter
 from ingest.base import Item
+
+# Every module that loads .env at runtime. Tests must not see the developer's .env
+# (backend choice, keys, PUBLISH_ENABLED ...), so load_dotenv is a no-op under pytest.
+_DOTENV_USERS = (config, drafter, run_draft, run_feedback, run_ops, run_publish, run_queue)
+_ENV_FROM_DOTENV = ("LLM_BACKEND", "DRAFT_MODEL", "DB_PATH", "PUBLISH_ENABLED")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_dotenv(monkeypatch):
+    for mod in _DOTENV_USERS:
+        monkeypatch.setattr(mod, "load_dotenv", lambda *a, **k: False)
+    for name in _ENV_FROM_DOTENV:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
