@@ -236,6 +236,12 @@ class Scorer:
         for i in range(0, len(clusters), self.batch_size):
             batch = clusters[i : i + self.batch_size]
             started = time.monotonic()
+            log.info(
+                "batch %d/%d: scoring %d clusters",
+                i // self.batch_size + 1,
+                total_batches,
+                len(batch),
+            )
             try:
                 got = self.score_batch(db, batch)
                 scores.extend(got)

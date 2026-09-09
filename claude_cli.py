@@ -23,6 +23,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import Any
 
@@ -151,16 +152,7 @@ def run_claude(
     argv = build_argv(binary, model, system_file, settings, effort)
     log.debug("running %s (%d chars of prompt)", binary, len(user))
     try:
-        proc = subprocess.run(
-            argv,
-            input=user,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=tempfile.gettempdir(),  # not the repo: no CLAUDE.md auto-discovery
-            timeout=float(settings["timeout_seconds"]),
-            check=False,
-        )
+        proc = _run_with_timeout(argv, user, float(settings["timeout_seconds"]))
     except subprocess.TimeoutExpired as exc:
         raise ClaudeCliError(f"CLI timed out after {settings['timeout_seconds']}s") from exc
     except OSError as exc:
@@ -174,6 +166,45 @@ def run_claude(
     if proc.returncode != 0:
         raise ClaudeCliError(f"CLI exited {proc.returncode}: {_failure_reason(proc)}")
     return parse_envelope(proc.stdout)
+
+
+def _run_with_timeout(
+    argv: list[str], stdin: str, timeout: float
+) -> subprocess.CompletedProcess[str]:
+    """subprocess.run with a timeout that actually ends the call. On Windows the npm
+    `claude.cmd` wrapper starts node as a grandchild; killing only the wrapper leaves node
+    holding the output pipes and the post-timeout communicate() blocks for good. Kill the
+    whole tree (taskkill /T) before collecting output."""
+    proc = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        cwd=tempfile.gettempdir(),  # not the repo: no CLAUDE.md auto-discovery
+    )
+    try:
+        out, err = proc.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        try:
+            proc.communicate(timeout=10)
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            pass
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
+def _kill_tree(proc: subprocess.Popen[str]) -> None:
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        proc.kill()
 
 
 def _failure_reason(proc: subprocess.CompletedProcess[str]) -> str:

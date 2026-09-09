@@ -67,7 +67,7 @@ def test_run_draft_stores_hard_rule_failures_as_failed(conn, monkeypatch):
             **kw,
         ),
     )
-    run_draft.main([])
+    run_draft.main(["--min-score", "7"])
     failed = store.list_drafts(conn, store.STATUS_FAILED)
     assert len(failed) == 1 and "missing the primary source URL" in failed[0].rejection_reason
     assert store.list_drafts(conn) == []
@@ -78,7 +78,7 @@ def test_run_draft_dry_run_makes_no_calls(conn, monkeypatch):
 
     seed_item(conn, "x", total=9.0)
     monkeypatch.setattr(run_draft, "draft_item", lambda **kw: (_ for _ in ()).throw(AssertionError))
-    run_draft.main(["--dry-run"])
+    run_draft.main(["--dry-run", "--min-score", "7"])
     assert store.list_drafts(conn) == []
 
 
@@ -203,7 +203,7 @@ def test_run_draft_examples_disabled_in_config(conn, monkeypatch):
     )
     called = []
     monkeypatch.setattr(run_draft, "build_examples", lambda *a: called.append(1))
-    systems = _run_with_capture(monkeypatch, [])
+    systems = _run_with_capture(monkeypatch, ["--min-score", "7"])
     assert len(systems) == 1 and called == []
 
 
@@ -216,7 +216,7 @@ def test_run_draft_dry_run_reports_examples_without_calls(conn, monkeypatch, cap
 
     seed_item(conn, "x", total=9.0)
     monkeypatch.setattr(run_draft, "draft_item", lambda **kw: (_ for _ in ()).throw(AssertionError))
-    assert run_draft.main(["--dry-run"]) == 0
+    assert run_draft.main(["--dry-run", "--min-score", "7"]) == 0
     assert "examples block is 0 chars" in caplog.text
     assert conn.execute("SELECT COUNT(*) FROM draft_examples").fetchone()[0] == 0
 
@@ -249,7 +249,7 @@ def test_run_draft_records_examples_for_failed_drafts_too(conn, monkeypatch):
             **kw,
         ),
     )
-    run_draft.main([])
+    run_draft.main(["--min-score", "7"])
     failed = store.list_drafts(conn, store.STATUS_FAILED)
     assert len(failed) == 1
     assert [r["decision_id"] for r in store.list_examples(conn, failed[0].id)] == [edit_id]

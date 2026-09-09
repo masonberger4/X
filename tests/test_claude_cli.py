@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -87,8 +88,8 @@ def test_parse_envelope_success_error_and_garbage():
 def test_run_claude_pipes_prompt_on_stdin(monkeypatch):
     seen = {}
 
-    def fake_run(argv, **kw):
-        seen["argv"], seen["kw"] = argv, kw
+    def fake_run(argv, stdin, timeout):
+        seen["argv"], seen["stdin"], seen["timeout"] = argv, stdin, timeout
         with open(argv[argv.index("--system-prompt-file") + 1], encoding="utf-8") as fh:
             seen["system_text"] = fh.read()
         return SimpleNamespace(
@@ -98,15 +99,14 @@ def test_run_claude_pipes_prompt_on_stdin(monkeypatch):
         )
 
     monkeypatch.setattr(claude_cli.shutil, "which", lambda b: "C:\\npm\\" + b + ".CMD")
-    monkeypatch.setattr(claude_cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(claude_cli, "_run_with_timeout", fake_run)
     out = claude_cli.run_claude(
         "USER", system="SYS", model="m", cfg={"claude_code": {"timeout_seconds": 7}}
     )
     assert out == "answer"
     assert seen["argv"][0] == "C:\\npm\\claude.CMD"  # resolved path, not the bare name
-    assert seen["kw"]["input"] == "USER"
-    assert seen["kw"]["timeout"] == 7.0
-    assert seen["kw"]["cwd"] == claude_cli.tempfile.gettempdir()  # no CLAUDE.md pickup
+    assert seen["stdin"] == "USER"
+    assert seen["timeout"] == 7.0
     assert "USER" not in seen["argv"] and "SYS" not in seen["argv"]
     system_file = seen["argv"][seen["argv"].index("--system-prompt-file") + 1]
     assert seen["system_text"] == "SYS"
@@ -123,14 +123,14 @@ def test_run_claude_failures_become_cli_errors(monkeypatch):
     def winerror2(*a, **k):
         raise FileNotFoundError(2, "The system cannot find the file specified")
 
-    monkeypatch.setattr(claude_cli.subprocess, "run", winerror2)
+    monkeypatch.setattr(claude_cli, "_run_with_timeout", winerror2)
     with pytest.raises(claude_cli.ClaudeCliUnavailable, match="could not start"):
         claude_cli.run_claude("u", model="m")
 
     monkeypatch.setattr(claude_cli.shutil, "which", lambda b: b)
     monkeypatch.setattr(
-        claude_cli.subprocess,
-        "run",
+        claude_cli,
+        "_run_with_timeout",
         lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr="Not logged in"),
     )
     with pytest.raises(claude_cli.ClaudeCliError, match="exited 1: Not logged in"):
@@ -147,8 +147,8 @@ def test_run_claude_failures_become_cli_errors(monkeypatch):
         }
     )
     monkeypatch.setattr(
-        claude_cli.subprocess,
-        "run",
+        claude_cli,
+        "_run_with_timeout",
         lambda *a, **k: SimpleNamespace(returncode=1, stdout=envelope, stderr=""),
     )
     with pytest.raises(claude_cli.ClaudeCliError, match="api_error: Model not available"):
@@ -157,7 +157,7 @@ def test_run_claude_failures_become_cli_errors(monkeypatch):
     def timeout(*a, **k):
         raise subprocess.TimeoutExpired(cmd="claude", timeout=1)
 
-    monkeypatch.setattr(claude_cli.subprocess, "run", timeout)
+    monkeypatch.setattr(claude_cli, "_run_with_timeout", timeout)
     with pytest.raises(claude_cli.ClaudeCliError, match="timed out"):
         claude_cli.run_claude("u", model="m")
 
@@ -312,3 +312,21 @@ def test_drafter_call_api_backend_requires_key_and_skips_cli(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
         drafter.call_anthropic("SYS", "USER", "m")
+
+
+def test_run_with_timeout_kills_the_child_and_raises():
+    """A real subprocess: the timeout must end the call (and the process) instead of
+    blocking in communicate(), which is what happened on Windows through claude.cmd."""
+    argv = [sys.executable, "-c", "import time; time.sleep(30)"]
+    with pytest.raises(subprocess.TimeoutExpired):
+        claude_cli._run_with_timeout(argv, "", timeout=0.5)
+
+
+def test_run_with_timeout_runs_from_temp_dir_and_returns_output():
+    argv = [sys.executable, "-c", "import os, sys; print(sys.stdin.read() + os.getcwd())"]
+    proc = claude_cli._run_with_timeout(argv, "in:", timeout=30)
+    assert proc.returncode == 0
+    assert proc.stdout.startswith("in:")
+    assert os.path.realpath(proc.stdout.strip()[3:]) == os.path.realpath(
+        claude_cli.tempfile.gettempdir()
+    )
