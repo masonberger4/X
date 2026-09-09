@@ -148,3 +148,40 @@ The report **proposes** changes and applies none. A human edits
 `PROMPT_VERSION` so `run_score.py` re-scores), `config.yaml` (prefilter
 keywords, source cadences), `publish/config.yaml` (slots, `post_format`) or
 `draft/voice.md`, as each suggestion names.
+
+## Operations (step 5)
+
+`run_ops.py` runs the whole pipeline unattended under cron or a systemd timer,
+detects when a source or stage has silently stopped, backs up the database, and
+tells you when something needs attention. It never posts, never calls the
+Anthropic API, and never edits content; it runs the other CLIs as subprocesses.
+
+```bash
+python run_ops.py run                 # lock; ingest -> score -> draft [-> publish -> feedback]
+python run_ops.py run --only ingest   # a subset
+python run_ops.py run --dry-run       # print the argv per step, run and record nothing
+python run_ops.py health [--json] [--alert]   # checks; exit 1 if anything is 'fail'
+python run_ops.py backup [--keep N]   # verified SQLite online backup into backups/
+python run_ops.py status              # last run per step, last health, row counts, backup age
+python run_ops.py prune --days 90     # ops-owned tables only (pipeline_runs, health_checks, alerts_sent)
+```
+
+Settings live in `ops/config.yaml` (step order, timeouts, health thresholds and
+budget caps, backup dir/keep, alert channels and cooldown). The `publish` step is
+disabled there and its argv is the dry-run default; enable it and add `--live`
+yourself, together with `PUBLISH_ENABLED=1`, after reading the publishing section
+above. Steps whose CLI has not merged yet are skipped with a warning.
+
+Health checks: sources (error / never ran / stale), staleness of ingest, score
+and draft, unscored backlog and pending-draft age, per-day scoring and drafting
+budget, publish `partial`/`failed`/stuck claims, feedback snapshots, backup age,
+DB size and disk free, and required env var names (never values). Alerts go to
+the log always, and optionally to a webhook (`ALERT_WEBHOOK_URL`, works for
+Slack/Discord/Mattermost incoming webhooks) or email (`SMTP_*`,
+`ALERT_EMAIL_FROM/TO`). A check that keeps failing is re-sent only after
+`alerts.cooldown_hours`; a recovery sends one message. Alerts carry check names,
+summaries and counts only.
+
+Deploy files: `deploy/crontab.example`, `deploy/pipeline.service`,
+`deploy/pipeline.timer`, and `deploy/README.md` (VPS setup, lock/backup/log
+locations, how to restore a backup).
