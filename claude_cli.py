@@ -172,7 +172,21 @@ def run_claude(
             except OSError:
                 pass
     if proc.returncode != 0:
-        raise ClaudeCliError(
-            f"CLI exited {proc.returncode}: {(proc.stderr or proc.stdout).strip()[:300]}"
-        )
+        raise ClaudeCliError(f"CLI exited {proc.returncode}: {_failure_reason(proc)}")
     return parse_envelope(proc.stdout)
+
+
+def _failure_reason(proc: subprocess.CompletedProcess[str]) -> str:
+    """The human-readable reason from a failed run: the envelope's `result` when stdout is
+    the JSON envelope (its first 300 chars are all usage counters), else stderr/stdout."""
+    out = (proc.stdout or "").strip()
+    if out.startswith("{"):
+        try:
+            data = json.loads(out)
+            result = str(data.get("result") or "").strip()
+            reason = data.get("terminal_reason") or data.get("subtype") or "error"
+            if result:
+                return f"{reason}: {result[:300]}"
+        except ValueError:
+            pass
+    return (proc.stderr or out).strip()[:300]
