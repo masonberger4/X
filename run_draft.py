@@ -90,6 +90,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="do not add recent human edits/rejections to the prompt (step 7)",
     )
+    ap.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="also draft stories whose only drafts failed the hard rules",
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(
@@ -127,9 +132,11 @@ def main(argv: list[str] | None = None) -> int:
                 rejection_ids,
             )
         candidates = store.fetch_candidates(args.min_score, args.since_hours, conn=conn)
-        todo = [c for c in candidates if not store.has_draft(conn, c.item_id, c.cluster_id)][
-            : args.limit
-        ]
+        todo = [
+            c
+            for c in candidates
+            if not store.has_draft(conn, c.item_id, c.cluster_id, ignore_failed=args.retry_failed)
+        ][: args.limit]
         log.info(
             "%d candidates >= %.1f in last %.0fh, %d without a draft",
             len(candidates),
@@ -142,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
             log.info("%s %.1f %s", c.source, c.total, c.title[:80])
             if args.dry_run:
                 continue
+            if args.retry_failed:
+                store.delete_failed_drafts(conn, c.item_id, c.cluster_id)
             try:
                 result = draft_item(
                     title=c.title,

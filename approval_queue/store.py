@@ -302,15 +302,43 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
     )
 
 
-def has_draft(conn: sqlite3.Connection, item_id: str, cluster_id: int | None = None) -> bool:
-    """True if this item, or any item in the same cluster (same story), already has a draft."""
-    if cluster_id is None:
-        row = conn.execute("SELECT 1 FROM drafts WHERE item_id = ?", (item_id,)).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT 1 FROM drafts WHERE item_id = ? OR cluster_id = ?", (item_id, cluster_id)
-        ).fetchone()
+def has_draft(
+    conn: sqlite3.Connection,
+    item_id: str,
+    cluster_id: int | None = None,
+    *,
+    ignore_failed: bool = False,
+) -> bool:
+    """True if this item, or any item in the same cluster (same story), already has a draft.
+    With ignore_failed, drafts that failed the hard rules do not count (run_draft
+    --retry-failed)."""
+    where = "item_id = ?" if cluster_id is None else "(item_id = ? OR cluster_id = ?)"
+    params: tuple = (item_id,) if cluster_id is None else (item_id, cluster_id)
+    if ignore_failed:
+        where += " AND status != ?"
+        params += (STATUS_FAILED,)
+    row = conn.execute(f"SELECT 1 FROM drafts WHERE {where}", params).fetchone()
     return row is not None
+
+
+def delete_failed_drafts(
+    conn: sqlite3.Connection, item_id: str, cluster_id: int | None = None
+) -> int:
+    """Remove the failed drafts for a story (and their draft_examples rows) so run_draft
+    --retry-failed can insert a fresh one; drafts.item_id is UNIQUE. Returns rows removed."""
+    where = "item_id = ?" if cluster_id is None else "(item_id = ? OR cluster_id = ?)"
+    params: tuple = (item_id,) if cluster_id is None else (item_id, cluster_id)
+    ids = [
+        r[0]
+        for r in conn.execute(
+            f"SELECT id FROM drafts WHERE {where} AND status = ?", params + (STATUS_FAILED,)
+        )
+    ]
+    for draft_id in ids:
+        conn.execute("DELETE FROM draft_examples WHERE draft_id = ?", (draft_id,))
+        conn.execute("DELETE FROM drafts WHERE id = ?", (draft_id,))
+    conn.commit()
+    return len(ids)
 
 
 def insert_draft(
