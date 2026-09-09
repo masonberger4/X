@@ -1,0 +1,257 @@
+"""Calls the Anthropic API to draft one item, then enforces the hard rules in code.
+
+All network I/O goes through call_anthropic(); tests replace it.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import random
+import re
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
+from dotenv import load_dotenv
+
+from draft.prompt import PREPRINT_LABEL, build_prompt, is_preprint
+from draft.schema import (
+    MAX_POST_CHARS,
+    Claim,
+    Draft,
+    SchemaError,
+    tweet_length,
+    validate_output,
+)
+
+log = logging.getLogger(__name__)
+
+DEFAULT_MODEL = "claude-sonnet-5"
+MAX_TOKENS = 2048
+MAX_ATTEMPTS = 4
+BACKOFF_BASE_SECONDS = 2.0
+
+# Phrases that read as medical advice or treatment recommendations. Case-insensitive.
+MEDICAL_ADVICE_PATTERNS = (
+    r"\bask your (doctor|oncologist|physician)\b",
+    r"\btalk to your (doctor|oncologist|physician)\b",
+    r"\bpatients should\b",
+    r"\byou should (take|try|switch|stop|start|ask|consider)\b",
+    r"\bwe recommend\b",
+    r"\bis recommended for patients\b",
+    r"\bshould (be|now be) (given|prescribed|offered) to\b",
+    r"\bfirst[- ]line (choice|option) for you\b",
+    r"\bconsider (taking|switching to|starting|stopping)\b",
+)
+_ADVICE_RE = re.compile("|".join(MEDICAL_ADVICE_PATTERNS), re.IGNORECASE)
+
+# Numbers: integers with optional thousands separators, decimals, and percentages.
+_NUMBER_RE = re.compile(r"(?<![\w/.])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(\s?%)?")
+_URL_RE = re.compile(r"https?://\S+")
+
+
+class DraftRejected(Exception):
+    """The model produced a draft that broke a hard rule after all attempts."""
+
+    def __init__(self, reasons: list[str]):
+        super().__init__("; ".join(reasons))
+        self.reasons = reasons
+
+
+@dataclass
+class DraftResult:
+    draft: Draft
+    model: str
+    attempts: int
+    flagged_numbers: list[str] = field(default_factory=list)
+
+
+def model_name() -> str:
+    return os.environ.get("DRAFT_MODEL", DEFAULT_MODEL)
+
+
+def call_anthropic(system: str, user: str, model: str) -> str:
+    """The single network call. Returns the raw text of the first content block."""
+    import anthropic  # imported here so tests that mock this function never touch the SDK
+
+    load_dotenv()
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set (put it in .env)")
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model=model,
+        max_tokens=MAX_TOKENS,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    return "".join(getattr(block, "text", "") for block in resp.content)
+
+
+def parse_json_response(text: str) -> object:
+    """Parse the model's reply, tolerating ```json fences and leading prose."""
+    text = text.strip()
+    fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+    if fence:
+        text = fence.group(1)
+    elif not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start : end + 1]
+    return json.loads(text)
+
+
+# ---------------------------------------------------------------------------
+# Hard-rule checks (mirror of HARD_RULES in prompt.py)
+# ---------------------------------------------------------------------------
+
+
+def _url_in(text: str, url: str) -> bool:
+    return url in text
+
+
+def numbers_in(text: str) -> list[str]:
+    """Numbers as written, e.g. '88%', '14.6', '1,200'. URLs are ignored."""
+    text = _URL_RE.sub(" ", text)
+    return [
+        m.group(1) + (m.group(2).replace(" ", "") if m.group(2) else "")
+        for m in _NUMBER_RE.finditer(text)
+    ]
+
+
+def _number_in_source(num: str, source_text: str) -> bool:
+    """A number counts as verbatim if it (and its % sign, if any) appears in the source text."""
+    bare = num.rstrip("%")
+    if bare not in source_text:
+        return False
+    if num.endswith("%"):
+        # Accept "88%", "88 %", "88 percent"
+        return bool(re.search(re.escape(bare) + r"\s?(%|percent)", source_text))
+    return True
+
+
+def verify_numbers(draft: Draft, source_text: str) -> list[str]:
+    """Return every number in the draft that does not appear verbatim in the source."""
+    seen: set[str] = set()
+    missing: list[str] = []
+    for post in draft.all_posts():
+        for num in numbers_in(post):
+            if num in seen:
+                continue
+            seen.add(num)
+            if not _number_in_source(num, source_text):
+                missing.append(num)
+    return missing
+
+
+def check_hard_rules(draft: Draft, *, url: str, source: str) -> list[str]:
+    """Violations that make a draft unusable. Empty list means the draft passes."""
+    problems: list[str] = []
+    for i, post in enumerate(draft.all_posts()):
+        label = "single_post" if i == 0 else f"thread[{i - 1}]"
+        n = tweet_length(post)
+        if n > MAX_POST_CHARS:
+            problems.append(f"{label} is {n} chars (> {MAX_POST_CHARS})")
+        if _ADVICE_RE.search(post):
+            problems.append(
+                f"{label} reads as medical advice: {_ADVICE_RE.search(post).group(0)!r}"
+            )
+    if not _url_in(draft.single_post, url):
+        problems.append("single_post is missing the primary source URL")
+    if not _url_in(draft.thread[-1], url):
+        problems.append("last thread post is missing the primary source URL")
+    if is_preprint(source):
+        if PREPRINT_LABEL not in draft.single_post.lower():
+            problems.append("preprint not labelled in single_post")
+        if PREPRINT_LABEL not in draft.thread[0].lower():
+            problems.append("preprint not labelled in first thread post")
+    return problems
+
+
+def flag_unverified_numbers(draft: Draft, source_text: str) -> list[str]:
+    """Append a low-confidence claim for every number not found in the source. Returns them."""
+    missing = verify_numbers(draft, source_text)
+    existing = {c.claim for c in draft.claims_to_verify}
+    for num in missing:
+        claim = f"Number '{num}' does not appear in the source abstract"
+        if claim not in existing:
+            draft.claims_to_verify.append(Claim(claim=claim, confidence="low"))
+    return missing
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+CallFn = Callable[[str, str, str], str]
+
+
+def _sleep_backoff(attempt: int, sleep: Callable[[float], None]) -> None:
+    delay = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+    log.info("retrying in %.1fs", delay)
+    sleep(delay)
+
+
+def draft_item(
+    *,
+    title: str,
+    abstract: str,
+    url: str,
+    source: str,
+    published_at: str | None = None,
+    suggested_angle: str | None = None,
+    rationale: str | None = None,
+    call: CallFn = call_anthropic,
+    model: str | None = None,
+    max_attempts: int = MAX_ATTEMPTS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> DraftResult:
+    """Draft one item. Retries on API errors, bad JSON, schema errors and hard-rule failures.
+
+    Raises DraftRejected if every attempt failed a hard rule, or re-raises the last API
+    error if the API never returned usable output.
+    """
+    model = model or model_name()
+    system, user = build_prompt(
+        title=title,
+        abstract=abstract,
+        url=url,
+        source=source,
+        published_at=published_at,
+        suggested_angle=suggested_angle,
+        rationale=rationale,
+    )
+    source_text = f"{title}\n{abstract}"
+    last_reasons: list[str] = []
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            raw = call(system, user, model)
+        except Exception as exc:  # network / rate limit / SDK errors
+            last_exc = exc
+            log.warning("attempt %d: API call failed: %s", attempt, exc)
+            if attempt < max_attempts:
+                _sleep_backoff(attempt, sleep)
+            continue
+        try:
+            draft = validate_output(parse_json_response(raw))
+        except (json.JSONDecodeError, SchemaError) as exc:
+            last_reasons = [f"invalid output: {exc}"]
+            log.warning("attempt %d: %s", attempt, last_reasons[0])
+            continue
+        problems = check_hard_rules(draft, url=url, source=source)
+        if problems:
+            last_reasons = problems
+            log.warning("attempt %d: hard-rule violations: %s", attempt, "; ".join(problems))
+            continue
+        flagged = flag_unverified_numbers(draft, source_text)
+        if flagged:
+            log.info("numbers not found in source, flagged for review: %s", flagged)
+        return DraftResult(draft=draft, model=model, attempts=attempt, flagged_numbers=flagged)
+    if last_reasons:
+        log.error("draft rejected for %r after %d attempts: %s", url, max_attempts, last_reasons)
+        raise DraftRejected(last_reasons)
+    assert last_exc is not None
+    raise last_exc
