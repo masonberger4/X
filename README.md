@@ -38,10 +38,16 @@ python run_score.py --dry-run   # see what would be scored
 python digest.py                # top-N clusters of the last 24h as markdown
 python digest.py --all --hours 72 --out digest.md
 python digest.py --rate         # rate each entry 1-5 with a note (saved to `ratings`)
+python run_draft.py             # draft approved candidates
+python run_queue.py             # approval UI on localhost:8000
+python run_publish.py           # DRY RUN (default): print what would post and when
+python run_publish.py --live    # posts only if PUBLISH_ENABLED=1 is also set
+python run_publish.py --live --breaking   # only FDA / company-approval items
+python run_publish.py --live --now        # ignore slots, post the top candidate once
 ```
 
 Suggested cron: `run_ingest.py` every 30 min, `run_score.py` hourly, read
-`digest.py` daily.
+`digest.py` daily, `run_publish.py --live` every 15 min.
 
 ## How it works
 
@@ -61,10 +67,41 @@ Suggested cron: `run_ingest.py` every 30 min, `run_score.py` hourly, read
 5. **Digest** (`digest.py`): top clusters above `scoring.threshold` in the
    window, as markdown. `--rate` collects human ratings for rubric tuning.
 
+## Publishing (step 3)
+
+`run_publish.py` reads approved drafts through `publish/store.py:fetch_approved`
+and posts them to X via tweepy (`publish/client.py`, the only module that
+imports tweepy). Slots, timezone, daily cap, minimum gap between posts and
+the breaking-news rules live in `publish/config.yaml`.
+
+Safety gates, all of which must hold before a single tweet is sent:
+
+- `--live` is passed **and** `PUBLISH_ENABLED=1` is set. Anything else is a
+  dry run that prints the plan and posts nothing.
+- The draft is claimed in a `BEGIN IMMEDIATE` transaction (table `schedule`)
+  before the API call, so two overlapping cron runs cannot post it twice and a
+  draft is never retried after a failure.
+- Every text is re-checked in code right before posting (<= 280 chars with
+  URLs as 23, source URL in the single post / last thread post). Failures are
+  logged as refusals and go back to the approval queue; nothing is auto-fixed.
+- Breaking items (`fda*` sources, `company_*` PRs whose title mentions an
+  approval) may post outside slots but still respect the daily cap and gap.
+- A thread that fails at post k keeps posts 1..k-1 live, records the error on
+  post k, marks the draft `partial`, and stops. It is not retried; a human
+  finishes or deletes it.
+
+### Bio disclosure (manual)
+
+PLAN.md requires the account bio to disclose AI-assisted drafting. Editing
+the bio is deliberately **not** automated. Before the first live run, edit the
+bio on X by hand, then set `BIO_DISCLOSURE_CONFIRMED=1` in `.env`;
+`run_publish.py` logs a warning at startup until it is set.
+
 ## Database
 
 SQLite (`db_path` in config). Tables: `items`, `clusters`, `scores`,
-`ratings`, `source_runs`. Every score is kept, so re-scoring after a prompt
+`ratings`, `source_runs` (step 1); `drafts`, `decisions` (step 2); `schedule`,
+`posts` (step 3). Every score is kept, so re-scoring after a prompt
 change is additive.
 
 ## Known source caveats
