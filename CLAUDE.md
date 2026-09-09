@@ -5,10 +5,12 @@ Project guidance for Claude Code. Read PLAN.md before making changes.
 ## What this is
 A human-in-the-loop pipeline that ingests oncology news, scores it with the
 Anthropic API, and drafts X posts for human approval. Python 3.11+, SQLite.
-Step 1 (ingest + dedup + prefilter + score + digest), step 2 (draft + human
-approval queue), step 3 (publish to X), step 4 (feedback loop) and step 5
-(operations: orchestrator, health, alerts, backups) are implemented. Nothing
-posts unless `PUBLISH_ENABLED=1` **and** `--live`.
+All seven build steps are implemented: 1 ingest + dedup + prefilter + score +
+digest, 2 draft + human approval queue, 3 publish to X, 4 feedback loop,
+5 operations (orchestrator, health, alerts, backups), 6 conference abstracts +
+KOL X list + HTTP retry, 7 voice learning loop. The kickoff prompt that built
+each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
+`PUBLISH_ENABLED=1` **and** `--live`.
 
 ## Commands
 - Install: `pip install -e ".[dev]"`

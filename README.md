@@ -5,7 +5,18 @@ ClinicalTrials.gov, FDA, company PR), scores new items, and drafts posts for a
 cancer-research X account. A human approves, edits, and adds commentary before
 anything is published.
 
-See [PLAN.md](PLAN.md) for the full design, principles, and build order.
+See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
+[prompts/](prompts/README.md) for the kickoff prompt that built each step.
+
+| Step | What | Package / CLI |
+|---|---|---|
+| 1 | Ingest, dedup, prefilter, score, digest | `ingest/`, `filter/`, `score/`, `run_ingest.py`, `run_score.py`, `digest.py` |
+| 2 | Draft posts, human approval queue | `draft/`, `approval_queue/`, `run_draft.py`, `run_queue.py` |
+| 3 | Publish to X (dry run by default) | `publish/`, `run_publish.py` |
+| 4 | Feedback loop: metrics, weekly report | `feedback/`, `run_feedback.py` |
+| 5 | Operations: orchestrator, health, alerts, backups | `ops/`, `deploy/`, `run_ops.py` |
+| 6 | Conference abstracts, KOL X list, HTTP retry | `ingest/crossref.py`, `ingest/x_list.py`, `ingest/http.py` |
+| 7 | Voice learning loop from human edits | `draft/examples.py`, `draft/voice_report.py`, queue `/voice` |
 
 ## Principles
 
@@ -47,13 +58,15 @@ python run_publish.py --live --now        # ignore slots, post the top candidate
 ```
 
 Suggested cron: `run_ingest.py` every 30 min, `run_score.py` hourly, read
-`digest.py` daily, `run_publish.py --live` every 15 min.
+`digest.py` daily, `run_publish.py --live` every 15 min, `run_feedback.py
+snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
 
 ## How it works
 
 1. **Ingest** (`run_ingest.py`): each source in `config.yaml` has a `type`
-   (`rss`, `biorxiv`, `pubmed`, `clinicaltrials`, `fda_oce`) and a
-   `cadence_minutes`. Items are normalised into `Item` (pydantic) with a
+   (`rss`, `biorxiv`, `pubmed`, `clinicaltrials`, `fda_oce`, `crossref`,
+   `x_list`) and a `cadence_minutes` (optionally overridden by meeting
+   `windows`, step 6). Items are normalised into `Item` (pydantic) with a
    `dedup_hash` of normalised title+url.
 2. **Dedup / cluster** (`filter/dedup.py`): exact hash -> DOI -> near-duplicate
    title. One cluster per story; a cluster records every source that covered it.
@@ -96,24 +109,6 @@ PLAN.md requires the account bio to disclose AI-assisted drafting. Editing
 the bio is deliberately **not** automated. Before the first live run, edit the
 bio on X by hand, then set `BIO_DISCLOSURE_CONFIRMED=1` in `.env`;
 `run_publish.py` logs a warning at startup until it is set.
-
-## Database
-
-SQLite (`db_path` in config). Tables: `items`, `clusters`, `scores`,
-`ratings`, `source_runs` (step 1); `drafts`, `decisions` (step 2); `schedule`,
-`posts` (step 3); `tweet_metrics`, `follower_snapshots`, `feedback_reports`
-(step 4). Every score is kept, so re-scoring after a prompt
-change is additive.
-
-## Known source caveats
-
-- EurekAlert no longer publishes RSS; bioRxiv/medRxiv RSS was retired, so
-  those use the `api.biorxiv.org` JSON API.
-- `fda.gov` (OCE approvals page) and `clinicaltrials.gov` sit behind bot
-  protection that blocks some cloud egress. Both sources fail soft; run from a
-  residential/VPS IP or add a proxy if they return 401/403.
-- Several big-pharma newsrooms have no public feed or block bots; the company
-  list in `config.yaml` contains only feeds verified to work.
 
 ## Feedback loop (step 4)
 
@@ -294,3 +289,24 @@ Drafting model resolution: `DRAFT_MODEL` in `.env`, else `models.drafter` in
 the root `config.yaml` if you add that key, else `model` in
 `draft/config.yaml`. Databases created before step 7 are migrated in place
 (`decisions.category` is added with a guarded `ALTER TABLE`).
+
+## Database
+
+SQLite (`db_path` in config). Tables: `items`, `clusters`, `scores`,
+`ratings`, `source_runs` (step 1); `drafts`, `decisions`, `draft_examples`
+(steps 2 and 7); `schedule`, `posts` (step 3); `tweet_metrics`,
+`follower_snapshots`, `feedback_reports` (step 4); `pipeline_runs`,
+`health_checks`, `alerts_sent` (step 5). Every score is kept, so re-scoring
+after a prompt change is additive. Each step creates only its own tables and
+reads the others through adapter functions in its `store.py`.
+
+## Known source caveats
+
+- EurekAlert no longer publishes RSS; bioRxiv/medRxiv RSS was retired, so
+  those use the `api.biorxiv.org` JSON API.
+- `fda.gov` (OCE approvals page) and `clinicaltrials.gov` sit behind bot
+  protection that blocks some cloud egress. Both sources fail soft; run from a
+  residential/VPS IP or add a proxy if they return 401/403.
+- Several big-pharma newsrooms have no public feed or block bots; the company
+  list in `config.yaml` contains only feeds verified to work.
+
