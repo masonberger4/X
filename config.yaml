@@ -11,7 +11,14 @@ ncbi:
   tool: cancer-news-pipeline
 
 models:
-  scorer: claude-haiku-4-5        # cheap model for rubric scoring (PLAN.md step 2)
+  # Scoring is analyst triage over ~150 items/day: it needs reliable drug,
+  # mechanism and sponsor knowledge (Haiku misidentified a T-cell engager as a
+  # menin inhibitor). Opus 5 on the claude_code backend; use claude-haiku-4-5
+  # to cut cost on the API backend.
+  scorer: claude-opus-5
+  # Drafting writes the posts the account is judged on. DRAFT_MODEL in .env
+  # overrides this; leave that blank to use this value.
+  drafter: claude-opus-5
   # Optional second opinion for `digest.py --auto-rate`: a stronger model rates
   # each digest entry 1-5 the way the human does with --rate. Stored with
   # rater='auto:<model>' so it never masquerades as a human rating.
