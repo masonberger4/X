@@ -212,3 +212,85 @@ def test_unverified_numbers_become_low_confidence_claims():
     # idempotent
     flag_unverified_numbers(result.draft, ABSTRACT)
     assert len(result.draft.claims_to_verify) == 1
+
+
+# --- step 7: examples never weaken the hard rules ----------------------------
+
+
+EXAMPLES = (
+    "=== RECENT HUMAN EDITS ===\n--- Edit 1 ---\nBEFORE (model):\nold text\n"
+    f"AFTER (human):\nPatients should ask their oncologist. {URL}\nWHY: taste"
+)
+
+
+def test_examples_block_reaches_system_prompt_only():
+    call = fake_call([good_json()])
+    result = run(call, examples_block=EXAMPLES)
+    assert result.attempts == 1
+    system, user, _ = call.calls[0]
+    assert EXAMPLES in system and EXAMPLES not in user
+    assert system.index(EXAMPLES) < system.index("HARD RULES")
+
+
+def test_hard_rules_still_enforced_with_examples_present():
+    advice = good_json(single_post=f"Patients should ask their oncologist about this. {URL}")
+    call = fake_call([advice, advice])
+    with pytest.raises(DraftRejected) as exc:
+        run(call, examples_block=EXAMPLES, max_attempts=2)
+    assert any("medical advice" in r for r in exc.value.reasons)
+    assert all(EXAMPLES in c[0] for c in call.calls)
+
+
+def test_existing_call_signature_without_examples_still_works():
+    call = fake_call([good_json()])
+    assert run(call).attempts == 1
+    assert "RECENT HUMAN EDITS" not in call.calls[0][0]
+
+
+# --- step 7: model resolution -------------------------------------------------
+
+
+def test_model_name_env_wins_then_root_config_then_draft_config(monkeypatch):
+    import config as root_config
+    from draft import drafter
+    from draft.settings import load_draft_config
+
+    fallback = load_draft_config()["model"]
+    monkeypatch.delenv("DRAFT_MODEL", raising=False)
+
+    monkeypatch.setattr(root_config, "load_config", lambda *a, **k: {"models": {"drafter": "x"}})
+    assert drafter.model_name() == "x"
+
+    monkeypatch.setattr(root_config, "load_config", lambda *a, **k: {"models": {"scorer": "s"}})
+    assert drafter.model_name() == fallback
+
+    monkeypatch.setattr(root_config, "load_config", lambda *a, **k: {})
+    assert drafter.model_name() == fallback
+
+    monkeypatch.setenv("DRAFT_MODEL", "from-env")
+    monkeypatch.setattr(root_config, "load_config", lambda *a, **k: {"models": {"drafter": "x"}})
+    assert drafter.model_name() == "from-env"
+
+
+def test_model_name_survives_unreadable_root_config(monkeypatch):
+    import config as root_config
+    from draft import drafter
+    from draft.settings import load_draft_config
+
+    monkeypatch.delenv("DRAFT_MODEL", raising=False)
+
+    def boom(*a, **k):
+        raise FileNotFoundError("no config.yaml")
+
+    monkeypatch.setattr(root_config, "load_config", boom)
+    assert drafter.model_name() == load_draft_config()["model"]
+
+
+def test_no_claude_model_literal_in_drafter():
+    import re
+    from pathlib import Path
+
+    import draft.drafter as mod
+
+    src = Path(mod.__file__).read_text(encoding="utf-8")
+    assert not re.search(r"claude-", src), "model IDs belong in config, not draft/drafter.py"

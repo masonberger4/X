@@ -41,7 +41,14 @@ def is_preprint(source: str | None) -> bool:
     return any(p in name for p in PREPRINT_SOURCES)
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(examples_block: str | None = None) -> str:
+    """System prompt: voice guide, then (optionally) recent human edits, then the hard rules.
+
+    With examples_block=None the output is byte-identical to the pre-step-7 prompt. The
+    examples go AFTER the voice guide and BEFORE HARD_RULES and the schema, so the hard rules
+    are the last thing the model reads and no example can relax them.
+    """
+    examples = f"{examples_block.rstrip()}\n\n" if examples_block else ""
     return (
         "You draft posts for a cancer-research X account. A human reviews and edits every "
         "draft before anything is published; nothing you write is posted automatically.\n\n"
@@ -49,6 +56,7 @@ def build_system_prompt() -> str:
         "=== VOICE GUIDE ===\n"
         f"{load_voice_guide()}\n"
         "=== END VOICE GUIDE ===\n\n"
+        f"{examples}"
         f"{HARD_RULES}\n"
         "Respond with a single JSON object and nothing else, matching this JSON schema:\n"
         f"{json.dumps(OUTPUT_JSON_SCHEMA, indent=2)}"
@@ -93,9 +101,10 @@ def build_prompt(
     published_at: str | None = None,
     suggested_angle: str | None = None,
     rationale: str | None = None,
+    examples_block: str | None = None,
 ) -> tuple[str, str]:
-    """Return (system_prompt, user_prompt)."""
-    return build_system_prompt(), build_user_prompt(
+    """Return (system_prompt, user_prompt). examples_block (step 7) goes into the system prompt."""
+    return build_system_prompt(examples_block), build_user_prompt(
         title=title,
         abstract=abstract,
         url=url,

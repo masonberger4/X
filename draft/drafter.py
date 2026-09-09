@@ -25,10 +25,10 @@ from draft.schema import (
     tweet_length,
     validate_output,
 )
+from draft.settings import load_draft_config
 
 log = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TOKENS = 2048
 MAX_ATTEMPTS = 4
 BACKOFF_BASE_SECONDS = 2.0
@@ -69,7 +69,20 @@ class DraftResult:
 
 
 def model_name() -> str:
-    return os.environ.get("DRAFT_MODEL", DEFAULT_MODEL)
+    """Drafting model: DRAFT_MODEL env, else root config.yaml models.drafter (if the human has
+    added that key), else draft/config.yaml `model`. No model ID is hardcoded here."""
+    env = os.environ.get("DRAFT_MODEL", "").strip()
+    if env:
+        return env
+    try:
+        import config as root_config
+
+        configured = (root_config.load_config().get("models") or {}).get("drafter")
+    except Exception:  # root config.yaml missing or unreadable
+        configured = None
+    if configured:
+        return str(configured)
+    return str(load_draft_config()["model"])
 
 
 def call_anthropic(system: str, user: str, model: str) -> str:
@@ -203,6 +216,7 @@ def draft_item(
     published_at: str | None = None,
     suggested_angle: str | None = None,
     rationale: str | None = None,
+    examples_block: str | None = None,
     call: CallFn = call_anthropic,
     model: str | None = None,
     max_attempts: int = MAX_ATTEMPTS,
@@ -212,6 +226,9 @@ def draft_item(
 
     Raises DraftRejected if every attempt failed a hard rule, or re-raises the last API
     error if the API never returned usable output.
+
+    examples_block (step 7): recent human edits, inserted into the system prompt before the
+    hard rules. check_hard_rules and flag_unverified_numbers run on every output regardless.
     """
     model = model or model_name()
     system, user = build_prompt(
@@ -222,6 +239,7 @@ def draft_item(
         published_at=published_at,
         suggested_angle=suggested_angle,
         rationale=rationale,
+        examples_block=examples_block,
     )
     source_text = f"{title}\n{abstract}"
     last_reasons: list[str] = []
