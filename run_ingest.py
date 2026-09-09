@@ -58,6 +58,11 @@ def ingest(
     for src in build_sources(cfg):
         if only and src.name not in only:
             continue
+        if not src.enabled and not only:
+            # --force ignores cadence, never `enabled: false`; naming the source with
+            # --source is the explicit opt-in.
+            log.debug("%s: disabled", src.name)
+            continue
         if not force and not src.is_due(db.last_run(src.name), now):
             log.debug("%s: not due", src.name)
             continue

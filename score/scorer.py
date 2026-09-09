@@ -130,6 +130,8 @@ class Scorer:
         for attempt in range(self.max_retries + 1):
             try:
                 return self.create_message(user_content)
+            except claude_cli.ClaudeCliUnavailable:
+                raise  # not installed / cannot start: retrying cannot help
             except RETRYABLE as exc:
                 if attempt >= self.max_retries:
                     raise
@@ -233,6 +235,9 @@ class Scorer:
             batch = clusters[i : i + self.batch_size]
             try:
                 scores.extend(self.score_batch(db, batch))
+            except claude_cli.ClaudeCliUnavailable as exc:
+                log.error("stopping: %s", exc)
+                break
             except (ScoringError, anthropic.APIError, claude_cli.ClaudeCliError) as exc:
                 log.error("batch %d-%d failed: %s", i, i + len(batch), exc)
         log.info("scored %d clusters", len(scores))

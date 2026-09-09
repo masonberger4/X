@@ -4,6 +4,7 @@ ever spawned: subprocess.run / run_claude are replaced."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from types import SimpleNamespace
 
@@ -46,13 +47,17 @@ def test_shipped_config_defaults_to_api(monkeypatch):
 
 def test_build_argv_is_print_mode_without_tools():
     argv = claude_cli.build_argv(
-        "claude-haiku-4-5", "SYS", claude_cli.cli_settings({"claude_code": {"extra_args": ["-x"]}})
+        "C:\\npm\\claude.cmd",
+        "claude-haiku-4-5",
+        "sys.md",
+        claude_cli.cli_settings({"claude_code": {"extra_args": ["-x"]}}),
     )
-    assert argv[:2] == ["claude", "-p"]
+    assert argv[:2] == ["C:\\npm\\claude.cmd", "-p"]
     assert argv[argv.index("--output-format") + 1] == "json"
     assert argv[argv.index("--tools") + 1] == ""
     assert argv[argv.index("--model") + 1] == "claude-haiku-4-5"
-    assert argv[argv.index("--system-prompt") + 1] == "SYS"
+    assert argv[argv.index("--system-prompt-file") + 1] == "sys.md"
+    assert "--system-prompt" not in argv  # long prompt never goes on the command line
     assert "--no-session-persistence" in argv and "--bare" in argv
     assert argv[-1] == "-x"
 
@@ -83,26 +88,41 @@ def test_run_claude_pipes_prompt_on_stdin(monkeypatch):
 
     def fake_run(argv, **kw):
         seen["argv"], seen["kw"] = argv, kw
+        with open(argv[argv.index("--system-prompt-file") + 1], encoding="utf-8") as fh:
+            seen["system_text"] = fh.read()
         return SimpleNamespace(
             returncode=0,
             stdout=json.dumps({"subtype": "success", "result": "answer"}),
             stderr="",
         )
 
-    monkeypatch.setattr(claude_cli.shutil, "which", lambda b: "/usr/bin/" + b)
+    monkeypatch.setattr(claude_cli.shutil, "which", lambda b: "C:\\npm\\" + b + ".CMD")
     monkeypatch.setattr(claude_cli.subprocess, "run", fake_run)
     out = claude_cli.run_claude(
         "USER", system="SYS", model="m", cfg={"claude_code": {"timeout_seconds": 7}}
     )
     assert out == "answer"
+    assert seen["argv"][0] == "C:\\npm\\claude.CMD"  # resolved path, not the bare name
     assert seen["kw"]["input"] == "USER"
     assert seen["kw"]["timeout"] == 7.0
-    assert "USER" not in seen["argv"]
+    assert "USER" not in seen["argv"] and "SYS" not in seen["argv"]
+    system_file = seen["argv"][seen["argv"].index("--system-prompt-file") + 1]
+    assert seen["system_text"] == "SYS"
+    assert not os.path.exists(system_file)  # temp file removed after the call
 
 
 def test_run_claude_failures_become_cli_errors(monkeypatch):
     monkeypatch.setattr(claude_cli.shutil, "which", lambda b: None)
-    with pytest.raises(claude_cli.ClaudeCliError, match="not found"):
+    with pytest.raises(claude_cli.ClaudeCliUnavailable, match="not found"):
+        claude_cli.run_claude("u", model="m")
+
+    monkeypatch.setattr(claude_cli.shutil, "which", lambda b: b)
+
+    def winerror2(*a, **k):
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+
+    monkeypatch.setattr(claude_cli.subprocess, "run", winerror2)
+    with pytest.raises(claude_cli.ClaudeCliUnavailable, match="could not start"):
         claude_cli.run_claude("u", model="m")
 
     monkeypatch.setattr(claude_cli.shutil, "which", lambda b: b)
@@ -196,6 +216,29 @@ def test_scorer_headless_cli_error_is_retried(monkeypatch):
     monkeypatch.setattr(claude_cli, "run_claude", flaky)
     resp = Scorer(CFG, client=object()).create_with_retry("USER")
     assert n["calls"] == 2 and Scorer.extract_scores(resp)[0]["index"] == 0
+
+
+def test_scorer_unavailable_cli_is_not_retried_and_stops_the_run(monkeypatch, db):
+    monkeypatch.delenv("LLM_BACKEND", raising=False)
+    n = {"calls": 0}
+
+    def missing(user, **kw):
+        n["calls"] += 1
+        raise claude_cli.ClaudeCliUnavailable("could not start 'claude'")
+
+    monkeypatch.setattr(claude_cli, "run_claude", missing)
+    scorer = Scorer({**CFG, "scoring": {"batch_size": 1, "max_retries": 5, "backoff_seconds": 0}})
+    with pytest.raises(claude_cli.ClaudeCliUnavailable):
+        scorer.create_with_retry("USER")
+    assert n["calls"] == 1  # no backoff loop for an unfixable error
+
+    # Several unscored batches: the run stops after the first, not one failure per batch.
+    from tests.test_scorer import _seed
+
+    _seed(db, 3)
+    n["calls"] = 0
+    assert scorer.score_unscored(db) == []
+    assert n["calls"] == 1
 
 
 def test_scorer_api_backend_never_spawns_cli(monkeypatch):

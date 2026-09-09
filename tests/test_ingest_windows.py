@@ -82,3 +82,31 @@ def test_parse_windows_accepts_dates_and_rejects_reversed():
         ]
     )
     assert len(ws) == 1 and ws[0][2] == 30
+
+
+def test_force_never_runs_a_disabled_source(db, monkeypatch):
+    """--force ignores cadence, not `enabled: false`; --source <name> is the explicit opt-in."""
+    import run_ingest
+    from ingest.base import Item, Source
+
+    calls = []
+
+    class Fake(Source):
+        type = "fake"
+
+        def fetch(self):
+            calls.append(self.name)
+            return [Item.build(source=self.name, url="https://x/1", title="t", abstract="a" * 300)]
+
+    def sources(cfg):
+        return [
+            Fake({"name": "on", "type": "fake", "cadence_minutes": 60}, cfg),
+            Fake({"name": "off", "type": "fake", "cadence_minutes": 60, "enabled": False}, cfg),
+        ]
+
+    monkeypatch.setattr(run_ingest, "build_sources", sources)
+    cfg = {"sources": [], "dedup": {"title_similarity": 0.92, "near_dup_window_days": 14}}
+    run_ingest.ingest(db, cfg, force=True)
+    assert calls == ["on"]
+    run_ingest.ingest(db, cfg, force=True, only={"off"})
+    assert calls == ["on", "off"]

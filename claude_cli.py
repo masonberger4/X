@@ -23,6 +23,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -42,6 +43,10 @@ class ClaudeCliError(RuntimeError):
     """The CLI could not be run or did not return a usable result."""
 
 
+class ClaudeCliUnavailable(ClaudeCliError):
+    """The CLI is not installed or cannot start at all. Not worth retrying."""
+
+
 def llm_backend(cfg: dict[str, Any] | None = None) -> str:
     """'api' (default) or 'claude_code'. LLM_BACKEND env wins over config.yaml models.backend."""
     env = os.environ.get("LLM_BACKEND", "").strip().lower()
@@ -58,10 +63,27 @@ def cli_settings(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     return out
 
 
-def build_argv(model: str, system: str, settings: dict[str, Any]) -> list[str]:
-    """Print mode, JSON envelope, no tools, no session files, no project CLAUDE.md."""
+def resolve_binary(settings: dict[str, Any]) -> str:
+    """Full path of the CLI. On Windows npm installs `claude.cmd`; CreateProcess needs the
+    resolved path (bare `claude` gives WinError 2 even though `which` finds it)."""
+    binary = str(settings["binary"])
+    found = shutil.which(binary)
+    if found is None:
+        raise ClaudeCliUnavailable(
+            f"{binary!r} not found on PATH; install Claude Code and run `claude login`, "
+            "or set models.backend: api"
+        )
+    return found
+
+
+def build_argv(
+    binary: str, model: str, system_file: str | None, settings: dict[str, Any]
+) -> list[str]:
+    """Print mode, JSON envelope, no tools, no session files, no project CLAUDE.md. The
+    system prompt travels in a file: it is long and full of quotes, and on Windows the
+    argv goes through a .cmd wrapper where that is not safe."""
     argv = [
-        str(settings["binary"]),
+        binary,
         "-p",
         "--output-format",
         "json",
@@ -72,8 +94,8 @@ def build_argv(model: str, system: str, settings: dict[str, Any]) -> list[str]:
         "--model",
         model,
     ]
-    if system:
-        argv += ["--system-prompt", system]
+    if system_file:
+        argv += ["--system-prompt-file", system_file]
     return argv + settings["extra_args"]
 
 
@@ -109,26 +131,36 @@ def run_claude(
 ) -> str:
     """The single subprocess call. The user prompt goes in on stdin (no arg-length limit)."""
     settings = cli_settings(cfg)
-    argv = build_argv(model, system, settings)
-    if shutil.which(argv[0]) is None:
-        raise ClaudeCliError(
-            f"{argv[0]!r} not found on PATH; install Claude Code and run `claude login`, "
-            "or set models.backend: api"
-        )
-    log.debug("running %s (%d chars of prompt)", argv[0], len(user))
+    binary = resolve_binary(settings)
+    system_file = None
+    if system:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=".md", prefix="claude-system-", delete=False
+        ) as fh:
+            fh.write(system)
+            system_file = fh.name
+    argv = build_argv(binary, model, system_file, settings)
+    log.debug("running %s (%d chars of prompt)", binary, len(user))
     try:
         proc = subprocess.run(
             argv,
             input=user,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=float(settings["timeout_seconds"]),
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise ClaudeCliError(f"CLI timed out after {settings['timeout_seconds']}s") from exc
     except OSError as exc:
-        raise ClaudeCliError(f"could not start {argv[0]!r}: {exc}") from exc
+        raise ClaudeCliUnavailable(f"could not start {binary!r}: {exc}") from exc
+    finally:
+        if system_file:
+            try:
+                os.unlink(system_file)
+            except OSError:
+                pass
     if proc.returncode != 0:
         raise ClaudeCliError(
             f"CLI exited {proc.returncode}: {(proc.stderr or proc.stdout).strip()[:300]}"
