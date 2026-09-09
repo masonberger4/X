@@ -66,6 +66,8 @@ python run_score.py --refilter  # after editing prefilter keywords: re-evaluate 
 python digest.py                # top-N clusters of the last 24h as markdown
 python digest.py --all --hours 72 --out digest.md
 python digest.py --rate         # rate each entry 1-5 with a note (saved to `ratings`)
+python digest.py --auto-rate    # models.rater (config.yaml) rates each entry; shown in --rate
+python digest.py --auto-rate --rate   # model first, then you, with its rating as a hint
 python run_draft.py             # draft approved candidates
 python run_queue.py             # approval UI on localhost:8000
 python run_publish.py           # DRY RUN (default): print what would post and when

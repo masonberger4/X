@@ -101,3 +101,80 @@ def test_ingest_cadence_errors_and_digest(tmp_path, monkeypatch):
     assert saved == 1
     assert db.ratings_for(rows[0][0].id)[0]["note"] == "great"
     db.close()
+
+
+def test_auto_rate_stores_model_ratings_separately_and_shows_them(db, monkeypatch, capsys):
+    """digest --auto-rate: one rating per entry tagged auto:<model>, skipped on rerun, shown as
+    a hint in --rate, and never read by the feedback report as a human rating."""
+    import digest as digest_mod
+    from score import rater
+
+    cfg = {
+        "models": {"scorer": "m", "rater": "claude-fable-5-1", "rater_effort": "low"},
+        "scoring": {"threshold": 0},
+        "digest": {"top_n": 5, "window_hours": 24 * 30},
+    }
+    from filter.dedup import assign_cluster
+    from ingest.base import Item
+
+    now = datetime.now(UTC)
+    for i in range(2):
+        assign_cluster(
+            db,
+            Item.build(
+                source="company_x",
+                url=f"https://x/{i}",
+                title=f"Engager readout {i}",
+                abstract="a" * 300,
+                published_at=now,
+            ),
+        )
+        db.set_prefilter(i + 1, "pass")
+        db.insert_score(
+            Score(
+                cluster_id=i + 1,
+                model="m",
+                prompt_version="v2",
+                novelty=8,
+                clinical_significance=8,
+                audience_interest=8,
+                expertise_fit=8,
+                timeliness=8,
+                evidence_level="phase2",
+                hype_risk=2,
+                total=39,
+                rationale="why",
+                suggested_angle="angle",
+                raw_response="{}",
+                scored_at=now,
+            )
+        )
+    _, rows = digest_mod.build_digest(db, cfg)
+    assert rows
+    seen = []
+
+    def fake_call(system, user, model, effort, cfg_):
+        seen.append((model, effort))
+        assert "Rating scale" in system and "TITLE:" in user
+        return '```json\n{"rating": 4, "note": "Public-company readout on the beat."}\n```'
+
+    assert digest_mod.auto_rate(db, cfg, rows, call=fake_call) == len(rows)
+    assert seen[0] == ("claude-fable-5-1", "low")
+    assert digest_mod.auto_rate(db, cfg, rows, call=fake_call) == 0  # idempotent per model
+    r = db.ratings_for(rows[0][0].id)
+    assert r[-1]["rater"] == "auto:claude-fable-5-1" and r[-1]["rating"] == 4
+
+    answers = iter(["5", "", "q"])
+    digest_mod.rate(db, rows, ask=lambda _p: next(answers))
+    out = capsys.readouterr().out
+    assert "model rating (auto:claude-fable-5-1): 4" in out
+    human = [x for x in db.ratings_for(rows[0][0].id) if x["rater"] == "human"]
+    assert human and human[-1]["rating"] == 5
+
+    # rater.parse_reply rejects out-of-range and non-JSON replies
+    import pytest
+
+    with pytest.raises(ValueError):
+        rater.parse_reply('{"rating": 7, "note": "x"}')
+    with pytest.raises(ValueError):
+        rater.parse_reply("no json here")

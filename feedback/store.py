@@ -28,7 +28,8 @@ STEP 1 SCHEMA (db.py):
   scores(id PK, cluster_id, model, prompt_version, novelty, clinical_significance,
          audience_interest, expertise_fit, timeliness, evidence_level, hype_risk, total,
          rationale, suggested_angle, raw_response, scored_at)   -- latest row per cluster
-  ratings(id PK, cluster_id, rating 1-5, note, rated_at)          -- latest row per cluster
+  ratings(id PK, cluster_id, rating 1-5, note, rated_at, rater)   -- latest HUMAN row per
+                                                                  -- cluster (rater NULL/'human')
 """
 
 from __future__ import annotations
@@ -191,6 +192,7 @@ SELECT d.id AS draft_id, d.item_id, d.cluster_id,
        s.novelty, s.clinical_significance, s.audience_interest, s.expertise_fit, s.timeliness,
        s.hype_risk, s.total, s.evidence_level, s.suggested_angle,
        (SELECT rating FROM ratings WHERE cluster_id = COALESCE(d.cluster_id, i.cluster_id)
+          AND COALESCE(rater, 'human') = 'human'
           ORDER BY id DESC LIMIT 1) AS rating,
        EXISTS (SELECT 1 FROM decisions x WHERE x.draft_id = d.id
                  AND x.edited_text IS NOT NULL AND x.edited_text != x.original_text) AS edited

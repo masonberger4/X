@@ -2,7 +2,10 @@
 """Print the top-N scored clusters from the last window as markdown.
 
 `--rate` walks the same list interactively and stores a 1-5 rating plus a note
-per cluster in the ratings table (training data for rubric tuning)."""
+per cluster in the ratings table (training data for rubric tuning). `--auto-rate`
+asks the model in config.yaml `models.rater` for the same 1-5 rating on each
+entry and stores it as rater='auto:<model>', a second opinion shown next to the
+prompt in `--rate`; human ratings stay the ground truth."""
 
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ from typing import Any
 from config import load_config, setup_logging
 from db import Cluster, Database, Score, window_start
 from filter.prefilter import cluster_text
+from score import rater
 
 log = logging.getLogger("digest")
 
@@ -67,11 +71,17 @@ def build_digest(
     return "\n".join(head + body), rows
 
 
+def _auto_ratings(db: Database, cluster_id: int) -> list[dict[str, Any]]:
+    return [r for r in db.ratings_for(cluster_id) if (r.get("rater") or "human") != "human"]
+
+
 def rate(db: Database, rows: list[tuple[Cluster, Score]], ask: Callable[[str], str] = input) -> int:
     """Prompt for a 1-5 rating and note per cluster. Returns number saved."""
     saved = 0
     for i, (cl, sc) in enumerate(rows):
         print(render_entry(i + 1, db, cl, sc))
+        for r in _auto_ratings(db, cl.id)[-1:]:
+            print(f"model rating ({r['rater']}): {r['rating']} — {r.get('note') or ''}")
         while True:
             ans = ask("rating 1-5 (s=skip, q=quit): ").strip().lower()
             if ans in ("q", "quit"):
@@ -87,6 +97,44 @@ def rate(db: Database, rows: list[tuple[Cluster, Score]], ask: Callable[[str], s
     return saved
 
 
+def auto_rate(
+    db: Database,
+    cfg: dict[str, Any],
+    rows: list[tuple[Cluster, Score]],
+    call: rater.CallFn = rater.call_model,
+) -> int:
+    """Store one model rating per entry (skipping entries this model already rated).
+    Returns number saved."""
+    name = rater.rater_name(cfg)
+    saved = 0
+    for i, (cl, sc) in enumerate(rows):
+        if any(r.get("rater") == name for r in db.ratings_for(cl.id)):
+            log.debug("cluster %s already rated by %s", cl.id, name)
+            continue
+        items = db.items_in_cluster(cl.id)
+        title, abstract = cluster_text(items) if items else (cl.title, "")
+        entry = {
+            "source": items[0].source if items else "?",
+            "published_at": cl.published_at.isoformat() if cl.published_at else None,
+            "title": title,
+            "abstract": abstract,
+            "total": sc.total,
+            "hype_risk": sc.hype_risk,
+            "rationale": sc.rationale,
+            "suggested_angle": sc.suggested_angle,
+        }
+        try:
+            ar = rater.rate_entry(entry, cfg, call=call)
+        except Exception as exc:  # one bad reply must not stop the run
+            log.error("%d. %s: rating failed: %s", i + 1, title[:70], exc)
+            continue
+        db.insert_rating(cl.id, ar.rating, ar.note, rater=name)
+        saved += 1
+        print(f"{i + 1}. [{ar.rating}] {title[:90]}\n   {ar.note}")
+    log.info("saved %d model ratings (%s)", saved, name)
+    return saved
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", default=None)
@@ -94,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--hours", type=int, default=None)
     ap.add_argument("--all", action="store_true", help="ignore the score threshold")
     ap.add_argument("--rate", action="store_true", help="interactively rate each entry")
+    ap.add_argument(
+        "--auto-rate",
+        action="store_true",
+        help="have config.yaml models.rater rate each entry 1-5 (stored as rater='auto:<model>')",
+    )
     ap.add_argument("--out", default=None, help="write markdown to this file")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
@@ -104,6 +157,10 @@ def main(argv: list[str] | None = None) -> int:
         md, rows = build_digest(
             db, cfg, top_n=args.top, hours=args.hours, min_total=0 if args.all else None
         )
+        if args.auto_rate:
+            auto_rate(db, cfg, rows)
+            if not args.rate:
+                return 0
         if args.rate:
             n = rate(db, rows)
             log.info("saved %d ratings", n)

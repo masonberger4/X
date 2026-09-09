@@ -77,7 +77,11 @@ def resolve_binary(settings: dict[str, Any]) -> str:
 
 
 def build_argv(
-    binary: str, model: str, system_file: str | None, settings: dict[str, Any]
+    binary: str,
+    model: str,
+    system_file: str | None,
+    settings: dict[str, Any],
+    effort: str | None = None,
 ) -> list[str]:
     """Print mode, JSON envelope, no tools, no session files. The system prompt travels
     in a file: it is long and full of quotes, and on Windows the argv goes through a
@@ -97,6 +101,8 @@ def build_argv(
     ]
     if system_file:
         argv += ["--system-prompt-file", system_file]
+    if effort:
+        argv += ["--effort", effort]
     return argv + settings["extra_args"]
 
 
@@ -129,8 +135,10 @@ def run_claude(
     system: str = "",
     model: str,
     cfg: dict[str, Any] | None = None,
+    effort: str | None = None,
 ) -> str:
-    """The single subprocess call. The user prompt goes in on stdin (no arg-length limit)."""
+    """The single subprocess call. The user prompt goes in on stdin (no arg-length limit).
+    `effort` (low|medium|high|xhigh|max) maps to the CLI's --effort."""
     settings = cli_settings(cfg)
     binary = resolve_binary(settings)
     system_file = None
@@ -140,7 +148,7 @@ def run_claude(
         ) as fh:
             fh.write(system)
             system_file = fh.name
-    argv = build_argv(binary, model, system_file, settings)
+    argv = build_argv(binary, model, system_file, settings, effort)
     log.debug("running %s (%d chars of prompt)", binary, len(user))
     try:
         proc = subprocess.run(

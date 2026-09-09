@@ -21,7 +21,9 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - Install: `pip install -e ".[dev]"`
 - Lint: `ruff check .` and `ruff format --check .`
 - Test: `pytest`
-- Run: `python run_ingest.py`, `python run_score.py`, `python digest.py [--rate]`,
+- Run: `python run_ingest.py`, `python run_score.py`,
+  `python digest.py [--rate] [--auto-rate]` (model ratings are stored as
+  `rater='auto:<model>'`; human ratings stay the ground truth for tuning),
   `python run_draft.py`, `python run_queue.py` (approval UI on localhost:8000),
   `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`),
   `python run_feedback.py snapshot|report|followers`,
@@ -40,7 +42,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   the only caller of `httpx.get` is its private `_request`, which retries
   429/5xx/transport errors and never logs headers),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
-  (Anthropic), `draft/drafter.py:call_anthropic`, `claude_cli.run_claude` (the
+  (Anthropic), `draft/drafter.py:call_anthropic`, `score/rater.py:call_model`
+  (the `digest.py --auto-rate` second-opinion rater), `claude_cli.run_claude` (the
   optional `models.backend: claude_code` path: the only place that spawns the
   Claude Code CLI; both Claude call sites route through it when selected, and
   the API stays the default), and `publish/client.py`
@@ -129,7 +132,7 @@ ingest/   base.py (Item, Source ABC, windows), http.py (retry), rss.py,
           biorxiv.py, pubmed.py, clinicaltrials.py, fda_oce.py,
           crossref.py (conference abstracts), x_list.py (KOL list, read-only)
 filter/   prefilter.py, dedup.py
-score/    rubric.py, scorer.py
+score/    rubric.py, scorer.py, rater.py (second-opinion 1-5 rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
 draft/    schema.py, prompt.py, voice.md, drafter.py, config.yaml, settings.py,
