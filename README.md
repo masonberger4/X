@@ -101,7 +101,8 @@ bio on X by hand, then set `BIO_DISCLOSURE_CONFIRMED=1` in `.env`;
 
 SQLite (`db_path` in config). Tables: `items`, `clusters`, `scores`,
 `ratings`, `source_runs` (step 1); `drafts`, `decisions` (step 2); `schedule`,
-`posts` (step 3). Every score is kept, so re-scoring after a prompt
+`posts` (step 3); `tweet_metrics`, `follower_snapshots`, `feedback_reports`
+(step 4). Every score is kept, so re-scoring after a prompt
 change is additive.
 
 ## Known source caveats
@@ -113,6 +114,40 @@ change is additive.
   residential/VPS IP or add a proxy if they return 401/403.
 - Several big-pharma newsrooms have no public feed or block bots; the company
   list in `config.yaml` contains only feeds verified to work.
+
+## Feedback loop (step 4)
+
+`run_feedback.py` pulls `public_metrics` for every tweet step 3 published,
+stores daily/weekly snapshots, and renders a weekly markdown report that says
+which sources, formats, slots and topics perform, plus concrete suggestions
+for the rubric and prefilter. It is **read-only** against X (app-only auth,
+`X_BEARER_TOKEN` in `.env`) and never posts, edits or deletes anything.
+
+```bash
+python run_feedback.py snapshot             # metrics for tweets that are due + followers
+python run_feedback.py snapshot --dry-run   # print the ids it would fetch
+python run_feedback.py snapshot --all       # ignore the schedule (still once per day)
+python run_feedback.py report               # last week, markdown to stdout, no network
+python run_feedback.py report --weeks 4 --out report.md
+python run_feedback.py followers            # follower time series
+```
+
+Suggested cron: `snapshot` once a day, `report --out` once a week. Rerunning
+`snapshot` the same day fetches nothing. Settings (username, snapshot schedule,
+KPI, minimum posts per group, topic keywords, rate-limit wait) live in
+`feedback/config.yaml`, not the root config. Tables: `tweet_metrics`,
+`follower_snapshots`, `feedback_reports`.
+
+Caveat: the API exposes `public_metrics` only. The Original Content Rewards
+"Premium impressions" figure is not available, so `impression_count` (all
+viewers) is a proxy. Groups below `min_posts_per_group` are flagged small-n
+and never produce a suggestion.
+
+The report **proposes** changes and applies none. A human edits
+`score/rubric.py` (weights in `compute_total`, few-shot anchors; then bump
+`PROMPT_VERSION` so `run_score.py` re-scores), `config.yaml` (prefilter
+keywords, source cadences), `publish/config.yaml` (slots, `post_format`) or
+`draft/voice.md`, as each suggestion names.
 
 ## Operations (step 5)
 

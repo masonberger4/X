@@ -244,7 +244,7 @@ def fetch_stage_activity(conn: sqlite3.Connection, now: datetime | None = None) 
 
 
 def fetch_publish_state(conn: sqlite3.Connection, now: datetime | None = None) -> PublishState:
-    """Step 3 (publish/store.py):
+    """Step 3, as merged on main (publish/store.py):
       schedule(id, draft_id UNIQUE, scheduled_for, claimed_at, finished_at,
                status 'pending'|'claimed'|'posted'|'partial'|'refused'|'failed', error)
       posts(id, draft_id, tweet_id, text, kind 'single'|'thread', position, posted_at,
@@ -300,7 +300,7 @@ def fetch_publish_state(conn: sqlite3.Connection, now: datetime | None = None) -
 
 
 def fetch_feedback_state(conn: sqlite3.Connection) -> FeedbackState:
-    """Step 4 (assumed from prompts/prompt4.md):
+    """Step 4, as merged on main (feedback/store.py):
       tweet_metrics(id, tweet_id, draft_id, captured_on, captured_at, ...)
       follower_snapshots(id, captured_on UNIQUE, captured_at, followers, ...)
       feedback_reports(id, window_start, window_end, generated_at, ...)
