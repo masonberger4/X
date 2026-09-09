@@ -25,3 +25,35 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+
+  # A PR that changes what the operator runs or configures must also update a doc,
+  # unless its description says `docs-not-needed`. tests/test_docs_coverage.py is the
+  # other half (every CLI, flag, ops step and settings file must be named in the docs).
+  docs:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a doc change alongside pipeline changes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE" "$HEAD")
+          echo "$changed"
+          code=$(echo "$changed" | grep -E '^(run_[a-z_]+\.py|digest\.py|config\.yaml|[a-z_]+/config\.yaml|approval_queue/templates/.*|deploy/.*|\.env\.example)$' || true)
+          docs=$(echo "$changed" | grep -E '^(HOWTO\.md|README\.md|OVERVIEW\.md|CLAUDE\.md|deploy/README\.md)$' || true)
+          if [ -n "$code" ] && [ -z "$docs" ]; then
+            if echo "$PR_BODY" | grep -q 'docs-not-needed'; then
+              echo "Operator-facing files changed without a doc change; PR says docs-not-needed."
+              exit 0
+            fi
+            echo "::error::These operator-facing files changed but no doc did:"
+            echo "$code"
+            echo "Update HOWTO.md / README.md / OVERVIEW.md / CLAUDE.md / deploy/README.md, or put 'docs-not-needed' in the PR description with a reason."
+            exit 1
+          fi
+          echo "docs check passed"

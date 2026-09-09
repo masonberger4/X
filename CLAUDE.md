@@ -133,6 +133,12 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   (`now` is a parameter). The only network call in `ops/` is
   `alert.py:post_webhook` (plus `send_email` via smtplib); alerts carry check
   names, summaries and counts, never secrets or post text.
+- **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
+  a `--flag`, an `ops/config.yaml` step or a settings file is not named in
+  HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
+  and the CI `docs` job fails a PR that touches operator-facing files without
+  touching a doc, unless the PR description says `docs-not-needed`. A change in
+  what the operator runs, sees or configures updates HOWTO.md in the same PR.
 - Commit after each working module.
 
 ## Layout

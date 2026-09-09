@@ -74,12 +74,19 @@ python digest.py --rate         # rate each entry 1-5 with a note (saved to `rat
 python digest.py --auto-rate    # models.rater (config.yaml) rates each entry; shown in --rate
 python digest.py --auto-rate --rate   # model first, then you, with its rating as a hint
 python run_draft.py             # draft approved candidates
+python run_verify.py            # check each draft's claims against the web (step 2b)
 python run_queue.py             # approval UI on localhost:8000
+python run_queue.py --host 0.0.0.0 --port 8080   # bind elsewhere (--reload for development)
 python run_publish.py           # DRY RUN (default): print what would post and when
 python run_publish.py --live    # posts only if PUBLISH_ENABLED=1 is also set
 python run_publish.py --live --breaking   # only FDA / company-approval items
 python run_publish.py --live --now        # ignore slots, post the top candidate once
 ```
+
+Common flags: `--config PATH` picks another root `config.yaml` (`run_ingest`,
+`run_score`, `digest`, `run_publish`, `run_feedback`; `run_ops` also takes
+`--db PATH`), `digest.py --top N` sets how many entries print, and `-v` turns
+on DEBUG logging everywhere.
 
 Suggested cron: `run_ingest.py` every 30 min, `run_score.py` hourly, read
 `digest.py` daily, `run_publish.py --live` every 15 min, `run_feedback.py
