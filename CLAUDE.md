@@ -6,8 +6,8 @@ Project guidance for Claude Code. Read PLAN.md before making changes.
 A human-in-the-loop pipeline that ingests oncology news, scores it with the
 Anthropic API, and drafts X posts for human approval. Python 3.11+, SQLite.
 Step 1 (ingest + dedup + prefilter + score + digest), step 2 (draft + human
-approval queue) and step 3 (publish to X) are implemented. Nothing posts
-unless `PUBLISH_ENABLED=1` **and** `--live`. Step 4 (feedback loop) is not built.
+approval queue), step 3 (publish to X) and step 4 (feedback loop) are
+implemented. Nothing posts unless `PUBLISH_ENABLED=1` **and** `--live`.
 
 ## Commands
 - Install: `pip install -e ".[dev]"`
@@ -15,7 +15,8 @@ unless `PUBLISH_ENABLED=1` **and** `--live`. Step 4 (feedback loop) is not built
 - Test: `pytest`
 - Run: `python run_ingest.py`, `python run_score.py`, `python digest.py [--rate]`,
   `python run_draft.py`, `python run_queue.py` (approval UI on localhost:8000),
-  `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`)
+  `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`),
+  `python run_feedback.py snapshot|report|followers`
 
 ## Rules
 - **Config drives everything.** Feeds, queries, company list, keywords,
@@ -63,6 +64,13 @@ unless `PUBLISH_ENABLED=1` **and** `--live`. Step 4 (feedback loop) is not built
   settings live in `publish/config.yaml`, not the root config. Posting is
   idempotent via the claim; partial threads are never retried automatically.
   Texts are re-checked before posting and refused, never edited, on failure.
+- Step 4 reads other steps' tables only through `feedback/store.py:fetch_posted`
+  (posts) and `fetch_post_context` (drafts/decisions/items/scores/ratings). Its
+  own tables are `tweet_metrics`, `follower_snapshots`, `feedback_reports`; its
+  settings live in `feedback/config.yaml`. `feedback/client.py` is the only
+  module that calls the X API (httpx, `X_BEARER_TOKEN`, read-only). Reports
+  PROPOSE rubric/prefilter/slot changes; a human applies them and bumps
+  `PROMPT_VERSION`. Analysis and suggestions are pure (no DB, no network).
 - Commit after each working module.
 
 ## Layout
@@ -76,6 +84,9 @@ draft/    schema.py, prompt.py, voice.md, drafter.py
 approval_queue/  store.py (drafts, decisions, fetch_candidates), app.py, templates/
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
           fetch_approved), client.py
+feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
+          store.py (tweet_metrics, follower_snapshots, feedback_reports,
+          fetch_posted, fetch_post_context, due_for_snapshot), client.py
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_queue.py
-run_publish.py   (CLIs)
+run_publish.py  run_feedback.py   (CLIs)
 ```
