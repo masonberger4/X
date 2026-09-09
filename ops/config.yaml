@@ -25,9 +25,10 @@ steps:
     timeout_seconds: 1200
   # Publishing stays OFF and in dry-run mode here. run_publish.py without
   # flags only prints what it would post. The human enables this step and
-  # appends "--live" to argv (and sets PUBLISH_ENABLED=1 in .env) only after
-  # reading README's "Publishing (step 3)" section and confirming the bio
-  # disclosure. Nothing in ops/ ever adds --live on its own.
+  # appends run_publish.py's live flag to argv (and sets PUBLISH_ENABLED=1 in
+  # .env) only after reading README's "Publishing (step 3)" section and
+  # confirming the bio disclosure. Nothing in ops/ ever adds that flag; a
+  # test asserts this file never contains it.
   - name: publish
     argv: ["python", "run_publish.py"]
     enabled: false

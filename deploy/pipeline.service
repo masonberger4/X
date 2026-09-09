@@ -1,0 +1,24 @@
+# systemd equivalent of the cron `run` entry. Install:
+#   sudo cp deploy/pipeline.service deploy/pipeline.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pipeline.timer
+# Edit User, WorkingDirectory and the venv path first. Logs: journalctl -u pipeline.
+[Unit]
+Description=Cancer-research X pipeline: ingest, score, draft (publish stays dry-run until enabled)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/home/pipeline/x
+# .env holds the API keys; python-dotenv reads it too, but EnvironmentFile makes
+# the values available even if the cwd changes. Never commit .env.
+EnvironmentFile=/home/pipeline/x/.env
+ExecStart=/home/pipeline/x/.venv/bin/python run_ops.py run
+# A held lock exits 2 (an overlapping run); do not treat that as a unit failure.
+SuccessExitStatus=2
+TimeoutStartSec=1h
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

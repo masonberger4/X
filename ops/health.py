@@ -142,7 +142,9 @@ def check_staleness(activity: StageActivity, now: datetime, th: Thresholds) -> C
     }
     details["statuses"] = statuses
     worst = max(statuses.values(), key=lambda s: {"ok": 0, "warn": 1, "fail": 2}[s])
-    summary = ", ".join(f"{n} {_fmt_hours(parts[n][0])} ago" for n in parts)
+    summary = ", ".join(
+        f"{n} never" if parts[n][0] is None else f"{n} {_fmt_hours(parts[n][0])} ago" for n in parts
+    )
     if worst != STATUS_OK:
         late = [n for n, s in statuses.items() if s != STATUS_OK]
         summary = f"{'/'.join(late)} stale: " + summary
