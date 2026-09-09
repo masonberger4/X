@@ -18,6 +18,13 @@
     button { margin-right: .5rem; }
     .actions { margin: 1rem 0; }
     .flash { background: #fff8e1; padding: .5rem; border-radius: 6px; }
+    pre.diff { white-space: pre-wrap; font: 13px/1.4 ui-monospace, monospace; background: #fafafa; border: 1px solid #ddd; border-radius: 6px; padding: .5rem; margin: .3rem 0; }
+    .diff .del { background: #fde7e9; color: #8a1c1c; text-decoration: line-through; display: block; }
+    .diff .add { background: #e6f4ea; color: #1b5e20; display: block; }
+    .diff .same { color: #666; display: block; }
+    .proposal { border-left: 4px solid #2e7d32; padding: .3rem .8rem; margin: .5rem 0; background: #f6fbf6; }
+    .caveats { color: #666; font-size: .9em; }
+    select { font: inherit; }
   </style>
 </head>
 <body>
@@ -27,6 +34,7 @@
   <a href="/status/snoozed">Snoozed</a>
   <a href="/status/rejected">Rejected</a>
   <a href="/status/failed">Failed</a>
+  <a href="/voice">Voice report</a>
 </nav>
 <main>{% block content %}{% endblock %}</main>
 </body>

@@ -119,3 +119,21 @@ def test_actions_on_missing_draft_404(client):
         client.post("/drafts/999/edit", data={"single_post": "s", "thread": ""}).status_code == 404
     )
     assert client.get("/status/bogus").status_code == 404
+
+
+# --- step 7 -----------------------------------------------------------------------
+
+
+def test_edit_form_accepts_category_and_rejects_unknown(client, conn, draft_id):
+    data = {"single_post": f"Preprint, edited. {URL}", "thread": f"Preprint. a\n---\nb {URL}"}
+    assert (
+        client.post(f"/drafts/{draft_id}/edit", data={**data, "category": "x"}).status_code == 400
+    )
+    assert store.list_decisions(conn, draft_id) == []
+    r = client.post(f"/drafts/{draft_id}/edit", data={**data, "category": "factual"})
+    assert r.status_code == 303
+    assert store.list_decisions(conn, draft_id)[0]["category"] == "factual"
+
+
+def test_voice_route_exists(client, draft_id):
+    assert client.get("/voice").status_code == 200
