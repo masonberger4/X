@@ -289,3 +289,10 @@ def test_db_path_resolution(monkeypatch, tmp_path):
     assert store.db_path() == tmp_path / "x.db"
     monkeypatch.delenv("DB_PATH")
     assert store.db_path().name == "pipeline.db"  # from config.yaml's db_path
+
+
+def test_configured_backend_follows_the_env_override(monkeypatch):
+    monkeypatch.setenv("LLM_BACKEND", "claude_code")
+    assert store.configured_backend() == "claude_code"
+    monkeypatch.setenv("LLM_BACKEND", "nonsense")
+    assert store.configured_backend() == "api"  # a bad value falls back, never raises

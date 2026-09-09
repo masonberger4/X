@@ -75,7 +75,9 @@ health:
   disk_min_free_mb: 1024         # free space on the DB's filesystem ('fail')
   backup_max_age_hours: 36       # backups run daily; 'fail' past this, 'warn' if none yet
   feedback_max_age_hours: 192    # step 4 snapshots taper to weekly; 'warn' past 8 days
-  required_env:                  # names only; values are never read into a report
+  required_env:                  # names only; values are never read into a report.
+                                 # ANTHROPIC_API_KEY is only required on the api backend;
+                                 # on claude_code (LLM_BACKEND or models.backend) it is skipped.
     - ANTHROPIC_API_KEY
 
 backups:
