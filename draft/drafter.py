@@ -23,6 +23,7 @@ import claude_cli
 from draft.prompt import PREPRINT_LABEL, build_prompt, is_preprint
 from draft.schema import (
     MAX_POST_CHARS,
+    URL_CHARS,
     Claim,
     Draft,
     SchemaError,
@@ -240,6 +241,20 @@ def flag_unverified_numbers(draft: Draft, source_text: str) -> list[str]:
 CallFn = Callable[[str, str, str], str]
 
 
+def retry_prompt(user: str, reasons: list[str]) -> str:
+    """The user prompt for a retry: the previous attempt's failures are appended so the
+    model fixes them instead of guessing. Length failures are the common case and the model
+    cannot count characters exactly, so it is told to leave a margin."""
+    if not reasons:
+        return user
+    lines = "\n".join(f"- {r}" for r in reasons)
+    return (
+        f"{user}\n\nYOUR PREVIOUS ATTEMPT WAS DISCARDED for these hard-rule violations:\n{lines}\n"
+        f"Write a new draft that fixes every one of them. Keep every post under "
+        f"{MAX_POST_CHARS - 20} characters (counting a URL as {URL_CHARS}) to leave a margin."
+    )
+
+
 def _sleep_backoff(attempt: int, sleep: Callable[[float], None]) -> None:
     delay = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
     log.info("retrying in %.1fs", delay)
@@ -285,7 +300,7 @@ def draft_item(
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            raw = call(system, user, model)
+            raw = call(system, retry_prompt(user, last_reasons), model)
         except Exception as exc:  # network / rate limit / SDK errors
             last_exc = exc
             log.warning("attempt %d: API call failed: %s", attempt, exc)
