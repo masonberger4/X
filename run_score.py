@@ -24,12 +24,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--dry-run", action="store_true", help="prefilter only; list what would be scored"
     )
+    ap.add_argument(
+        "--refilter",
+        action="store_true",
+        help="send previously dropped clusters back through the prefilter (after a keyword "
+        "change); 'stale' drops stay dropped",
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     setup_logging(args.verbose)
     cfg = load_config(args.config)
     db = Database(cfg.get("db_path", "pipeline.db"))
     try:
+        if args.refilter:
+            log.info("refilter: %d dropped clusters back in the queue", db.reset_prefilter())
         run_prefilter(db, cfg.get("prefilter") or {})
         scorer = Scorer(cfg)
         if args.dry_run:

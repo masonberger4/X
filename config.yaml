@@ -36,7 +36,9 @@ scoring:
 prefilter:
   require_abstract: true
   min_abstract_chars: 200
-  daily_cap: 60                   # max clusters sent to the scorer per UTC day
+  daily_cap: 60                   # max clusters sent to the scorer per UTC day; the rest
+                                  # are deferred to the next run, not dropped
+  max_age_days: 7                 # a deferred cluster older than this is dropped as 'stale'
   allow_keywords:                 # at least one must appear in title+abstract
     # oncology
     - cancer
