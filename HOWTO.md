@@ -115,7 +115,10 @@ source only when it is due, and score only scores what is new.
    ```
    About one to two minutes per claim. Verdicts are only "verified" when
    the source is on a trusted site (`verify\config.yaml`, plus every company
-   site in `config.yaml`); anything else is shown as a lead.
+   site in `config.yaml`); anything else is shown as a lead. Once the
+   scheduler in part 6 is running, this happens automatically after every
+   drafting run, so by the time you open the queue the evidence is already
+   attached; running it by hand is only for drafts you made by hand.
 3. Open the approval page.
    ```
    python run_queue.py
@@ -193,6 +196,8 @@ source only when it is due, and score only scores what is new.
 
 1. Try the orchestrator by hand first. It runs ingest, score, draft and
    verify in order under a lock, and records each step.
+   The `verify` step runs after `draft` and is optional: if it fails, the
+   claims show as "not checked yet" and the run carries on.
    ```
    mkdir logs
    python run_ops.py run --dry-run
@@ -267,7 +272,8 @@ source only when it is due, and score only scores what is new.
 ## Changing settings
 
 Everything lives in `config.yaml` (sources, keywords, models, caps),
-`draft\config.yaml` (how human edits are reused), `publish\config.yaml`
+`draft\config.yaml` (how human edits are reused), `verify\config.yaml`
+(the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules), `feedback\config.yaml`
-and `ops\config.yaml`. Ask me to commit a change rather than editing by
+and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
