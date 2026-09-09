@@ -3,8 +3,13 @@
 Project guidance for Claude Code. Read PLAN.md before making changes.
 
 ## What this is
-A human-in-the-loop pipeline that ingests oncology news, scores it with the
-Anthropic API, and drafts X posts for human approval. Python 3.11+, SQLite.
+A human-in-the-loop pipeline that ingests immuno-oncology news, scores it with
+the Anthropic API, and drafts X posts for human approval. The account is the
+business and investing side of immuno-oncology biotech (CAR-T and cell therapy,
+T-cell engagers and bispecifics, adjacent IO science): trial results and what
+they mean, upcoming catalysts for public companies, M&A and financing. The AI
+writes as a PhD-level immuno-oncology analyst at a hedge fund. Python 3.11+,
+SQLite.
 All seven build steps are implemented: 1 ingest + dedup + prefilter + score +
 digest, 2 draft + human approval queue, 3 publish to X, 4 feedback loop,
 5 operations (orchestrator, health, alerts, backups), 6 conference abstracts +
@@ -69,10 +74,12 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - Read secrets from `.env` via python-dotenv; never commit `.env`.
 - Logging: stdlib `logging`. INFO for per-source counts, DEBUG for items.
 - Ask before adding a dependency not already in `pyproject.toml`.
-- Generated content must never contain medical advice. Preprints are labelled
-  as preprints. `draft/drafter.py:check_hard_rules` enforces this in code after
-  generation (plus 280 chars/post with URLs as 23, source URL placement, and
-  verbatim-number verification); drafts that fail are stored as `failed`.
+- Generated content must never contain medical advice or investment advice
+  (no buy/sell/hold/short calls, price targets, or return promises; describing
+  a thesis, a valuation or a risk is fine). Preprints are labelled as
+  preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
+  after generation (plus 280 chars/post with URLs as 23, source URL placement,
+  and verbatim-number verification); drafts that fail are stored as `failed`.
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
   tables are `drafts` and `decisions`; edits log original vs edited text.
