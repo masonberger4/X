@@ -13,7 +13,8 @@ SQLite.
 All seven build steps are implemented: 1 ingest + dedup + prefilter + score +
 digest, 2 draft + human approval queue, 3 publish to X, 4 feedback loop,
 5 operations (orchestrator, health, alerts, backups), 6 conference abstracts +
-KOL X list + HTTP retry, 7 voice learning loop. The kickoff prompt that built
+KOL X list + HTTP retry, 7 voice learning loop, 8 control panel (one web app over
+the whole workflow). The kickoff prompt that built
 each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 `PUBLISH_ENABLED=1` **and** `--live`.
 
@@ -26,6 +27,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `rater='auto:<model>'`; human ratings stay the ground truth for tuning),
   `python run_draft.py`, `python run_verify.py` (claim checks with web search),
   `python run_queue.py` (approval UI on localhost:8000),
+  `python run_app.py` (control panel: dashboard, sources, runs and the queue, same port),
   `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`),
   `python run_feedback.py snapshot|report|followers`,
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
@@ -133,6 +135,22 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   (`now` is a parameter). The only network call in `ops/` is
   `alert.py:post_webhook` (plus `send_email` via smtplib); alerts carry check
   names, summaries and counts, never secrets or post text.
+- Step 8 (`panel/`) owns no tables, no config file of its own and no pipeline
+  logic. It reads other steps only through `ops/store.py`'s read-only adapters plus
+  `run_ops.build_report`; the one exception is `panel/feed.py`, which uses step 1's own
+  `db.Database` API (as `digest.py` does) to list scored clusters and to write a human
+  1-5 rating — the only row the panel writes outside its own pages, and it opens that
+  Database inside the route because a `Database` keeps its connection to one thread.
+  It renders through the pure functions in `panel/views.py`
+  (`now` is a parameter; no DB, network or clock), and includes the step 2 queue's
+  routes into the same app so the queue's own module stays unchanged apart from its
+  index moving to `/queue`. `panel/jobs.py` never builds an argv: a job names steps
+  from `ops/config.yaml` and `ops/runner.py` runs them under `ops/lock.py`, one job
+  at a time, refusing any step whose argv contains `--live`. The panel has no publish
+  button and never writes `config.yaml`, `draft/voice.md` or a draft's text. It has
+  no authentication: `run_app.py` binds localhost by default. `/publishing` and
+  `/feedback` are views: no post button, and a report's suggestions are rendered, never
+  applied.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -156,6 +174,9 @@ draft/    schema.py, prompt.py, voice.md, drafter.py, config.yaml, settings.py,
 approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
           fetch_decisions_for_voice, fetch_draft_stats, record_examples),
           app.py (/voice), templates/
+panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
+          ratings), jobs.py (JobManager, background step runs),
+          app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback), templates/
 verify/   config.yaml, settings.py, verifier.py (ClaimCheck, verify_claim,
           call_model), store.py (claim_checks)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
@@ -168,5 +189,5 @@ ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
           read-only adapters)
 deploy/   crontab.example, pipeline.service, pipeline.timer, README.md
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
-run_publish.py  run_feedback.py  run_ops.py   (CLIs)
+run_app.py  run_publish.py  run_feedback.py  run_ops.py   (CLIs)
 ```

@@ -235,7 +235,8 @@ def test_queue_shows_verdicts_and_blocks_approve_on_contradiction(client, conn):
     )
     assert "not checked yet" in body  # claim 1
     assert "approve anyway" in body
-    assert "1 contradicted" in client.get("/").text and "1 unchecked" in client.get("/").text
+    listing = client.get("/queue").text
+    assert "1 contradicted" in listing and "1 unchecked" in listing
 
     r = client.post(f"/drafts/{did}/approve")
     assert r.status_code == 409

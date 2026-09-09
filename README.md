@@ -21,6 +21,39 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | 5 | Operations: orchestrator, health, alerts, backups | `ops/`, `deploy/`, `run_ops.py` |
 | 6 | Conference abstracts, KOL X list, HTTP retry | `ingest/crossref.py`, `ingest/x_list.py`, `ingest/http.py` |
 | 7 | Voice learning loop from human edits | `draft/examples.py`, `draft/voice_report.py`, queue `/voice` |
+| 8 | Control panel: one web app over the whole workflow | `panel/`, `run_app.py` |
+
+## Control panel (step 8)
+
+`python run_app.py` serves the whole workflow at http://localhost:8000:
+
+| Page | What |
+|---|---|
+| `/` | health checks, the last outcome of every orchestrator step, row counts, database size, latest backup |
+| `/sources` | every configured ingest source with its freshness, last error and item counts |
+| `/feed` | the scored clusters `digest.py` prints, with its 1-5 rating prompt inline |
+| `/publishing` | approved and waiting, what has posted, and any partial thread needing a human |
+| `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
+| `/runs` | start a run of any enabled step and watch its log; recent runs with per-step output |
+| `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue, unchanged |
+
+`panel/` owns no tables. Every number comes from the read-only adapters in
+`ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
+step 1's own `db.Database` API — the same one `digest.py` uses, and the run buttons execute
+`ops/config.yaml`'s steps through `ops/runner.py` under the same `ops/lock.py` lock
+cron takes, so a run started in the browser is the run cron would have started. A step
+disabled in `ops/config.yaml` is skipped, never run: publishing stays off. The panel
+never edits `config.yaml`, `draft/voice.md` or a draft's text, and has no publish
+button. The feedback page renders a report's suggestions; applying one is still a human
+editing a settings file and bumping `PROMPT_VERSION`. The one thing the panel writes
+outside its own steps is a human 1-5 rating on the feed page, through step 1's API, which
+is exactly what `digest.py --rate` writes.
+
+There is no authentication. Bind it to localhost and reach it over an SSH tunnel or a
+private network; the run buttons execute the pipeline's CLIs.
+
+`run_queue.py` still serves the approval queue on its own for anyone who wants only
+that.
 
 ## Principles
 
@@ -75,8 +108,10 @@ python digest.py --auto-rate    # models.rater (config.yaml) rates each entry; s
 python digest.py --auto-rate --rate   # model first, then you, with its rating as a hint
 python run_draft.py             # draft approved candidates
 python run_verify.py            # check each draft's claims against the web (step 2b)
-python run_queue.py             # approval UI on localhost:8000
+python run_queue.py             # approval UI alone on localhost:8000
 python run_queue.py --host 0.0.0.0 --port 8080   # bind elsewhere (--reload for development)
+python run_app.py               # control panel: dashboard + sources + runs + the queue
+python run_app.py --host 0.0.0.0 --port 8080     # bind elsewhere (--reload for development)
 python run_publish.py           # DRY RUN (default): print what would post and when
 python run_publish.py --live    # posts only if PUBLISH_ENABLED=1 is also set
 python run_publish.py --live --breaking   # only FDA / company-approval items

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Draft {{ d.id }}{% endblock %}
 {% block content %}
-<p class="meta"><a href="/">&larr; back to pending</a></p>
+<p class="meta"><a href="/queue">&larr; back to pending</a></p>
 <h1>{{ d.title or d.item_id }}</h1>
 <p class="meta">
   status <strong>{{ d.status }}</strong>

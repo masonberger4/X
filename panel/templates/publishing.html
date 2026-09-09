@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Publishing{% endblock %}
+{% block content %}
+<h1>Publishing</h1>
+{% if not publish_enabled %}
+<p class="flash">Publishing is off: the <code>publish</code> step is disabled in
+<code>ops/config.yaml</code>. Nothing posts until a human enables it there, appends the
+live flag and sets <code>PUBLISH_ENABLED=1</code>. This page cannot do any of that.</p>
+{% endif %}
+
+<div class="cards">
+  <div class="card"><div class="n">{{ approved_waiting }}</div><div class="meta">approved, waiting</div></div>
+  <div class="card"><div class="n">{{ state.posts_24h }}</div><div class="meta">posted in 24h</div></div>
+  <div class="card"><div class="n">{{ state.posts_7d }}</div><div class="meta">posted in 7d</div></div>
+  <div class="card"><div class="n">{{ last_posted }}</div><div class="meta">last post</div></div>
+</div>
+
+{% if needs_attention %}
+<h2>Needs a human</h2>
+<p class="meta">A partial thread is never retried automatically. Open X, see what actually
+went out, then fix the row by hand.</p>
+<table>
+  <tr><th>Draft</th><th>Status</th><th>When</th><th>Error</th></tr>
+  {% for r in needs_attention %}
+  <tr>
+    <td><a href="/drafts/{{ r.draft_id }}">{{ r.draft_id }}</a></td>
+    <td><span class="pill fail">{{ r.status }}</span></td>
+    <td class="meta">{{ (r.finished_at or r.claimed_at or r.scheduled_for) or '' }}</td>
+    <td class="low">{{ r.error or '' }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Posts</h2>
+{% if posts %}
+<table>
+  <tr><th>Draft</th><th>Status</th><th>Posted</th><th>Slot</th><th>Text</th></tr>
+  {% for p in posts %}
+  <tr>
+    <td><a href="/drafts/{{ p.draft_id }}">{{ p.draft_id }}</a>{% if p.kind == 'thread' %} <span class="meta">{{ p.position }}</span>{% endif %}</td>
+    <td><span class="pill {{ 'ok' if p.status == 'posted' else 'fail' }}">{{ p.status }}</span></td>
+    <td class="meta">{{ p.posted_at.strftime('%Y-%m-%d %H:%M') if p.posted_at else '' }}</td>
+    <td class="meta">{{ p.slot or '' }}</td>
+    <td>
+      {% if p.tweet_id %}<a href="https://x.com/i/status/{{ p.tweet_id }}" rel="noreferrer">{{ p.text }}</a>
+      {% else %}{{ p.text }}{% endif %}
+      {% if p.error %}<div class="low">{{ p.error }}</div>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">Nothing has posted yet. In dry-run mode <code>run_publish.py</code> prints
+what it would post and writes nothing here.</p>
+{% endif %}
+{% endblock %}

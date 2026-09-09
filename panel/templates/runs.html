@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Runs{% endblock %}
+{% block content %}
+<h1>Runs</h1>
+{% if error %}<p class="flash low">{{ error }}</p>{% endif %}
+<form method="post" action="/runs">
+  {% for s in steps %}
+  <label style="margin-right:1rem">
+    <input type="checkbox" name="step" value="{{ s.name }}" {% if not s.enabled %}disabled{% endif %}>
+    {{ s.name }}{% if not s.enabled %} <span class="meta">(disabled)</span>{% endif %}
+  </label>
+  {% endfor %}
+  <div class="actions"><button type="submit">Run selected steps</button></div>
+</form>
+<div id="jobs">{% include "_jobs.html" %}</div>
+<script>
+(function () {
+  var box = document.getElementById("jobs");
+  function isRunning() {
+    var flag = box.querySelector("#run-state");
+    return flag !== null && flag.getAttribute("data-running") === "1";
+  }
+  function poll() {
+    fetch("/runs/current", {headers: {"Accept": "text/html"}})
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        box.innerHTML = html;
+        if (isRunning()) { setTimeout(poll, 2000); }
+      })
+      .catch(function () { setTimeout(poll, 5000); });
+  }
+  if (isRunning()) { setTimeout(poll, 2000); }
+})();
+</script>
+{% endblock %}

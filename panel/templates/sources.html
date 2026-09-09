@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Sources{% endblock %}
+{% block content %}
+<h1>Sources</h1>
+<p class="meta">{{ enabled }} enabled, {{ failing }} needing attention. Cadence and the
+enabled flag come from <code>config.yaml</code>; edit it on disk, not here.</p>
+<table>
+  <tr><th>Source</th><th>Status</th><th>Last run</th><th>Cadence</th><th>Fetched</th><th>New</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td><strong>{{ r.source }}</strong></td>
+    <td><span class="pill {{ r.status }}">{{ 'disabled' if not r.enabled else r.status }}</span></td>
+    <td class="meta">{{ r.age }}</td>
+    <td class="meta">{{ r.cadence_minutes }}m</td>
+    <td>{{ r.fetched }}</td>
+    <td>{{ r.inserted }}</td>
+  </tr>
+  {% if r.error %}<tr><td></td><td colspan="5" class="low">{{ r.error }}</td></tr>{% endif %}
+  {% endfor %}
+</table>
+{% endblock %}
