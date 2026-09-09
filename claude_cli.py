@@ -79,15 +79,16 @@ def resolve_binary(settings: dict[str, Any]) -> str:
 def build_argv(
     binary: str, model: str, system_file: str | None, settings: dict[str, Any]
 ) -> list[str]:
-    """Print mode, JSON envelope, no tools, no session files, no project CLAUDE.md. The
-    system prompt travels in a file: it is long and full of quotes, and on Windows the
-    argv goes through a .cmd wrapper where that is not safe."""
+    """Print mode, JSON envelope, no tools, no session files. The system prompt travels
+    in a file: it is long and full of quotes, and on Windows the argv goes through a
+    .cmd wrapper where that is not safe. No `--bare`: it also skips the stored login
+    ("Not logged in" on every call). The project's CLAUDE.md is kept out of the prompt
+    by running the CLI from the temp directory instead (see run_claude)."""
     argv = [
         binary,
         "-p",
         "--output-format",
         "json",
-        "--bare",
         "--no-session-persistence",
         "--tools",
         "",
@@ -148,6 +149,7 @@ def run_claude(
             capture_output=True,
             text=True,
             encoding="utf-8",
+            cwd=tempfile.gettempdir(),  # not the repo: no CLAUDE.md auto-discovery
             timeout=float(settings["timeout_seconds"]),
             check=False,
         )
