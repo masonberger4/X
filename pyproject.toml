@@ -15,6 +15,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "jinja2>=3.1",
+    "tweepy>=4.14",
 ]
 
 [project.optional-dependencies]
@@ -29,10 +30,10 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["config", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue"]
+py-modules = ["config", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_publish"]
 
 [tool.setuptools.packages.find]
-include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*"]
+include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "publish*"]
 
 [tool.ruff]
 line-length = 100
