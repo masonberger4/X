@@ -3,6 +3,9 @@
 
 db_path: pipeline.db
 
+http:
+  user_agent: "Mozilla/5.0 (X11; Linux x86_64) cancer-news-pipeline/0.1"
+
 ncbi:
   email: masonpberger@gmail.com   # Entrez.email (NCBI etiquette)
   tool: cancer-news-pipeline
@@ -98,28 +101,30 @@ sources:
     type: rss
     url: https://ascopubs.org/action/showFeed?type=etoc&feed=rss&jc=jco
     cadence_minutes: 720
-  - name: cancer_discovery
-    type: rss
-    url: https://aacrjournals.org/rss/site_1000004/1000010.xml
-    cadence_minutes: 720
-  - name: eurekalert_cancer
-    type: rss
-    url: https://www.eurekalert.org/rss/cancer.xml
-    cadence_minutes: 60
-  - name: biorxiv_cancer_biology
-    type: rss
-    url: https://connect.biorxiv.org/biorxiv_xml/subject/cancer_biology
-    cadence_minutes: 180
-  - name: medrxiv_oncology
-    type: rss
-    url: https://connect.medrxiv.org/medrxiv_xml/subject/oncology
-    cadence_minutes: 180
+  # EurekAlert no longer publishes topic RSS feeds; bioRxiv/medRxiv retired their
+  # RSS feeds and are ingested through the JSON API below (type: biorxiv).
   - name: fda_press
     type: rss
     url: https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml
     cadence_minutes: 60
 
   # --- structured / API sources ---
+  - name: biorxiv_cancer_biology
+    type: biorxiv
+    server: biorxiv
+    api_url: https://api.biorxiv.org/details
+    category: cancer_biology
+    lookback_days: 2
+    max_pages: 5
+    cadence_minutes: 180
+  - name: medrxiv_oncology
+    type: biorxiv
+    server: medrxiv
+    api_url: https://api.medrxiv.org/details
+    category: oncology
+    lookback_days: 2
+    max_pages: 5
+    cadence_minutes: 180
   - name: fda_oce_approvals
     type: fda_oce
     url: https://www.fda.gov/drugs/resources-information-approved-drugs/oncology-cancer-hematologic-malignancies-approval-notifications
@@ -166,123 +171,41 @@ sources:
 companies:
   cadence_minutes: 120
   feeds:
-    - key: bms
-      name: Bristol Myers Squibb
-      url: https://news.bms.com/rss/news-releases.xml
-    - key: merck
-      name: Merck
-      url: https://www.merck.com/media/news/feed/
-    - key: astrazeneca
-      name: AstraZeneca
-      url: https://www.astrazeneca.com/content/astraz/media-centre/press-releases.rss
-    - key: roche
-      name: Roche
-      url: https://www.roche.com/media/releases.rss
-    - key: pfizer
-      name: Pfizer
-      url: https://www.pfizer.com/news/press-release/rss.xml
-    - key: gilead
-      name: Gilead / Kite
-      url: https://www.gilead.com/news/rss
-    - key: jnj
-      name: Johnson & Johnson
-      url: https://www.jnj.com/rss/press-releases
-    - key: amgen
-      name: Amgen
-      url: https://www.amgen.com/newsroom/rss
-    - key: abbvie
-      name: AbbVie
-      url: https://news.abbvie.com/rss
-    - key: novartis
-      name: Novartis
-      url: https://www.novartis.com/news/media-releases/rss
-    - key: regeneron
-      name: Regeneron
-      url: https://investor.regeneron.com/rss/news-releases.xml
-    - key: daiichi
-      name: Daiichi Sankyo
-      url: https://www.daiichisankyo.com/rss/media/press_release.xml
-    - key: genmab
-      name: Genmab
-      url: https://ir.genmab.com/rss/news-releases.xml
-    - key: incyte
-      name: Incyte
-      url: https://investor.incyte.com/rss/news-releases.xml
-    - key: exelixis
-      name: Exelixis
-      url: https://ir.exelixis.com/rss/news-releases.xml
-    - key: seagen_pfizer
-      name: Seagen (Pfizer)
-      url: https://investor.seagen.com/rss/news-releases.xml
-    - key: iovance
-      name: Iovance
-      url: https://ir.iovance.com/rss/news-releases.xml
-    - key: legend
-      name: Legend Biotech
-      url: https://investors.legendbiotech.com/rss/news-releases.xml
-    - key: autolus
-      name: Autolus
-      url: https://www.autolus.com/rss/news-releases.xml
-    - key: allogene
-      name: Allogene
-      url: https://ir.allogene.com/rss/news-releases.xml
-    - key: crispr_tx
-      name: CRISPR Therapeutics
-      url: https://crisprtx.gcs-web.com/rss/news-releases.xml
-    - key: intellia
-      name: Intellia
-      url: https://ir.intelliatx.com/rss/news-releases.xml
-    - key: beam
-      name: Beam Therapeutics
-      url: https://investors.beamtx.com/rss/news-releases.xml
-    - key: caribou
-      name: Caribou Biosciences
-      url: https://investor.cariboubio.com/rss/news-releases.xml
-    - key: arcellx
-      name: Arcellx
-      url: https://ir.arcellx.com/rss/news-releases.xml
-    - key: adaptimmune
-      name: Adaptimmune
-      url: https://ir.adaptimmune.com/rss/news-releases.xml
-    - key: immunocore
-      name: Immunocore
-      url: https://ir.immunocore.com/rss/news-releases.xml
-    - key: moderna
-      name: Moderna
-      url: https://investors.modernatx.com/rss/news-releases.xml
-    - key: biontech
-      name: BioNTech
-      url: https://investors.biontech.de/rss/news-releases.xml
-    - key: summit
-      name: Summit Therapeutics
-      url: https://www.smmttx.com/rss/news-releases.xml
-    - key: revolution
-      name: Revolution Medicines
-      url: https://ir.revmed.com/rss/news-releases.xml
-    - key: relay
-      name: Relay Therapeutics
-      url: https://ir.relaytx.com/rss/news-releases.xml
-    - key: nuvalent
-      name: Nuvalent
-      url: https://investors.nuvalent.com/rss/news-releases.xml
-    - key: mirati_bms
-      name: Mirati (BMS)
-      url: https://ir.mirati.com/rss/news-releases.xml
-    - key: zymeworks
-      name: Zymeworks
-      url: https://ir.zymeworks.com/rss/news-releases.xml
-    - key: adc_tx
-      name: ADC Therapeutics
-      url: https://ir.adctherapeutics.com/rss/news-releases.xml
-    - key: immunitybio
-      name: ImmunityBio
-      url: https://immunitybio.com/feed/
-    - key: kura
-      name: Kura Oncology
-      url: https://ir.kuraoncology.com/rss/news-releases.xml
-    - key: syndax
-      name: Syndax
-      url: https://ir.syndax.com/rss/news-releases.xml
-    - key: cargo
-      name: CARGO Therapeutics
-      url: https://ir.cargo-tx.com/rss/news-releases.xml
+    # Verified working RSS 2.0 feeds (Sept 2026). Big-pharma newsrooms (BMS,
+    # Pfizer, Gilead, J&J, AstraZeneca, Roche, Novartis) sit behind bot
+    # protection or have no feed; add them here if you find a working URL.
+    - {key: merck,        name: Merck,                   url: https://www.merck.com/media/news/feed/}
+    - {key: regeneron,    name: Regeneron,               url: https://investor.regeneron.com/rss/news-releases.xml}
+    - {key: amgen,        name: Amgen,                   url: https://investors.amgen.com/rss/news-releases.xml}
+    - {key: abbvie,       name: AbbVie,                  url: https://investors.abbvie.com/rss/news-releases.xml}
+    - {key: lilly,        name: Eli Lilly,               url: https://investor.lilly.com/rss/news-releases.xml}
+    - {key: genmab,       name: Genmab,                  url: https://ir.genmab.com/rss/news-releases.xml}
+    - {key: incyte,       name: Incyte,                  url: https://investor.incyte.com/rss/news-releases.xml}
+    - {key: exelixis,     name: Exelixis,                url: https://ir.exelixis.com/rss/news-releases.xml}
+    - {key: iovance,      name: Iovance,                 url: https://ir.iovance.com/rss/news-releases.xml}
+    - {key: legend,       name: Legend Biotech,          url: https://investors.legendbiotech.com/rss/news-releases.xml}
+    - {key: allogene,     name: Allogene,                url: https://ir.allogene.com/rss/news-releases.xml}
+    - {key: crispr_tx,    name: CRISPR Therapeutics,     url: https://crisprtx.gcs-web.com/rss/news-releases.xml}
+    - {key: intellia,     name: Intellia,                url: https://ir.intelliatx.com/rss/news-releases.xml}
+    - {key: beam,         name: Beam Therapeutics,       url: https://investors.beamtx.com/rss/news-releases.xml}
+    - {key: caribou,      name: Caribou Biosciences,     url: https://investor.cariboubio.com/rss/news-releases.xml}
+    - {key: immunocore,   name: Immunocore,              url: https://ir.immunocore.com/rss/news-releases.xml}
+    - {key: biontech,     name: BioNTech,                url: https://investors.biontech.de/rss/news-releases.xml}
+    - {key: revolution,   name: Revolution Medicines,    url: https://ir.revmed.com/rss/news-releases.xml}
+    - {key: relay,        name: Relay Therapeutics,      url: https://ir.relaytx.com/rss/news-releases.xml}
+    - {key: zymeworks,    name: Zymeworks,               url: https://ir.zymeworks.com/rss/news-releases.xml}
+    - {key: immunitybio,  name: ImmunityBio,             url: https://immunitybio.com/feed/}
+    - {key: kura,         name: Kura Oncology,           url: https://ir.kuraoncology.com/rss/news-releases.xml}
+    - {key: syndax,       name: Syndax,                  url: https://ir.syndax.com/rss/news-releases.xml}
+    - {key: tscan,        name: TScan Therapeutics,      url: https://ir.tscan.com/rss/news-releases.xml}
+    - {key: arvinas,      name: Arvinas,                 url: https://ir.arvinas.com/rss/news-releases.xml}
+    - {key: cellectis,    name: Cellectis,               url: https://www.cellectis.com/en/rss/press-releases}
+    - {key: blueprint,    name: Blueprint Medicines,     url: https://ir.blueprintmedicines.com/rss/news-releases.xml}
+    - {key: bicycle,      name: Bicycle Therapeutics,    url: https://investors.bicycletherapeutics.com/rss/news-releases.xml}
+    - {key: tango,        name: Tango Therapeutics,      url: https://ir.tangotx.com/rss/news-releases.xml}
+    - {key: verastem,     name: Verastem,                url: https://investor.verastem.com/rss/news-releases.xml}
+    - {key: replimune,    name: Replimune,               url: https://ir.replimune.com/rss/news-releases.xml}
+    - {key: macrogenics,  name: MacroGenics,             url: https://ir.macrogenics.com/rss/news-releases.xml}
+    - {key: xencor,       name: Xencor,                  url: https://investors.xencor.com/rss/news-releases.xml}
+    - {key: carisma,      name: Carisma Therapeutics,    url: https://ir.carismatx.com/rss/news-releases.xml}
+    - {key: alx,          name: ALX Oncology,            url: https://ir.alxoncology.com/rss/news-releases.xml}
