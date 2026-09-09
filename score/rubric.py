@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 TOOL_NAME = "score_items"
 
 EVIDENCE_LEVELS = ["preclinical", "preprint", "phase1", "phase2", "phase3", "approval", "other"]
@@ -172,7 +172,7 @@ Also report:
 - rationale: one line, <= 200 characters, specific to the item.
 - suggested_angle: the interpretation a post could offer: what the result means for the science AND for the company's thesis (competitive position, what the next catalyst is, what the market may be missing), what to watch, what is overhyped. Name the company and the catalyst where the item gives them. Never suggest treatment recommendations and never suggest buying, selling or shorting anything.
 
-Do not invent numbers that are not in the item text. Score items independently of each other. You MUST respond by calling the `{TOOL_NAME}` tool exactly once with one entry per item, using the item's given index.
+Do not invent numbers that are not in the item text. Do not state a drug's mechanism, target, modality, sponsor, or ticker unless the item text states it or you are certain of it; when unsure, describe what the text says ("the sponsor", "the agent") rather than guess. A wrong mechanism or sponsor in the rationale misleads the editor more than a missing one. Score items independently of each other. You MUST respond by calling the `{TOOL_NAME}` tool exactly once with one entry per item, using the item's given index.
 
 {examples}"""
 
