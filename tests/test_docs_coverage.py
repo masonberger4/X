@@ -56,7 +56,9 @@ def test_every_ops_step_is_in_the_howto():
 
 
 def test_every_settings_file_is_in_the_howto_and_readme():
-    files = ["config.yaml"] + sorted(str(p.relative_to(ROOT)) for p in ROOT.glob("*/config.yaml"))
+    files = ["config.yaml"] + sorted(
+        p.relative_to(ROOT).as_posix() for p in ROOT.glob("*/config.yaml")
+    )
     settings = DOCS["HOWTO.md"].split("## Changing settings")[1]
     for f in files:
         win = f.replace("/", "\\")
