@@ -1,0 +1,28 @@
+{
+  "studies": [
+    {
+      "protocolSection": {
+        "identificationModule": {"nctId": "NCT09990001", "briefTitle": "Study of ABC-123 in Relapsed Lymphoma", "officialTitle": "A Phase 2 Study of ABC-123 in Relapsed or Refractory Large B-cell Lymphoma"},
+        "statusModule": {"overallStatus": "RECRUITING", "lastUpdatePostDateStruct": {"date": "2026-09-08", "type": "ACTUAL"}, "startDateStruct": {"date": "2026-02-01"}},
+        "descriptionModule": {"briefSummary": "This study evaluates ABC-123, a CD19xCD3 bispecific, in relapsed or refractory large B-cell lymphoma."},
+        "conditionsModule": {"conditions": ["Large B-cell Lymphoma"]},
+        "designModule": {"phases": ["PHASE2"]},
+        "armsInterventionsModule": {"interventions": [{"type": "DRUG", "name": "ABC-123"}]},
+        "sponsorCollaboratorsModule": {"leadSponsor": {"name": "ABC Therapeutics"}}
+      }
+    },
+    {
+      "protocolSection": {
+        "identificationModule": {"nctId": "NCT09990002", "briefTitle": "Terminated Trial of XYZ in NSCLC"},
+        "statusModule": {"overallStatus": "TERMINATED", "whyStopped": "Lack of efficacy at interim analysis", "lastUpdatePostDateStruct": {"date": "2026-09-07"}},
+        "descriptionModule": {"briefSummary": "Phase 3 trial of XYZ plus chemotherapy in NSCLC."},
+        "conditionsModule": {"conditions": ["Non-small Cell Lung Cancer"]},
+        "designModule": {"phases": ["PHASE3"]},
+        "armsInterventionsModule": {"interventions": [{"type": "DRUG", "name": "XYZ"}]},
+        "sponsorCollaboratorsModule": {"leadSponsor": {"name": "XYZ Inc"}}
+      }
+    },
+    {"protocolSection": {"identificationModule": {"briefTitle": "no nct id"}}}
+  ],
+  "nextPageToken": "tok2"
+}
