@@ -290,6 +290,47 @@ the root `config.yaml` if you add that key, else `model` in
 `draft/config.yaml`. Databases created before step 7 are migrated in place
 (`decisions.category` is added with a guarded `ALTER TABLE`).
 
+## Headless backend (optional)
+
+By default the scorer and drafter call the Anthropic API with `ANTHROPIC_API_KEY`
+(metered, pay as you go). As an alternative for personal, low-volume use, the
+same two call sites can run the Claude Code CLI in print mode instead, so the
+calls are covered by whatever account the CLI is logged in with:
+
+```yaml
+# config.yaml
+models:
+  backend: claude_code     # default: api
+claude_code:
+  binary: claude           # must be on PATH and logged in (`claude login`)
+  timeout_seconds: 300
+  extra_args: []
+```
+
+or `LLM_BACKEND=claude_code` in `.env` (the env var wins). Nothing else changes:
+`run_score.py` and `run_draft.py` behave the same, the score rows record
+`backend: claude_code` in `raw_response`, and every draft still goes through
+`check_hard_rules`.
+
+How it works: `claude_cli.run_claude` launches
+`claude -p --output-format json --bare --tools "" --model <model>` with the
+system prompt as an argument and the user prompt on stdin, reads the JSON
+envelope, and returns the reply text. The scorer, which normally relies on a
+strict tool schema, instead inlines that schema into the system prompt and
+validates the reply in code: a malformed reply fails the batch (logged, skipped,
+picked up next run); a CLI failure (not logged in, rate limited, timeout) is
+retried with the same backoff as an API error.
+
+Trade-offs, so you can decide with eyes open:
+
+- The subscription's rolling usage limits are shared with your own Claude Code
+  sessions; a limit hit stalls scoring until it resets.
+- The machine running cron needs Claude Code installed and kept logged in.
+- Reply shape is requested, not enforced; expect an occasional skipped batch.
+- Anthropic's terms treat consumer subscriptions as covering their own products,
+  not programmatic use. A scheduled pipeline sits in a grey area; the API backend
+  is the clearly supported path and costs roughly $5-15/month at this volume.
+
 ## Database
 
 SQLite (`db_path` in config). Tables: `items`, `clusters`, `scores`,

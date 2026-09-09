@@ -12,6 +12,15 @@ ncbi:
 
 models:
   scorer: claude-haiku-4-5        # cheap model for rubric scoring (PLAN.md step 2)
+  # How the scorer and drafter reach Claude. "api" (default) calls the Anthropic
+  # API with ANTHROPIC_API_KEY. "claude_code" runs the Claude Code CLI in print
+  # mode instead (see README "Headless backend"); LLM_BACKEND env overrides.
+  backend: api
+
+claude_code:                      # only used when models.backend is claude_code
+  binary: claude                  # CLI on PATH; it must be logged in (`claude login`)
+  timeout_seconds: 300            # per call
+  extra_args: []                  # appended verbatim, e.g. ["--fallback-model", "sonnet"]
 
 scoring:
   batch_size: 10                  # clusters per API call

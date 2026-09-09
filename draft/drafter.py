@@ -1,6 +1,9 @@
 """Calls the Anthropic API to draft one item, then enforces the hard rules in code.
 
-All network I/O goes through call_anthropic(); tests replace it.
+All network I/O goes through call_anthropic(); tests replace it. With
+`models.backend: claude_code` (or LLM_BACKEND=claude_code) call_anthropic runs the
+Claude Code CLI via `claude_cli.run_claude` instead; the JSON parsing, schema check
+and hard rules below are the same on both backends.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
+import claude_cli
 from draft.prompt import PREPRINT_LABEL, build_prompt, is_preprint
 from draft.schema import (
     MAX_POST_CHARS,
@@ -85,11 +89,25 @@ def model_name() -> str:
     return str(load_draft_config()["model"])
 
 
+def _root_config() -> dict:
+    try:
+        import config as root_config
+
+        return root_config.load_config()
+    except Exception:  # root config.yaml missing or unreadable
+        return {}
+
+
 def call_anthropic(system: str, user: str, model: str) -> str:
-    """The single network call. Returns the raw text of the first content block."""
+    """The single network call. Returns the raw text of the first content block, or, on the
+    claude_code backend, the CLI's result text."""
+    load_dotenv()
+    cfg = _root_config()
+    if claude_cli.llm_backend(cfg) == claude_cli.CLAUDE_CODE:
+        return claude_cli.run_claude(user, system=system, model=model, cfg=cfg)
+
     import anthropic  # imported here so tests that mock this function never touch the SDK
 
-    load_dotenv()
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set (put it in .env)")

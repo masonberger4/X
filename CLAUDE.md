@@ -35,7 +35,10 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   the only caller of `httpx.get` is its private `_request`, which retries
   429/5xx/transport errors and never logs headers),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
-  (Anthropic), `draft/drafter.py:call_anthropic`, and `publish/client.py`
+  (Anthropic), `draft/drafter.py:call_anthropic`, `claude_cli.run_claude` (the
+  optional `models.backend: claude_code` path: the only place that spawns the
+  Claude Code CLI; both Claude call sites route through it when selected, and
+  the API stays the default), and `publish/client.py`
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
   `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
@@ -115,6 +118,7 @@ ingest/   base.py (Item, Source ABC, windows), http.py (retry), rss.py,
 filter/   prefilter.py, dedup.py
 score/    rubric.py, scorer.py
 db.py     sqlite: items, clusters, scores, ratings, source_runs
+claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
 draft/    schema.py, prompt.py, voice.md, drafter.py, config.yaml, settings.py,
           examples.py (EditExample, select_edit_examples, format_examples_block),
           voice_report.py (VoiceReport, build_report, render_markdown, CLI)
