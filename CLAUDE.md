@@ -5,16 +5,17 @@ Project guidance for Claude Code. Read PLAN.md before making changes.
 ## What this is
 A human-in-the-loop pipeline that ingests oncology news, scores it with the
 Anthropic API, and drafts X posts for human approval. Python 3.11+, SQLite.
-Step 1 (ingest + dedup + prefilter + score + digest) and step 2 (draft + human
-approval queue) are implemented. Posting and any X API integration are
-deliberately **not** built yet.
+Step 1 (ingest + dedup + prefilter + score + digest), step 2 (draft + human
+approval queue) and step 3 (publish to X) are implemented. Nothing posts
+unless `PUBLISH_ENABLED=1` **and** `--live`. Step 4 (feedback loop) is not built.
 
 ## Commands
 - Install: `pip install -e ".[dev]"`
 - Lint: `ruff check .` and `ruff format --check .`
 - Test: `pytest`
 - Run: `python run_ingest.py`, `python run_score.py`, `python digest.py [--rate]`,
-  `python run_draft.py`, `python run_queue.py` (approval UI on localhost:8000)
+  `python run_draft.py`, `python run_queue.py` (approval UI on localhost:8000),
+  `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`)
 
 ## Rules
 - **Config drives everything.** Feeds, queries, company list, keywords,
@@ -23,8 +24,9 @@ deliberately **not** built yet.
   expands `companies.feeds` into `rss` sources named `company_<key>`.
 - **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
-  (Anthropic), and `draft/drafter.py:call_anthropic`. Tests monkeypatch those and
-  never hit the network.
+  (Anthropic), `draft/drafter.py:call_anthropic`, and `publish/client.py`
+  (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
+  the functions). Tests monkeypatch those and never hit the network.
 - **Tests use real saved feeds** in `tests/fixtures/` where a live sample could
   be captured; synthetic fixtures only for bot-protected endpoints (FDA OCE
   page, ClinicalTrials.gov API).
@@ -55,6 +57,12 @@ deliberately **not** built yet.
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
   tables are `drafts` and `decisions`; edits log original vs edited text.
+- Step 3 reads step 2's tables only through `publish/store.py:fetch_approved`
+  (edited_text from `decisions` wins over `single_post`). Its own tables are
+  `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
+  settings live in `publish/config.yaml`, not the root config. Posting is
+  idempotent via the claim; partial threads are never retried automatically.
+  Texts are re-checked before posting and refused, never edited, on failure.
 - Commit after each working module.
 
 ## Layout
@@ -66,5 +74,8 @@ score/    rubric.py, scorer.py
 db.py     sqlite: items, clusters, scores, ratings, source_runs
 draft/    schema.py, prompt.py, voice.md, drafter.py
 approval_queue/  store.py (drafts, decisions, fetch_candidates), app.py, templates/
-run_ingest.py  run_score.py  digest.py  run_draft.py  run_queue.py   (CLIs)
+publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
+          fetch_approved), client.py
+run_ingest.py  run_score.py  digest.py  run_draft.py  run_queue.py
+run_publish.py   (CLIs)
 ```
