@@ -1,15 +1,30 @@
 # Cancer Research X Account — AI-Assisted Pipeline
 
-Goal: a cancer-research-focused X account where an AI pipeline monitors sources,
-scores them, and drafts posts; a human approves, edits, and adds commentary
-before publishing. Target X's Original Content Rewards program (500 verified
+Goal: an X account on the business and investing side of immuno-oncology
+biotech: CAR-T and other engineered cell therapies, T-cell engagers and
+bispecifics, and adjacent cutting-edge immuno-oncology science. It covers
+clinical trial results and what they mean, upcoming readouts and catalysts
+(especially for publicly traded companies), and M&A, licensing and financing in
+the space. Equal weight on the science and the investment implications. The AI
+writes as a PhD-level immuno-oncology analyst at a hedge fund would: precise
+about mechanism and trial design, explicit about what a result does to a
+company's thesis, never a stock tip. An AI pipeline monitors sources, scores
+them, and drafts posts; a human approves, edits, and adds commentary before
+publishing. Target X's Original Content Rewards program (500 verified
 followers, 500k Home Timeline impressions from Premium users per 90 days,
 content must add interpretation — not description).
+
+Audience: biotech investors and analysts (buy side, sell side, generalists
+learning the space), company operators and BD teams, and clinician-scientists
+who follow the money.
 
 ## Principles
 - Human-in-the-loop by default. Autonomy is a dial, not a starting point.
 - Every post must contain an interpretation (what it means, what to watch, what's overhyped).
 - No medical advice or treatment recommendations. Ever.
+- No investment advice: no buy/sell/hold/short calls, no price targets, no
+  return promises. Describe what a result means for a thesis and the risks;
+  the reader decides. Bio discloses that nothing is investment advice.
 - Always link the primary source. Label preprints as preprints.
 - Never fabricate numbers; stats are pulled verbatim from the source.
 - Bio discloses AI-assisted drafting.

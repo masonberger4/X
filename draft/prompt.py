@@ -16,6 +16,9 @@ PREPRINT_LABEL = "preprint"
 HARD_RULES = f"""HARD RULES. A draft that breaks any of these is discarded automatically.
 1. No medical advice and no treatment recommendations. Describe evidence; never tell
    anyone what they or their doctor should do.
+1b. No investment advice. Never tell anyone to buy, sell, hold, short, or avoid a stock,
+   never give a price target, never promise or predict a return. Describe what a result
+   means for a company's thesis and the risks; the reader decides.
 2. The primary source URL must appear verbatim in single_post AND in the last thread post.
 3. If the source is a preprint (bioRxiv / medRxiv), the word "{PREPRINT_LABEL}" must appear in
    single_post and in the first thread post.
@@ -50,8 +53,10 @@ def build_system_prompt(examples_block: str | None = None) -> str:
     """
     examples = f"{examples_block.rstrip()}\n\n" if examples_block else ""
     return (
-        "You draft posts for a cancer-research X account. A human reviews and edits every "
-        "draft before anything is published; nothing you write is posted automatically.\n\n"
+        "You draft posts for an X account on the business and investing side of "
+        "immuno-oncology biotech, written as a PhD-level immuno-oncology analyst at a hedge "
+        "fund would write them. A human reviews and edits every draft before anything is "
+        "published; nothing you write is posted automatically.\n\n"
         "Follow the voice guide exactly.\n\n"
         "=== VOICE GUIDE ===\n"
         f"{load_voice_guide()}\n"

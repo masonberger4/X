@@ -38,6 +38,7 @@ prefilter:
   min_abstract_chars: 200
   daily_cap: 60                   # max clusters sent to the scorer per UTC day
   allow_keywords:                 # at least one must appear in title+abstract
+    # oncology
     - cancer
     - tumor
     - tumour
@@ -54,13 +55,39 @@ prefilter:
     - metasta
     - neoplas
     - malignan
+    # immuno-oncology modalities (the account's core)
     - CAR-T
     - CAR T
+    - CAR-NK
+    - TCR-T
+    - T-cell engager
+    - T cell engager
+    - bispecific
+    - trispecific
+    - BiTE
+    - tumor-infiltrating lymphocyte
+    - TIL therapy
+    - in vivo CAR
     - checkpoint inhibitor
     - PD-1
     - PD-L1
+    - LAG-3
+    - TIGIT
     - antibody-drug conjugate
-    - bispecific
+    - cancer vaccine
+    - oncolytic
+    # business / catalyst language (company PRs, deal news)
+    - topline
+    - readout
+    - PDUFA
+    - BLA
+    - accelerated approval
+    - acquisition
+    - acquire
+    - merger
+    - licensing agreement
+    - collaboration agreement
+    - milestone payment
   deny_keywords:                  # any of these drops the item
     - horoscope
     - cannabis stock
@@ -74,13 +101,16 @@ dedup:
   near_dup_window_days: 14        # only compare against clusters this recent
 
 expertise:
-  # Topics that earn the expertise_fit bonus in the rubric.
+  # Topics that earn the expertise_fit bonus in the rubric. The account is the
+  # business and investing side of immuno-oncology; these are its core beat.
   bonus_topics:
-    - CAR-T / CAR-NK / TCR-T cell therapy
+    - CAR-T, CAR-NK, TCR-T and other engineered cell therapies (autologous, allogeneic, in vivo CAR)
+    - T-cell engagers, bispecific and trispecific antibodies
     - TILs and other adoptive cell therapy
-    - in vivo CAR
-    - CRISPR / base editing / prime editing
-    - gene therapy vectors for oncology
+    - next-generation checkpoint and immune agonists (LAG-3, TIGIT, CD47, 4-1BB, etc.)
+    - cancer vaccines (mRNA, neoantigen) and oncolytic viruses
+    - M&A, licensing, partnerships and financings of companies in the above areas
+    - upcoming catalysts for public companies in the above areas: readouts, PDUFA dates, conference data
 
 digest:
   top_n: 10
@@ -163,7 +193,8 @@ sources:
     lookback_days: 2
     max_results: 100
     query: >-
-      (immunotherapy OR "immune checkpoint" OR bispecific OR
+      (immunotherapy OR "immune checkpoint" OR bispecific OR trispecific OR
+      "T-cell engager" OR "T cell engager" OR "cancer vaccine" OR oncolytic OR
       "antibody-drug conjugate") AND (cancer OR tumor OR neoplasm) AND english[la]
   - name: pubmed_cell_gene_therapy
     type: pubmed
@@ -171,9 +202,10 @@ sources:
     lookback_days: 3
     max_results: 100
     query: >-
-      ("chimeric antigen receptor" OR CAR-T OR "cell therapy" OR CRISPR OR
-      "gene editing" OR "base editing") AND (cancer OR tumor OR leukemia OR
-      lymphoma OR myeloma) AND english[la]
+      ("chimeric antigen receptor" OR CAR-T OR "CAR T" OR "CAR-NK" OR "TCR-T" OR
+      "cell therapy" OR "tumor-infiltrating lymphocytes" OR "in vivo CAR" OR
+      CRISPR OR "gene editing" OR "base editing") AND (cancer OR tumor OR
+      leukemia OR lymphoma OR myeloma) AND english[la]
 
 # Company press-release feeds. Each becomes an `rss` source named
 # company_<key> with the cadence below.
@@ -218,6 +250,30 @@ companies:
     - {key: xencor,       name: Xencor,                  url: https://investors.xencor.com/rss/news-releases.xml}
     - {key: carisma,      name: Carisma Therapeutics,    url: https://ir.carismatx.com/rss/news-releases.xml}
     - {key: alx,          name: ALX Oncology,            url: https://ir.alxoncology.com/rss/news-releases.xml}
+    # Cell therapy / T-cell engager pure plays, feeds verified Sept 2026.
+    - {key: autolus,      name: Autolus,                 url: https://autolus.gcs-web.com/rss/news-releases.xml}
+    - {key: nkarta,       name: Nkarta,                  url: https://ir.nkartatx.com/rss/news-releases.xml}
+    - {key: fate,         name: Fate Therapeutics,       url: https://ir.fatetherapeutics.com/rss/news-releases.xml}
+    - {key: sana,         name: Sana Biotechnology,      url: https://ir.sana.com/rss/news-releases.xml}
+    - {key: kyverna,      name: Kyverna Therapeutics,    url: https://ir.kyvernatx.com/rss/news-releases.xml}
+    - {key: vor,          name: Vor Bio,                 url: https://ir.vorbio.com/rss/news-releases.xml}
+    - {key: lyell,        name: Lyell Immunopharma,      url: https://ir.lyell.com/rss/news-releases.xml}
+    - {key: instil,       name: Instil Bio,              url: https://ir.instilbio.com/rss/news-releases.xml}
+    - {key: arsenal,      name: Arsenal Bio,             url: https://www.arsenalbio.com/feed/}
+    - {key: immatics,     name: Immatics,                url: https://investors.immatics.com/rss/news-releases.xml}
+    - {key: precision,    name: Precision BioSciences,   url: https://investor.precisionbiosciences.com/rss/news-releases.xml}
+    - {key: marker,       name: Marker Therapeutics,     url: https://ir.markertherapeutics.com/rss/news-releases.xml}
+    - {key: zai,          name: Zai Lab,                 url: https://ir.zailaboratory.com/rss/news-releases.xml}
+    # Not reachable from the build sandbox (DNS/timeouts), so unverified. Try
+    # them from your machine and add if they return RSS:
+    #   Arcellx https://ir.arcellx.com/rss/news-releases.xml
+    #   CARGO   https://ir.cargo-tx.com/rss/news-releases.xml
+    #   Janux   https://ir.januxrx.com/rss/news-releases.xml
+    #   IGM     https://ir.igmbio.com/rss/news-releases.xml
+    #   iTeos   https://investors.iteostherapeutics.com/rss/news-releases.xml
+    #   Cullinan https://ir.cullinanoncology.com/rss/news-releases.xml
+    #   Compass https://ir.compasstherapeutics.com/rss/news-releases.xml
+    #   bluebird https://investor.bluebirdbio.com/rss/news-releases.xml
 
 # ---------------------------------------------------------------------------
 # Step 6: conference abstracts (Crossref) and the curated KOL X list.

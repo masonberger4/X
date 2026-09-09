@@ -1,9 +1,13 @@
 # Cancer Research X — AI-assisted pipeline
 
-An AI pipeline that monitors oncology sources (PubMed, bioRxiv/medRxiv,
-ClinicalTrials.gov, FDA, company PR), scores new items, and drafts posts for a
-cancer-research X account. A human approves, edits, and adds commentary before
-anything is published.
+An AI pipeline that monitors immuno-oncology sources (PubMed, bioRxiv/medRxiv,
+ClinicalTrials.gov, FDA, conference abstracts, ~50 company newsrooms), scores
+new items, and drafts posts for an X account on the business and investing side
+of immuno-oncology biotech: CAR-T and cell therapy, T-cell engagers and
+bispecifics, trial readouts and catalysts for public companies, M&A and
+financing. The AI writes as a PhD-level immuno-oncology analyst at a hedge fund
+would. A human approves, edits, and adds commentary before anything is
+published. Nothing it writes is medical or investment advice.
 
 See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 [prompts/](prompts/README.md) for the kickoff prompt that built each step.
@@ -23,6 +27,8 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 - Human-in-the-loop by default.
 - Every post adds interpretation, never just description.
 - No medical advice or treatment recommendations, ever.
+- No investment advice: no buy/sell/hold/short calls, price targets or return
+  promises. Implications and risks, yes; the reader decides.
 - Always link the primary source; label preprints as preprints.
 - Never fabricate numbers.
 

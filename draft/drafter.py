@@ -51,6 +51,23 @@ MEDICAL_ADVICE_PATTERNS = (
 )
 _ADVICE_RE = re.compile("|".join(MEDICAL_ADVICE_PATTERNS), re.IGNORECASE)
 
+# Phrases that read as investment advice: a directional call on a security, a price
+# target, or a promised return. Describing a thesis, a valuation or a risk is fine.
+INVESTMENT_ADVICE_PATTERNS = (
+    r"\b(buy|sell|short|accumulate|dump|hold)\s+(the\s+)?(stock|shares|calls|puts)\b",
+    r"\b(buy|sell|short|accumulate|dump)\s+\$[A-Za-z]{1,5}\b",
+    r"\b(strong|clear|obvious)\s+(buy|sell|short)\b",
+    r"\b(you|investors|traders)\s+should\s+(buy|sell|short|hold|avoid|add|trim)\b",
+    r"\bprice\s+target\b",
+    r"\bwill\s+(double|triple|10x|moon)\b",
+    r"\bto\s+the\s+moon\b",
+    r"\b(easy|free)\s+money\b",
+    r"\bguaranteed\s+(return|gain|profit|win)\b",
+    r"\bcan'?t\s+lose\b",
+    r"\bload\s+up\s+on\b",
+)
+_INVEST_RE = re.compile("|".join(INVESTMENT_ADVICE_PATTERNS), re.IGNORECASE)
+
 # Numbers: integers with optional thousands separators, decimals, and percentages.
 _NUMBER_RE = re.compile(r"(?<![\w/.])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(\s?%)?")
 _URL_RE = re.compile(r"https?://\S+")
@@ -188,6 +205,10 @@ def check_hard_rules(draft: Draft, *, url: str, source: str) -> list[str]:
         if _ADVICE_RE.search(post):
             problems.append(
                 f"{label} reads as medical advice: {_ADVICE_RE.search(post).group(0)!r}"
+            )
+        if _INVEST_RE.search(post):
+            problems.append(
+                f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
     if not _url_in(draft.single_post, url):
         problems.append("single_post is missing the primary source URL")

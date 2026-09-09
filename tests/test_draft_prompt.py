@@ -54,8 +54,10 @@ def _pre_step7_system_prompt() -> str:
     from draft.schema import OUTPUT_JSON_SCHEMA
 
     return (
-        "You draft posts for a cancer-research X account. A human reviews and edits every "
-        "draft before anything is published; nothing you write is posted automatically.\n\n"
+        "You draft posts for an X account on the business and investing side of "
+        "immuno-oncology biotech, written as a PhD-level immuno-oncology analyst at a hedge "
+        "fund would write them. A human reviews and edits every draft before anything is "
+        "published; nothing you write is posted automatically.\n\n"
         "Follow the voice guide exactly.\n\n"
         "=== VOICE GUIDE ===\n"
         f"{load_voice_guide()}\n"

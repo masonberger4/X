@@ -178,6 +178,43 @@ def test_medical_advice_is_rejected():
     assert any("medical advice" in p for p in problems)
 
 
+# --- investment advice rule ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Buy $TICK before the readout.",
+        "This is a strong buy at these levels.",
+        "Investors should sell the stock into the PDUFA.",
+        "Price target $40.",
+        "The stock will double on approval.",
+        "Easy money if the ODAC goes well.",
+        "Load up on calls here.",
+    ],
+)
+def test_investment_advice_is_rejected(text):
+    draft = validate_output(good_json(single_post=f"{text} ORR 88%. {URL}"))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert any("investment advice" in p for p in problems), text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "For $TICK the thesis now rests on durability, not ORR.",
+        "The $1.4B price puts a value on mid-stage T-cell engagers.",
+        "The stock will trade on PFS today; the label will be decided on OS.",
+        "Approval is the base case; the label wording decides the market size.",
+        "A dilutive financing after data is the risk to watch.",
+    ],
+)
+def test_thesis_language_is_not_investment_advice(text):
+    draft = validate_output(good_json(single_post=f"{text} ORR 88%. {URL}"))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert not any("investment advice" in p for p in problems), text
+
+
 # --- number verification ---------------------------------------------------
 
 
