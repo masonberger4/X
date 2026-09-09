@@ -190,3 +190,170 @@ def test_list_pending_newest_first(conn):
     d1 = store.insert_draft(conn, item_id="a", model="m", draft=make_draft())
     d2 = store.insert_draft(conn, item_id="b", model="m", draft=make_draft())
     assert [r.id for r in store.list_drafts(conn)] == [d2, d1]
+
+
+# --- step 7: category migration, draft_examples, voice adapters ------------------
+
+
+OLD_DECISIONS_SCHEMA = """
+CREATE TABLE drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL UNIQUE, cluster_id INTEGER,
+    model TEXT NOT NULL, single_post TEXT NOT NULL, thread_json TEXT NOT NULL,
+    suggested_visual TEXT NOT NULL DEFAULT '', why_it_matters TEXT NOT NULL DEFAULT '',
+    claims_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'pending',
+    rejection_reason TEXT, snoozed_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, draft_id INTEGER NOT NULL REFERENCES drafts(id),
+    action TEXT NOT NULL, original_text TEXT NOT NULL, edited_text TEXT, note TEXT,
+    created_at TEXT NOT NULL
+);
+"""
+
+
+def _columns(conn, table):
+    return [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+
+
+def test_connect_migrates_old_decisions_schema_and_keeps_rows(tmp_path):
+    path = tmp_path / "old.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(OLD_DECISIONS_SCHEMA)
+    raw.execute(
+        "INSERT INTO drafts (item_id, model, single_post, thread_json, created_at, updated_at)"
+        " VALUES ('i', 'm', 's', '[]', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+    )
+    raw.execute(
+        "INSERT INTO decisions (draft_id, action, original_text, created_at)"
+        " VALUES (1, 'approve', 's', '2026-01-01T00:00:00+00:00')"
+    )
+    raw.commit()
+    assert "category" not in _columns(raw, "decisions")
+    raw.close()
+
+    conn = store.connect(path)
+    assert "category" in _columns(conn, "decisions")
+    assert "draft_examples" in {
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    old = store.list_decisions(conn)
+    assert len(old) == 1 and old[0]["category"] is None and old[0]["action"] == "approve"
+    # old-style callers (steps 4 and 5 select named columns) still work
+    assert conn.execute("SELECT edited_text, original_text FROM decisions").fetchone()[1] == "s"
+    conn.close()
+    # idempotent: a second connect neither fails nor duplicates the column
+    conn = store.connect(path)
+    assert _columns(conn, "decisions").count("category") == 1
+    conn.close()
+
+
+def test_connect_is_idempotent_on_new_database(tmp_path):
+    path = tmp_path / "new.db"
+    store.connect(path).close()
+    conn = store.connect(path)
+    assert _columns(conn, "decisions").count("category") == 1
+    assert _columns(conn, "draft_examples") == [
+        "id",
+        "draft_id",
+        "decision_id",
+        "kind",
+        "created_at",
+    ]
+    conn.close()
+
+
+def test_reject_with_category_stores_it_and_invalid_raises(conn):
+    seed_item(conn, "i1")
+    did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
+    with pytest.raises(ValueError, match="unknown category"):
+        store.reject(conn, did, note="x", category="bogus")
+    assert store.get_draft(conn, did).status == store.STATUS_PENDING  # nothing changed
+    store.reject(conn, did, note="too hypey", category="voice")
+    dec = store.list_decisions(conn, did)[0]
+    assert dec["category"] == "voice" and dec["note"] == "too hypey" and dec["action"] == "reject"
+
+
+def test_edit_with_category_and_blank_category_is_none(conn):
+    seed_item(conn, "i1")
+    did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
+    store.edit(
+        conn, did, single_post=f"s {URL}", thread=["1", "2", f"3 {URL}"], category="Factual "
+    )
+    assert store.list_decisions(conn, did)[0]["category"] == "factual"
+    seed_item(conn, "i2")
+    did2 = store.insert_draft(conn, item_id="i2", model="m", draft=make_draft())
+    store.edit(conn, did2, single_post="s", thread=[], category="")
+    assert store.list_decisions(conn, did2)[0]["category"] is None
+    with pytest.raises(ValueError):
+        store.edit(conn, did2, single_post="s", thread=[], category="nope")
+
+
+def test_actions_without_category_still_work(conn):
+    for i, fn in enumerate((store.approve, store.reject, store.snooze)):
+        seed_item(conn, f"i{i}")
+        did = store.insert_draft(conn, item_id=f"i{i}", model="m", draft=make_draft())
+        fn(conn, did)
+        assert store.list_decisions(conn, did)[0]["category"] is None
+    assert store.validate_category(None) is None
+
+
+def test_record_examples_writes_rows_per_kind(conn):
+    seed_item(conn, "old")
+    seed_item(conn, "new")
+    old = store.insert_draft(conn, item_id="old", model="m", draft=make_draft())
+    e_id = store.edit(conn, old, single_post=f"edited {URL}", thread=["a", "b", f"c {URL}"])
+    r_id = store.reject(conn, old, note="meh")
+    new = store.insert_draft(conn, item_id="new", model="m", draft=make_draft())
+    assert store.record_examples(conn, new, [e_id], [r_id]) == 2
+    rows = store.list_examples(conn, new)
+    assert [(r["decision_id"], r["kind"]) for r in rows] == [(e_id, "edit"), (r_id, "rejection")]
+    assert all(r["draft_id"] == new and r["created_at"] for r in rows)
+    assert store.record_examples(conn, new) == 0
+    assert store.list_examples(conn, old) == []
+
+
+def test_fetch_decisions_for_voice_joins_items_source_and_url(conn):
+    seed_item(conn, "i1", source="biorxiv")
+    did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
+    store.edit(conn, did, single_post=f"e {URL}", thread=["1", "2", f"3 {URL}"], category="voice")
+    store.reject(conn, did, note="later")
+    rows = store.fetch_decisions_for_voice(conn, "2000-01-01T00:00:00+00:00")
+    assert [r["action"] for r in rows] == ["edit", "reject"]  # oldest first
+    r = rows[0]
+    assert r["source"] == "biorxiv" and r["url"] == URL and r["draft_id"] == did
+    assert r["category"] == "voice" and r["draft_status"] == "rejected"
+    assert '"single_post"' in r["original_text"] and "e " in r["edited_text"]
+    assert r["draft_created_at"] and r["item_id"] == "i1"
+    # since in the future -> nothing; datetime accepted too
+    from datetime import UTC, datetime, timedelta
+
+    assert store.fetch_decisions_for_voice(conn, datetime.now(UTC) + timedelta(days=1)) == []
+    assert len(store.fetch_decisions_for_voice(conn, datetime.now(UTC) - timedelta(days=1))) == 2
+    assert len(store.fetch_decisions_for_voice(conn)) == 2
+
+
+def test_fetch_decisions_for_voice_without_step1_tables(tmp_path):
+    conn = store.connect(tmp_path / "solo.db")
+    did = store.insert_draft(conn, item_id="orphan", model="m", draft=make_draft())
+    store.approve(conn, did, note="fine")
+    rows = store.fetch_decisions_for_voice(conn, "2000-01-01")
+    assert len(rows) == 1 and rows[0]["source"] == "" and rows[0]["url"] == ""
+    stats = store.fetch_draft_stats(conn, "2000-01-01")
+    assert len(stats) == 1 and stats[0]["source"] == "" and stats[0]["status"] == "approved"
+    conn.close()
+
+
+def test_fetch_draft_stats(conn):
+    seed_item(conn, "a", source="pubmed")
+    seed_item(conn, "b", source="fda")
+    d1 = store.insert_draft(conn, item_id="a", model="m", draft=make_draft())
+    d2 = store.insert_draft(
+        conn, item_id="b", model="m", draft=make_draft(), status=store.STATUS_FAILED
+    )
+    store.reject(conn, d1)
+    rows = store.fetch_draft_stats(conn, "2000-01-01")
+    assert [(r["id"], r["source"], r["status"]) for r in rows] == [
+        (d1, "pubmed", "rejected"),
+        (d2, "fda", "failed"),
+    ]
+    assert rows[0]["item_id"] == "a" and rows[0]["created_at"] and rows[0]["model"] == "m"

@@ -5,9 +5,13 @@ Owns two tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline 
   drafts(id INTEGER PK, item_id TEXT UNIQUE, cluster_id, model, single_post, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
          snoozed_until, created_at, updated_at)
-  decisions(id INTEGER PK, draft_id FK, action, original_text, edited_text, note, created_at)
+  decisions(id INTEGER PK, draft_id FK, action, original_text, edited_text, note, created_at,
+            category)   -- category added by step 7 through a guarded ALTER TABLE migration
+  draft_examples(id INTEGER PK, draft_id FK, decision_id FK, kind 'edit'|'rejection',
+                 created_at)   -- step 7: which examples each draft was shown
 
-Never modifies the items or scores tables.
+Never modifies the items or scores tables. Step 7 reads items only through
+fetch_decisions_for_voice / fetch_draft_stats, and only for source and url.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,6 +43,24 @@ ACTION_SNOOZE = "snooze"
 ACTIONS = (ACTION_APPROVE, ACTION_EDIT, ACTION_REJECT, ACTION_SNOOZE)
 
 SNOOZE_HOURS = 24
+
+# Step 7: why a draft was edited or rejected. Stored in decisions.category (nullable).
+CATEGORY_VOICE = "voice"
+CATEGORY_FACTUAL = "factual"
+CATEGORY_NOT_NEWSWORTHY = "not_newsworthy"
+CATEGORY_HARD_RULE = "hard_rule"
+CATEGORY_OTHER = "other"
+DECISION_CATEGORIES = (
+    CATEGORY_VOICE,
+    CATEGORY_FACTUAL,
+    CATEGORY_NOT_NEWSWORTHY,
+    CATEGORY_HARD_RULE,
+    CATEGORY_OTHER,
+)
+
+EXAMPLE_KIND_EDIT = "edit"
+EXAMPLE_KIND_REJECTION = "rejection"
+EXAMPLE_KINDS = (EXAMPLE_KIND_EDIT, EXAMPLE_KIND_REJECTION)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS drafts (
@@ -66,10 +89,38 @@ CREATE TABLE IF NOT EXISTS decisions (
     original_text TEXT NOT NULL,
     edited_text   TEXT,
     note          TEXT,
-    created_at    TEXT NOT NULL
+    created_at    TEXT NOT NULL,
+    category      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_draft ON decisions(draft_id);
+
+CREATE TABLE IF NOT EXISTS draft_examples (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id    INTEGER NOT NULL REFERENCES drafts(id),
+    decision_id INTEGER NOT NULL REFERENCES decisions(id),
+    kind        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_draft_examples_draft ON draft_examples(draft_id);
+CREATE INDEX IF NOT EXISTS idx_draft_examples_decision ON draft_examples(decision_id);
 """
+
+# Guarded, additive migrations for databases created before a column existed. Each entry is
+# (table, column, ALTER TABLE statement). Never a destructive rebuild: steps 4 and 5 read
+# decisions through adapters that select named columns and must keep working on old and new
+# databases alike.
+_MIGRATIONS = (("decisions", "category", "ALTER TABLE decisions ADD COLUMN category TEXT"),)
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, ddl in _MIGRATIONS:
+        if column not in _columns(conn, table):
+            conn.execute(ddl)
+    conn.commit()
 
 
 def db_path() -> Path:
@@ -97,6 +148,7 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    _migrate(conn)
     return conn
 
 
@@ -349,6 +401,18 @@ def _set_status(
     )
 
 
+def validate_category(category: str | None) -> str | None:
+    """Normalise a decision category; blank -> None; unknown -> ValueError."""
+    if category is None:
+        return None
+    value = str(category).strip().lower()
+    if not value:
+        return None
+    if value not in DECISION_CATEGORIES:
+        raise ValueError(f"unknown category {category!r}; expected one of {DECISION_CATEGORIES}")
+    return value
+
+
 def _record_decision(
     conn: sqlite3.Connection,
     draft_id: int,
@@ -356,11 +420,13 @@ def _record_decision(
     original_text: str,
     edited_text: str | None,
     note: str | None,
+    category: str | None = None,
 ) -> int:
     cur = conn.execute(
-        """INSERT INTO decisions (draft_id, action, original_text, edited_text, note, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (draft_id, action, original_text, edited_text, note, _now()),
+        """INSERT INTO decisions (draft_id, action, original_text, edited_text, note, created_at,
+                                  category)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (draft_id, action, original_text, edited_text, note, _now(), category),
     )
     return int(cur.lastrowid)
 
@@ -389,8 +455,13 @@ def edit(
     thread: list[str],
     note: str | None = None,
     approve_after: bool = True,
+    category: str | None = None,
 ) -> int:
-    """Save edited text over the draft and log original vs edited for voice-guide training."""
+    """Save edited text over the draft and log original vs edited for voice-guide training.
+
+    category (step 7, optional) says why: one of DECISION_CATEGORIES.
+    """
+    category = validate_category(category)
     row = _require(conn, draft_id)
     original = _serialise_text(row.draft.single_post, row.draft.thread)
     edited = _serialise_text(single_post, thread)
@@ -400,15 +471,24 @@ def edit(
     )
     if approve_after:
         _set_status(conn, draft_id, STATUS_APPROVED)
-    did = _record_decision(conn, draft_id, ACTION_EDIT, original, edited, note)
+    did = _record_decision(conn, draft_id, ACTION_EDIT, original, edited, note, category)
     conn.commit()
     return did
 
 
-def reject(conn: sqlite3.Connection, draft_id: int, note: str | None = None) -> int:
+def reject(
+    conn: sqlite3.Connection,
+    draft_id: int,
+    note: str | None = None,
+    category: str | None = None,
+) -> int:
+    """Mark rejected. category (step 7, optional) is one of DECISION_CATEGORIES."""
+    category = validate_category(category)
     row = _require(conn, draft_id)
     _set_status(conn, draft_id, STATUS_REJECTED)
-    did = _record_decision(conn, draft_id, ACTION_REJECT, row.draft.single_post, None, note)
+    did = _record_decision(
+        conn, draft_id, ACTION_REJECT, row.draft.single_post, None, note, category
+    )
     conn.commit()
     return did
 
@@ -436,3 +516,106 @@ def list_decisions(conn: sqlite3.Connection, draft_id: int | None = None) -> lis
 def _serialise_text(single_post: str, thread: list[str]) -> str:
     """Canonical text form of a draft for the decisions log: JSON so it round-trips."""
     return json.dumps({"single_post": single_post, "thread": thread}, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Step 7: voice learning loop (examples audit trail + read adapters)
+# ---------------------------------------------------------------------------
+
+
+def record_examples(
+    conn: sqlite3.Connection,
+    draft_id: int,
+    edit_ids: Iterable[int] = (),
+    rejection_ids: Iterable[int] = (),
+) -> int:
+    """Log which decisions were shown as examples when this draft was generated.
+
+    Returns the number of rows written. This is the audit trail for "did the examples help";
+    step 4's report can join draft_examples to posts later.
+    """
+    now = _now()
+    rows = [(draft_id, int(d), EXAMPLE_KIND_EDIT, now) for d in edit_ids]
+    rows += [(draft_id, int(d), EXAMPLE_KIND_REJECTION, now) for d in rejection_ids]
+    if rows:
+        conn.executemany(
+            "INSERT INTO draft_examples (draft_id, decision_id, kind, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+    return len(rows)
+
+
+def list_examples(conn: sqlite3.Connection, draft_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM draft_examples WHERE draft_id = ? ORDER BY id", (draft_id,)
+    ).fetchall()
+
+
+def _since_text(since: datetime | str | None) -> str:
+    if since is None:
+        return ""
+    if isinstance(since, datetime):
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+        return since.astimezone(UTC).replace(microsecond=0).isoformat()
+    return str(since)
+
+
+def _items_table_present(conn: sqlite3.Connection) -> bool:
+    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='items'").fetchone()
+    return row is not None
+
+
+def fetch_decisions_for_voice(
+    conn: sqlite3.Connection, since: datetime | str | None = None
+) -> list[sqlite3.Row]:
+    """Decisions made at or after `since`, joined with their draft and the item's source/url.
+
+    Columns: id, draft_id, action, original_text, edited_text, note, category, created_at,
+    draft_status, draft_created_at, item_id, source, url. Oldest first. On a database without
+    step 1's items table, source and url are empty strings. This (with fetch_draft_stats) is
+    the ONLY place step 7 reads the items table, and only for source and url.
+    """
+    if _items_table_present(conn):
+        item_cols = "COALESCE(i.source, '') AS source, COALESCE(i.url, '') AS url"
+        item_join = "LEFT JOIN items i ON i.id = d.item_id"
+    else:
+        item_cols = "'' AS source, '' AS url"
+        item_join = ""
+    sql = f"""
+        SELECT x.id, x.draft_id, x.action, x.original_text, x.edited_text, x.note,
+               x.category, x.created_at,
+               d.status AS draft_status, d.created_at AS draft_created_at, d.item_id,
+               {item_cols}
+        FROM decisions x
+        JOIN drafts d ON d.id = x.draft_id
+        {item_join}
+        WHERE x.created_at >= ?
+        ORDER BY x.created_at, x.id
+    """
+    return conn.execute(sql, (_since_text(since),)).fetchall()
+
+
+def fetch_draft_stats(
+    conn: sqlite3.Connection, since: datetime | str | None = None
+) -> list[sqlite3.Row]:
+    """Drafts created at or after `since`: id, item_id, source, status, created_at, model.
+
+    source is '' when step 1's items table is absent. Oldest first.
+    """
+    if _items_table_present(conn):
+        source_col = "COALESCE(i.source, '') AS source"
+        item_join = "LEFT JOIN items i ON i.id = d.item_id"
+    else:
+        source_col = "'' AS source"
+        item_join = ""
+    sql = f"""
+        SELECT d.id, d.item_id, {source_col}, d.status, d.created_at, d.model
+        FROM drafts d
+        {item_join}
+        WHERE d.created_at >= ?
+        ORDER BY d.created_at, d.id
+    """
+    return conn.execute(sql, (_since_text(since),)).fetchall()
