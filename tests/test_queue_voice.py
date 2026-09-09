@@ -128,5 +128,5 @@ def test_voice_page_with_data(client, conn):
 
 
 def test_index_links_to_voice_report(client):
-    body = client.get("/").text
+    body = client.get("/queue").text
     assert 'href="/voice"' in body

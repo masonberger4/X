@@ -121,9 +121,11 @@ source only when it is due, and score only scores what is new.
    attached; running it by hand is only for drafts you made by hand.
 3. Open the approval page.
    ```
-   python run_queue.py
+   python run_app.py
    ```
-   Then open http://localhost:8000 in a browser. For each draft: approve,
+   Then open http://localhost:8000/queue in a browser (the front page is the
+   dashboard; part 8 explains it). `python run_queue.py` still opens the
+   approval page on its own if that is all you want. For each draft: approve,
    edit, reject or snooze. When you edit or reject, pick a reason (voice,
    factual, not newsworthy, hard rule, other). Press Ctrl+C in the window to
    stop the server when done.
@@ -257,6 +259,40 @@ source only when it is due, and score only scores what is new.
 
 ---
 
+## Part 8. The control panel (one window for everything)
+
+```
+python run_app.py
+```
+Open http://localhost:8000. Leave it running in its own window; press Ctrl+C
+to stop it. Four pages:
+
+- **Dashboard** (`/`) — the same health checks `python run_ops.py health`
+  prints, worst first, plus the last outcome of every scheduled step, how
+  many rows are in each table, the database size, free disk and the age of
+  the latest backup. This is the page to open when something looks wrong.
+- **Sources** (`/sources`) — every source from `config.yaml`: when it last
+  ran, how many items it fetched, how many were new, and the last error if
+  it failed. A source in red has been failing; one in amber has not run for
+  three times its cadence.
+- **Runs** (`/runs`) — tick the steps you want and press "Run selected
+  steps". The log appears on the page as it finishes. This runs exactly what
+  the scheduler in part 6 runs; if the scheduler happens to be running at
+  that moment the page says so and does nothing, rather than running twice.
+- **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
+  approval pages from part 3, unchanged.
+
+Two things it deliberately will not do. It never posts to X: publishing is
+off in `ops\config.yaml` and stays off, and there is no publish button. And
+it never edits settings: change `config.yaml` or `draft\voice.md` on disk
+(ask me to commit it), not in the browser.
+
+Anyone who can reach the page can run the pipeline, so keep it on
+`localhost`. `--host` and `--port` move it and `--reload` is for development;
+only use `--host 0.0.0.0` on a network you trust.
+
+---
+
 ## Fixing things
 
 | Symptom | What to do |
@@ -268,6 +304,8 @@ source only when it is due, and score only scores what is new.
 | Scoring says `pass: 0, deferred: N` | today's cap of 150 is spent; the N wait for tomorrow, or raise `daily_cap` in `config.yaml` |
 | A source keeps erroring | it is logged and skipped; the others still run. Paste the line to me |
 | Want a completely fresh start | delete `pipeline.db`, then `python run_ingest.py --force` |
+| The control panel says a run is already in progress | the scheduler (part 6) is mid-run; wait for it and press the button again |
+| The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
 
 ## Changing settings
 

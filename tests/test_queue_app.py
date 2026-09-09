@@ -27,7 +27,7 @@ def draft_id(conn):
 
 
 def test_index_lists_pending_with_source_score_rationale(client, draft_id):
-    r = client.get("/")
+    r = client.get("/queue")
     assert r.status_code == 200
     body = r.text
     assert "biorxiv" in body and "8.5" in body and "rationale i1" in body
@@ -47,12 +47,12 @@ def test_detail_shows_post_thread_claims_and_lengths(client, draft_id):
 
 def test_approve_action(client, conn, draft_id):
     r = client.post(f"/drafts/{draft_id}/approve", data={"note": "good"})
-    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert r.status_code == 303 and r.headers["location"] == "/queue"
     row = store.get_draft(conn, draft_id)
     assert row.status == "approved"
     dec = store.list_decisions(conn, draft_id)
     assert dec[0]["action"] == "approve" and dec[0]["note"] == "good"
-    assert f"/drafts/{draft_id}" not in client.get("/").text
+    assert f"/drafts/{draft_id}" not in client.get("/queue").text
     assert f"/drafts/{draft_id}" in client.get("/status/approved").text
 
 
@@ -108,7 +108,7 @@ def test_snooze_action_hides_for_24h(client, conn, draft_id):
     assert r.status_code == 303
     row = store.get_draft(conn, draft_id)
     assert row.status == "snoozed" and row.snoozed_until is not None
-    assert f"/drafts/{draft_id}" not in client.get("/").text
+    assert f"/drafts/{draft_id}" not in client.get("/queue").text
     assert f"/drafts/{draft_id}" in client.get("/status/snoozed").text
 
 

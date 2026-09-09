@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Pipeline dashboard{% endblock %}
+{% block content %}
+<h1>Pipeline</h1>
+<div class="banner {{ overall }}">Health: {{ overall|upper }} <span class="meta">checked {{ checked_at.strftime('%Y-%m-%d %H:%M') }}Z</span></div>
+
+{% if job %}
+<p class="flash">A run is in progress ({{ job.steps|join(', ') }}). <a href="/runs">Watch it</a>.</p>
+{% endif %}
+
+<h2>Checks</h2>
+<table>
+  <tr><th>Check</th><th>Status</th><th>Summary</th></tr>
+  {% for c in checks %}
+  <tr>
+    <td><strong>{{ c.name }}</strong></td>
+    <td><span class="pill {{ c.status }}">{{ c.status }}</span></td>
+    <td>{{ c.summary }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="meta">Source detail is on the <a href="/sources">sources page</a>.</p>
+
+<h2>Steps</h2>
+<form method="post" action="/runs">
+<table>
+  <tr><th>Run</th><th>Step</th><th>Last outcome</th><th>When</th><th>Command</th></tr>
+  {% for s in steps %}
+  <tr>
+    <td>{% if s.enabled %}<input type="checkbox" name="step" value="{{ s.name }}">{% endif %}</td>
+    <td><strong>{{ s.name }}</strong>{% if not s.enabled %} <span class="pill skip">disabled</span>{% endif %}{% if s.required %} <span class="meta">required</span>{% endif %}</td>
+    <td><span class="pill {{ s.status }}">{{ s.status }}</span> {{ s.outcome }}</td>
+    <td class="meta">{{ s.age }}</td>
+    <td class="meta">{{ s.argv }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<div class="actions"><button type="submit">Run selected steps</button></div>
+</form>
+<p class="meta">Steps run exactly as <code>ops/config.yaml</code> defines them, under the same
+lock cron uses. A disabled step is skipped, not run: publishing stays off here.</p>
+
+<h2>Storage</h2>
+<div class="cards">
+  <div class="card"><div class="n">{{ '%.1f'|format(db_size_mb) }} MB</div><div class="meta">database</div></div>
+  <div class="card"><div class="n">{{ '%.0f'|format(disk_free_mb) if disk_free_mb is not none else '?' }} MB</div><div class="meta">disk free</div></div>
+  <div class="card"><div class="n">{{ backup_age }}</div><div class="meta">{{ backup_name or 'no backup yet' }}</div></div>
+</div>
+<p class="meta">{{ db_path }}</p>
+
+<h2>Rows</h2>
+<div class="cards">
+  {% for name, n in counts.items() %}
+  <div class="card"><div class="n">{{ n }}</div><div class="meta">{{ name }}</div></div>
+  {% endfor %}
+</div>
+{% endblock %}

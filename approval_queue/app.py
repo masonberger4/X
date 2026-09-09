@@ -1,7 +1,7 @@
 """Server-rendered approval queue: FastAPI + Jinja2, no JavaScript framework.
 
 Routes:
-  GET  /                      pending drafts (source, score, rationale)
+  GET  /queue                 pending drafts (source, score, rationale); / redirects here
   GET  /drafts/{id}           detail: single_post, thread, claims_to_verify (+ step 2b
                               verdicts with source links), edit form
   POST /drafts/{id}/approve   refused with 409 while a claim is contradicted, unless the
@@ -47,6 +47,9 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["tweet_length"] = tweet_length
 templates.env.globals["MAX_POST_CHARS"] = MAX_POST_CHARS
 templates.env.globals["DECISION_CATEGORIES"] = store.DECISION_CATEGORIES
+# The shared nav (base.html) shows the control-panel links only when the queue is
+# served as part of it (panel/app.py sets this True); run_queue.py serves the queue alone.
+templates.env.globals["HAS_PANEL"] = False
 
 app = FastAPI(title="Approval queue")
 
@@ -130,7 +133,14 @@ def _decision_views(decisions: list[store.sqlite3.Row]) -> list[dict]:
     return views
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    """Standalone (run_queue.py) entry point. The control panel serves its dashboard
+    here instead and this route never matches there."""
+    return _redirect_home()
+
+
+@app.get("/queue", response_class=HTMLResponse)
 def index(request: Request, conn: Conn):
     drafts = store.list_drafts(conn, store.STATUS_PENDING)
     return templates.TemplateResponse(
@@ -210,7 +220,7 @@ def voice(request: Request, conn: Conn, weeks: int | None = None):
 
 
 def _redirect_home() -> RedirectResponse:
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/queue", status_code=303)
 
 
 @app.post("/drafts/{draft_id}/approve")
