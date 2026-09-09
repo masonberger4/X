@@ -21,12 +21,22 @@ unless `PUBLISH_ENABLED=1` **and** `--live`. Step 4 (feedback loop) is not built
 - **Config drives everything.** Feeds, queries, company list, keywords,
   cadences, thresholds, and model names live in `config.yaml`. Never hardcode
   queries, URLs, feeds, or `claude-*` model IDs in code. `config.load_config()`
-  expands `companies.feeds` into `rss` sources named `company_<key>`.
-- **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`),
+  expands `companies.feeds` into `rss` sources named `company_<key>`,
+  `conferences.meetings` into `crossref` sources `conf_<key>_abstracts` (plus
+  `conf_<key>_news` rss when `news_rss` is set) and `kol` into one `x_list`
+  source `kol_x_list`; an explicit `enabled:` is copied through expansion.
+- **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`;
+  the only caller of `httpx.get` is its private `_request`, which retries
+  429/5xx/transport errors and never logs headers),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
   (Anthropic), `draft/drafter.py:call_anthropic`, and `publish/client.py`
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
+  `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
+  network methods of the step 6 sources (both call `http.get_json`).
+- **Meeting windows:** `Source.is_due` honours `windows: [{start, end,
+  cadence_minutes}]` (inclusive UTC dates); conference sources run hourly in a
+  window and daily outside. Window dates in `config.yaml` are updated yearly.
 - **Tests use real saved feeds** in `tests/fixtures/` where a live sample could
   be captured; synthetic fixtures only for bot-protected endpoints (FDA OCE
   page, ClinicalTrials.gov API).
@@ -67,8 +77,9 @@ unless `PUBLISH_ENABLED=1` **and** `--live`. Step 4 (feedback loop) is not built
 
 ## Layout
 ```
-ingest/   base.py (Item, Source ABC), http.py, rss.py, biorxiv.py, pubmed.py,
-          clinicaltrials.py, fda_oce.py
+ingest/   base.py (Item, Source ABC, windows), http.py (retry), rss.py,
+          biorxiv.py, pubmed.py, clinicaltrials.py, fda_oce.py,
+          crossref.py (conference abstracts), x_list.py (KOL list, read-only)
 filter/   prefilter.py, dedup.py
 score/    rubric.py, scorer.py
 db.py     sqlite: items, clusters, scores, ratings, source_runs
