@@ -1,0 +1,29 @@
+[project]
+name = "cancer-news-pipeline"
+version = "0.1.0"
+description = "Ingest, dedup, score, and digest cancer-research news (step 1 of PLAN.md)"
+requires-python = ">=3.11"
+dependencies = [
+  "anthropic",
+  "feedparser",
+  "biopython",
+  "httpx",
+  "pyyaml",
+  "python-dotenv",
+  "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["ingest", "filter", "score"]
+py-modules = ["db", "config", "digest", "run_ingest", "run_score"]
