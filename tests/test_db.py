@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from db import Score
+from db import Database, Score
 from ingest.base import Item, compute_dedup_hash, normalize_doi, normalize_title, normalize_url
 
 
@@ -92,3 +92,21 @@ def test_source_runs(db):
     assert db.last_run("x") is not None
     db.record_run("x", 0, 0, error="boom")
     assert db.conn.execute("SELECT error FROM source_runs").fetchone()[0] == "boom"
+
+
+def test_prefiltered_at_migration_on_old_database(tmp_path):
+    """A pipeline.db created before the prefiltered_at column existed gets it added in place."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    old = Database(str(path))
+    old.close()
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE clusters DROP COLUMN prefiltered_at")
+    conn.commit()
+    conn.close()
+    reopened = Database(str(path))
+    cols = {r[1] for r in reopened.conn.execute("PRAGMA table_info(clusters)").fetchall()}
+    assert "prefiltered_at" in cols
+    assert reopened.count_prefilter_passed_since(datetime.now(UTC)) == 0
+    reopened.close()

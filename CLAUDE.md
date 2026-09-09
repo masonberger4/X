@@ -68,6 +68,12 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   env overrides); rate limiter at 3 req/s, or 10 req/s with `NCBI_API_KEY`.
 - **Cadence:** `run_ingest.py` only fetches sources whose last run (table
   `source_runs`) is older than `cadence_minutes`; `--force` overrides.
+- **Prefilter cap defers, never drops.** A cluster that passes the rules but
+  hits `prefilter.daily_cap` keeps a NULL status and is retried next run; one
+  older than `prefilter.max_age_days` is dropped as `stale`. After changing
+  keywords run `run_score.py --refilter` (`db.reset_prefilter`) to re-evaluate
+  earlier drops. `clusters.prefiltered_at` (guarded migration in `db.py`)
+  is what the daily cap counts.
 - **Fail soft per source.** Errors are logged and recorded in
   `source_runs.error`; the run continues. `ingest/fda_oce.py` returns `[]` on
   any failure.

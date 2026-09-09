@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS clusters (
     published_at     TEXT,                   -- earliest member published_at
     created_at       TEXT NOT NULL,
     prefilter_status TEXT,                   -- NULL | 'pass' | 'drop'
-    prefilter_reason TEXT
+    prefilter_reason TEXT,
+    prefiltered_at   TEXT                    -- when status was last set (cap accounting)
 );
 CREATE INDEX IF NOT EXISTS idx_clusters_published ON clusters(published_at);
 CREATE INDEX IF NOT EXISTS idx_clusters_doi ON clusters(doi);
@@ -138,6 +139,19 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    # Additive, guarded migrations for databases created before a column existed.
+    _MIGRATIONS = (
+        ("clusters", "prefiltered_at", "ALTER TABLE clusters ADD COLUMN prefiltered_at TEXT"),
+    )
+
+    def _migrate(self) -> None:
+        for table, column, ddl in self._MIGRATIONS:
+            cols = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if column not in cols:
+                self.conn.execute(ddl)
+                self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -283,12 +297,33 @@ class Database:
                 (_iso(new_pub), new_doi, cluster_id),
             )
 
-    def set_prefilter(self, cluster_id: int, status: str, reason: str | None = None) -> None:
+    def set_prefilter(
+        self,
+        cluster_id: int,
+        status: str | None,
+        reason: str | None = None,
+        at: datetime | None = None,
+    ) -> None:
+        """status None = back to the queue (deferred); 'pass' / 'drop' with a reason."""
         with self.tx() as c:
             c.execute(
-                "UPDATE clusters SET prefilter_status = ?, prefilter_reason = ? WHERE id = ?",
-                (status, reason, cluster_id),
+                """UPDATE clusters SET prefilter_status = ?, prefilter_reason = ?,
+                   prefiltered_at = ? WHERE id = ?""",
+                (status, reason, _iso(at or utcnow()), cluster_id),
             )
+
+    def reset_prefilter(self, keep_reasons: tuple[str, ...] = ("stale",)) -> int:
+        """Send dropped clusters back through the prefilter (after a keyword change).
+        Clusters dropped for a reason in keep_reasons stay dropped. Returns the count."""
+        placeholders = ",".join("?" for _ in keep_reasons) or "''"
+        with self.tx() as c:
+            cur = c.execute(
+                f"""UPDATE clusters SET prefilter_status = NULL, prefilter_reason = NULL
+                    WHERE prefilter_status = 'drop'
+                      AND COALESCE(prefilter_reason, '') NOT IN ({placeholders})""",
+                keep_reasons,
+            )
+            return int(cur.rowcount)
 
     def unprefiltered_clusters(self) -> list[Cluster]:
         rows = self.conn.execute(
@@ -309,8 +344,11 @@ class Database:
         return [self._row_to_cluster(r) for r in rows]
 
     def count_prefilter_passed_since(self, since: datetime) -> int:
+        """Passes recorded since `since` (by prefiltered_at; created_at for rows from before
+        that column existed)."""
         r = self.conn.execute(
-            "SELECT COUNT(*) FROM clusters WHERE prefilter_status = 'pass' AND created_at >= ?",
+            """SELECT COUNT(*) FROM clusters WHERE prefilter_status = 'pass'
+               AND COALESCE(prefiltered_at, created_at) >= ?""",
             (_iso(since),),
         ).fetchone()
         return int(r[0])

@@ -62,6 +62,7 @@ python run_ingest.py --force    # ignore cadence
 python run_ingest.py --source pubmed_oncology -v
 python run_score.py             # prefilter + score unscored clusters
 python run_score.py --dry-run   # see what would be scored
+python run_score.py --refilter  # after editing prefilter keywords: re-evaluate earlier drops
 python digest.py                # top-N clusters of the last 24h as markdown
 python digest.py --all --hours 72 --out digest.md
 python digest.py --rate         # rate each entry 1-5 with a note (saved to `ratings`)
