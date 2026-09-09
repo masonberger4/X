@@ -1,0 +1,205 @@
+"""Run the pipeline's CLIs as subprocesses, in order, with per-step timeouts.
+
+Pure with respect to the database: the caller records the returned StepResults.
+Other steps' modules are never imported; a CLI file missing from this checkout
+(a step that has not merged yet) is skipped with a WARNING.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import subprocess
+import sys
+import time
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+log = logging.getLogger(__name__)
+
+SKIP_DISABLED = "disabled"
+SKIP_NOT_MERGED = "not merged"
+SKIP_UPSTREAM = "upstream failed"
+SKIP_DRY_RUN = "dry run"
+
+
+@dataclass
+class Step:
+    name: str
+    argv: list[str]
+    enabled: bool = True
+    required: bool = False
+    timeout_seconds: int = 600
+
+    @classmethod
+    def from_config(cls, raw: dict[str, Any]) -> Step:
+        return cls(
+            name=str(raw["name"]),
+            argv=[str(a) for a in raw["argv"]],
+            enabled=bool(raw.get("enabled", True)),
+            required=bool(raw.get("required", False)),
+            timeout_seconds=int(raw.get("timeout_seconds", 600)),
+        )
+
+
+def steps_from_config(cfg: dict[str, Any]) -> list[Step]:
+    return [Step.from_config(s) for s in cfg.get("steps") or []]
+
+
+@dataclass
+class StepResult:
+    name: str
+    argv: list[str]
+    started_at: datetime
+    finished_at: datetime
+    exit_code: int | None = None
+    timed_out: bool = False
+    skipped_reason: str | None = None
+    stdout_tail: str = ""
+    stderr_tail: str = ""
+    extra: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def skipped(self) -> bool:
+        return self.skipped_reason is not None
+
+    @property
+    def ok(self) -> bool:
+        return not self.skipped and not self.timed_out and self.exit_code == 0
+
+    @property
+    def failed(self) -> bool:
+        return not self.skipped and not self.ok
+
+    @property
+    def duration_seconds(self) -> float:
+        return (self.finished_at - self.started_at).total_seconds()
+
+
+def _now() -> datetime:
+    return datetime.now(UTC).replace(microsecond=0)
+
+
+def _tail(text: str | bytes | None, n: int) -> str:
+    if text is None:
+        return ""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    return text[-n:] if n >= 0 else text
+
+
+def resolve_argv(argv: list[str], python: str) -> list[str]:
+    out = list(argv)
+    if out and out[0] == "python":
+        out[0] = python
+    return out
+
+
+def cli_missing(argv: list[str], cwd: Path) -> bool:
+    """True when argv names a .py CLI that does not exist on this checkout."""
+    if len(argv) < 2 or not argv[1].endswith(".py"):
+        return False
+    script = Path(argv[1])
+    if not script.is_absolute():
+        script = cwd / script
+    return not script.exists()
+
+
+def run_steps(
+    steps: Iterable[Step],
+    *,
+    only: Iterable[str] | None = None,
+    dry_run: bool = False,
+    env: dict[str, str] | None = None,
+    python: str = sys.executable,
+    cwd: str | os.PathLike[str] | None = None,
+    tail_chars: int = 4000,
+) -> list[StepResult]:
+    """Run each enabled step in order. See module docstring for the skip/stop rules."""
+    workdir = Path(cwd) if cwd else Path.cwd()
+    selected = set(only) if only is not None else None
+    child_env = None if env is None else {**os.environ, **env}
+    results: list[StepResult] = []
+    upstream_failed = False
+
+    for step in steps:
+        if selected is not None and step.name not in selected:
+            continue
+        argv = resolve_argv(step.argv, python)
+        now = _now()
+        if not step.enabled:
+            log.info("step %s: disabled, skipping", step.name)
+            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DISABLED))
+            continue
+        if upstream_failed:
+            log.warning("step %s: skipped because a required upstream step failed", step.name)
+            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_UPSTREAM))
+            continue
+        if cli_missing(argv, workdir):
+            log.warning(
+                "step %s: %s not found on this checkout (not merged); skipping", step.name, argv[1]
+            )
+            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_NOT_MERGED))
+            continue
+        if dry_run:
+            log.info("step %s: would run %s (timeout %ss)", step.name, argv, step.timeout_seconds)
+            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DRY_RUN))
+            continue
+
+        result = _run_one(step, argv, workdir, child_env, tail_chars)
+        results.append(result)
+        if result.failed and step.required:
+            upstream_failed = True
+    return results
+
+
+def _run_one(
+    step: Step, argv: list[str], cwd: Path, env: dict[str, str] | None, tail_chars: int
+) -> StepResult:
+    started = _now()
+    t0 = time.monotonic()
+    log.info("step %s: starting %s", step.name, argv)
+    timed_out = False
+    exit_code: int | None = None
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=step.timeout_seconds,
+            check=False,
+        )
+        exit_code = proc.returncode
+        stdout, stderr = proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired as exc:  # subprocess.run kills the child for us
+        timed_out = True
+        stdout, stderr = exc.stdout, exc.stderr
+    except OSError as exc:  # interpreter/script not executable etc.
+        exit_code = 127
+        stdout, stderr = "", f"{type(exc).__name__}: {exc}"
+    finished = _now()
+    duration = time.monotonic() - t0
+    result = StepResult(
+        name=step.name,
+        argv=argv,
+        started_at=started,
+        finished_at=finished,
+        exit_code=exit_code,
+        timed_out=timed_out,
+        stdout_tail=_tail(stdout, tail_chars),
+        stderr_tail=_tail(stderr, tail_chars),
+    )
+    if timed_out:
+        log.error("step %s: timed out after %ss (killed)", step.name, step.timeout_seconds)
+    elif result.ok:
+        log.info("step %s: finished in %.1fs, exit 0", step.name, duration)
+    else:
+        log.error("step %s: failed in %.1fs, exit %s", step.name, duration, exit_code)
+        if result.stderr_tail:
+            log.error("step %s stderr tail:\n%s", step.name, result.stderr_tail[-1000:])
+    return result

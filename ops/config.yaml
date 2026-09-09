@@ -1,0 +1,84 @@
+# Step 5 (operations) settings. This is ops' own file; the root config.yaml
+# still drives every pipeline stage. Relative paths are resolved from the
+# working directory, which the cron/systemd entries `cd` to the repo root.
+
+# Steps run in this order by `run_ops.py run`. argv[0] "python" is replaced by
+# the interpreter that runs run_ops.py (the venv's). A step whose CLI file
+# does not exist on this checkout is skipped with a WARNING ("not merged").
+# A failing `required` step stops the run; a failing optional step is logged
+# and the run continues.
+steps:
+  - name: ingest
+    argv: ["python", "run_ingest.py"]
+    enabled: true
+    required: true
+    timeout_seconds: 900
+  - name: score
+    argv: ["python", "run_score.py"]
+    enabled: true
+    required: true
+    timeout_seconds: 1200
+  - name: draft
+    argv: ["python", "run_draft.py"]
+    enabled: true
+    required: true
+    timeout_seconds: 1200
+  # Publishing stays OFF and in dry-run mode here. run_publish.py without
+  # flags only prints what it would post. The human enables this step and
+  # appends run_publish.py's live flag to argv (and sets PUBLISH_ENABLED=1 in
+  # .env) only after reading README's "Publishing (step 3)" section and
+  # confirming the bio disclosure. Nothing in ops/ ever adds that flag; a
+  # test asserts this file never contains it.
+  - name: publish
+    argv: ["python", "run_publish.py"]
+    enabled: false
+    required: false
+    timeout_seconds: 300
+  # Daily metrics snapshot (step 4). Optional; enable once feedback/ has
+  # merged and X_BEARER_TOKEN is set.
+  - name: feedback
+    argv: ["python", "run_feedback.py", "snapshot"]
+    enabled: false
+    required: false
+    timeout_seconds: 300
+
+lock_path: ./pipeline.lock       # fcntl lock; overlapping cron fires exit 2
+run_log_tail_chars: 4000         # stdout/stderr kept per step per run
+
+health:
+  # Staleness: 'warn' past the threshold, 'fail' past twice the threshold.
+  max_hours_since_ingest: 3      # run_ingest runs every 30 min; most sources are <= 6h cadence
+  max_hours_since_score: 6       # score runs every cycle; 0 unscored clusters is normal, >6h with backlog is not
+  max_hours_since_draft: 48      # drafts only appear when something clears the score threshold
+  source_stale_multiplier: 3     # a source is stale when last_run_at > multiplier * cadence
+  max_source_failure_fraction: 0.34   # (error + never ran + stale) / enabled sources -> 'fail'
+  pending_draft_max_age_hours: 72     # a draft nobody has reviewed in 3 days -> 'warn'
+  unscored_backlog_max: 100      # prefilter-passed clusters with no score ('warn'; 'fail' at 2x)
+  # Budget caps derived from PLAN.md's $30-60/mo API budget:
+  #   scoring: prefilter.daily_cap is 60 clusters/day; batches of 10 on the
+  #            cheap scorer cost roughly a cent per cluster, so 150/day leaves
+  #            room for a re-score after a PROMPT_VERSION bump and is < $2/day.
+  #   drafting: PLAN.md advances the top 5-10/day; a draft on the stronger
+  #            model is ~$0.05-0.10, so 15/day is about $1/day, ~$30/mo.
+  # Exceeding a cap is 'fail' (money), 80% of it is 'warn'.
+  scores_per_day_max: 150
+  drafts_per_day_max: 15
+  db_max_mb: 2048                # SQLite file size ('warn')
+  disk_min_free_mb: 1024         # free space on the DB's filesystem ('fail')
+  backup_max_age_hours: 36       # backups run daily; 'fail' past this, 'warn' if none yet
+  feedback_max_age_hours: 192    # step 4 snapshots taper to weekly; 'warn' past 8 days
+  required_env:                  # names only; values are never read into a report
+    - ANTHROPIC_API_KEY
+
+backups:
+  dir: ./backups
+  keep: 14                       # newest N copies are kept (daily -> two weeks)
+
+alerts:
+  cooldown_hours: 6              # same check, same status: do not re-send within this window
+  min_status: warn               # send 'warn' and 'fail' (set to fail to send only failures)
+  channels:
+    log: true                    # always on: WARNING for warn, ERROR for fail
+    webhook: true                # JSON POST {"text": ...} to ALERT_WEBHOOK_URL (skipped if unset)
+    email: false                 # smtplib via SMTP_* and ALERT_EMAIL_FROM/TO (skipped if unset)
+  webhook_timeout_seconds: 10

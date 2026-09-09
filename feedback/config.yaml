@@ -1,0 +1,51 @@
+# Feedback-loop settings (step 4). This is NOT the root config.yaml.
+# Nothing here changes what gets ingested, scored, drafted or posted; it only controls
+# how engagement metrics are collected and reported.
+
+# X handle whose follower counts are snapshotted (without the @). Leave empty to skip.
+username: ""
+
+# X API v2 base URL and the bearer token env var (app-only auth, read-only endpoints).
+api_base: https://api.x.com/2
+bearer_token_env: X_BEARER_TOKEN
+
+# Timezone used only for the "hour posted" column. Posts are stored in UTC.
+timezone: America/New_York
+
+# Primary KPI every group comparison and correlation is computed against.
+# One of: impressions | likes | reposts | replies | quotes | bookmarks
+kpi: impressions
+
+# When to pull a fresh snapshot of a tweet's metrics, counted in days since it was posted.
+snapshot:
+  daily_for_days: 7        # one snapshot per day for days 0..N after posting
+  weekly_interval_days: 7  # after that, one snapshot every W days
+  stop_after_days: 90      # never fetch a tweet older than this
+  batch_size: 100          # ids per /2/tweets call (API maximum is 100)
+
+# Retry policy for 429 and 5xx responses. 401/403 are never retried.
+rate_limit:
+  max_attempts: 4
+  backoff_seconds: 2       # base for exponential backoff on 5xx
+  max_wait_seconds: 900    # cap on honouring x-rate-limit-reset for a 429
+
+report:
+  weeks: 1                 # default window for `report`
+  top_n: 5                 # top/bottom posts shown
+  min_posts_per_group: 5   # a group with fewer posts gets a small-n warning and no suggestion
+
+suggest:
+  effect_ratio: 2.0        # median KPI must differ by more than this factor between groups
+  min_abs_rho: 0.5         # |Spearman rho| needed before a rubric-weight suggestion
+
+# Topic tags: a post belongs to a topic when its title contains any keyword (case-insensitive).
+# These feed the "by topic" table and prefilter_keyword suggestions. Editing this list changes
+# only the report; the real prefilter keywords live in the root config.yaml.
+topics:
+  cell_therapy: ["CAR-T", "CAR T", "CAR-NK", "TCR-T", "TIL", "cell therapy"]
+  gene_editing: ["CRISPR", "base editing", "prime editing", "gene editing", "gene therapy"]
+  checkpoint: ["PD-1", "PD-L1", "checkpoint", "CTLA-4", "LAG-3"]
+  adc: ["antibody-drug conjugate", "ADC"]
+  bispecific: ["bispecific", "BiTE"]
+  approval: ["FDA", "approv", "EMA"]
+  preprint: ["preprint", "bioRxiv", "medRxiv"]

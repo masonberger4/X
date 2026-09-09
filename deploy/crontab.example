@@ -1,0 +1,30 @@
+# Cancer-research X pipeline: cron entries for a small VPS.  `crontab -e` and paste.
+#
+# Adjust REPO and VENV. Every entry cd's into the repo so relative paths in
+# config.yaml / ops/config.yaml (pipeline.db, pipeline.lock, backups/) resolve.
+# .env is read by python-dotenv from the repo root, so no secrets live here.
+#
+# Publishing stays a DRY RUN until you (1) set `enabled: true` on the publish
+# step in ops/config.yaml, (2) append "--live" to its argv there, and (3) set
+# PUBLISH_ENABLED=1 in .env. Nothing in the ops layer adds --live for you.
+#
+# Logs: append to logs/ops.log (create the directory once: mkdir -p logs).
+# Rotate with logrotate or `find logs -mtime +30 -delete` if it grows.
+
+REPO=/home/pipeline/x
+VENV=/home/pipeline/x/.venv
+PY=$VENV/bin/python
+MAILTO=""
+
+# Run the pipeline (ingest -> score -> draft [-> publish -> feedback]) every 30 min.
+# Overlapping fires exit 2 immediately thanks to the lock file.
+*/30 * * * *  cd $REPO && $PY run_ops.py run >> logs/ops.log 2>&1
+
+# Health checks with notifications (ALERT_WEBHOOK_URL / SMTP_* from .env), hourly at :15.
+15 * * * *    cd $REPO && $PY run_ops.py health --alert >> logs/ops.log 2>&1
+
+# Verified online backup of pipeline.db, daily at 03:40 UTC (keeps `backups.keep` copies).
+40 3 * * *    cd $REPO && $PY run_ops.py backup >> logs/ops.log 2>&1
+
+# Prune ops-owned bookkeeping tables (pipeline_runs, health_checks, alerts_sent), weekly.
+50 4 * * 0    cd $REPO && $PY run_ops.py prune --days 90 >> logs/ops.log 2>&1
