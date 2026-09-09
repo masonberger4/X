@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Draft {{ d.id }}{% endblock %}
+{% block content %}
+<p class="meta"><a href="/">&larr; back to pending</a></p>
+<h1>{{ d.title or d.item_id }}</h1>
+<p class="meta">
+  status <strong>{{ d.status }}</strong>
+  · source <strong>{{ d.source or "?" }}</strong>
+  · score <strong>{{ "%.1f"|format(d.total) if d.total is not none else "–" }}</strong>
+  · model {{ d.model }}
+  · created {{ d.created_at }}
+  {% if d.url %}· <a href="{{ d.url }}">primary source</a>{% endif %}
+</p>
+{% if d.rejection_reason %}<p class="flash over">Hard-rule failure: {{ d.rejection_reason }}</p>{% endif %}
+{% if d.rationale %}<p><strong>Scorer rationale:</strong> {{ d.rationale }}</p>{% endif %}
+{% if d.suggested_angle %}<p><strong>Suggested angle:</strong> {{ d.suggested_angle }}</p>{% endif %}
+<p><strong>Why it matters:</strong> {{ d.draft.why_it_matters }}</p>
+{% if d.draft.suggested_visual %}<p><strong>Suggested visual:</strong> {{ d.draft.suggested_visual }}</p>{% endif %}
+
+<h2>Single post</h2>
+{% set n = d.draft.single_post|tweet_length %}
+<div class="post">{{ d.draft.single_post }}</div>
+<div class="meta {% if n > MAX_POST_CHARS %}over{% endif %}">{{ n }}/{{ MAX_POST_CHARS }}</div>
+
+<h2>Thread</h2>
+{% for p in d.draft.thread %}
+  {% set n = p|tweet_length %}
+  <div class="post">{{ loop.index }}/{{ d.draft.thread|length }} {{ p }}</div>
+  <div class="meta {% if n > MAX_POST_CHARS %}over{% endif %}">{{ n }}/{{ MAX_POST_CHARS }}</div>
+{% endfor %}
+
+<h2>Claims to verify</h2>
+{% if d.draft.claims_to_verify %}
+<ul>
+{% for c in d.draft.claims_to_verify %}
+  <li><span class="{{ c.confidence }}">[{{ c.confidence }}]</span> {{ c.claim }}</li>
+{% endfor %}
+</ul>
+{% else %}<p class="meta">None flagged.</p>{% endif %}
+
+{% if d.abstract %}
+<details><summary>Source abstract</summary><p>{{ d.abstract }}</p></details>
+{% endif %}
+
+<h2>Actions</h2>
+<div class="actions">
+  <form class="inline" method="post" action="/drafts/{{ d.id }}/approve"><button>Approve</button></form>
+  <form class="inline" method="post" action="/drafts/{{ d.id }}/snooze"><button>Snooze 24h</button></form>
+  <form class="inline" method="post" action="/drafts/{{ d.id }}/reject">
+    <input name="note" placeholder="reason (optional)"> <button>Reject</button>
+  </form>
+</div>
+
+<h2>Edit</h2>
+<form method="post" action="/drafts/{{ d.id }}/edit">
+  <label>Single post<br><textarea name="single_post" rows="4">{{ d.draft.single_post }}</textarea></label>
+  <p class="meta">Thread: separate posts with a line containing only <code>---</code>.</p>
+  <label>Thread<br><textarea name="thread" rows="10">{{ thread_text }}</textarea></label>
+  <label>Note<br><input name="note" placeholder="what you changed and why (optional)"></label>
+  <p>
+    <button>Save &amp; approve</button>
+    <button name="keep_pending" value="1">Save, keep pending</button>
+  </p>
+</form>
+
+{% if decisions %}
+<h2>Decision history</h2>
+<table>
+  <thead><tr><th>When</th><th>Action</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for x in decisions %}
+    <tr><td class="meta">{{ x["created_at"] }}</td><td>{{ x["action"] }}</td><td>{{ x["note"] or "" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

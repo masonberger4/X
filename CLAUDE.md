@@ -5,14 +5,16 @@ Project guidance for Claude Code. Read PLAN.md before making changes.
 ## What this is
 A human-in-the-loop pipeline that ingests oncology news, scores it with the
 Anthropic API, and drafts X posts for human approval. Python 3.11+, SQLite.
-Step 1 (ingest + dedup + prefilter + score + digest) is implemented. Drafting,
-posting, and any X API integration are deliberately **not** built yet.
+Step 1 (ingest + dedup + prefilter + score + digest) and step 2 (draft + human
+approval queue) are implemented. Posting and any X API integration are
+deliberately **not** built yet.
 
 ## Commands
 - Install: `pip install -e ".[dev]"`
 - Lint: `ruff check .` and `ruff format --check .`
 - Test: `pytest`
-- Run: `python run_ingest.py`, `python run_score.py`, `python digest.py [--rate]`
+- Run: `python run_ingest.py`, `python run_score.py`, `python digest.py [--rate]`,
+  `python run_draft.py`, `python run_queue.py` (approval UI on localhost:8000)
 
 ## Rules
 - **Config drives everything.** Feeds, queries, company list, keywords,
@@ -21,7 +23,8 @@ posting, and any X API integration are deliberately **not** built yet.
   expands `companies.feeds` into `rss` sources named `company_<key>`.
 - **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
-  (Anthropic). Tests monkeypatch those and never hit the network.
+  (Anthropic), and `draft/drafter.py:call_anthropic`. Tests monkeypatch those and
+  never hit the network.
 - **Tests use real saved feeds** in `tests/fixtures/` where a live sample could
   be captured; synthetic fixtures only for bot-protected endpoints (FDA OCE
   page, ClinicalTrials.gov API).
@@ -46,7 +49,12 @@ posting, and any X API integration are deliberately **not** built yet.
 - Logging: stdlib `logging`. INFO for per-source counts, DEBUG for items.
 - Ask before adding a dependency not already in `pyproject.toml`.
 - Generated content must never contain medical advice. Preprints are labelled
-  as preprints.
+  as preprints. `draft/drafter.py:check_hard_rules` enforces this in code after
+  generation (plus 280 chars/post with URLs as 23, source URL placement, and
+  verbatim-number verification); drafts that fail are stored as `failed`.
+- Step 2 reads step 1's tables only through
+  `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
+  tables are `drafts` and `decisions`; edits log original vs edited text.
 - Commit after each working module.
 
 ## Layout
@@ -56,5 +64,7 @@ ingest/   base.py (Item, Source ABC), http.py, rss.py, biorxiv.py, pubmed.py,
 filter/   prefilter.py, dedup.py
 score/    rubric.py, scorer.py
 db.py     sqlite: items, clusters, scores, ratings, source_runs
-run_ingest.py  run_score.py  digest.py   (CLIs)
+draft/    schema.py, prompt.py, voice.md, drafter.py
+approval_queue/  store.py (drafts, decisions, fetch_candidates), app.py, templates/
+run_ingest.py  run_score.py  digest.py  run_draft.py  run_queue.py   (CLIs)
 ```

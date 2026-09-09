@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ status|capitalize }} drafts{% endblock %}
+{% block content %}
+<h1>{{ status|capitalize }} drafts <span class="meta">({{ drafts|length }})</span></h1>
+{% if not drafts %}
+  <p class="meta">Nothing here.</p>
+{% else %}
+<table>
+  <thead><tr><th>Score</th><th>Source</th><th>Draft</th><th>Rationale</th></tr></thead>
+  <tbody>
+  {% for d in drafts %}
+    <tr>
+      <td>{{ "%.1f"|format(d.total) if d.total is not none else "–" }}</td>
+      <td>{{ d.source or "?" }}{% if d.status != status %}<br><span class="meta">{{ d.status }}</span>{% endif %}</td>
+      <td>
+        <a href="/drafts/{{ d.id }}"><strong>{{ d.title or d.item_id }}</strong></a>
+        <div class="meta">{{ d.draft.single_post }}</div>
+        {% if d.rejection_reason %}<div class="meta over">{{ d.rejection_reason }}</div>{% endif %}
+      </td>
+      <td class="meta">{{ d.rationale }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
