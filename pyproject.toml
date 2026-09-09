@@ -30,7 +30,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["config", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_publish", "run_feedback", "run_ops"]
+py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_publish", "run_feedback", "run_ops"]
 
 [tool.setuptools.packages.find]
 include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "publish*", "feedback*", "ops*"]

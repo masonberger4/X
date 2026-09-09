@@ -1,6 +1,10 @@
 """Score clusters with the Anthropic API via tool use, in batches, with retry/backoff.
 
-Network is confined to `Scorer.create_message`, which tests replace.
+Network is confined to `Scorer.create_message`, which tests replace. With
+`models.backend: claude_code` (or LLM_BACKEND=claude_code) the same method runs the
+Claude Code CLI through `claude_cli.run_claude` instead and asks for the tool's JSON
+as plain text; the reply is validated in code and wrapped in a response-like object
+so the rest of the scorer is unchanged.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from typing import Any
 
 import anthropic
 
+import claude_cli
 from db import Cluster, Database, Score
 from filter.prefilter import cluster_text
 from ingest.base import utcnow
@@ -20,11 +25,49 @@ from score import rubric
 
 log = logging.getLogger(__name__)
 
-RETRYABLE = (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.InternalServerError)
+RETRYABLE = (
+    anthropic.RateLimitError,
+    anthropic.APIConnectionError,
+    anthropic.InternalServerError,
+    claude_cli.ClaudeCliError,
+)
+
+HEADLESS_FORMAT_NOTE = (
+    "\n\nYou are running without tool calling. Instead of calling the `{tool}` tool, reply "
+    "with ONLY a JSON object (no prose, no code fence) that is exactly the tool's input: "
+    "it must validate against this JSON schema:\n{schema}"
+)
 
 
 class ScoringError(RuntimeError):
     pass
+
+
+class HeadlessToolUse:
+    """Mimics the SDK's ToolUseBlock for extract_scores()."""
+
+    type = "tool_use"
+
+    def __init__(self, name: str, input: dict[str, Any]):
+        self.name = name
+        self.input = input
+
+
+class HeadlessResponse:
+    """What create_message returns on the claude_code backend. raw_json() stores the
+    verbatim CLI text next to the parsed scores, like the API path stores the SDK dump."""
+
+    stop_reason = "tool_use"
+
+    def __init__(self, text: str, data: dict[str, Any], model: str):
+        self.text = text
+        self.model = model
+        self.content = [HeadlessToolUse(rubric.TOOL_NAME, data)]
+
+    def model_dump_json(self) -> str:
+        return json.dumps(
+            {"backend": claude_cli.CLAUDE_CODE, "model": self.model, "text": self.text}
+        )
 
 
 class Scorer:
@@ -39,6 +82,7 @@ class Scorer:
         self.force_tool_choice = bool(sc.get("force_tool_choice", True))
         self.abstract_max_chars = int(sc.get("abstract_max_chars", 2500))
         self.system_prompt = rubric.build_system_prompt(cfg.get("expertise") or {})
+        self.backend = claude_cli.llm_backend(cfg)
         self._client = client
 
     @property
@@ -49,6 +93,8 @@ class Scorer:
 
     # ---- network ----------------------------------------------------------
     def create_message(self, user_content: str) -> Any:
+        if self.backend == claude_cli.CLAUDE_CODE:
+            return self.create_message_headless(user_content)
         kwargs: dict[str, Any] = dict(
             model=self.model,
             max_tokens=self.max_tokens,
@@ -59,6 +105,26 @@ class Scorer:
         if self.force_tool_choice:
             kwargs["tool_choice"] = {"type": "tool", "name": rubric.TOOL_NAME}
         return self.client.messages.create(**kwargs)
+
+    def headless_system_prompt(self) -> str:
+        return self.system_prompt + HEADLESS_FORMAT_NOTE.format(
+            tool=rubric.TOOL_NAME, schema=json.dumps(rubric.TOOL["input_schema"])
+        )
+
+    def create_message_headless(self, user_content: str) -> HeadlessResponse:
+        """claude_code backend: no tool schema is enforced server-side, so the JSON reply is
+        checked here. A malformed reply is a ScoringError (not retried: the batch is logged
+        and skipped); a CLI failure is a ClaudeCliError (retried like an API error)."""
+        text = claude_cli.run_claude(
+            user_content, system=self.headless_system_prompt(), model=self.model, cfg=self.cfg
+        )
+        try:
+            data = _parse_json_object(text)
+        except json.JSONDecodeError as exc:
+            raise ScoringError(f"claude_code reply is not JSON: {text[:200]!r}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("scores"), list):
+            raise ScoringError("claude_code reply lacks a 'scores' list")
+        return HeadlessResponse(text, data, self.model)
 
     def create_with_retry(self, user_content: str) -> Any:
         for attempt in range(self.max_retries + 1):
@@ -167,7 +233,20 @@ class Scorer:
             batch = clusters[i : i + self.batch_size]
             try:
                 scores.extend(self.score_batch(db, batch))
-            except (ScoringError, anthropic.APIError) as exc:
+            except (ScoringError, anthropic.APIError, claude_cli.ClaudeCliError) as exc:
                 log.error("batch %d-%d failed: %s", i, i + len(batch), exc)
         log.info("scored %d clusters", len(scores))
         return scores
+
+
+def _parse_json_object(text: str) -> Any:
+    """Parse a JSON object, tolerating a ```json fence or stray prose around it."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text[4:] if text.lower().startswith("json") else text
+    if not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start : end + 1]
+    return json.loads(text)
