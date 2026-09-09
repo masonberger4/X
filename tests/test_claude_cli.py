@@ -136,6 +136,24 @@ def test_run_claude_failures_become_cli_errors(monkeypatch):
     with pytest.raises(claude_cli.ClaudeCliError, match="exited 1: Not logged in"):
         claude_cli.run_claude("u", model="m")
 
+    # non-zero exit with the JSON envelope on stdout: surface its `result`, not the counters
+    envelope = json.dumps(
+        {
+            "usage": {"x": 0},
+            "is_error": True,
+            "terminal_reason": "api_error",
+            "subtype": "success",
+            "result": "Model not available on this plan",
+        }
+    )
+    monkeypatch.setattr(
+        claude_cli.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=1, stdout=envelope, stderr=""),
+    )
+    with pytest.raises(claude_cli.ClaudeCliError, match="api_error: Model not available"):
+        claude_cli.run_claude("u", model="m")
+
     def timeout(*a, **k):
         raise subprocess.TimeoutExpired(cmd="claude", timeout=1)
 
