@@ -1,0 +1,166 @@
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:prism="http://prismstandard.org/namespaces/basic/2.0/" xmlns:dc="http://purl.org/dc/elements/1.1/"
+         xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns="http://purl.org/rss/1.0/" xmlns:admin="http://webns.net/mvcb/">
+    <channel rdf:about="http://feeds.nature.com/nm/rss/current">
+        <title>Nature Medicine</title>
+        <description>Original research articles published in Nature Medicine range from basic findings that have clear implications for disease pathogenesis and therapy to the earliest phases of human investigation. Aiming to keep Ph.D. and M.D. readers informed of a wide range of biomedical research findings, the journal publishes the latest advances in cancer biology, vascular biology, neuroscience, inflammatory disease, infectious disease and metabolic disorders, among other fields. Reviews, Perspectives and other commissioned content clarify and give context to these biomedical research advances, and the News section reports on the latest developments in drug research and development.</description>
+        <link>http://feeds.nature.com/nm/rss/current</link>
+        <admin:generatorAgent rdf:resource="https://www.nature.com/"/>
+        <admin:errorReportsTo rdf:resource="mailto:feedback@nature.com"/>
+        <dc:publisher>Nature Publishing Group</dc:publisher>
+        <dc:language>en</dc:language>
+        <dc:rights>© 2026 Macmillan Publishers Limited, part of Springer Nature. All rights reserved.</dc:rights>
+        <prism:publicationName>Nature Medicine</prism:publicationName>
+        
+        
+        <prism:copyright>© 2026 Macmillan Publishers Limited, part of Springer Nature. All rights reserved.</prism:copyright>
+        <prism:rightsAgent>permissions@nature.com</prism:rightsAgent>
+        <image rdf:resource="https://www.nature.com/uploads/product/nm/rss.gif"/>
+        <items>
+            <rdf:Seq>
+                
+                    <rdf:li rdf:resource="https://www.nature.com/articles/s41591-026-04641-x"/>
+                
+                    <rdf:li rdf:resource="https://www.nature.com/articles/s41591-026-04633-x"/>
+                
+                    <rdf:li rdf:resource="https://www.nature.com/articles/s41591-026-04645-7"/>
+                
+                    <rdf:li rdf:resource="https://www.nature.com/articles/s41591-026-04694-y"/>
+                
+                    <rdf:li rdf:resource="https://www.nature.com/articles/s41591-026-04637-7"/>
+                
+                    <rdf:li rdf:resource="https://www.nature.com/articles/s41591-026-04682-2"/>
+                
+                    <rdf:li rdf:resource="https://www.nature.com/articles/s41591-026-04638-6"/>
+                
+                    <rdf:li rdf:resource="https://www.nature.com/articles/d41591-026-00045-z"/>
+                
+            </rdf:Seq>
+        </items>
+    </channel>
+    <image rdf:about="https://www.nature.com/uploads/product/nm/rss.gif">
+        <title>Nature Medicine</title>
+        <url>https://www.nature.com/uploads/product/nm/rss.gif</url>
+        <link>http://feeds.nature.com/nm/rss/current</link>
+    </image>
+    
+        <item rdf:about="https://www.nature.com/articles/s41591-026-04641-x">
+            <title><![CDATA[A binding ban, and its limits: Japan legislates on heritable human genome editing]]></title>
+            <link>https://www.nature.com/articles/s41591-026-04641-x</link>
+            <content:encoded>
+                <![CDATA[<p>Nature Medicine, Published online: 08 September 2026; <a href="https://www.nature.com/articles/s41591-026-04641-x">doi:10.1038/s41591-026-04641-x</a></p>A binding ban, and its limits: Japan legislates on heritable human genome editing]]></content:encoded>
+            <dc:title><![CDATA[A binding ban, and its limits: Japan legislates on heritable human genome editing]]></dc:title>
+            <dc:creator>Tsutomu Sawai</dc:creator>
+            <dc:identifier>doi:10.1038/s41591-026-04641-x</dc:identifier>
+            <dc:source>Nature Medicine, Published online: 2026-09-08; | doi:10.1038/s41591-026-04641-x</dc:source>
+            <dc:date>2026-09-08</dc:date>
+            <prism:publicationName>Nature Medicine</prism:publicationName>
+            <prism:doi>10.1038/s41591-026-04641-x</prism:doi>
+            <prism:url>https://www.nature.com/articles/s41591-026-04641-x</prism:url>
+        </item>
+    
+        <item rdf:about="https://www.nature.com/articles/s41591-026-04633-x">
+            <title><![CDATA[From algorithms to patient outcomes — lessons from one of the first randomized trials of AI in medicine]]></title>
+            <link>https://www.nature.com/articles/s41591-026-04633-x</link>
+            <content:encoded>
+                <![CDATA[<p>Nature Medicine, Published online: 07 September 2026; <a href="https://www.nature.com/articles/s41591-026-04633-x">doi:10.1038/s41591-026-04633-x</a></p>The first generation of medical artificial intelligence (AI) was judged on whether algorithms could match clinicians. The next generation should be judged on whether carefully designed human–AI systems can improve patient outcomes.]]></content:encoded>
+            <dc:title><![CDATA[From algorithms to patient outcomes — lessons from one of the first randomized trials of AI in medicine]]></dc:title>
+            <dc:creator>Kristina Lång</dc:creator>
+            <dc:identifier>doi:10.1038/s41591-026-04633-x</dc:identifier>
+            <dc:source>Nature Medicine, Published online: 2026-09-07; | doi:10.1038/s41591-026-04633-x</dc:source>
+            <dc:date>2026-09-07</dc:date>
+            <prism:publicationName>Nature Medicine</prism:publicationName>
+            <prism:doi>10.1038/s41591-026-04633-x</prism:doi>
+            <prism:url>https://www.nature.com/articles/s41591-026-04633-x</prism:url>
+        </item>
+    
+        <item rdf:about="https://www.nature.com/articles/s41591-026-04645-7">
+            <title><![CDATA[Strengthening clinical trial ethics and regulatory oversight in Africa: lessons from the TRACE initiative]]></title>
+            <link>https://www.nature.com/articles/s41591-026-04645-7</link>
+            <content:encoded>
+                <![CDATA[<p>Nature Medicine, Published online: 07 September 2026; <a href="https://www.nature.com/articles/s41591-026-04645-7">doi:10.1038/s41591-026-04645-7</a></p>Strengthening clinical trial ethics and regulatory oversight in Africa: lessons from the TRACE initiative]]></content:encoded>
+            <dc:title><![CDATA[Strengthening clinical trial ethics and regulatory oversight in Africa: lessons from the TRACE initiative]]></dc:title>
+            <dc:creator>Kara L. Neil</dc:creator><dc:creator>Jeanine Condo</dc:creator><dc:creator>Obadia Kyetuza Bishoge</dc:creator><dc:creator>Peter Saula</dc:creator><dc:creator>Tendayi Kureya</dc:creator><dc:creator>Barbara E. Bierer</dc:creator><dc:creator>Willyanne DeCormier Plosky</dc:creator><dc:creator>Sarah A. White</dc:creator><dc:creator>Enock Kebenei</dc:creator><dc:creator>Beno Nyam Yakubu</dc:creator><dc:creator>Priscilla P. M. Nyambayo</dc:creator><dc:creator>Rutendo B. L. Gutsire</dc:creator><dc:creator>Sithembile Ruzario</dc:creator><dc:creator>Alphonse Ndayambaje</dc:creator><dc:creator>Nathalie Umutoni</dc:creator><dc:creator>Stella Ekallam</dc:creator><dc:creator>Ritah U. Mupende</dc:creator><dc:creator>Marie Angele Ikuzwe</dc:creator><dc:creator>Moise Ruhinda</dc:creator><dc:creator>Fantacy Twagira</dc:creator><dc:creator>Absolomon Gashaija</dc:creator><dc:creator>Vedaste Ndahindwa</dc:creator><dc:creator>Teresia Nyawira</dc:creator><dc:creator>Damas Matiko</dc:creator><dc:creator>Collins Mitambo</dc:creator><dc:creator>Elly Lefoll Kourany</dc:creator><dc:creator>David Mukanga</dc:creator>
+            <dc:identifier>doi:10.1038/s41591-026-04645-7</dc:identifier>
+            <dc:source>Nature Medicine, Published online: 2026-09-07; | doi:10.1038/s41591-026-04645-7</dc:source>
+            <dc:date>2026-09-07</dc:date>
+            <prism:publicationName>Nature Medicine</prism:publicationName>
+            <prism:doi>10.1038/s41591-026-04645-7</prism:doi>
+            <prism:url>https://www.nature.com/articles/s41591-026-04645-7</prism:url>
+        </item>
+    
+        <item rdf:about="https://www.nature.com/articles/s41591-026-04694-y">
+            <title><![CDATA[Prediction of maternal and infant outcomes from longitudinal electronic health records with a Mother-Child AI agent]]></title>
+            <link>https://www.nature.com/articles/s41591-026-04694-y</link>
+            <content:encoded>
+                <![CDATA[<p>Nature Medicine, Published online: 04 September 2026; <a href="https://www.nature.com/articles/s41591-026-04694-y">doi:10.1038/s41591-026-04694-y</a></p>An LLM-based clinical assistant that orchestrates multiple tools to integrate sequential electronic health record data can forecast maternal and infant conditions, opening a window of opportunity to enhance risk-stratified care for mothers and infants.]]></content:encoded>
+            <dc:title><![CDATA[Prediction of maternal and infant outcomes from longitudinal electronic health records with a Mother-Child AI agent]]></dc:title>
+            <dc:creator>Sian Liu</dc:creator><dc:creator>Wenxin Zheng</dc:creator><dc:creator>Jin Kang</dc:creator><dc:creator>Tianyi Xu</dc:creator><dc:creator>Siming Chen</dc:creator><dc:creator>Gen Li</dc:creator><dc:creator>Junlong Li</dc:creator><dc:creator>Hang Wong</dc:creator><dc:creator>Meihao Wang</dc:creator><dc:creator>Xiaokai Bai</dc:creator><dc:creator>Changxi Hu</dc:creator><dc:creator>Cheng Tang</dc:creator><dc:creator>Shengwei Jin</dc:creator><dc:creator>Zixing Zou</dc:creator><dc:creator>Ieng Chong</dc:creator><dc:creator>Yuxing Lu</dc:creator><dc:creator>Io Nam Wong</dc:creator><dc:creator>Hui Xu</dc:creator><dc:creator>Charlotte L. Zhang</dc:creator><dc:creator>Jingman Shi</dc:creator><dc:creator>Erhu Feng</dc:creator><dc:creator>Jinyu Gu</dc:creator><dc:creator>Zhuo Sun</dc:creator><dc:creator>Haibo Chen</dc:creator><dc:creator>Li Yang</dc:creator><dc:creator>Yuan Zhang</dc:creator><dc:creator>Xian Zhu</dc:creator><dc:creator>Huanhuan Huang</dc:creator><dc:creator>Xiuyuan Xu</dc:creator><dc:creator>Xue Li</dc:creator><dc:creator>Zhao Zhenhui</dc:creator><dc:creator>Hongbo Qi</dc:creator><dc:creator>Xinyu Lu</dc:creator><dc:creator>Ngaman Cheng</dc:creator><dc:creator>Sicheng Pan</dc:creator><dc:creator>Ning Sun</dc:creator><dc:creator>Yun Yin</dc:creator><dc:creator>Michelle Williams</dc:creator><dc:creator>Eric Oermann</dc:creator><dc:creator>John E. J. Rasko</dc:creator><dc:creator>Jin Li</dc:creator><dc:creator>Kai Wang</dc:creator><dc:creator>Kang Zhang</dc:creator><dc:creator>Hao Wu</dc:creator><dc:creator>Yubin Xia</dc:creator><dc:creator>Fanxin Zeng</dc:creator><dc:creator>Zhenhui Zhao</dc:creator>
+            <dc:identifier>doi:10.1038/s41591-026-04694-y</dc:identifier>
+            <dc:source>Nature Medicine, Published online: 2026-09-04; | doi:10.1038/s41591-026-04694-y</dc:source>
+            <dc:date>2026-09-04</dc:date>
+            <prism:publicationName>Nature Medicine</prism:publicationName>
+            <prism:doi>10.1038/s41591-026-04694-y</prism:doi>
+            <prism:url>https://www.nature.com/articles/s41591-026-04694-y</prism:url>
+        </item>
+    
+        <item rdf:about="https://www.nature.com/articles/s41591-026-04637-7">
+            <title><![CDATA[Reply to: Limited benchmarks constrain the conclusions of a general-purpose versus clinical AI comparison]]></title>
+            <link>https://www.nature.com/articles/s41591-026-04637-7</link>
+            <content:encoded>
+                <![CDATA[<p>Nature Medicine, Published online: 03 September 2026; <a href="https://www.nature.com/articles/s41591-026-04637-7">doi:10.1038/s41591-026-04637-7</a></p>Reply to: Limited benchmarks constrain the conclusions of a general-purpose versus clinical AI comparison]]></content:encoded>
+            <dc:title><![CDATA[Reply to: Limited benchmarks constrain the conclusions of a general-purpose versus clinical AI comparison]]></dc:title>
+            <dc:creator>Krithik Vishwanath</dc:creator><dc:creator>Yindalon Aphinyanaphongs</dc:creator><dc:creator>Eric Karl Oermann</dc:creator>
+            <dc:identifier>doi:10.1038/s41591-026-04637-7</dc:identifier>
+            <dc:source>Nature Medicine, Published online: 2026-09-03; | doi:10.1038/s41591-026-04637-7</dc:source>
+            <dc:date>2026-09-03</dc:date>
+            <prism:publicationName>Nature Medicine</prism:publicationName>
+            <prism:doi>10.1038/s41591-026-04637-7</prism:doi>
+            <prism:url>https://www.nature.com/articles/s41591-026-04637-7</prism:url>
+        </item>
+    
+        <item rdf:about="https://www.nature.com/articles/s41591-026-04682-2">
+            <title><![CDATA[Gene alteration in human brain suggests genetic and epigenetic roots of major depression]]></title>
+            <link>https://www.nature.com/articles/s41591-026-04682-2</link>
+            <content:encoded>
+                <![CDATA[<p>Nature Medicine, Published online: 03 September 2026; <a href="https://www.nature.com/articles/s41591-026-04682-2">doi:10.1038/s41591-026-04682-2</a></p>A large, multimodal molecular characterization of the adult human hippocampus provides evidence for sustained neurogenesis and identifies a stalled neurogenic process in major depressive disorder (MDD). Cell- and circuit-specific genetic, epigenetic, stress, immune, metabolic and synaptic mechanisms are identified that underlie impaired hippocampal plasticity, providing a framework for disease subtyping and therapeutic development.]]></content:encoded>
+            <dc:title><![CDATA[Gene alteration in human brain suggests genetic and epigenetic roots of major depression]]></dc:title>
+            
+            <dc:identifier>doi:10.1038/s41591-026-04682-2</dc:identifier>
+            <dc:source>Nature Medicine, Published online: 2026-09-03; | doi:10.1038/s41591-026-04682-2</dc:source>
+            <dc:date>2026-09-03</dc:date>
+            <prism:publicationName>Nature Medicine</prism:publicationName>
+            <prism:doi>10.1038/s41591-026-04682-2</prism:doi>
+            <prism:url>https://www.nature.com/articles/s41591-026-04682-2</prism:url>
+        </item>
+    
+        <item rdf:about="https://www.nature.com/articles/s41591-026-04638-6">
+            <title><![CDATA[Limited benchmarks constrain the conclusions of a general-purpose versus clinical AI comparison]]></title>
+            <link>https://www.nature.com/articles/s41591-026-04638-6</link>
+            <content:encoded>
+                <![CDATA[<p>Nature Medicine, Published online: 03 September 2026; <a href="https://www.nature.com/articles/s41591-026-04638-6">doi:10.1038/s41591-026-04638-6</a></p>Limited benchmarks constrain the conclusions of a general-purpose versus clinical AI comparison]]></content:encoded>
+            <dc:title><![CDATA[Limited benchmarks constrain the conclusions of a general-purpose versus clinical AI comparison]]></dc:title>
+            <dc:creator>Brett Beaulieu-Jones</dc:creator><dc:creator>Shamim Nemati</dc:creator>
+            <dc:identifier>doi:10.1038/s41591-026-04638-6</dc:identifier>
+            <dc:source>Nature Medicine, Published online: 2026-09-03; | doi:10.1038/s41591-026-04638-6</dc:source>
+            <dc:date>2026-09-03</dc:date>
+            <prism:publicationName>Nature Medicine</prism:publicationName>
+            <prism:doi>10.1038/s41591-026-04638-6</prism:doi>
+            <prism:url>https://www.nature.com/articles/s41591-026-04638-6</prism:url>
+        </item>
+    
+        <item rdf:about="https://www.nature.com/articles/d41591-026-00045-z">
+            <title><![CDATA[Induced proximity comes of age]]></title>
+            <link>https://www.nature.com/articles/d41591-026-00045-z</link>
+            <content:encoded>
+                <![CDATA[<p>Nature Medicine, Published online: 03 September 2026; <a href="https://www.nature.com/articles/d41591-026-00045-z">doi:10.1038/d41591-026-00045-z</a></p>The first approved PROTAC for breast cancer validated the idea that medicines can work by bringing proteins together rather than by simply blocking them. Now, a new generation of proximity-based therapies is pushing that principle further.]]></content:encoded>
+            <dc:title><![CDATA[Induced proximity comes of age]]></dc:title>
+            <dc:creator>Natalie Healey</dc:creator>
+            <dc:identifier>doi:10.1038/d41591-026-00045-z</dc:identifier>
+            <dc:source>Nature Medicine, Published online: 2026-09-03; | doi:10.1038/d41591-026-00045-z</dc:source>
+            <dc:date>2026-09-03</dc:date>
+            <prism:publicationName>Nature Medicine</prism:publicationName>
+            <prism:doi>10.1038/d41591-026-00045-z</prism:doi>
+            <prism:url>https://www.nature.com/articles/d41591-026-00045-z</prism:url>
+        </item>
+    
+</rdf:RDF>
