@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -23,20 +24,38 @@ def title_similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 
-def find_near_duplicate(db: Database, norm_title: str, threshold: float,
+_YEAR_RE = re.compile(r"^(19|20)\d\d$")
+
+
+def tokens_conflict(a: str, b: str) -> bool:
+    """True when the titles differ in a real word (>=4 letters) or a year.
+
+    Guards difflib against merging boilerplate that differs only in the entity
+    ("Amgen reports Q2 results" vs "Xencor reports Q2 results")."""
+    diff = set(a.split()) ^ set(b.split())
+    return any((t.isalpha() and len(t) >= 4) or _YEAR_RE.match(t) for t in diff)
+
+
+def find_near_duplicate(db: Database, norm_title: str, source: str, threshold: float,
                         window_days: int) -> int | None:
-    """Return the id of the most similar recent cluster above threshold, if any."""
+    """Return the id of the most similar recent cluster above threshold, if any.
+
+    Only clusters with no member from `source` are candidates: exact repeats
+    from one feed are caught by dedup_hash, and near-identical titles from the
+    same feed are almost always recurring boilerplate, not the same story."""
     if not norm_title:
         return None
     since = utcnow() - timedelta(days=window_days)
     best_id, best = None, 0.0
     for cl in db.recent_clusters(since):
+        if source in cl.sources:
+            continue
         # cheap length gate before SequenceMatcher
         la, lb = len(cl.norm_title), len(norm_title)
         if not la or min(la, lb) / max(la, lb) < threshold - 0.05:
             continue
         r = difflib.SequenceMatcher(None, cl.norm_title, norm_title).ratio()
-        if r > best:
+        if r > best and not tokens_conflict(cl.norm_title, norm_title):
             best_id, best = cl.id, r
     if best_id is not None and best >= threshold:
         log.debug("near-dup: %r ~ cluster %s (%.3f)", norm_title[:60], best_id, best)
@@ -68,7 +87,7 @@ def assign_cluster(db: Database, item: Item, dedup_cfg: dict[str, Any] | None = 
 
     norm = normalize_title(item.title)
     if cluster_id is None:
-        cluster_id = find_near_duplicate(db, norm, threshold, window_days)
+        cluster_id = find_near_duplicate(db, norm, item.source, threshold, window_days)
 
     if cluster_id is None:
         cluster_id = db.create_cluster(item.title, norm, item.doi, item.published_at)

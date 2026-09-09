@@ -107,6 +107,7 @@ class Cluster(BaseModel):
     prefilter_status: str | None = None
     prefilter_reason: str | None = None
     member_ids: list[str] = []
+    sources: list[str] = []
 
 
 class Score(BaseModel):
@@ -208,13 +209,16 @@ class Database:
             return int(cur.lastrowid)
 
     def _row_to_cluster(self, r: sqlite3.Row) -> Cluster:
-        ids = [x["id"] for x in self.conn.execute(
-            "SELECT id FROM items WHERE cluster_id = ? ORDER BY published_at", (r["id"],))]
+        members = self.conn.execute(
+            "SELECT id, source FROM items WHERE cluster_id = ? ORDER BY published_at", (r["id"],)
+        ).fetchall()
+        ids = [x["id"] for x in members]
+        sources = sorted({x["source"] for x in members})
         return Cluster(
             id=r["id"], title=r["title"], norm_title=r["norm_title"], doi=r["doi"],
             published_at=_parse(r["published_at"]), created_at=_parse(r["created_at"]),
             prefilter_status=r["prefilter_status"], prefilter_reason=r["prefilter_reason"],
-            member_ids=ids,
+            member_ids=ids, sources=sources,
         )
 
     def get_cluster(self, cluster_id: int) -> Cluster | None:
@@ -254,7 +258,8 @@ class Database:
 
     def unprefiltered_clusters(self) -> list[Cluster]:
         rows = self.conn.execute(
-            "SELECT * FROM clusters WHERE prefilter_status IS NULL ORDER BY id").fetchall()
+            """SELECT * FROM clusters WHERE prefilter_status IS NULL
+               ORDER BY published_at IS NULL, published_at DESC, id""").fetchall()
         return [self._row_to_cluster(r) for r in rows]
 
     def unscored_clusters(self, model: str, prompt_version: str) -> list[Cluster]:

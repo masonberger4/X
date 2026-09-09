@@ -49,3 +49,22 @@ def test_similarity_threshold_respected(db):
     _, c1 = assign_cluster(db, a, {"title_similarity": 0.92})
     _, c2 = assign_cluster(db, b, {"title_similarity": 0.92})
     assert c1 != c2
+
+
+def test_same_source_near_duplicates_stay_separate(db, dedup_cfg):
+    a = _item("company_x", "https://x/1", "Cellectis to Report Second Quarter Financial Results on August 6, 2026")
+    b = _item("company_x", "https://x/2", "Cellectis to Report Second Quarter Financial Results on August 4, 2025")
+    _, c1 = assign_cluster(db, a, dedup_cfg)
+    _, c2 = assign_cluster(db, b, dedup_cfg)
+    assert c1 != c2
+
+
+def test_entity_word_difference_blocks_merge(db, dedup_cfg):
+    a = _item("company_amgen", "https://a/1", "AMGEN REPORTS SECOND QUARTER 2026 FINANCIAL RESULTS")
+    b = _item("company_xencor", "https://x/1", "Xencor Reports Second Quarter 2026 Financial Results")
+    c = _item("company_xencor2", "https://x/2", "Xencor Reports Second Quarter 2025 Financial Results")
+    assert title_similarity(a.title, b.title) >= 0.9
+    _, c1 = assign_cluster(db, a, dedup_cfg)
+    _, c2 = assign_cluster(db, b, dedup_cfg)
+    _, c3 = assign_cluster(db, c, dedup_cfg)
+    assert len({c1, c2, c3}) == 3

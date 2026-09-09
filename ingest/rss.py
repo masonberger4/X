@@ -47,9 +47,10 @@ def _entry_abstract(entry: Any) -> str:
 
 
 def _entry_doi(entry: Any) -> str | None:
+    # Deliberately not the summary: press releases cite papers' DOIs in body
+    # text, which would merge unrelated releases into one cluster.
     return extract_doi(
-        entry.get("prism_doi"), entry.get("dc_identifier"), entry.get("id"),
-        entry.get("link"), entry.get("summary"),
+        entry.get("prism_doi"), entry.get("dc_identifier"), entry.get("id"), entry.get("link"),
     )
 
 

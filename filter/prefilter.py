@@ -1,7 +1,8 @@
 """Cheap, deterministic gate applied to clusters before they cost API money.
 
 Rules (all from config.prefilter): deny keywords, allow keywords, empty/short
-abstract, and a daily cap on clusters passed to the scorer. Results are stored
+abstract, and a daily cap on clusters passed to the scorer. Clusters are
+processed newest-first so the cap keeps the freshest stories. Results are stored
 on clusters.prefilter_status ('pass'|'drop') with a reason.
 """
 from __future__ import annotations

@@ -51,3 +51,5 @@ def setup_logging(verbose: bool = False) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
+    # httpx logs every request at INFO; keep that at DEBUG-only.
+    logging.getLogger("httpx").setLevel(logging.DEBUG if verbose else logging.WARNING)
