@@ -37,6 +37,19 @@ def test_nonzero_exit_is_failed():
     assert "boom" in r.stderr_tail
 
 
+def test_timeout_zero_means_no_limit():
+    step = Step("quick", py("import time; time.sleep(0.2)"), timeout_seconds=0)
+    assert step.wait_timeout is None
+    r = run_steps([step])[0]
+    assert r.ok and not r.timed_out
+    assert (
+        Step.from_config(
+            {"name": "v", "argv": ["python", "x.py"], "timeout_seconds": 0}
+        ).wait_timeout
+        is None
+    )
+
+
 def test_timeout_kills_and_flags():
     step = Step("slow", py("import time; time.sleep(30)"), timeout_seconds=1)
     res = run_steps([step])

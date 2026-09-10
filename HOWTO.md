@@ -344,6 +344,10 @@ to stop it. Four pages:
   While a run is going there is a "Stop this run" button: it ends the
   current step (and anything it started, such as the Claude window) and
   skips the rest. Nothing is lost; the next run picks up where it left off.
+  The verify step has no time limit (`timeout_seconds: 0` in
+  `ops/config.yaml`): a backlog of drafts can take an hour or more, and each
+  claim's verdict is saved the moment it lands, so stopping the run keeps
+  every claim already checked and only the one in flight is redone next time.
 - **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
   approval pages from part 3, unchanged.
 
