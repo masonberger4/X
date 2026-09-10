@@ -12,6 +12,7 @@ recomputed afterwards. Manual runs never send alerts: a human is already watchin
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -77,9 +78,11 @@ class JobManager:
         repo_root: Path,
         db_path: Path | None = None,
         history_size: int = 10,
+        python: str = sys.executable,
     ) -> None:
         self.cfg = cfg
         self.repo_root = Path(repo_root)
+        self.python = python
         self._db_path = db_path
         self._history_size = history_size
         self._mutex = threading.Lock()
@@ -162,6 +165,7 @@ class JobManager:
                 self.steps(),
                 only=job.steps,
                 cwd=self.repo_root,
+                python=self.python,
                 tail_chars=tail,
             )
             self._record(job)
