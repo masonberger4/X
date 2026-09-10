@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 ACTION_EDIT = "edit"
 ACTION_REJECT = "reject"
+ACTION_REVISE = "revise"  # AI rewrite on a human note; never a BEFORE/AFTER example
 
 EDITS_HEADER = "=== RECENT HUMAN EDITS ==="
 REJECTIONS_HEADER = "=== RECENTLY REJECTED ==="

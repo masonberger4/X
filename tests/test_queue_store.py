@@ -357,3 +357,36 @@ def test_fetch_draft_stats(conn):
         (d2, "fda", "failed"),
     ]
     assert rows[0]["item_id"] == "a" and rows[0]["created_at"] and rows[0]["model"] == "m"
+
+
+def test_revise_replaces_whole_draft_keeps_status_and_logs_decision(conn):
+    seed_item(conn, "i1")
+    d = Draft(
+        single_post=f"old {URL}",
+        thread=["a", "b", f"c {URL}"],
+        suggested_visual="v",
+        why_it_matters="w",
+        claims_to_verify=[Claim("old claim", "low")],
+    )
+    did = store.insert_draft(conn, item_id="i1", model="m1", draft=d)
+    new = Draft(
+        single_post=f"new {URL}",
+        thread=["x", "y", f"z {URL}"],
+        suggested_visual="v2",
+        why_it_matters="w2",
+        claims_to_verify=[Claim("new claim", "medium")],
+    )
+    store.revise(conn, did, draft=new, model="m2", note="less hype", category="voice")
+    row = store.get_draft(conn, did)
+    assert row.status == "pending"
+    assert row.model == "m2"
+    assert row.draft.single_post == f"new {URL}"
+    assert row.draft.thread == ["x", "y", f"z {URL}"]
+    assert row.draft.why_it_matters == "w2" and row.draft.suggested_visual == "v2"
+    assert [c.claim for c in row.draft.claims_to_verify] == ["new claim"]
+    (dec,) = store.list_decisions(conn, did)
+    assert dec["action"] == "revise"
+    assert dec["note"] == "less hype" and dec["category"] == "voice"
+    assert "old" in dec["original_text"] and "new" in dec["edited_text"]
+    with pytest.raises(KeyError):
+        store.revise(conn, 999, draft=new, model="m")

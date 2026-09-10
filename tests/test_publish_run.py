@@ -257,3 +257,21 @@ def test_missing_keys_raise_without_network(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     with pytest.raises(client.PublishError, match="missing X credentials"):
         client._keys()
+
+
+def test_fetch_approved_uses_ai_revision_over_older_human_edit(conn):
+    seed_draft(conn, "a", approve=False)
+    qstore.edit(
+        conn, 1, single_post=f"Human edit {URL}", thread=["1", "2", f"3 {URL}"], approve_after=False
+    )
+    revised = Draft(
+        single_post=f"Revised {URL}",
+        thread=["r1", "r2", f"r3 {URL}"],
+        suggested_visual="",
+        why_it_matters="w",
+        claims_to_verify=[],
+    )
+    qstore.revise(conn, 1, draft=revised, model="m", note="tighter")
+    qstore.approve(conn, 1)
+    (got,) = store.fetch_approved(10, conn=conn)
+    assert got.single_post == f"Revised {URL}" and got.thread == ["r1", "r2", f"r3 {URL}"]

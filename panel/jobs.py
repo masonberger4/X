@@ -51,6 +51,8 @@ class Job:
     results: list[StepResult] = field(default_factory=list)
     error: str | None = None
     stopping: str | None = None  # set by cancel(); the finished job becomes STATE_STOPPED
+    active_step: str | None = None  # the step whose process is live right now
+    active_since: datetime | None = None
 
     @property
     def running(self) -> bool:
@@ -65,6 +67,12 @@ class Job:
     @property
     def failed_steps(self) -> list[str]:
         return [r.name for r in self.results if r.failed]
+
+    @property
+    def pending_steps(self) -> list[str]:
+        """Steps of this job that have neither finished nor started."""
+        seen = {r.name for r in self.results} | ({self.active_step} if self.active_step else set())
+        return [s for s in self.steps if s not in seen]
 
 
 def _now() -> datetime:
@@ -177,12 +185,24 @@ class JobManager:
             return
         with held:
             tail = int(self.cfg.get("run_log_tail_chars", 4000))
-            job.results = runner.run_steps(
+
+            # Results land on the job as each step finishes, so the runs page can show
+            # progress mid-run instead of one block when the whole list returns.
+            def started(step: Step) -> None:
+                job.active_step, job.active_since = step.name, _now()
+
+            def finished(result: StepResult) -> None:
+                job.active_step, job.active_since = None, None
+                job.results.append(result)
+
+            runner.run_steps(
                 self.steps(),
                 only=job.steps,
                 cwd=self.repo_root,
                 python=self.python,
                 tail_chars=tail,
+                on_start=started,
+                on_result=finished,
             )
             self._record(job)
 

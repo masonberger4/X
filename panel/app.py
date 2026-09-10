@@ -316,6 +316,11 @@ def _job_views(jobs: list[Any]) -> list[dict[str, Any]]:
                 "started": views.fmt_age(now, job.started_at),
                 "duration": views.fmt_duration(job.duration_seconds),
                 "error": job.error,
+                "active_step": job.active_step,
+                "active_for": views.fmt_duration(
+                    (now - job.active_since).total_seconds() if job.active_since else None
+                ),
+                "pending_steps": job.pending_steps,
                 "results": [
                     {
                         "name": r.name,

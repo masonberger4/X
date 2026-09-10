@@ -1,10 +1,15 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from approval_queue import store
 from approval_queue.app import app
+from draft import drafter
 from draft.schema import Claim, Draft
 from tests.conftest import URL, seed_item
+from verify import store as verify_store
+from verify.verifier import ClaimCheck
 
 
 @pytest.fixture
@@ -137,3 +142,104 @@ def test_edit_form_accepts_category_and_rejects_unknown(client, conn, draft_id):
 
 def test_voice_route_exists(client, draft_id):
     assert client.get("/voice").status_code == 200
+
+
+# --- revise (AI rewrite on the human's note) ----------------------------------------
+
+
+def _revision_json(single_post):
+    return json.dumps(
+        {
+            "single_post": single_post,
+            "thread": ["Preprint. r1", "r2", f"r3 {URL}"],
+            "suggested_visual": "",
+            "why_it_matters": "revised",
+            "claims_to_verify": [{"claim": "new claim", "confidence": "medium"}],
+        }
+    )
+
+
+def _stub_call(monkeypatch, responses):
+    calls = []
+
+    def fake(system, user, model):
+        calls.append((system, user, model))
+        r = responses.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    monkeypatch.setattr(drafter, "call_anthropic", fake)
+    monkeypatch.setattr(drafter, "model_name", lambda: "stub-model")
+    return calls
+
+
+def test_revise_rewrites_draft_from_instructions_and_keeps_pending(
+    client, conn, draft_id, monkeypatch
+):
+    calls = _stub_call(monkeypatch, [_revision_json(f"Preprint: tighter. ORR 88%. {URL}")])
+    r = client.post(
+        f"/drafts/{draft_id}/revise", data={"instructions": "tighter opening", "category": "voice"}
+    )
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}?revised=1"
+    row = store.get_draft(conn, draft_id)
+    assert row.status == "pending"
+    assert row.draft.single_post.startswith("Preprint: tighter.")
+    assert row.draft.thread[0] == "Preprint. r1"
+    assert [c.claim for c in row.draft.claims_to_verify] == ["new claim"]
+    assert row.model == "stub-model"
+    (dec,) = store.list_decisions(conn, draft_id)
+    assert dec["action"] == "revise" and dec["note"] == "tighter opening"
+    assert dec["category"] == "voice"
+    system, user, model = calls[0]
+    assert "tighter opening" in user and "Preprint: ORR 88%." in user
+    assert model == "stub-model"
+    body = client.get(f"/drafts/{draft_id}?revised=1").text
+    assert "Revised." in body and "revise" in body
+    assert "- single: Preprint: ORR 88%." in body  # diff of the AI rewrite is shown
+
+
+def test_revise_with_empty_box_fixes_failed_claims_and_resets_checks(
+    client, conn, draft_id, monkeypatch
+):
+    verify_store.insert_check(
+        conn,
+        draft_id,
+        ClaimCheck(0, "Number '15'...", "contradicted", "https://src", "it was 14", "wrong", True),
+        "checker",
+    )
+    calls = _stub_call(monkeypatch, [_revision_json(f"Preprint: fixed. ORR 88%. {URL}")])
+    r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": ""})
+    assert r.status_code == 303
+    user = calls[0][1]
+    assert "FACT-CHECK FAILURES" in user and "it was 14" in user and "https://src" in user
+    assert verify_store.checks_for_draft(conn, draft_id) == []  # re-verified next run
+    (dec,) = store.list_decisions(conn, draft_id)
+    assert dec["note"] == "fix fact-check failures"
+    assert not verify_store.has_contradiction(conn, draft_id)
+
+
+def test_revise_with_nothing_to_do_or_failed_model_leaves_draft_alone(
+    client, conn, draft_id, monkeypatch
+):
+    r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": ""})
+    assert r.status_code == 303 and "error=" in r.headers["location"]
+    _stub_call(monkeypatch, [json.dumps({"single_post": "no url"})] * drafter.MAX_ATTEMPTS)
+    r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
+    assert r.status_code == 303 and "error=" in r.headers["location"]
+    _stub_call(monkeypatch, [RuntimeError("api down")] * drafter.MAX_ATTEMPTS)
+    monkeypatch.setattr(drafter, "_sleep_backoff", lambda a, s: None)
+    r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
+    assert r.status_code == 303 and "api%20down" in r.headers["location"]
+    row = store.get_draft(conn, draft_id)
+    assert row.draft.single_post == f"Preprint: ORR 88%. {URL}"
+    assert store.list_decisions(conn, draft_id) == []
+    assert client.post("/drafts/999/revise", data={"instructions": "x"}).status_code == 404
+    body = client.get(f"/drafts/{draft_id}?error=api%20down").text
+    assert "api down" in body
+
+
+def test_pending_page_has_inline_revise_box(client, draft_id):
+    body = client.get("/queue").text
+    assert f'action="/drafts/{draft_id}/revise"' in body
+    assert 'action="/drafts/' not in client.get("/status/approved").text

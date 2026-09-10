@@ -35,7 +35,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/publishing` | approved and waiting, what has posted, and any partial thread needing a human |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | start a run of any enabled step and watch its log, or stop the one in progress; recent runs with per-step output |
-| `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue, unchanged |
+| `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue, unchanged (its Revise box sends a draft back through the drafter with your note) |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
@@ -183,6 +183,13 @@ verified only when the source host is in `verify/config.yaml`
 it is shown as a lead. The queue shows the evidence beside each claim and
 refuses Approve with 409 while any claim is contradicted, unless the form
 carries `override=1` ("approve anyway"). The verifier never edits a draft.
+Fixing a draft is the drafter's job, on request: the queue's Revise action
+(`POST /drafts/{id}/revise`, `draft/drafter.py:revise_item`) re-prompts the
+model with the current draft, the human's instructions and every claim check
+that came back contradicted or unverified, re-runs the hard rules in code,
+replaces the draft in place (still pending, logged as a `revise` decision
+with the before/after text) and drops its claim checks so the next
+`run_verify.py` checks the new claims.
 `ops/config.yaml` runs it after `draft` as an optional step.
 
 ```bash
