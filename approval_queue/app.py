@@ -305,8 +305,10 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     """Send the draft back through the drafter with the human's instructions. Claims that
     step 2b contradicted (or could not verify) are always included, so a draft can be
     revised with an empty instruction box just to fix its fact-check failures. On success
-    the draft is replaced, stays pending, and its claim checks are dropped so run_verify
-    checks the new claims; on failure nothing changes and the detail page shows why."""
+    the draft is replaced, stays pending, and its claim checks are dropped, except a
+    supported verdict whose claim text is unchanged, which is carried over so run_verify
+    only checks the claims that are new or changed; on failure nothing changes and the
+    detail page shows why."""
     form = await read_form(request)
     row = store.get_draft(conn, draft_id)
     if row is None:
@@ -344,13 +346,16 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     store.revise(
         conn, draft_id, draft=result.draft, model=result.model, note=note, category=category
     )
-    verify_store.delete_checks(conn, draft_id)
+    kept = verify_store.carry_over_checks(
+        conn, draft_id, [c.claim for c in result.draft.claims_to_verify]
+    )
     images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)
     log.info(
-        "draft %d revised (%d attempt(s), %d claim problem(s))",
+        "draft %d revised (%d attempt(s), %d claim problem(s), %d verdict(s) kept)",
         draft_id,
         result.attempts,
         len(problems),
+        kept,
     )
     return _detail_redirect(draft_id, revised=True)
 

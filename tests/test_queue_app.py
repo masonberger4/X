@@ -219,6 +219,39 @@ def test_revise_with_empty_box_fixes_failed_claims_and_resets_checks(
     assert not verify_store.has_contradiction(conn, draft_id)
 
 
+def test_revise_keeps_supported_verdicts_for_unchanged_claims(client, conn, draft_id, monkeypatch):
+    verify_store.insert_check(
+        conn,
+        draft_id,
+        ClaimCheck(0, "ORR was 88%.", "supported", "https://src", "88%", "", True),
+        "checker",
+    )
+    verify_store.insert_check(
+        conn, draft_id, ClaimCheck(1, "n=40", "unverified", "", "", "thin", False), "checker"
+    )
+    verify_store.insert_check(
+        conn,
+        draft_id,
+        ClaimCheck(2, "Phase 3", "supported", "https://src", "ph3", "", True),
+        "checker",
+    )
+    body = json.loads(_revision_json(f"Preprint: tighter. ORR 88%. {URL}"))
+    body["claims_to_verify"] = [
+        {"claim": "n=40", "confidence": "low"},
+        {"claim": "orr was 88%", "confidence": "high"},  # same claim, new position and case
+        {"claim": "Phase 3 in 2027", "confidence": "low"},  # changed text: checked again
+    ]
+    _stub_call(monkeypatch, [json.dumps(body)])
+    assert client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"}).status_code == 303
+    checks = verify_store.checks_for_draft(conn, draft_id)
+    assert [(c.claim_index, c.claim, c.verdict) for c in checks] == [
+        (1, "orr was 88%", "supported")
+    ]
+    assert checks[0].source_url == "https://src" and checks[0].trusted
+    row = store.get_draft(conn, draft_id)
+    assert verify_store.unchecked_indexes(conn, row) == [0, 2]
+
+
 def test_revise_with_nothing_to_do_or_failed_model_leaves_draft_alone(
     client, conn, draft_id, monkeypatch
 ):

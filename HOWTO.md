@@ -171,9 +171,10 @@ source only when it is due, and score only scores what is new.
    revision also hands the drafter each claim that was contradicted (to
    correct or remove, using the fact-checker's note and quote) or could not
    be verified (to soften or drop), so pressing Revise with an empty box
-   fixes the failed claims on their own. A revised draft's old verdicts are
-   discarded; the next `run_verify.py` (or the scheduler) checks the new
-   claims.
+   fixes the failed claims on their own. After a revision a supported claim
+   whose wording did not change keeps its verdict; every other verdict is
+   discarded and the next `run_verify.py` (or the scheduler) checks the new
+   or changed claims.
 4. After a couple of weeks, see what your edits are asking for and paste the
    suggestions you agree with into `draft\voice.md`.
    ```

@@ -130,8 +130,10 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `draft/prompt.py:build_revision_user_prompt`) with the current draft, the
   instructions and every step 2b check that is contradicted or unverified. The result
   replaces the whole draft via `store.revise` (status unchanged, a `revise` decision
-  holds the before/after, `note` is the instruction), then the route drops the draft's
-  `claim_checks`. On any failure the draft is untouched. `revise` decisions are never
+  holds the before/after, `note` is the instruction), then the route calls
+  `verify/store.py:carry_over_checks`: a `supported` verdict whose claim text is unchanged
+  (up to case, spacing, trailing full stop) is re-indexed and kept, every other
+  `claim_checks` row is dropped. On any failure the draft is untouched. `revise` decisions are never
   few-shot examples (the AFTER text is not human-written); publish honours the latest
   `edit` or `revise` text.
 - Step 7 (voice learning) turns recent `decisions` into few-shot examples via

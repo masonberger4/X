@@ -12,7 +12,7 @@
   {% if d.url %}· <a href="{{ d.url }}" target="_blank" rel="noopener noreferrer">primary source</a>{% endif %}
 </p>
 {% if error %}<p class="flash over">{{ error }}</p>{% endif %}
-{% if revised %}<p class="flash">Revised. Read the new text below; the claim checks were reset (run <code>python run_verify.py</code> or wait for the scheduler).</p>{% endif %}
+{% if revised %}<p class="flash">Revised. Read the new text below; claims whose text changed lost their verdict; supported claims that stayed the same kept theirs (run <code>python run_verify.py</code> or wait for the scheduler).</p>{% endif %}
 {% if d.rejection_reason %}<p class="flash over">Hard-rule failure: {{ d.rejection_reason }}</p>{% endif %}
 {% if d.rationale %}<p><strong>Scorer rationale:</strong> {{ d.rationale }}</p>{% endif %}
 {% if d.suggested_angle %}<p><strong>Suggested angle:</strong> {{ d.suggested_angle }}</p>{% endif %}
