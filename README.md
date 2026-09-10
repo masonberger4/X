@@ -356,7 +356,8 @@ the society pages linked in `config.yaml`.
 
 **Conference abstracts (`type: crossref`).** Societies publish their meeting
 abstracts as journal supplements (JCO for ASCO, Cancer Research for AACR,
-Blood for ASH, Annals of Oncology for ESMO) that Crossref indexes under the
+Blood for ASH, Annals of Oncology for ESMO, Molecular Therapy for ASGCT) that
+Crossref indexes under the
 journal's ISSN. `conferences.meetings` expands into `conf_<key>_abstracts`
 sources that query `api.crossref.org/works` by ISSN and created date, keep
 only works whose issue or DOI matches `issue_pattern`, gate on
@@ -365,9 +366,10 @@ newest, and cap each run at `max_items_per_run`. Abstracts get one factual
 line prepended (`ASCO Annual Meeting 2026 abstract (Journal of Clinical
 Oncology 44, 16_suppl).`); titles are untouched so the later full paper joins
 the same cluster by DOI or title. A meeting's `news_rss` becomes
-`conf_<key>_news` with the same windows. ESMO is shipped `enabled: false`:
-Elsevier deposits the Annals of Oncology abstract book in Crossref after the
-congress, without abstracts. Set `CROSSREF_MAILTO` in `.env` (or
+`conf_<key>_news` with the same windows. ESMO and ASGCT are shipped
+`enabled: false`: Elsevier deposits the Annals of Oncology abstract book in
+Crossref after the congress, without abstracts, and the Molecular Therapy
+ASGCT abstract book as a single record with no per-abstract DOIs or text. Set `CROSSREF_MAILTO` in `.env` (or
 `crossref.mailto`) to use Crossref's polite pool.
 
 The flood of a meeting week is handled inside the source (issue filter,

@@ -441,6 +441,24 @@ conferences:
         # Update yearly.
         - {start: 2026-11-04, end: 2026-12-18}
       # hematology.org publishes no RSS feed (checked /rss, /rss.xml, /newsroom/rss).
+    - key: asgct
+      name: "ASGCT Annual Meeting"
+      journal: "Molecular Therapy"
+      issn: 1525-0016
+      # Verified Sept 2026: Elsevier deposits the whole ASGCT abstract book as
+      # ONE Crossref record ("ASGCT 2026 Annual Meeting Abstracts",
+      # 10.1016/j.ymthe.2026.04.047, Molecular Therapy 34(5), registered
+      # 2026-05-08) with no per-abstract DOIs and no `abstract` text, so this
+      # source cannot yield scorable items. Disabled until Elsevier deposits
+      # individual abstracts. Re-check yearly.
+      enabled: false
+      issue_pattern: 'suppl|^S\d+'
+      windows:
+        # ASGCT 30th Annual Meeting: May 3-7, 2027
+        # (https://www.asgct.org/annual-meeting). The 2026 abstract book was
+        # registered the week before the meeting. Update yearly.
+        - {start: 2027-04-26, end: 2027-05-11}
+      # asgct.org publishes no RSS feed (checked /feed, /rss, /rss.xml, /news/rss).
 
 # Curated X list of oncology KOLs (read-only). The list itself is created by
 # hand on X; put its id in X_KOL_LIST_ID (.env) or list_id below. Reading it

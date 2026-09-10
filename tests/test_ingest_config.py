@@ -12,6 +12,7 @@ EXPECTED_WINDOWS = {
     "aacr": [(date(2027, 3, 19), date(2027, 4, 10))],
     "esmo": [(date(2026, 10, 16), date(2026, 10, 30))],
     "ash": [(date(2026, 11, 4), date(2026, 12, 18))],
+    "asgct": [(date(2027, 4, 26), date(2027, 5, 11))],
 }
 
 
@@ -37,6 +38,7 @@ def test_shipped_conference_sources(shipped):
         assert src["max_items_per_run"] == 40 and src["rows"] == 200 and src["max_pages"] == 5
         assert "keywords" not in src  # defaults to prefilter.allow_keywords in the source
     assert by_name["conf_esmo_abstracts"]["enabled"] is False
+    assert by_name["conf_asgct_abstracts"]["enabled"] is False
     assert "enabled" not in by_name["conf_asco_abstracts"]
     news = by_name["conf_aacr_news"]
     assert news["type"] == "rss" and news["url"].startswith("https://www.aacr.org/")
