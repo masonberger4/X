@@ -15,7 +15,7 @@ enabled flag come from <code>config.yaml</code>; edit it on disk, not here.</p>
     <td>{{ r.fetched }}</td>
     <td>{{ r.inserted }}</td>
   </tr>
-  {% if r.error %}<tr><td></td><td colspan="5" class="low">{{ r.error }}</td></tr>{% endif %}
+  {% if r.error %}<tr><td></td><td colspan="5" class="low wrap">{{ r.error }}</td></tr>{% endif %}
   {% endfor %}
 </table>
 {% endblock %}

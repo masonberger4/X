@@ -340,6 +340,10 @@ _GENERATED = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
 
 def _adopt_queue_routes() -> None:
+    # The queue's routes render with the queue's own template env; tell it the panel's
+    # links belong in the nav (run_queue.py never imports this module, so alone it stays
+    # False).
+    queue_app.templates.env.globals["HAS_PANEL"] = True
     have = {getattr(r, "path", None) for r in app.router.routes}
     for route in queue_app.app.router.routes:
         path = getattr(route, "path", None)

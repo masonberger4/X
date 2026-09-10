@@ -55,9 +55,7 @@ class BiorxivSource(Source):
         server = self.cfg.get("server", "biorxiv")
         url = f"{self.cfg['api_url'].rstrip('/')}/{server}/{start}/{end}/{cursor}"
         params = {"category": self.cfg["category"]} if self.cfg.get("category") else None
-        return http.get_json(
-            url, params=params, user_agent=(self.global_cfg.get("http") or {}).get("user_agent")
-        )
+        return http.get_json(url, params=params, user_agent=self.user_agent())
 
     def fetch(self) -> list[Item]:
         server = self.cfg.get("server", "biorxiv")

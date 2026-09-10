@@ -185,6 +185,10 @@ sources:
   - name: clinicaltrials_oncology
     type: clinicaltrials
     url: https://clinicaltrials.gov/api/v2/studies
+    # ClinicalTrials.gov's firewall returns 403 to a Python client whose agent string
+    # claims to be a browser (the global http.user_agent) or is unrecognised; it accepts
+    # one that names the library it really is. Keep the python-httpx/ token.
+    user_agent: "python-httpx/0.28 cancer-news-pipeline/0.1"
     cadence_minutes: 360
     lookback_days: 2
     page_size: 100

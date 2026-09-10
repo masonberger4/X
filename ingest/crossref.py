@@ -195,9 +195,7 @@ class CrossrefSource(Source):
 
     def fetch_page(self, params: dict[str, Any]) -> dict[str, Any]:
         url = self.cfg.get("api_url") or self._crossref_cfg().get("api_url") or DEFAULT_API_URL
-        return http.get_json(
-            url, params=params, user_agent=(self.global_cfg.get("http") or {}).get("user_agent")
-        )
+        return http.get_json(url, params=params, user_agent=self.user_agent())
 
     def fetch(self) -> list[Item]:
         works: list[dict[str, Any]] = []

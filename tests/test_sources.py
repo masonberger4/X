@@ -165,3 +165,45 @@ def test_fda_oce_fails_soft(monkeypatch):
         http, "get_text", lambda url, **kw: "<html><body><p>nothing</p></body></html>"
     )
     assert src.fetch() == []
+
+
+def test_a_source_user_agent_overrides_the_global_one_and_falls_back():
+    from ingest.clinicaltrials import ClinicalTrialsSource
+
+    base = {
+        "name": "ct",
+        "type": "clinicaltrials",
+        "url": "https://clinicaltrials.gov/api/v2/studies",
+    }
+    assert ClinicalTrialsSource(base, GLOBAL).user_agent() == "test"
+    own = ClinicalTrialsSource({**base, "user_agent": "python-httpx/0.28 x/1"}, GLOBAL)
+    assert own.user_agent() == "python-httpx/0.28 x/1"
+    assert ClinicalTrialsSource(base, {}).user_agent() is None
+
+
+def test_fetch_page_sends_the_source_user_agent(monkeypatch):
+    from ingest import http
+    from ingest.clinicaltrials import ClinicalTrialsSource
+
+    seen = {}
+
+    def fake_get_json(url, *, params=None, user_agent=None, timeout=30.0):
+        seen["ua"] = user_agent
+        return {"studies": []}
+
+    monkeypatch.setattr(http, "get_json", fake_get_json)
+    src = ClinicalTrialsSource(
+        {"name": "ct", "type": "clinicaltrials", "url": "u", "user_agent": "python-httpx/0.28 p/1"},
+        GLOBAL,
+    )
+    src.fetch_page({})
+    assert seen["ua"] == "python-httpx/0.28 p/1"
+
+
+def test_the_shipped_clinicaltrials_source_names_the_python_client():
+    """ClinicalTrials.gov's firewall blocks a Python client that claims to be a browser."""
+    import config
+
+    cfg = config.load_config()
+    ct = next(s for s in cfg["sources"] if s["type"] == "clinicaltrials")
+    assert "python-httpx/" in ct.get("user_agent", "")
