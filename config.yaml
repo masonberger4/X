@@ -15,10 +15,12 @@ models:
   # mechanism and sponsor knowledge (Haiku misidentified a T-cell engager as a
   # menin inhibitor). Opus 5 on the claude_code backend; use claude-haiku-4-5
   # to cut cost on the API backend.
-  scorer: claude-opus-5
+  scorer: claude-fable-5-1
+  scorer_effort: low              # low | medium | high | xhigh | max; blank = model default
   # Drafting writes the posts the account is judged on. DRAFT_MODEL in .env
   # overrides this; leave that blank to use this value.
-  drafter: claude-opus-5
+  drafter: claude-fable-5-1
+  drafter_effort: low
   # Optional second opinion for `digest.py --auto-rate`: a stronger model rates
   # each digest entry 1-5 the way the human does with --rate. Stored with
   # rater='auto:<model>' so it never masquerades as a human decision.
@@ -45,7 +47,7 @@ scoring:
   backoff_seconds: 2              # base for exponential backoff
   # Fable/Mythos models reject forced tool_choice; set false to fall back to
   # "auto" + a prompt instruction for those models.
-  force_tool_choice: true
+  force_tool_choice: false
   abstract_max_chars: 2500        # truncate abstracts sent to the model
 
 prefilter:

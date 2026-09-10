@@ -74,6 +74,9 @@ class Scorer:
     def __init__(self, cfg: dict[str, Any], client: anthropic.Anthropic | None = None):
         self.cfg = cfg
         self.model: str = cfg["models"]["scorer"]
+        self.effort: str | None = (
+            str(cfg["models"].get("scorer_effort") or "").strip().lower() or None
+        )
         sc = cfg.get("scoring") or {}
         self.batch_size = int(sc.get("batch_size", 10))
         self.max_tokens = int(sc.get("max_tokens", 4096))
@@ -104,6 +107,8 @@ class Scorer:
         )
         if self.force_tool_choice:
             kwargs["tool_choice"] = {"type": "tool", "name": rubric.TOOL_NAME}
+        if self.effort:
+            kwargs["output_config"] = {"effort": self.effort}
         return self.client.messages.create(**kwargs)
 
     def headless_system_prompt(self) -> str:
@@ -116,7 +121,11 @@ class Scorer:
         checked here. A malformed reply is a ScoringError (not retried: the batch is logged
         and skipped); a CLI failure is a ClaudeCliError (retried like an API error)."""
         text = claude_cli.run_claude(
-            user_content, system=self.headless_system_prompt(), model=self.model, cfg=self.cfg
+            user_content,
+            system=self.headless_system_prompt(),
+            model=self.model,
+            cfg=self.cfg,
+            effort=self.effort,
         )
         try:
             data = _parse_json_object(text)
@@ -132,6 +141,8 @@ class Scorer:
                 return self.create_message(user_content)
             except claude_cli.ClaudeCliUnavailable:
                 raise  # not installed / cannot start: retrying cannot help
+            except claude_cli.ClaudeCliRefused:
+                raise  # safeguard verdict: the same prompt is refused every time
             except RETRYABLE as exc:
                 if attempt >= self.max_retries:
                     raise
@@ -220,6 +231,28 @@ class Scorer:
             )
         return out
 
+    def score_batch_splitting(self, db: Database, clusters: list[Cluster]) -> list[Score]:
+        """score_batch, but a safeguard refusal splits the batch in half and scores each
+        half on its own (a fresh CLI call, so a fresh session). The refusal is triggered by
+        the accumulation of biology topics in one prompt, so smaller prompts pass; a single
+        cluster that is still refused is logged and left unscored for the next run."""
+        try:
+            return self.score_batch(db, clusters)
+        except claude_cli.ClaudeCliRefused as exc:
+            if len(clusters) == 1:
+                log.error("cluster %s refused by safeguards; skipping: %s", clusters[0].id, exc)
+                return []
+            half = len(clusters) // 2
+            log.warning(
+                "batch of %d refused by safeguards; splitting into %d + %d",
+                len(clusters),
+                half,
+                len(clusters) - half,
+            )
+            out = self.score_batch_splitting(db, clusters[:half])
+            out.extend(self.score_batch_splitting(db, clusters[half:]))
+            return out
+
     def score_unscored(self, db: Database, limit: int | None = None) -> list[Score]:
         clusters = db.unscored_clusters(self.model, rubric.PROMPT_VERSION)
         if limit is not None:
@@ -243,7 +276,7 @@ class Scorer:
                 len(batch),
             )
             try:
-                got = self.score_batch(db, batch)
+                got = self.score_batch_splitting(db, batch)
                 scores.extend(got)
                 log.info(
                     "batch %d/%d: scored %d of %d clusters in %.0fs",

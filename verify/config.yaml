@@ -1,6 +1,6 @@
 # Claim verification settings (step 2b). Read by verify/settings.py.
-model: claude-opus-5          # the verifier: web search on, one call per claim
-effort: medium
+model: claude-fable-5-1       # the verifier: web search on, one call per claim
+effort: low
 max_claims_per_draft: 6       # extra claims stay "unchecked" and are listed as such
 max_searches_per_claim: 5     # web_search max_uses on the API backend
 timeout_seconds: 240          # per claim, claude_code backend
