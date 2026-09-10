@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -24,6 +26,13 @@ SKIP_DISABLED = "disabled"
 SKIP_NOT_MERGED = "not merged"
 SKIP_UPSTREAM = "upstream failed"
 SKIP_DRY_RUN = "dry run"
+SKIP_CANCELLED = "cancelled"
+
+# Live children of this process, so a caller (the control panel's Stop button, or the
+# desktop app closing) can end a run: each step's process and everything it launched.
+_ACTIVE: set[subprocess.Popen] = set()
+_ACTIVE_LOCK = threading.Lock()
+_STOP = threading.Event()
 
 
 @dataclass
@@ -132,12 +141,17 @@ def run_steps(
     child_env = None if env is None else {**os.environ, **env}
     results: list[StepResult] = []
     upstream_failed = False
+    _STOP.clear()
 
     for step in steps:
         if selected is not None and step.name not in selected:
             continue
         argv = resolve_argv(step.argv, python)
         now = _now()
+        if _STOP.is_set():
+            log.warning("step %s: skipped, the run was stopped", step.name)
+            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_CANCELLED))
+            continue
         if not step.enabled:
             log.info("step %s: disabled, skipping", step.name)
             results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DISABLED))
@@ -178,6 +192,42 @@ def no_window_kwargs() -> dict[str, int]:
     return {}
 
 
+def _own_group_kwargs() -> dict[str, bool]:
+    """Start each step in its own process group (POSIX) so killing it takes its children
+    (the claude CLI, for one) with it. Windows uses taskkill /T for the same effect."""
+    return {} if sys.platform == "win32" else {"start_new_session": True}
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """End a step and everything it launched."""
+    if proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+            check=False,
+            **no_window_kwargs(),
+        )
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+
+
+def terminate_active() -> int:
+    """Stop the run in progress: kill every live step (and its children) and make
+    run_steps skip whatever steps remain. Returns how many processes were ended."""
+    _STOP.set()
+    with _ACTIVE_LOCK:
+        procs = list(_ACTIVE)
+    for proc in procs:
+        log.warning("stopping step process %s", proc.pid)
+        _kill_tree(proc)
+    return len(procs)
+
+
 def _run_one(
     step: Step, argv: list[str], cwd: Path, env: dict[str, str] | None, tail_chars: int
 ) -> StepResult:
@@ -187,24 +237,35 @@ def _run_one(
     timed_out = False
     exit_code: int | None = None
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             argv,
             cwd=str(cwd),
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=step.timeout_seconds,
-            check=False,
+            **_own_group_kwargs(),
             **no_window_kwargs(),
         )
-        exit_code = proc.returncode
-        stdout, stderr = proc.stdout, proc.stderr
-    except subprocess.TimeoutExpired as exc:  # subprocess.run kills the child for us
-        timed_out = True
-        stdout, stderr = exc.stdout, exc.stderr
     except OSError as exc:  # interpreter/script not executable etc.
         exit_code = 127
         stdout, stderr = "", f"{type(exc).__name__}: {exc}"
+    else:
+        with _ACTIVE_LOCK:
+            _ACTIVE.add(proc)
+        try:
+            try:
+                stdout, stderr = proc.communicate(timeout=step.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                _kill_tree(proc)
+                stdout, stderr = proc.communicate()
+        finally:
+            with _ACTIVE_LOCK:
+                _ACTIVE.discard(proc)
+        # A timed-out step records no exit code (it was killed); the status page shows
+        # "timed out" instead. A stopped run's step keeps its (kill) code: it did fail.
+        exit_code = None if timed_out else proc.returncode
     finished = _now()
     duration = time.monotonic() - t0
     result = StepResult(

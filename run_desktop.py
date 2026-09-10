@@ -3,8 +3,9 @@
 Usage: pythonw run_desktop.py [--host 127.0.0.1] [--port 0] [--no-window]
 
 Starts the same server run_app.py starts, then opens it in a native window (pywebview:
-Edge on Windows). Closing the window stops the server. --port 0 (the default) picks a
-free port, so it never clashes with a run_app.py already on 8000; give a fixed --port
+Edge on Windows). Closing the window stops the server and any run in progress. --port 0
+(the default) picks a free port, so it never clashes with a run_app.py already on 8000;
+give a fixed --port
 and --host 0.0.0.0 to reach the same window from a phone (HOWTO part 8). --no-window
 starts the server, prints its address and waits: for a headless check, or to open the
 page in a second browser as well.
@@ -135,9 +136,19 @@ def main(argv: list[str] | None = None) -> int:
         else:
             open_window(url)
     finally:
+        stop_run()
         server.should_exit = True
         thread.join(timeout=5)
     return 0
+
+
+def stop_run() -> None:
+    """Closing the window must not leave a step (and the claude CLI it launches) running
+    on its own; the operator would keep seeing its windows with no way to stop it."""
+    from panel.app import JOBS
+
+    if JOBS.cancel("stopped: the app was closed"):
+        log.info("a run was in progress; its step was stopped")
 
 
 if __name__ == "__main__":

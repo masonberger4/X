@@ -29,6 +29,7 @@ STATE_RUNNING = "running"
 STATE_DONE = "done"
 STATE_LOCKED = "locked"
 STATE_ERROR = "error"
+STATE_STOPPED = "stopped"
 
 # Refused before anything is spawned, however the config got that way. ops/config.yaml
 # must never carry the publisher's live flag (a step 5 test asserts it); this is the
@@ -49,6 +50,7 @@ class Job:
     state: str = STATE_RUNNING
     results: list[StepResult] = field(default_factory=list)
     error: str | None = None
+    stopping: str | None = None  # set by cancel(); the finished job becomes STATE_STOPPED
 
     @property
     def running(self) -> bool:
@@ -108,6 +110,17 @@ class JobManager:
             jobs = ([self._current] if self._current else []) + self._history
         return jobs
 
+    def cancel(self, reason: str = "stopped by the operator") -> bool:
+        """End the run in progress: the live step and everything it launched are killed,
+        the remaining steps are skipped, and the job records why. False if none running."""
+        with self._mutex:
+            job = self._current
+            if job is None or not job.running:
+                return False
+            job.stopping = reason
+        runner.terminate_active()
+        return True
+
     # -- starting ----------------------------------------------------------
 
     def start(self, step_names: list[str]) -> Job:
@@ -145,7 +158,10 @@ class JobManager:
             job.error = f"{type(exc).__name__}: {exc}"
         finally:
             job.finished_at = _now()
-            if job.state == STATE_RUNNING:
+            if job.stopping and job.state == STATE_RUNNING:
+                job.state = STATE_STOPPED
+                job.error = job.stopping
+            elif job.state == STATE_RUNNING:
                 job.state = STATE_DONE
             with self._mutex:
                 self._history.insert(0, job)

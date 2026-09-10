@@ -125,3 +125,17 @@ def test_a_long_source_error_wraps_instead_of_widening_the_table(client, conn):
     body = client.get("/sources").text
     cell = body.split("403 Forbidden")[0].rsplit("<td", 1)[1]
     assert "wrap" in cell
+
+
+def test_the_runs_page_offers_stop_while_running_and_the_route_cancels(client, monkeypatch):
+    from panel.jobs import Job
+
+    running = Job(id="abc", steps=["ingest"], started_at=panel_app._now())
+    monkeypatch.setattr(panel_app.JOBS, "history", lambda: [running])
+    body = client.get("/runs/current").text
+    assert 'action="/runs/cancel"' in body and "Stop this run" in body
+
+    called = {}
+    monkeypatch.setattr(panel_app.JOBS, "cancel", lambda *a: called.setdefault("yes", True))
+    r = client.post("/runs/cancel")
+    assert r.status_code == 303 and r.headers["location"] == "/runs" and called["yes"]

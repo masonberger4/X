@@ -152,16 +152,21 @@ def test_steps_are_launched_without_a_console_window(monkeypatch, tmp_path):
     seen = {}
 
     class Done:
+        pid = 1
         returncode = 0
-        stdout = ""
-        stderr = ""
 
-    def fake_run(argv, **kwargs):
+        def communicate(self, timeout=None):
+            return "", ""
+
+        def poll(self):
+            return 0
+
+    def fake_popen(argv, **kwargs):
         seen["kwargs"] = kwargs
         return Done()
 
     monkeypatch.setattr(runner, "no_window_kwargs", lambda: {"creationflags": 7})
-    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    monkeypatch.setattr(runner.subprocess, "Popen", fake_popen)
     step = runner.Step("s", ["python", "-c", "pass"])
     result = runner._run_one(step, ["python", "-c", "pass"], tmp_path, None, 100)
     assert result.ok and seen["kwargs"]["creationflags"] == 7
@@ -173,3 +178,64 @@ def test_no_window_kwargs_only_on_windows(monkeypatch):
     monkeypatch.setattr(runner.sys, "platform", "win32")
     monkeypatch.setattr(runner.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     assert runner.no_window_kwargs() == {"creationflags": 0x08000000}
+
+
+def test_terminate_active_kills_a_running_step_and_its_children(tmp_path):
+    """A step that spawns a grandchild (as a step spawning the claude CLI does) is ended
+    as a tree, and the steps after it are skipped as cancelled."""
+    import threading
+    import time
+
+    marker = tmp_path / "grandchild.pid"
+    code = (
+        "import subprocess, sys, time, pathlib\n"
+        f"p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(p.pid))\n"
+        "time.sleep(60)\n"
+    )
+    steps = [
+        Step("slow", [sys.executable, "-c", code], timeout_seconds=60),
+        Step("after", [sys.executable, "-c", "print('should not run')"]),
+    ]
+    results: list = []
+    t = threading.Thread(target=lambda: results.extend(run_steps(steps, cwd=tmp_path)))
+    t.start()
+    deadline = time.monotonic() + 10
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert marker.exists(), "the step never started its grandchild"
+    grandchild = int(marker.read_text())
+
+    assert runner.terminate_active() == 1
+    t.join(timeout=10)
+    assert not t.is_alive()
+    assert results[0].name == "slow" and results[0].failed and not results[0].timed_out
+    assert results[1].skipped_reason == runner.SKIP_CANCELLED
+
+    import os
+    import signal
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            break
+        # reaped-but-zombie children of a killed group show up as alive; give them a beat
+        time.sleep(0.05)
+    else:
+        try:
+            os.kill(grandchild, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        raise AssertionError("the grandchild survived terminate_active")
+
+
+def test_terminate_active_with_nothing_running_is_harmless():
+    assert runner.terminate_active() == 0
+
+
+def test_a_new_run_clears_a_previous_stop(tmp_path):
+    runner.terminate_active()
+    (res,) = run_steps([Step("ok", [sys.executable, "-c", "print(1)"])], cwd=tmp_path)
+    assert res.ok

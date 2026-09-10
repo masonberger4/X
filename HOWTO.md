@@ -301,6 +301,9 @@ to stop it. Four pages:
   steps". The log appears on the page as it finishes. This runs exactly what
   the scheduler in part 6 runs; if the scheduler happens to be running at
   that moment the page says so and does nothing, rather than running twice.
+  While a run is going there is a "Stop this run" button: it ends the
+  current step (and anything it started, such as the Claude window) and
+  skips the rest. Nothing is lost; the next run picks up where it left off.
 - **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
   approval pages from part 3, unchanged.
 
@@ -325,7 +328,9 @@ Two levels. The first needs nothing built.
 pythonw run_desktop.py
 ```
 `pythonw` (with the w) is the copy of Python that opens no command prompt.
-The control panel opens in its own window; close the window to stop it. It
+The control panel opens in its own window; close the window to stop it. If
+a run is in progress when you close the window, it is stopped too, the
+same as the Stop button. It
 picks a free port each time so it never clashes with a `run_app.py` you
 also have open; add `--port 8000 --host 0.0.0.0` if the phone should reach
 the same window. To put it on the desktop, right-click the desktop, New >
@@ -401,6 +406,7 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | `clinicaltrials_oncology` says `403 Forbidden` | ClinicalTrials.gov blocks a Python program that calls itself a browser. Its entry in `config.yaml` has its own `user_agent` starting with `python-httpx/` for that reason; if the line was removed, put it back |
 | Want a completely fresh start | delete `pipeline.db`, then `python run_ingest.py --force` |
 | The dashboard says `missing env: ANTHROPIC_API_KEY` but you use the Claude Code backend | it should not since the check follows `LLM_BACKEND`; make sure `.env` is in the folder you start `run_app.py` from |
+| A step keeps running after you closed the app (a `claude` window keeps reopening) | that was the behaviour before the Stop button; on an old checkout, `taskkill /F /IM pythonw.exe` ends it (or `python.exe` if you started the app from a command prompt) |
 | The control panel says a run is already in progress | the scheduler (part 6) is mid-run; wait for it and press the button again |
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
 | `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |

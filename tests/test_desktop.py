@@ -183,3 +183,14 @@ def test_no_window_does_not_need_pywebview(monkeypatch, db_file):
     monkeypatch.setattr(run_desktop, "window_available", lambda: False)
     monkeypatch.setattr(run_desktop, "wait_forever", lambda thread: None)
     assert run_desktop.main(["--no-window"]) == 0
+
+
+def test_closing_the_window_stops_a_run_in_progress(db_file, monkeypatch):
+    from panel import app as panel_app
+
+    cancelled = {}
+    monkeypatch.setattr(run_desktop, "window_available", lambda: True)
+    monkeypatch.setattr(run_desktop, "open_window", lambda url: None)
+    monkeypatch.setattr(panel_app.JOBS, "cancel", lambda reason: cancelled.setdefault("r", reason))
+    assert run_desktop.main(["--port", "0"]) == 0
+    assert "closed" in cancelled["r"]
