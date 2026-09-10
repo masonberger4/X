@@ -133,13 +133,28 @@ source only when it is due, and score only scores what is new.
    Then open http://localhost:8000/queue in a browser (the front page is the
    dashboard; part 8 explains it). `python run_queue.py` still opens the
    approval page on its own if that is all you want. For each draft: approve,
-   edit, reject or snooze. When you edit or reject, pick a reason (voice,
-   factual, not newsworthy, hard rule, other). Press Ctrl+C in the window to
-   stop the server when done.
+   revise, reject or snooze. Press Ctrl+C in the window to stop the server
+   when done.
+   To change a post, do not retype it: write what should change in the
+   "what should change?" box (on the list next to each draft, or under
+   "Revise" on the draft's page) and press Revise. The drafter rewrites the
+   post from your note, keeps the rest as it was, the hard rules are checked
+   again in code, and the draft comes back to you still pending with a
+   before/after diff in its history. It takes a few seconds. If the model
+   cannot produce a valid rewrite the draft is left untouched and the page
+   says why. Pick a reason (voice, factual, not newsworthy, hard rule, other)
+   when you revise or reject; your notes feed the voice report. "Edit by hand"
+   is still there, folded away, for a one-word fix.
    Under "Claims to verify" each claim shows its verdict, the source link and
    the quoted sentence. Open the link and read the sentence before approving;
    the verdict is a lead, the link is the proof. A contradicted claim blocks
-   Approve until you edit the draft or tick "approve anyway".
+   Approve until the draft is revised or you tick "approve anyway". Every
+   revision also hands the drafter each claim that was contradicted (to
+   correct or remove, using the fact-checker's note and quote) or could not
+   be verified (to soften or drop), so pressing Revise with an empty box
+   fixes the failed claims on their own. A revised draft's old verdicts are
+   discarded; the next `run_verify.py` (or the scheduler) checks the new
+   claims.
 4. After a couple of weeks, see what your edits are asking for and paste the
    suggestions you agree with into `draft\voice.md`.
    ```

@@ -86,3 +86,38 @@ def test_examples_block_sits_after_voice_guide_and_before_hard_rules():
     assert system.index(HARD_RULES) < system.index('"single_post"')
     # everything outside the block is unchanged
     assert system.replace(block + "\n\n", "") == _pre_step7_system_prompt()
+
+
+def test_revision_prompt_carries_draft_instructions_and_claim_failures():
+    from draft.prompt import ClaimProblem, build_revision_user_prompt, build_user_prompt
+
+    base = build_user_prompt(title="T", abstract="ORR 88%", url="https://x/1", source="pubmed")
+    user = build_revision_user_prompt(
+        base_user_prompt=base,
+        current={"single_post": "old post", "thread": ["a", "b", "c"]},
+        instructions="drop the hype",
+        claim_problems=[
+            ClaimProblem(
+                "Trial has 200 patients", "contradicted", note="it has 97", quote="97 patients"
+            ),
+            ClaimProblem("Readout in Q4", "unverified"),
+        ],
+    )
+    assert "Draft the single_post and the thread now" not in user
+    assert "REVISING" in user
+    assert "ABSTRACT:\nORR 88%" in user
+    assert '"single_post": "old post"' in user
+    assert "EDITOR INSTRUCTIONS" in user and "drop the hype" in user
+    assert "FACT-CHECK FAILURES" in user and "Trial has 200 patients" in user
+    assert "NOTE: it has 97" in user and 'SOURCE SAYS: "97 patients"' in user
+    assert "UNVERIFIED CLAIMS" in user and "Readout in Q4" in user
+    assert user.index("FACT-CHECK FAILURES") < user.index("UNVERIFIED CLAIMS")
+
+
+def test_revision_prompt_without_claims_has_no_fact_check_sections():
+    from draft.prompt import build_revision_user_prompt
+
+    user = build_revision_user_prompt(
+        base_user_prompt="brief", current={"single_post": "p"}, instructions="shorter"
+    )
+    assert "FACT-CHECK" not in user and "UNVERIFIED" not in user

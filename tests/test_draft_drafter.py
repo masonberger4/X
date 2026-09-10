@@ -366,3 +366,73 @@ def test_draft_item_retries_with_the_violation_in_the_prompt():
     assert result.attempts == 2
     assert "PREVIOUS ATTEMPT" not in seen[0]
     assert "thread[0] is 281 chars" in seen[1]
+
+
+# --- revise_item ----------------------------------------------------------------
+
+
+def _current():
+    return validate_output(good_json())
+
+
+def test_revise_item_sends_current_draft_and_instructions(monkeypatch):
+    from draft.drafter import revise_item
+    from draft.prompt import ClaimProblem
+
+    call = fake_call([good_json(single_post=f"Shorter. ORR 88%. {URL}")])
+    res = revise_item(
+        current=_current(),
+        instructions="make the single post shorter",
+        claim_problems=[ClaimProblem("myeloma readout was in 2023", "contradicted", note="2024")],
+        title="CAR-T in myeloma",
+        abstract=ABSTRACT,
+        url=URL,
+        source="pubmed",
+        model="m",
+        call=call,
+        sleep=lambda s: None,
+    )
+    assert res.draft.single_post.startswith("Shorter.")
+    system, user, model = call.calls[0]
+    assert model == "m"
+    assert "HARD RULES" in system
+    assert "make the single post shorter" in user
+    assert "myeloma readout was in 2023" in user
+    assert good_json()["single_post"] in user  # the current draft is shown
+    assert ABSTRACT in user
+
+
+def test_revise_item_still_enforces_hard_rules():
+    from draft.drafter import revise_item
+
+    bad = good_json(single_post="Investors should buy the stock now. " + URL)
+    good = good_json()
+    call = fake_call([bad, good])
+    res = revise_item(
+        current=_current(),
+        instructions="x",
+        title="t",
+        abstract=ABSTRACT,
+        url=URL,
+        source="pubmed",
+        model="m",
+        call=call,
+        sleep=lambda s: None,
+    )
+    assert res.attempts == 2
+    assert "investment advice" in call.calls[1][1]
+
+
+def test_revise_item_rejects_after_all_attempts_and_needs_something_to_do():
+    from draft.drafter import revise_item
+
+    bad = good_json(single_post="Ask your doctor. " + URL)
+    kw = dict(
+        title="t", abstract=ABSTRACT, url=URL, source="pubmed", model="m", sleep=lambda s: None
+    )
+    with pytest.raises(DraftRejected):
+        revise_item(
+            current=_current(), instructions="x", call=fake_call([bad] * 4), max_attempts=4, **kw
+        )
+    with pytest.raises(ValueError):
+        revise_item(current=_current(), instructions="  ", call=fake_call([]), **kw)

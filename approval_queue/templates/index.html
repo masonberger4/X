@@ -2,7 +2,7 @@
 {% block title %}{{ status|capitalize }} drafts{% endblock %}
 {% block content %}
 <h1>{{ status|capitalize }} drafts <span class="meta">({{ drafts|length }})</span></h1>
-<p class="meta">Your edits and rejection reasons teach the drafter: see the <a href="/voice">voice report</a>.</p>
+<p class="meta">Tell the drafter what to change and it rewrites the post; open a draft for the full text, claims and approve buttons. Your notes and rejection reasons teach the drafter: see the <a href="/voice">voice report</a>.</p>
 {% if not drafts %}
   <p class="meta">Nothing here.</p>
 {% else %}
@@ -24,6 +24,12 @@
           {% if k.unverified %}<span class="badge">{{ k.unverified }} unverified</span>{% endif %}
           {% if k.unchecked %}<span class="badge">{{ k.unchecked }} unchecked</span>{% endif %}
         </div>{% endif %}
+        {% if status == "pending" %}
+        <form method="post" action="/drafts/{{ d.id }}/revise" class="revise">
+          <input name="instructions" placeholder="what should change?{% if k and (k.contradicted or k.unverified) %} (leave empty to fix the failed claims){% endif %}">
+          <button>Revise</button>
+        </form>
+        {% endif %}
       </td>
       <td class="meta">{{ d.rationale }}</td>
     </tr>

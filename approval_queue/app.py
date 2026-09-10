@@ -7,6 +7,9 @@ Routes:
   POST /drafts/{id}/approve   refused with 409 while a claim is contradicted, unless the
                               form carries override=1
   POST /drafts/{id}/edit      saves edited text (+ approves unless 'keep_pending' is set)
+  POST /drafts/{id}/revise    the drafter rewrites the draft from the form's 'instructions'
+                              and from every claim step 2b contradicted (or could not
+                              verify); the draft stays pending, old claim checks are dropped
   POST /drafts/{id}/reject
   POST /drafts/{id}/snooze    hides the draft for 24h
   GET  /status/{status}       approved / rejected / snoozed / failed lists
@@ -26,15 +29,16 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from approval_queue import store
+from draft import drafter
 from draft.examples import parse_decision_text
-from draft.prompt import VOICE_PATH
+from draft.prompt import VOICE_PATH, ClaimProblem
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.settings import load_draft_config
 from draft.voice_report import build_report
@@ -119,7 +123,11 @@ def _decision_views(decisions: list[store.sqlite3.Row]) -> list[dict]:
         keys = x.keys()
         edited = x["edited_text"] if "edited_text" in keys else None
         diff = None
-        if x["action"] == store.ACTION_EDIT and edited and edited != x["original_text"]:
+        if (
+            x["action"] in (store.ACTION_EDIT, store.ACTION_REVISE)
+            and edited
+            and edited != x["original_text"]
+        ):
             diff = decision_diff(x["original_text"], edited)
         views.append(
             {
@@ -179,7 +187,7 @@ def by_status(status: str, request: Request, conn: Conn):
 
 
 @app.get("/drafts/{draft_id}", response_class=HTMLResponse)
-def detail(draft_id: int, request: Request, conn: Conn):
+def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised: int = 0):
     row = store.get_draft(conn, draft_id)
     if row is None:
         raise HTTPException(404, "no such draft")
@@ -194,8 +202,30 @@ def detail(draft_id: int, request: Request, conn: Conn):
             "thread_text": "\n---\n".join(row.draft.thread),
             "checks": checks,
             "contradicted": any(c.verdict == "contradicted" for c in checks.values()),
+            "claim_problems": len(claim_problems(checks.values())),
+            "error": error,
+            "revised": bool(revised),
         },
     )
+
+
+def claim_problems(checks) -> list[ClaimProblem]:
+    """The step 2b verdicts a revision must fix: contradicted claims, plus unverified ones
+    the model is told to soften or drop. Supported claims are left alone."""
+    out: list[ClaimProblem] = []
+    for c in checks:
+        if c.verdict == "supported":
+            continue
+        out.append(
+            ClaimProblem(
+                claim=c.claim,
+                verdict=c.verdict,
+                note=c.note,
+                quote=c.quote,
+                source_url=c.source_url,
+            )
+        )
+    return out
 
 
 @app.get("/voice", response_class=HTMLResponse)
@@ -264,6 +294,69 @@ async def edit(draft_id: int, request: Request, conn: Conn):
     if "keep_pending" in form:
         return RedirectResponse(f"/drafts/{draft_id}", status_code=303)
     return _redirect_home()
+
+
+@app.post("/drafts/{draft_id}/revise")
+async def revise(draft_id: int, request: Request, conn: Conn):
+    """Send the draft back through the drafter with the human's instructions. Claims that
+    step 2b contradicted (or could not verify) are always included, so a draft can be
+    revised with an empty instruction box just to fix its fact-check failures. On success
+    the draft is replaced, stays pending, and its claim checks are dropped so run_verify
+    checks the new claims; on failure nothing changes and the detail page shows why."""
+    form = await read_form(request)
+    row = store.get_draft(conn, draft_id)
+    if row is None:
+        raise HTTPException(404, "no such draft")
+    instructions = form.get("instructions", "").strip() or None
+    problems = claim_problems(verify_store.checks_for_draft(conn, draft_id))
+    if not instructions and not problems:
+        return _detail_redirect(
+            draft_id, error="say what should change, or run the claim check first"
+        )
+    category = _category(form)
+    try:
+        result = drafter.revise_item(
+            current=row.draft,
+            instructions=instructions,
+            claim_problems=problems,
+            title=row.title,
+            abstract=row.abstract,
+            url=row.url,
+            source=row.source,
+            suggested_angle=row.suggested_angle or None,
+            rationale=row.rationale or None,
+            # Looked up at call time so tests can monkeypatch draft.drafter.call_anthropic.
+            call=drafter.call_anthropic,
+        )
+    except drafter.DraftRejected as exc:
+        log.warning("draft %d: revision broke a hard rule: %s", draft_id, exc)
+        return _detail_redirect(draft_id, error=f"the revision broke a hard rule: {exc}")
+    except Exception as exc:  # API / network errors: keep the draft as it was
+        log.error("draft %d: revision failed: %s", draft_id, exc)
+        return _detail_redirect(draft_id, error=f"revision failed: {exc}")
+    note = instructions
+    if problems and not note:
+        note = "fix fact-check failures"
+    store.revise(
+        conn, draft_id, draft=result.draft, model=result.model, note=note, category=category
+    )
+    verify_store.delete_checks(conn, draft_id)
+    log.info(
+        "draft %d revised (%d attempt(s), %d claim problem(s))",
+        draft_id,
+        result.attempts,
+        len(problems),
+    )
+    return _detail_redirect(draft_id, revised=True)
+
+
+def _detail_redirect(draft_id: int, *, error: str = "", revised: bool = False) -> RedirectResponse:
+    url = f"/drafts/{draft_id}"
+    if error:
+        url += f"?error={quote(error)}"
+    elif revised:
+        url += "?revised=1"
+    return RedirectResponse(url, status_code=303)
 
 
 @app.post("/drafts/{draft_id}/reject")

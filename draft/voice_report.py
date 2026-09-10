@@ -27,6 +27,7 @@ from typing import Any
 from draft.examples import (
     ACTION_EDIT,
     ACTION_REJECT,
+    ACTION_REVISE,
     EditExample,
     _field,
     format_examples_block,
@@ -405,7 +406,7 @@ def build_report(
     notes = [
         str(_field(r, "note", "") or "")
         for r in decisions
-        if _field(r, "action") in (ACTION_EDIT, ACTION_REJECT) and _field(r, "note")
+        if _field(r, "action") in (ACTION_EDIT, ACTION_REJECT, ACTION_REVISE) and _field(r, "note")
     ]
     proposals = _proposals(
         deleted_phrases=_deleted_phrases(edits, stopwords),
