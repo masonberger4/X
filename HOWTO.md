@@ -414,7 +414,9 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 
 ## Changing settings
 
-Everything lives in `config.yaml` (sources, keywords, models, caps),
+Everything lives in `config.yaml` (sources, keywords, models, caps; a source
+can set its own `min_abstract_chars` when its feed only carries a one-line
+summary, as the Fierce Biotech and BioPharma Dive entries do),
 `draft\config.yaml` (how human edits are reused), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules), `feedback\config.yaml`

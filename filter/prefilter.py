@@ -32,8 +32,12 @@ def cluster_text(items: list[Item]) -> tuple[str, str]:
     return title, abstract
 
 
-def check(title: str, abstract: str, cfg: dict[str, Any]) -> tuple[bool, str | None]:
-    """Return (passes, reason). Pure function so it is trivially testable."""
+def check(
+    title: str, abstract: str, cfg: dict[str, Any], min_chars: int | None = None
+) -> tuple[bool, str | None]:
+    """Return (passes, reason). Pure function so it is trivially testable.
+
+    `min_chars` overrides `cfg["min_abstract_chars"]` (a per-source floor)."""
     text = f"{title}\n{abstract}".lower()
     for kw in cfg.get("deny_keywords") or []:
         if kw.lower() in text:
@@ -41,7 +45,8 @@ def check(title: str, abstract: str, cfg: dict[str, Any]) -> tuple[bool, str | N
     allow = cfg.get("allow_keywords") or []
     if allow and not any(kw.lower() in text for kw in allow):
         return False, "no_allow_keyword"
-    min_chars = int(cfg.get("min_abstract_chars", 0))
+    if min_chars is None:
+        min_chars = int(cfg.get("min_abstract_chars", 0))
     if cfg.get("require_abstract", True) and len(abstract.strip()) < min_chars:
         return False, f"abstract<{min_chars}"
     return True, None
@@ -62,9 +67,37 @@ def _is_stale(cl: Any, now: datetime, max_age_days: int) -> bool:
     return (now - ref) > timedelta(days=max_age_days)
 
 
-def run_prefilter(db: Database, cfg: dict[str, Any], now: datetime | None = None) -> dict[str, int]:
+def source_min_chars(sources: list[dict[str, Any]]) -> dict[str, int]:
+    """source name -> its own `min_abstract_chars`, for sources that set one.
+
+    Trade-press feeds carry a one-line summary, not an abstract; a source may
+    lower the floor for its own items without loosening it for everyone else."""
+    return {
+        s["name"]: int(s["min_abstract_chars"])
+        for s in sources
+        if s.get("min_abstract_chars") is not None
+    }
+
+
+def cluster_min_chars(
+    items: list[Item], cfg: dict[str, Any], overrides: dict[str, int] | None
+) -> int:
+    """The lowest floor among the cluster's sources (default from cfg)."""
+    default = int(cfg.get("min_abstract_chars", 0))
+    if not overrides:
+        return default
+    return min((overrides.get(i.source, default) for i in items), default=default)
+
+
+def run_prefilter(
+    db: Database,
+    cfg: dict[str, Any],
+    now: datetime | None = None,
+    source_overrides: dict[str, int] | None = None,
+) -> dict[str, int]:
     """Prefilter every cluster with prefilter_status IS NULL. Returns counts by reason.
-    'deferred' clusters keep a NULL status and come back next run."""
+    'deferred' clusters keep a NULL status and come back next run.
+    `source_overrides` is `source_min_chars(cfg["sources"])`."""
     now = now or datetime.now(UTC)
     cap = int(cfg.get("daily_cap", 0) or 0)
     max_age_days = int(cfg.get("max_age_days", 7) or 0)
@@ -73,7 +106,7 @@ def run_prefilter(db: Database, cfg: dict[str, Any], now: datetime | None = None
     for cl in db.unprefiltered_clusters():
         items = db.items_in_cluster(cl.id)
         title, abstract = cluster_text(items) if items else (cl.title, "")
-        ok, reason = check(title, abstract, cfg)
+        ok, reason = check(title, abstract, cfg, cluster_min_chars(items, cfg, source_overrides))
         if ok and cap and passed_today >= cap:
             if _is_stale(cl, now, max_age_days):
                 ok, reason = False, "stale"
