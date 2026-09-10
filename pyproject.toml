@@ -53,6 +53,7 @@ select = ["E", "F", "I", "B", "UP"]
 "score/rubric.py" = ["E501"]  # prompt text and few-shot examples are long by nature
 "score/rater.py" = ["E501"]   # same: the rater's prompt text
 "verify/verifier.py" = ["E501"]  # same: the verifier's prompt text
+"filter/link.py" = ["E501"]  # same: the story linker's prompt text
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

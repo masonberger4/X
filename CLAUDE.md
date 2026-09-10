@@ -54,7 +54,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   429/5xx/transport errors and never logs headers),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
   (Anthropic), `draft/drafter.py:call_anthropic`, `score/rater.py:call_model`
-  (the `digest.py --auto-rate` second-opinion rater), `claude_cli.run_claude` (the
+  (the `digest.py --auto-rate` second-opinion rater, and the call behind
+  `filter/link.py` story linking), `claude_cli.run_claude` (the
   optional `models.backend: claude_code` path: the only place that spawns the
   Claude Code CLI; both Claude call sites route through it when selected, and
   the API stays the default), and `publish/client.py`
@@ -71,7 +72,13 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - **Dedup order:** exact `dedup_hash` (sha256 of normalized title+url) -> DOI
   match -> near-duplicate normalized title (`difflib`, cross-source only, with
   a differing-word guard). One cluster = one story; clusters keep the earliest
-  `published_at`.
+  `published_at`. **Story linking** (`filter/link.py`, run by `run_score.py`
+  after the prefilter, `--no-link` skips it): one call to `models.linker` over
+  the passed clusters of the last `linking.window_hours` (scored or not)
+  proposes same-event groups; code validates them (unknown ids, overlaps,
+  singletons dropped) and `db.merge_clusters` folds each group into the
+  cluster that already has a score, else the oldest, moving items, scores and
+  ratings. It never raises: a failed call is logged and scoring proceeds.
 - **Every score row stores** `model`, `prompt_version`
   (`score/rubric.py:PROMPT_VERSION`), and the raw API response. Bump
   `PROMPT_VERSION` whenever the prompt, few-shot examples, or tool schema
@@ -191,7 +198,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 ingest/   base.py (Item, Source ABC, windows), http.py (retry), rss.py,
           biorxiv.py, pubmed.py, clinicaltrials.py, fda_oce.py,
           crossref.py (conference abstracts), x_list.py (KOL list, read-only)
-filter/   prefilter.py, dedup.py
+filter/   prefilter.py, dedup.py, link.py (story linking: same-event groups -> one cluster)
 score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories),
           rater.py (second-opinion yes/no rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
