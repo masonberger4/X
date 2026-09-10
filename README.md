@@ -317,8 +317,8 @@ python run_ops.py status              # last run per step, last health, row coun
 python run_ops.py prune --days 90     # ops-owned tables only (pipeline_runs, health_checks, alerts_sent)
 ```
 
-Settings live in `ops/config.yaml` (step order, timeouts, health thresholds and
-budget caps, backup dir/keep, alert channels and cooldown). The `publish` step is
+Settings live in `ops/config.yaml` (step order, per-step `timeout_seconds` where 0 means
+no limit, as `verify` uses, health thresholds and budget caps, backup dir/keep, alert channels and cooldown). The `publish` step is
 disabled there and its argv is the dry-run default; enable it and add `--live`
 yourself, together with `PUBLISH_ENABLED=1`, after reading the publishing section
 above. Steps whose CLI has not merged yet are skipped with a warning.

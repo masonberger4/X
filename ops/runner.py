@@ -41,7 +41,11 @@ class Step:
     argv: list[str]
     enabled: bool = True
     required: bool = False
-    timeout_seconds: int = 600
+    timeout_seconds: int = 600  # 0 = no limit: the step runs until it exits or is stopped
+
+    @property
+    def wait_timeout(self) -> float | None:
+        return None if self.timeout_seconds <= 0 else float(self.timeout_seconds)
 
     @classmethod
     def from_config(cls, raw: dict[str, Any]) -> Step:
@@ -186,7 +190,12 @@ def run_steps(
             add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_NOT_MERGED))
             continue
         if dry_run:
-            log.info("step %s: would run %s (timeout %ss)", step.name, argv, step.timeout_seconds)
+            log.info(
+                "step %s: would run %s (timeout %s)",
+                step.name,
+                argv,
+                "none" if step.wait_timeout is None else f"{step.timeout_seconds}s",
+            )
             add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DRY_RUN))
             continue
 
@@ -334,7 +343,7 @@ def _run_one(
             t.start()
         try:
             try:
-                proc.wait(timeout=step.timeout_seconds)
+                proc.wait(timeout=step.wait_timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 _kill_tree(proc)
