@@ -309,6 +309,10 @@ to stop it. Four pages:
 - **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
   approval pages from part 3, unchanged.
 
+Links to other websites (a story's source, a DOI, a posted tweet, a
+claim check's source, a draft's primary source) open in a new tab, or in your
+browser from the desktop window, so the page you were on stays put.
+
 The one thing it writes outside its own pages is a decision on the feed page.
 Everything else is a view.
 

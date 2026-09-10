@@ -43,7 +43,7 @@ went out, then fix the row by hand.</p>
     <td class="meta">{{ p.posted_at.strftime('%Y-%m-%d %H:%M') if p.posted_at else '' }}</td>
     <td class="meta">{{ p.slot or '' }}</td>
     <td>
-      {% if p.tweet_id %}<a href="https://x.com/i/status/{{ p.tweet_id }}" rel="noreferrer">{{ p.text }}</a>
+      {% if p.tweet_id %}<a href="https://x.com/i/status/{{ p.tweet_id }}" target="_blank" rel="noopener noreferrer">{{ p.text }}</a>
       {% else %}{{ p.text }}{% endif %}
       {% if p.error %}<div class="low wrap">{{ p.error }}</div>{% endif %}
     </td>
