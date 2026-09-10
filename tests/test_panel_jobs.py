@@ -110,3 +110,24 @@ def test_only_one_job_runs_at_a_time(tmp_path):
     _wait(first)
     manager.start(["slow"])  # the slot is free again
     _wait(manager.current() or first)
+
+
+def test_cancel_ends_a_running_job_and_records_why(tmp_path):
+    cfg = _cfg(
+        tmp_path,
+        [_step("slow", "import time; time.sleep(30)"), _step("after", "print('no')")],
+    )
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    job = manager.start(["slow", "after"])
+    deadline = time.monotonic() + 10
+    while not job.results and manager.current() is job and time.monotonic() < deadline:
+        time.sleep(0.05)
+        from ops import runner as _runner
+
+        if _runner._ACTIVE:
+            break
+    assert manager.cancel("stopped by a test")
+    _wait(job)
+    assert job.state == "stopped" and job.error == "stopped by a test"
+    assert job.results[0].failed and job.results[1].skipped_reason == "cancelled"
+    assert manager.cancel() is False, "nothing left to cancel"

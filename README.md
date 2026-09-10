@@ -34,7 +34,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline |
 | `/publishing` | approved and waiting, what has posted, and any partial thread needing a human |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
-| `/runs` | start a run of any enabled step and watch its log; recent runs with per-step output |
+| `/runs` | start a run of any enabled step and watch its log, or stop the one in progress; recent runs with per-step output |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue, unchanged |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in

@@ -10,6 +10,7 @@ Routes owned here:
   GET  /runs            recent runs started from the panel, with per-step logs
   GET  /runs/current    HTML fragment for the in-page poll while a run is in flight
   POST /runs            start a run of the selected orchestrator steps
+  POST /runs/cancel     stop the run in progress (kills the step and what it launched)
 
 The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., /voice),
 so the operator has one URL for the whole workflow. Everything else this app shows is
@@ -293,6 +294,12 @@ async def start_run(request: Request):
         JOBS.start(form.get("step", []))
     except JobError as exc:
         return RedirectResponse(f"/runs?{urlencode({'error': str(exc)})}", status_code=303)
+    return RedirectResponse("/runs", status_code=303)
+
+
+@app.post("/runs/cancel")
+def cancel_run():
+    JOBS.cancel()
     return RedirectResponse("/runs", status_code=303)
 
 

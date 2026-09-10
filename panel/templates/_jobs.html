@@ -2,7 +2,7 @@
 {% for j in jobs %}
 <details class="run" {% if loop.first %}open{% endif %}>
   <summary>
-    <span class="pill {{ 'warn' if j.running else ('fail' if j.state in ('error', 'locked') else 'ok') }}">{{ j.state }}</span>
+    <span class="pill {{ 'warn' if j.running else ('fail' if j.state in ('error', 'locked') else ('skip' if j.state == 'stopped' else 'ok')) }}">{{ j.state }}</span>
     {{ j.steps|join(', ') }}
     <span class="meta">started {{ j.started }}{% if j.duration %}, took {{ j.duration }}{% endif %}</span>
   </summary>
@@ -14,6 +14,12 @@
     {% if r.stderr %}<pre class="log">{{ r.stderr }}</pre>{% endif %}
   {% endfor %}
   {% if j.running and not j.results %}<p class="meta">running…</p>{% endif %}
+  {% if j.running %}
+  <form method="post" action="/runs/cancel" class="inline">
+    <button type="submit">Stop this run</button>
+    <span class="meta">ends the current step and skips the rest; the next run picks up where it left off</span>
+  </form>
+  {% endif %}
 </details>
 {% else %}
 <p class="meta">No runs started from the panel yet. Cron runs are recorded too; the

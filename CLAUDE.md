@@ -154,7 +154,10 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   routes into the same app so the queue's own module stays unchanged apart from its
   index moving to `/queue`. `panel/jobs.py` never builds an argv: a job names steps
   from `ops/config.yaml` and `ops/runner.py` runs them under `ops/lock.py`, one job
-  at a time, refusing any step whose argv contains `--live`. The panel has no publish
+  at a time, refusing any step whose argv contains `--live`. `JobManager.cancel()` ends a run:
+  `ops/runner.terminate_active()` kills the live step's process tree (own process group on
+  POSIX, `taskkill /T` on Windows) and the remaining steps are skipped as `cancelled`; the
+  runs page's Stop button and `run_desktop.py` closing both call it. The panel has no publish
   button and never writes `config.yaml`, `draft/voice.md` or a draft's text. It has
   no authentication: `run_app.py` binds localhost by default. `/publishing` and
   `/feedback` are views: no post button, and a report's suggestions are rendered, never
