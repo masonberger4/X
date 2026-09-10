@@ -161,6 +161,44 @@ sources:
     url: https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml
     cadence_minutes: 60
 
+  # --- trade press (RSS, verified Sept 2026) ---
+  # These carry a one-line summary, not an abstract, so each sets its own
+  # `min_abstract_chars` (the prefilter floor for that source's items only).
+  # A trade-press write-up of a company release rarely repeats the release's
+  # headline, so it usually lands in its own cluster; the scorer sees both.
+  # Headlines cover all of biotech; `prefilter.allow_keywords` does the topic cut.
+  - name: fierce_biotech
+    type: rss
+    url: https://www.fiercebiotech.com/rss/xml
+    cadence_minutes: 120
+    min_abstract_chars: 60
+  - name: stat_biotech                # articles are STAT+ (paywalled); the feed
+    type: rss                         # itself carries a ~1000-char excerpt
+    url: https://www.statnews.com/category/biotech/feed/
+    cadence_minutes: 120
+  - name: biopharma_dive
+    type: rss
+    url: https://www.biopharmadive.com/feeds/news/
+    cadence_minutes: 120
+    min_abstract_chars: 60
+  # Wire services carry company releases verbatim (private and ex-US companies
+  # included), so their items dedup cleanly against the company feeds below.
+  # Neither host answers from the build sandbox, so these are unverified: try
+  # the URL in a browser, then set `enabled: true`.
+  - name: businesswire_biotech
+    type: rss
+    url: https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFpRVQ==
+    cadence_minutes: 60
+    enabled: false
+  - name: globenewswire_biotech
+    type: rss
+    url: https://www.globenewswire.com/RssFeed/subjectcode/22-Biotechnology/feedTitle/GlobeNewswire%20-%20Biotechnology
+    cadence_minutes: 60
+    enabled: false
+  # Checked and not usable (Sept 2026): Endpoints (403 to feed readers),
+  # BioSpace (no feed), PR Newswire topic feeds (return the unfiltered wire),
+  # OncLive / Targeted Oncology (403), Evaluate Vantage (no feed).
+
   # --- structured / API sources ---
   - name: biorxiv_cancer_biology
     type: biorxiv

@@ -18,6 +18,7 @@ def test_check_rules():
     assert check("Join our webinar on cancer", "x" * 30, CFG) == (False, "deny:webinar")
     assert check("Quarterly earnings", "x" * 30, CFG) == (False, "no_allow_keyword")
     assert check("Cancer study", "short", CFG) == (False, "abstract<20")
+    assert check("Cancer study", "short", CFG, min_chars=5) == (True, None)
     assert check("Cancer study", "", {"require_abstract": False, "allow_keywords": ["cancer"]}) == (
         True,
         None,
@@ -92,3 +93,49 @@ def test_reset_prefilter_requeues_drops_except_stale(db):
     counts = run_prefilter(db, wider)
     assert counts["pass"] == 1 and counts["no_allow_keyword"] == 1
     assert db.get_cluster(3).prefilter_reason == "stale"
+
+
+def test_source_min_chars_override_uses_lowest_floor_in_cluster(db):
+    from filter.prefilter import cluster_min_chars, source_min_chars
+
+    sources = [
+        {"name": "fierce_biotech", "type": "rss", "min_abstract_chars": 60},
+        {"name": "nejm", "type": "rss"},
+    ]
+    overrides = source_min_chars(sources)
+    assert overrides == {"fierce_biotech": 60}
+    cfg = {"min_abstract_chars": 200}
+    press = Item.build(source="fierce_biotech", url="https://f/1", title="t", abstract="a" * 80)
+    journal = Item.build(source="nejm", url="https://n/1", title="t", abstract="a" * 80)
+    assert cluster_min_chars([journal], cfg, overrides) == 200
+    assert cluster_min_chars([journal, press], cfg, overrides) == 60
+    assert cluster_min_chars([journal], cfg, None) == 200
+
+    now = datetime.now(UTC)
+    assign_cluster(
+        db,
+        Item.build(
+            source="fierce_biotech",
+            url="https://f/2",
+            title="Cancer drug hold",
+            abstract="a" * 80,
+            published_at=now,
+        ),
+    )
+    assign_cluster(
+        db,
+        Item.build(
+            source="nejm",
+            url="https://n/2",
+            title="Cancer trial",
+            abstract="a" * 80,
+            published_at=now,
+        ),
+    )
+    cfg = {**CFG, "min_abstract_chars": 200, "daily_cap": 0}
+    assert run_prefilter(db, cfg, now=now) == {"pass": 0, "abstract<200": 2}
+    db.reset_prefilter()
+    assert run_prefilter(db, cfg, now=now, source_overrides=overrides) == {
+        "pass": 1,
+        "abstract<200": 1,
+    }

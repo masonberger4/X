@@ -3,6 +3,7 @@
 import logging
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -242,3 +243,13 @@ def test_callbacks_report_each_step_as_it_happens():
     assert [s.name for s in started] == ["a", "b"], "skipped steps never start"
     assert [r.name for r in finished] == ["a", "off", "b"]
     assert finished == res
+
+
+def test_a_stop_between_on_start_and_launch_still_ends_the_step():
+    """The panel reports a step as live from on_start, so a Stop can arrive before
+    the process exists; the step must be killed on launch, not run to completion."""
+    step = Step("slow", py("import time; time.sleep(30)"), timeout_seconds=60)
+    t0 = time.monotonic()
+    res = run_steps([step], on_start=lambda _s: runner.terminate_active())
+    assert time.monotonic() - t0 < 20
+    assert res[0].name == "slow" and not res[0].ok and not res[0].timed_out

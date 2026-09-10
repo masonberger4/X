@@ -267,6 +267,11 @@ def _run_one(
     else:
         with _ACTIVE_LOCK:
             _ACTIVE.add(proc)
+            # A stop that landed between on_start and Popen found nothing to
+            # kill; end the process here, not after its whole run.
+            stopped_early = _STOP.is_set()
+        if stopped_early:
+            _kill_tree(proc)
         try:
             try:
                 stdout, stderr = proc.communicate(timeout=step.timeout_seconds)

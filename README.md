@@ -156,7 +156,10 @@ snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
 2. **Dedup / cluster** (`filter/dedup.py`): exact hash -> DOI -> near-duplicate
    title. One cluster per story; a cluster records every source that covered it.
 3. **Prefilter** (`filter/prefilter.py`): keyword allow/deny, short-abstract
-   drop, daily cap. Cheap and deterministic; runs before any API call.
+   drop, daily cap. Cheap and deterministic; runs before any API call. A source
+   may set its own `min_abstract_chars` (the trade-press feeds do: their items
+   carry a one-line summary); a cluster is held to the lowest floor among its
+   sources.
 4. **Score** (`score/`): batches of ~10 clusters go to the model named in
    `models.scorer` via tool use with a strict JSON schema. Each row stores the
    model, prompt version, raw response, five 0-10 dimensions, evidence level,

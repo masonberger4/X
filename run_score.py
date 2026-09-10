@@ -10,7 +10,7 @@ import sys
 
 from config import load_config, setup_logging
 from db import Database
-from filter.prefilter import run_prefilter
+from filter.prefilter import run_prefilter, source_min_chars
 from score import rubric
 from score.scorer import Scorer
 
@@ -38,7 +38,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.refilter:
             log.info("refilter: %d dropped clusters back in the queue", db.reset_prefilter())
-        run_prefilter(db, cfg.get("prefilter") or {})
+        run_prefilter(
+            db, cfg.get("prefilter") or {}, source_overrides=source_min_chars(cfg["sources"])
+        )
         scorer = Scorer(cfg)
         if args.dry_run:
             pending = db.unscored_clusters(scorer.model, rubric.PROMPT_VERSION)
