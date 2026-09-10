@@ -335,9 +335,10 @@ to stop it. Four pages:
   impressions, and the suggestions from the latest weekly report. The
   suggestions are proposals only; applying one means editing a settings file.
 - **Runs** (`/runs`) — tick the steps you want and press "Run selected
-  steps". The page updates as the run goes: each step's log appears the
-  moment that step finishes, the step in progress is shown with how long it
-  has been running, and the steps still to come are listed. This runs exactly what
+  steps". The page updates as the run goes: the step in progress is shown
+  with how long it has been running and its log so far, refreshed every few
+  seconds as the step writes, each finished step keeps its final log, and the
+  steps still to come are listed. This runs exactly what
   the scheduler in part 6 runs; if the scheduler happens to be running at
   that moment the page says so and does nothing, rather than running twice.
   While a run is going there is a "Stop this run" button: it ends the

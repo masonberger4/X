@@ -53,6 +53,8 @@ class Job:
     stopping: str | None = None  # set by cancel(); the finished job becomes STATE_STOPPED
     active_step: str | None = None  # the step whose process is live right now
     active_since: datetime | None = None
+    active_stdout: str = ""  # that step's log so far, refreshed as it writes
+    active_stderr: str = ""
 
     @property
     def running(self) -> bool:
@@ -189,10 +191,15 @@ class JobManager:
             # Results land on the job as each step finishes, so the runs page can show
             # progress mid-run instead of one block when the whole list returns.
             def started(step: Step) -> None:
+                job.active_stdout, job.active_stderr = "", ""
                 job.active_step, job.active_since = step.name, _now()
+
+            def output(step: Step, stdout: str, stderr: str) -> None:
+                job.active_stdout, job.active_stderr = stdout, stderr
 
             def finished(result: StepResult) -> None:
                 job.active_step, job.active_since = None, None
+                job.active_stdout, job.active_stderr = "", ""
                 job.results.append(result)
 
             runner.run_steps(
@@ -203,6 +210,7 @@ class JobManager:
                 tail_chars=tail,
                 on_start=started,
                 on_result=finished,
+                on_output=output,
             )
             self._record(job)
 

@@ -24,7 +24,22 @@
     fetch("/runs/current", {headers: {"Accept": "text/html"}})
       .then(function (r) { return r.text(); })
       .then(function (html) {
+        // Replacing the fragment recreates every scrollable <pre class="log"> and
+        // every <details>, so remember where the reader was and put it back.
+        var logs = Array.prototype.map.call(box.querySelectorAll("pre.log"), function (el) {
+          return {top: el.scrollTop, atBottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 2};
+        });
+        var open = Array.prototype.map.call(box.querySelectorAll("details.run"), function (el) {
+          return el.open;
+        });
         box.innerHTML = html;
+        box.querySelectorAll("details.run").forEach(function (el, i) {
+          if (i < open.length) { el.open = open[i]; }
+        });
+        box.querySelectorAll("pre.log").forEach(function (el, i) {
+          if (i >= logs.length) { return; }
+          el.scrollTop = logs[i].atBottom ? el.scrollHeight : logs[i].top;
+        });
         if (isRunning()) { setTimeout(poll, 2000); }
       })
       .catch(function () { setTimeout(poll, 5000); });

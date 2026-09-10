@@ -320,6 +320,8 @@ def _job_views(jobs: list[Any]) -> list[dict[str, Any]]:
                 "active_for": views.fmt_duration(
                     (now - job.active_since).total_seconds() if job.active_since else None
                 ),
+                "active_stdout": job.active_stdout,
+                "active_stderr": job.active_stderr,
                 "pending_steps": job.pending_steps,
                 "results": [
                     {
