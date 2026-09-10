@@ -139,3 +139,18 @@ def test_the_runs_page_offers_stop_while_running_and_the_route_cancels(client, m
     monkeypatch.setattr(panel_app.JOBS, "cancel", lambda *a: called.setdefault("yes", True))
     r = client.post("/runs/cancel")
     assert r.status_code == 303 and r.headers["location"] == "/runs" and called["yes"]
+
+
+def test_the_run_fragment_shows_finished_steps_and_the_live_one_mid_run(client, monkeypatch):
+    from ops.runner import StepResult
+    from panel.jobs import Job
+
+    now = panel_app._now()
+    running = Job(id="abc", steps=["ingest", "score", "draft"], started_at=now)
+    running.results = [StepResult("ingest", ["x"], now, now, exit_code=0, stdout_tail="12 new")]
+    running.active_step, running.active_since = "score", now
+    monkeypatch.setattr(panel_app.JOBS, "history", lambda: [running])
+    body = client.get("/runs/current").text
+    assert "12 new" in body, "a finished step's log is shown before the run ends"
+    assert "<strong>score</strong>" in body and "then draft" in body
+    assert "running…" not in body
