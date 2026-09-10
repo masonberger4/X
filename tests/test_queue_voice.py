@@ -28,7 +28,7 @@ def _draft(conn, item_id="i1", source="pubmed"):
 def test_forms_offer_categories(client, conn):
     did = _draft(conn)
     body = client.get(f"/drafts/{did}").text
-    assert body.count('name="category"') == 2  # reject form and edit form
+    assert body.count('name="category"') == 3  # reject, revise and edit forms
     for c in store.DECISION_CATEGORIES:
         assert f'<option value="{c}">' in body
 

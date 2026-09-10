@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from draft.schema import MAX_POST_CHARS, OUTPUT_JSON_SCHEMA, THREAD_MAX, THREAD_MIN, URL_CHARS
 
@@ -95,6 +97,82 @@ def build_user_prompt(
     parts.append("")
     parts.append("Draft the single_post and the thread now. Output JSON only.")
     return "\n".join(parts)
+
+
+@dataclass
+class ClaimProblem:
+    """A claim the fact-checker (step 2b) could not stand behind, handed to a revision."""
+
+    claim: str
+    verdict: str  # 'contradicted' or 'unverified'
+    note: str = ""
+    quote: str = ""
+    source_url: str = ""
+
+
+def build_revision_user_prompt(
+    *,
+    base_user_prompt: str,
+    current: dict[str, Any],
+    instructions: str | None,
+    claim_problems: list[ClaimProblem] | None = None,
+) -> str:
+    """The user prompt for a revision round: the original brief, then the draft as it stands,
+    the editor's instructions and any claims the fact-checker contradicted. The model is told
+    to change only what those ask for and to keep everything else as written."""
+    parts = [
+        base_user_prompt.replace(
+            "Draft the single_post and the thread now. Output JSON only.",
+            "This item was already drafted. You are now REVISING that draft.",
+        ),
+        "",
+        "CURRENT DRAFT (JSON):",
+        json.dumps(current, indent=2, ensure_ascii=False),
+        "",
+    ]
+    if instructions:
+        parts += [
+            "EDITOR INSTRUCTIONS (a human reviewed the draft; do exactly this):",
+            instructions,
+            "",
+        ]
+    contradicted = [c for c in (claim_problems or []) if c.verdict == "contradicted"]
+    unverified = [c for c in (claim_problems or []) if c.verdict != "contradicted"]
+    if contradicted:
+        parts.append(
+            "FACT-CHECK FAILURES. A fact-checker searched the web and found these claims in the "
+            "draft to be WRONG. Correct or remove every one of them, using only the facts in the "
+            "fact-checker's note and quote or in the abstract; do not replace a wrong claim with "
+            "another guess:"
+        )
+        parts += [_format_claim_problem(c) for c in contradicted]
+        parts.append("")
+    if unverified:
+        parts.append(
+            "UNVERIFIED CLAIMS. The fact-checker could not confirm these. Keep them only if the "
+            "abstract supports them; otherwise soften them to what the abstract says or drop them:"
+        )
+        parts += [_format_claim_problem(c) for c in unverified]
+        parts.append("")
+    parts.append(
+        "Rewrite the draft applying the instructions and fixes above. Keep everything the "
+        "instructions do not touch as close to the current draft as possible (same angle, same "
+        "structure, same wording where it still fits). Every hard rule still applies. Update "
+        "claims_to_verify so it lists only claims that remain in the revised text. "
+        "Output the full JSON object only."
+    )
+    return "\n".join(parts)
+
+
+def _format_claim_problem(c: ClaimProblem) -> str:
+    line = f"- CLAIM: {c.claim}\n  VERDICT: {c.verdict}"
+    if c.note:
+        line += f"\n  NOTE: {c.note}"
+    if c.quote:
+        line += f'\n  SOURCE SAYS: "{c.quote}"'
+    if c.source_url:
+        line += f"\n  SOURCE URL: {c.source_url}"
+    return line
 
 
 def build_prompt(

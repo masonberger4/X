@@ -11,6 +11,8 @@
   · created {{ d.created_at }}
   {% if d.url %}· <a href="{{ d.url }}">primary source</a>{% endif %}
 </p>
+{% if error %}<p class="flash over">{{ error }}</p>{% endif %}
+{% if revised %}<p class="flash">Revised. Read the new text below; the claim checks were reset (run <code>python run_verify.py</code> or wait for the scheduler).</p>{% endif %}
 {% if d.rejection_reason %}<p class="flash over">Hard-rule failure: {{ d.rejection_reason }}</p>{% endif %}
 {% if d.rationale %}<p><strong>Scorer rationale:</strong> {{ d.rationale }}</p>{% endif %}
 {% if d.suggested_angle %}<p><strong>Suggested angle:</strong> {{ d.suggested_angle }}</p>{% endif %}
@@ -31,7 +33,7 @@
 
 <h2>Claims to verify</h2>
 {% if d.draft.claims_to_verify %}
-{% if contradicted %}<p class="flash over">A claim was contradicted by its source. Edit the draft, or tick "approve anyway" below.</p>{% endif %}
+{% if contradicted %}<p class="flash over">A claim was contradicted by its source. Press Revise below (the drafter fixes it), or tick "approve anyway".</p>{% endif %}
 <ul class="claims">
 {% for c in d.draft.claims_to_verify %}
   {% set k = checks.get(loop.index0) %}
@@ -74,7 +76,25 @@
   </form>
 </div>
 
-<h2>Edit</h2>
+<h2>Revise</h2>
+<form method="post" action="/drafts/{{ d.id }}/revise">
+  <label>What should change?<br><textarea name="instructions" rows="3" placeholder="e.g. lead with the durability data, drop the second thread post, less hype in the last line"></textarea></label>
+  {% if claim_problems %}
+  <p class="meta">{{ claim_problems }} claim(s) failed or could not be verified. They are fixed in the same round whatever you type, so the box may stay empty.</p>
+  {% else %}
+  <p class="meta">The drafter rewrites the post from your note, keeps everything else, and the hard rules are re-checked in code. The draft stays pending for you to read again.</p>
+  {% endif %}
+  <label>Why<br>
+    <select name="category">
+      <option value="">(no category)</option>
+      {% for c in DECISION_CATEGORIES %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+  </label>
+  <p><button>Revise with AI</button> <span class="meta">takes a few seconds</span></p>
+</form>
+
+<details>
+<summary>Edit by hand</summary>
 <form method="post" action="/drafts/{{ d.id }}/edit">
   <label>Single post<br><textarea name="single_post" rows="4">{{ d.draft.single_post }}</textarea></label>
   <p class="meta">Thread: separate posts with a line containing only <code>---</code>.</p>
@@ -92,6 +112,7 @@
     <button name="keep_pending" value="1">Save, keep pending</button>
   </p>
 </form>
+</details>
 
 {% if decisions %}
 <h2>Decision history</h2>

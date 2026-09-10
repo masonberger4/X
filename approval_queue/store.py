@@ -7,6 +7,8 @@ Owns two tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline 
          snoozed_until, created_at, updated_at)
   decisions(id INTEGER PK, draft_id FK, action, original_text, edited_text, note, created_at,
             category)   -- category added by step 7 through a guarded ALTER TABLE migration
+            -- action 'revise': the drafter rewrote the text on the human's instructions
+            -- (note); original_text/edited_text hold the before/after like an 'edit'.
   draft_examples(id INTEGER PK, draft_id FK, decision_id FK, kind 'edit'|'rejection',
                  created_at)   -- step 7: which examples each draft was shown
 
@@ -40,7 +42,8 @@ ACTION_APPROVE = "approve"
 ACTION_EDIT = "edit"
 ACTION_REJECT = "reject"
 ACTION_SNOOZE = "snooze"
-ACTIONS = (ACTION_APPROVE, ACTION_EDIT, ACTION_REJECT, ACTION_SNOOZE)
+ACTION_REVISE = "revise"  # the drafter rewrote the draft on the human's instructions
+ACTIONS = (ACTION_APPROVE, ACTION_EDIT, ACTION_REJECT, ACTION_SNOOZE, ACTION_REVISE)
 
 SNOOZE_HOURS = 24
 
@@ -500,6 +503,43 @@ def edit(
     if approve_after:
         _set_status(conn, draft_id, STATUS_APPROVED)
     did = _record_decision(conn, draft_id, ACTION_EDIT, original, edited, note, category)
+    conn.commit()
+    return did
+
+
+def revise(
+    conn: sqlite3.Connection,
+    draft_id: int,
+    *,
+    draft: Draft,
+    model: str,
+    note: str | None = None,
+    category: str | None = None,
+) -> int:
+    """Replace the draft with one the drafter rewrote on the human's instructions (note) and
+    log original vs revised as a 'revise' decision. The whole Draft is replaced, claims
+    included, so the caller must drop step 2b's claim checks for it. The draft stays in its
+    current status: a revision is never an approval."""
+    category = validate_category(category)
+    row = _require(conn, draft_id)
+    original = _serialise_text(row.draft.single_post, row.draft.thread)
+    revised = _serialise_text(draft.single_post, draft.thread)
+    conn.execute(
+        """UPDATE drafts SET single_post = ?, thread_json = ?, suggested_visual = ?,
+                             why_it_matters = ?, claims_json = ?, model = ?, updated_at = ?
+           WHERE id = ?""",
+        (
+            draft.single_post,
+            json.dumps(draft.thread),
+            draft.suggested_visual,
+            draft.why_it_matters,
+            json.dumps([c.__dict__ for c in draft.claims_to_verify]),
+            model,
+            _now(),
+            draft_id,
+        ),
+    )
+    did = _record_decision(conn, draft_id, ACTION_REVISE, original, revised, note, category)
     conn.commit()
     return did
 

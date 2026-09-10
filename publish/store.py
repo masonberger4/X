@@ -19,7 +19,7 @@ simpler shape with source/url columns on drafts, which is reconciled here):
   drafts(id PK, item_id UNIQUE, cluster_id, model, single_post, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
          snoozed_until, created_at, updated_at)
-  decisions(id PK, draft_id FK, action 'approve'|'edit'|'reject'|'snooze',
+  decisions(id PK, draft_id FK, action 'approve'|'edit'|'reject'|'snooze'|'revise',
             original_text, edited_text, note, created_at)
       edited_text is JSON {"single_post": ..., "thread": [...]} (a plain string is also
       accepted here as a single_post edit).
@@ -166,7 +166,7 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
             f"""
             SELECT d.id, d.item_id, d.cluster_id, d.single_post, d.thread_json, d.updated_at,
                    (SELECT edited_text FROM decisions WHERE draft_id = d.id
-                      AND action = 'edit' AND edited_text IS NOT NULL
+                      AND action IN ('edit', 'revise') AND edited_text IS NOT NULL
                       ORDER BY id DESC LIMIT 1) AS edited_text,
                    (SELECT created_at FROM decisions WHERE draft_id = d.id
                       AND action IN ('approve', 'edit') ORDER BY id DESC LIMIT 1) AS approved_at

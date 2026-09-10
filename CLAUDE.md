@@ -103,6 +103,16 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
   tables are `drafts` and `decisions`; edits log original vs edited text.
+  A human asks for changes in words, not by retyping: `POST /drafts/{id}/revise`
+  calls `draft/drafter.py:revise_item` (same `call_anthropic`, same schema check and
+  `check_hard_rules` loop as `draft_item`; the user prompt is
+  `draft/prompt.py:build_revision_user_prompt`) with the current draft, the
+  instructions and every step 2b check that is contradicted or unverified. The result
+  replaces the whole draft via `store.revise` (status unchanged, a `revise` decision
+  holds the before/after, `note` is the instruction), then the route drops the draft's
+  `claim_checks`. On any failure the draft is untouched. `revise` decisions are never
+  few-shot examples (the AFTER text is not human-written); publish honours the latest
+  `edit` or `revise` text.
 - Step 7 (voice learning) turns recent `decisions` into few-shot examples via
   `draft/examples.py` and builds the block once per `run_draft.py` run. Examples
   never override the hard rules: an edited text that fails `check_hard_rules` is
