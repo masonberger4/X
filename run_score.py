@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Prefilter unfiltered clusters, then score every cluster the prefilter passed
-that has no score for the configured model + prompt version."""
+"""Prefilter unfiltered clusters, link clusters that report the same story (one model
+call; `--no-link` skips it), then score every cluster the prefilter passed that has no
+score for the configured model + prompt version."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import sys
 
 from config import load_config, setup_logging
 from db import Database
+from filter import link
 from filter.prefilter import run_prefilter, source_min_chars
 from score import rubric
 from score.scorer import Scorer
@@ -30,6 +32,9 @@ def main(argv: list[str] | None = None) -> int:
         help="send previously dropped clusters back through the prefilter (after a keyword "
         "change); 'stale' drops stay dropped",
     )
+    ap.add_argument(
+        "--no-link", action="store_true", help="skip the story-linking pass (see config linking:)"
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     setup_logging(args.verbose)
@@ -41,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
         run_prefilter(
             db, cfg.get("prefilter") or {}, source_overrides=source_min_chars(cfg["sources"])
         )
+        if not args.no_link and not args.dry_run:
+            link.link_recent(db, cfg)
         scorer = Scorer(cfg)
         if args.dry_run:
             pending = db.unscored_clusters(scorer.model, rubric.PROMPT_VERSION)

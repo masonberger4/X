@@ -83,8 +83,16 @@ def parse_reply(text: str) -> AutoRating:
     return AutoRating(decision=decision, note=note)
 
 
-def call_model(system: str, user: str, model: str, effort: str | None, cfg: dict) -> str:
-    """The single network call (claude_code backend or Anthropic API)."""
+def call_model(
+    system: str,
+    user: str,
+    model: str,
+    effort: str | None,
+    cfg: dict,
+    max_tokens: int = MAX_TOKENS,
+) -> str:
+    """The single network call (claude_code backend or Anthropic API). Also the call
+    behind `filter/link.py` (story linking), which needs a larger `max_tokens`."""
     if claude_cli.llm_backend(cfg) == claude_cli.CLAUDE_CODE:
         return claude_cli.run_claude(user, system=system, model=model, cfg=cfg, effort=effort)
 
@@ -92,7 +100,7 @@ def call_model(system: str, user: str, model: str, effort: str | None, cfg: dict
 
     kwargs: dict[str, Any] = dict(
         model=model,
-        max_tokens=MAX_TOKENS,
+        max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
     )

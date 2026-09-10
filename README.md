@@ -117,6 +117,7 @@ python run_ingest.py --source pubmed_oncology -v
 python run_score.py             # prefilter + score unscored clusters
 python run_score.py --dry-run   # see what would be scored
 python run_score.py --refilter  # after editing prefilter keywords: re-evaluate earlier drops
+python run_score.py --no-link   # skip the story-linking model call (config `linking:`)
 python digest.py                # top-N clusters of the last 24h as markdown
 python digest.py --all --hours 72 --out digest.md
 python digest.py --rate         # yes/no per entry plus a required explanation (saved to `ratings`)
@@ -160,6 +161,13 @@ snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
    may set its own `min_abstract_chars` (the trade-press feeds do: their items
    carry a one-line summary); a cluster is held to the lowest floor among its
    sources.
+3b. **Link** (`filter/link.py`): one model call (`models.linker`, settings in
+   `linking:`) over the passed clusters of the last `window_hours`, scored or
+   not, returns groups that report the same event: a release, its wire copy,
+   trade-press write-ups with their own headlines. Code validates the groups
+   and `Database.merge_clusters` folds each into one cluster, keeping the one
+   that already has a score so the story is not scored twice. A failed call is
+   logged and scoring goes on unmerged; `--no-link` skips it.
 4. **Score** (`score/`): batches of ~10 clusters go to the model named in
    `models.scorer` via tool use with a strict JSON schema. Each row stores the
    model, prompt version, raw response, five 0-10 dimensions, evidence level,

@@ -437,7 +437,9 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 
 Everything lives in `config.yaml` (sources, keywords, models, caps; a source
 can set its own `min_abstract_chars` when its feed only carries a one-line
-summary, as the Fierce Biotech and BioPharma Dive entries do),
+summary, as the Fierce Biotech and BioPharma Dive entries do; `linking:` is the
+story-linking pass that merges a release with the trade-press write-ups of it
+before scoring, `enabled: false` turns it off),
 `draft\config.yaml` (how human edits are reused), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules), `feedback\config.yaml`

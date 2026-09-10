@@ -415,6 +415,58 @@ class Database:
             out.append((cl, sc))
         return out
 
+    def has_score(self, cluster_id: int) -> bool:
+        r = self.conn.execute(
+            "SELECT 1 FROM scores WHERE cluster_id = ? LIMIT 1", (cluster_id,)
+        ).fetchone()
+        return r is not None
+
+    def clusters_for_linking(self, since: datetime, limit: int) -> list[Cluster]:
+        """Passed clusters created or published since `since` (newest first): the
+        story linker's candidate set, scored or not."""
+        rows = self.conn.execute(
+            """SELECT * FROM clusters WHERE prefilter_status = 'pass'
+               AND (created_at >= ? OR published_at >= ?)
+               ORDER BY created_at DESC, id DESC LIMIT ?""",
+            (_iso(since), _iso(since), limit),
+        ).fetchall()
+        return [self._row_to_cluster(r) for r in rows]
+
+    def merge_clusters(self, keep_id: int, other_ids: list[int]) -> int:
+        """Fold `other_ids` into `keep_id`: items, scores and ratings move over, the
+        kept cluster takes the earliest published_at and a DOI if it lacked one, and
+        the emptied cluster rows are deleted. Returns how many items moved."""
+        others = [i for i in other_ids if i != keep_id]
+        if not others:
+            return 0
+        moved = 0
+        with self.tx() as c:
+            keep = c.execute("SELECT * FROM clusters WHERE id = ?", (keep_id,)).fetchone()
+            if keep is None:
+                raise ValueError(f"cluster {keep_id} does not exist")
+            pub, doi = _parse(keep["published_at"]), keep["doi"]
+            for other in others:
+                r = c.execute("SELECT * FROM clusters WHERE id = ?", (other,)).fetchone()
+                if r is None:
+                    continue
+                opub = _parse(r["published_at"])
+                if opub is not None and (pub is None or opub < pub):
+                    pub = opub
+                doi = doi or r["doi"]
+                for table in ("items", "scores", "ratings"):
+                    cur = c.execute(
+                        f"UPDATE {table} SET cluster_id = ? WHERE cluster_id = ?",  # noqa: S608
+                        (keep_id, other),
+                    )
+                    if table == "items":
+                        moved += cur.rowcount
+                c.execute("DELETE FROM clusters WHERE id = ?", (other,))
+            c.execute(
+                "UPDATE clusters SET published_at = ?, doi = ? WHERE id = ?",
+                (_iso(pub), doi, keep_id),
+            )
+        return moved
+
     # ---- ratings -----------------------------------------------------------
     def insert_rating(
         self, cluster_id: int, rating: int, note: str | None = None, rater: str = "human"
