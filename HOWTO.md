@@ -307,6 +307,49 @@ Anyone who can reach the page can run the pipeline, so keep it on
 `localhost`. `--host` and `--port` move it and `--reload` is for development;
 only use `--host 0.0.0.0` on a network you trust.
 
+### As a desktop app (no browser, no command prompt)
+
+Two levels. The first needs nothing built.
+
+**A window instead of a browser.** Once, `pip install -e ".[desktop]"`. Then:
+```
+pythonw run_desktop.py
+```
+`pythonw` (with the w) is the copy of Python that opens no command prompt.
+The control panel opens in its own window; close the window to stop it. It
+picks a free port each time so it never clashes with a `run_app.py` you
+also have open; add `--port 8000 --host 0.0.0.0` if the phone should reach
+the same window. To put it on the desktop, right-click the desktop, New >
+Shortcut, and for the location enter (with your own paths):
+```
+C:\Users\you\X\.venv\Scripts\pythonw.exe C:\Users\you\X\run_desktop.py
+```
+then set "Start in" to `C:\Users\you\X` in the shortcut's Properties.
+
+**A Pipeline.exe you can double-click.** For a PC without Python set up, or
+just to pin it to the taskbar. Build it once per version, from the repo
+folder with the venv active:
+```
+pip install -e ".[desktop]"
+pyinstaller deploy\desktop.spec
+```
+Takes a few minutes. The result is the folder `dist\Pipeline`. Move or copy
+the whole folder wherever you like; inside it:
+- `Pipeline.exe` is the app. Double-click it.
+- `pipeline-cli.exe` is what the runs page uses to run each step. Leave it
+  next to `Pipeline.exe`.
+- `.env`, `pipeline.db`, `backups\` and `desktop.log` live in that same
+  folder (copy your `.env` in before the first start). `desktop.log` is
+  where messages go, since there is no command prompt; send it to me if the
+  window does not open.
+- the settings files (`config.yaml`, `ops\config.yaml`, `draft\voice.md`
+  and the others) are under `_internal\`. Editing them there works, but
+  they are copies: the next build takes the repo's versions again, so make
+  lasting changes in the repo and rebuild.
+After every `git pull` that changes code, rebuild; the exe does not update
+itself. Everything else is the same as in the browser, including the rule
+that publishing stays off unless you turn it on in `ops\config.yaml`.
+
 ### Using it from your phone
 
 The page has no login and its buttons run the pipeline, so the phone has to
@@ -350,6 +393,8 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | The dashboard says `missing env: ANTHROPIC_API_KEY` but you use the Claude Code backend | it should not since the check follows `LLM_BACKEND`; make sure `.env` is in the folder you start `run_app.py` from |
 | The control panel says a run is already in progress | the scheduler (part 6) is mid-run; wait for it and press the button again |
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
+| `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |
+| Building the exe fails with `No module named PyInstaller` | `pip install -e ".[desktop]"` in the venv first |
 
 ## Changing settings
 

@@ -55,6 +55,22 @@ private network; the run buttons execute the pipeline's CLIs.
 `run_queue.py` still serves the approval queue on its own for anyone who wants only
 that.
 
+### Desktop build
+
+`run_desktop.py` opens the same server in a native window (pywebview, the Edge engine on
+Windows) and stops it when the window closes; run it with `pythonw` and no console appears.
+`deploy/desktop.spec` turns that into a folder with `Pipeline.exe` and `pipeline-cli.exe`
+via PyInstaller. Both extras live in `pip install -e ".[desktop]"`; the pipeline itself never
+needs them.
+
+How the frozen build stays honest with the rest of the code: every settings file and
+template ships inside the bundle at its usual relative path, so each step's
+`Path(__file__)` lookups are unchanged; the database, `.env`, lock and backups live beside
+the exe, which the launcher makes the working directory; and since there is no python.exe,
+the runs page launches each step as `pipeline-cli.exe run_ingest.py ...`, where
+`pipeline_cli.py` maps the script name to its module. `panel/frozen.py:bundle_manifest` is
+the one list of what gets bundled, and a test checks it against the files on disk.
+
 ## Principles
 
 - Human-in-the-loop by default.
@@ -112,6 +128,9 @@ python run_queue.py             # approval UI alone on localhost:8000
 python run_queue.py --host 0.0.0.0 --port 8080   # bind elsewhere (--reload for development)
 python run_app.py               # control panel: dashboard + sources + runs + the queue
 python run_app.py --host 0.0.0.0 --port 8080     # bind elsewhere (--reload for development)
+pythonw run_desktop.py          # the same panel in a native window, no console (pip install -e ".[desktop]")
+pyinstaller deploy/desktop.spec # build dist/Pipeline: Pipeline.exe + pipeline-cli.exe, no Python needed
+python pipeline_cli.py run_ops.py status   # what the exe runs steps with; works from a checkout too
 python run_publish.py           # DRY RUN (default): print what would post and when
 python run_publish.py --live    # posts only if PUBLISH_ENABLED=1 is also set
 python run_publish.py --live --breaking   # only FDA / company-approval items

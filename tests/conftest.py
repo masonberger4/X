@@ -10,6 +10,7 @@ import pytest
 
 import config
 import run_app
+import run_desktop
 import run_draft
 import run_feedback
 import run_ops
@@ -26,6 +27,7 @@ _DOTENV_USERS = (
     config,
     drafter,
     run_app,
+    run_desktop,
     run_draft,
     run_feedback,
     run_ops,

@@ -45,11 +45,11 @@ from ops import store as ops_store
 from ops.config import load_ops_config
 from ops.health import Thresholds
 from panel import feed, views
+from panel.frozen import data_dir, step_interpreter
 from panel.jobs import JobError, JobManager
 
 log = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = Path(__file__).with_name("templates")
 QUEUE_TEMPLATES_DIR = Path(queue_app.__file__).with_name("templates")
 
@@ -64,7 +64,9 @@ templates.env.globals["HAS_PANEL"] = True
 app = FastAPI(title="Pipeline control panel")
 
 CONFIG = load_ops_config()
-JOBS = JobManager(CONFIG, REPO_ROOT)
+# Steps run in the data directory (the repo root, or the exe's folder in the desktop
+# build) under the interpreter that can run them there (see panel/frozen.py).
+JOBS = JobManager(CONFIG, data_dir(), python=step_interpreter())
 
 
 def _now() -> datetime:

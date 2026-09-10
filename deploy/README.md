@@ -52,3 +52,20 @@ fire; in Task Scheduler's GUI, tick "Run whether user is logged on or not" and
 shows the next run; `schtasks /Delete /TN pipeline-run` removes one. If you use
 the `claude_code` backend, the tasks must run as the Windows user that ran
 `claude login`.
+
+## Desktop build (Windows)
+
+`desktop.spec` is the PyInstaller spec for the control panel as a double-click app.
+From the repo root with the venv active:
+
+```
+pip install -e ".[desktop]"
+pyinstaller deploy\desktop.spec
+```
+
+`dist\Pipeline\` then holds `Pipeline.exe` (the window, no console), `pipeline-cli.exe`
+(a console build the runs page launches steps with; it maps `run_ingest.py` and the
+other script names to their modules) and `_internal\` with the code and every settings
+file at its usual relative path. `.env`, `pipeline.db`, `backups\`, the lock and
+`desktop.log` live beside the exe. Rebuild after every code change; the exe does not
+update itself. HOWTO part 8 has the operator's version.

@@ -28,6 +28,9 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `python run_draft.py`, `python run_verify.py` (claim checks with web search),
   `python run_queue.py` (approval UI on localhost:8000),
   `python run_app.py` (control panel: dashboard, sources, runs and the queue, same port),
+  `pythonw run_desktop.py` (the panel in a native window; `pyinstaller deploy/desktop.spec`
+  builds `dist/Pipeline/` with `Pipeline.exe` + `pipeline-cli.exe`; both need the
+  `desktop` extra), `python pipeline_cli.py <run_x.py> ...` (the CLIs behind one entry point),
   `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`),
   `python run_feedback.py snapshot|report|followers`,
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
@@ -150,7 +153,13 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   button and never writes `config.yaml`, `draft/voice.md` or a draft's text. It has
   no authentication: `run_app.py` binds localhost by default. `/publishing` and
   `/feedback` are views: no post button, and a report's suggestions are rendered, never
-  applied.
+  applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
+  changes no step: `panel/frozen.py` decides the data dir (exe folder when frozen, else
+  the repo root), the step interpreter (`pipeline-cli` when frozen) and the bundle
+  manifest (every `*/config.yaml`, `draft/voice.md`, both template dirs, each CLI script
+  as a marker for `ops/runner.py:cli_missing`, which also looks in `sys._MEIPASS`).
+  `pipeline_cli.py` dispatches only the names in `panel/frozen.py:CLIS`. pywebview and
+  PyInstaller live in the `desktop` extra only.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -175,7 +184,8 @@ approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
           fetch_decisions_for_voice, fetch_draft_stats, record_examples),
           app.py (/voice), templates/
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
-          ratings), jobs.py (JobManager, background step runs),
+          ratings), jobs.py (JobManager, background step runs), frozen.py (data dir,
+          step interpreter and bundle manifest for the desktop build),
           app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback), templates/
 verify/   config.yaml, settings.py, verifier.py (ClaimCheck, verify_claim,
           call_model), store.py (claim_checks)
@@ -187,7 +197,7 @@ feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
 ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
           backup.py, store.py (pipeline_runs, health_checks, alerts_sent +
           read-only adapters)
-deploy/   crontab.example, pipeline.service, pipeline.timer, README.md
+deploy/   crontab.example, pipeline.service, pipeline.timer, desktop.spec, README.md
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
-run_app.py  run_publish.py  run_feedback.py  run_ops.py   (CLIs)
+run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py   (CLIs)
 ```

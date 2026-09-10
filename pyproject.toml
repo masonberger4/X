@@ -25,13 +25,19 @@ dev = [
     "pytest-mock>=3.14",
     "ruff>=0.6",
 ]
+# The desktop window (run_desktop.py) and the build that turns it into Pipeline.exe
+# (deploy/desktop.spec). The pipeline itself never needs either.
+desktop = [
+    "pywebview>=5.0",
+    "pyinstaller>=6.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_app", "run_publish", "run_feedback", "run_ops", "run_verify"]
+py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_app", "run_desktop", "pipeline_cli", "run_publish", "run_feedback", "run_ops", "run_verify"]
 
 [tool.setuptools.packages.find]
 include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "panel*", "publish*", "feedback*", "ops*", "verify*"]

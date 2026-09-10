@@ -99,13 +99,21 @@ def resolve_argv(argv: list[str], python: str) -> list[str]:
 
 
 def cli_missing(argv: list[str], cwd: Path) -> bool:
-    """True when argv names a .py CLI that does not exist on this checkout."""
+    """True when argv names a .py CLI that does not exist on this checkout.
+
+    In a PyInstaller build the scripts are shipped inside the bundle rather than the
+    working directory, so that folder is checked too (it is only set when frozen).
+    """
     if len(argv) < 2 or not argv[1].endswith(".py"):
         return False
     script = Path(argv[1])
-    if not script.is_absolute():
-        script = cwd / script
-    return not script.exists()
+    if script.is_absolute():
+        return not script.exists()
+    candidates = [cwd / script]
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        candidates.append(Path(bundle) / script)
+    return not any(c.exists() for c in candidates)
 
 
 def run_steps(
