@@ -152,3 +152,25 @@ def test_results_appear_on_the_job_step_by_step(tmp_path):
     manager.cancel()
     _wait(job)
     assert job.active_step is None and [r.name for r in job.results] == ["quick", "slow"]
+
+
+def test_a_running_step_exposes_its_log_so_far(tmp_path, monkeypatch):
+    """The runs page shows the live step's output while it runs; once the step ends its
+    final result carries the log and the live tail is cleared."""
+    gate = tmp_path / "go"
+    code = (
+        "import time, pathlib; print('one'); "
+        f"p = pathlib.Path({str(gate)!r})\n"
+        "while not p.exists(): time.sleep(0.02)\n"
+        "print('two')"
+    )
+    mgr = JobManager(_cfg(tmp_path, [_step("slow", code)]), tmp_path.parent, tmp_path / "t.db")
+    job = mgr.start(["slow"])
+    deadline = time.monotonic() + 10
+    while "one" not in job.active_stdout and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert job.active_step == "slow" and job.active_stdout.split() == ["one"]
+    gate.write_text("")
+    _wait(job)
+    assert job.state == STATE_DONE and job.active_stdout == ""
+    assert job.results[0].stdout_tail.split() == ["one", "two"]
