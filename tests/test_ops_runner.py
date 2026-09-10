@@ -155,9 +155,11 @@ def test_steps_are_launched_without_a_console_window(monkeypatch, tmp_path):
     class Done:
         pid = 1
         returncode = 0
+        stdout = None
+        stderr = None
 
-        def communicate(self, timeout=None):
-            return "", ""
+        def wait(self, timeout=None):
+            return 0
 
         def poll(self):
             return 0
@@ -253,3 +255,43 @@ def test_a_stop_between_on_start_and_launch_still_ends_the_step():
     res = run_steps([step], on_start=lambda _s: runner.terminate_active())
     assert time.monotonic() - t0 < 20
     assert res[0].name == "slow" and not res[0].ok and not res[0].timed_out
+
+
+def test_output_is_reported_while_a_step_runs(tmp_path):
+    """The watcher sees the first line before the step exits, not one lump at the end."""
+    import threading
+
+    seen: list[str] = []
+    first_line = threading.Event()
+    gate = tmp_path / "go"
+
+    def output(step, out, err):
+        seen.append(out)
+        if "one" in out:
+            first_line.set()
+
+    code = (
+        "import sys, time, pathlib; print('one'); sys.stdout.flush(); "
+        f"p = pathlib.Path({str(gate)!r})\n"
+        "while not p.exists(): time.sleep(0.02)\n"
+        "print('two')"
+    )
+    step = runner.Step("s", ["python", "-c", code], timeout_seconds=20)
+
+    def release():
+        assert first_line.wait(10), "the first line never reached the watcher"
+        gate.write_text("")
+
+    t = threading.Thread(target=release)
+    t.start()
+    res = run_steps([step], on_output=output)
+    t.join()
+    assert res[0].ok and res[0].stdout_tail.split() == ["one", "two"]
+    assert seen[0].split() == ["one"] and seen[-1].split() == ["one", "two"]
+
+
+def test_children_get_unbuffered_python_output(tmp_path):
+    """No flush in the child: the line still lands as it is printed (PYTHONUNBUFFERED)."""
+    step = runner.Step("s", ["python", "-c", "import os; print(os.environ['PYTHONUNBUFFERED'])"])
+    res = run_steps([step], env={"OTHER": "1"})
+    assert res[0].ok and res[0].stdout_tail.strip() == "1"

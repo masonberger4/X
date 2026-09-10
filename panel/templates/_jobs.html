@@ -17,6 +17,8 @@
     {% if j.active_step %}
     <p><span class="pill warn">running</span> <strong>{{ j.active_step }}</strong>
       <span class="meta">for {{ j.active_for }}</span></p>
+    {% if j.active_stdout %}<pre class="log">{{ j.active_stdout }}</pre>{% endif %}
+    {% if j.active_stderr %}<pre class="log">{{ j.active_stderr }}</pre>{% endif %}
     {% elif not j.results %}<p class="meta">starting…</p>{% endif %}
     {% if j.pending_steps %}<p class="meta">then {{ j.pending_steps|join(', ') }}</p>{% endif %}
   {% endif %}

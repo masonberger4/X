@@ -136,16 +136,23 @@ def run_steps(
     tail_chars: int = 4000,
     on_start: Callable[[Step], None] | None = None,
     on_result: Callable[[StepResult], None] | None = None,
+    on_output: Callable[[Step, str, str], None] | None = None,
 ) -> list[StepResult]:
     """Run each enabled step in order. See module docstring for the skip/stop rules.
 
     `on_start` is called just before a step's process is launched and `on_result` with
     every StepResult as it is produced (run, skipped or timed out), so a caller watching
     the run (the control panel) can show progress before the whole list returns.
+    `on_output` is called from the reader threads with the step and the current
+    stdout/stderr tails every time the live process writes something, so a watcher can
+    show a step's log while it runs rather than when it ends. It must be cheap and
+    thread-safe.
     """
     workdir = Path(cwd) if cwd else Path.cwd()
     selected = set(only) if only is not None else None
-    child_env = None if env is None else {**os.environ, **env}
+    # Python children block-buffer stdout on a pipe, so without this a step's log would
+    # arrive in one lump at exit whatever the reader does.
+    child_env = {**os.environ, "PYTHONUNBUFFERED": "1", **(env or {})}
     results: list[StepResult] = []
     upstream_failed = False
     _STOP.clear()
@@ -185,7 +192,7 @@ def run_steps(
 
         if on_start is not None:
             on_start(step)
-        result = _run_one(step, argv, workdir, child_env, tail_chars)
+        result = _run_one(step, argv, workdir, child_env, tail_chars, on_output=on_output)
         add(result)
         if result.failed and step.required:
             upstream_failed = True
@@ -242,14 +249,57 @@ def terminate_active() -> int:
     return len(procs)
 
 
+def _pump(
+    stream: Any,
+    buf: list[str],
+    lock: threading.Lock,
+    notify: Callable[[], None] | None,
+) -> None:
+    """Copy a child's pipe into `buf` chunk by chunk, telling the watcher each time."""
+    try:
+        while True:
+            chunk = stream.readline()
+            if not chunk:
+                break
+            with lock:
+                buf.append(chunk)
+            if notify is not None:
+                notify()
+    except (OSError, ValueError):  # pipe closed under us (a killed step)
+        pass
+    finally:
+        try:
+            stream.close()
+        except OSError:
+            pass
+
+
 def _run_one(
-    step: Step, argv: list[str], cwd: Path, env: dict[str, str] | None, tail_chars: int
+    step: Step,
+    argv: list[str],
+    cwd: Path,
+    env: dict[str, str] | None,
+    tail_chars: int,
+    on_output: Callable[[Step, str, str], None] | None = None,
 ) -> StepResult:
     started = _now()
     t0 = time.monotonic()
     log.info("step %s: starting %s", step.name, argv)
     timed_out = False
     exit_code: int | None = None
+    out_buf: list[str] = []
+    err_buf: list[str] = []
+    buf_lock = threading.Lock()
+
+    def tails() -> tuple[str, str]:
+        with buf_lock:
+            return _tail("".join(out_buf), tail_chars), _tail("".join(err_buf), tail_chars)
+
+    def notify() -> None:
+        if on_output is not None:
+            out, err = tails()
+            on_output(step, out, err)
+
     try:
         proc = subprocess.Popen(
             argv,
@@ -258,12 +308,13 @@ def _run_one(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            errors="replace",
             **_own_group_kwargs(),
             **no_window_kwargs(),
         )
     except OSError as exc:  # interpreter/script not executable etc.
         exit_code = 127
-        stdout, stderr = "", f"{type(exc).__name__}: {exc}"
+        err_buf.append(f"{type(exc).__name__}: {exc}")
     else:
         with _ACTIVE_LOCK:
             _ACTIVE.add(proc)
@@ -272,19 +323,31 @@ def _run_one(
             stopped_early = _STOP.is_set()
         if stopped_early:
             _kill_tree(proc)
+        # One reader per pipe: the process is never blocked on a full pipe, and the
+        # watcher sees each line as it is written instead of everything at exit.
+        readers = [
+            threading.Thread(target=_pump, args=(stream, buf, buf_lock, notify), daemon=True)
+            for stream, buf in ((proc.stdout, out_buf), (proc.stderr, err_buf))
+            if stream is not None
+        ]
+        for t in readers:
+            t.start()
         try:
             try:
-                stdout, stderr = proc.communicate(timeout=step.timeout_seconds)
+                proc.wait(timeout=step.timeout_seconds)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 _kill_tree(proc)
-                stdout, stderr = proc.communicate()
+                proc.wait()
         finally:
+            for t in readers:
+                t.join()
             with _ACTIVE_LOCK:
                 _ACTIVE.discard(proc)
         # A timed-out step records no exit code (it was killed); the status page shows
         # "timed out" instead. A stopped run's step keeps its (kill) code: it did fail.
         exit_code = None if timed_out else proc.returncode
+    stdout, stderr = tails()
     finished = _now()
     duration = time.monotonic() - t0
     result = StepResult(
@@ -294,8 +357,8 @@ def _run_one(
         finished_at=finished,
         exit_code=exit_code,
         timed_out=timed_out,
-        stdout_tail=_tail(stdout, tail_chars),
-        stderr_tail=_tail(stderr, tail_chars),
+        stdout_tail=stdout,
+        stderr_tail=stderr,
     )
     if timed_out:
         log.error("step %s: timed out after %ss (killed)", step.name, step.timeout_seconds)
