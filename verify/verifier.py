@@ -104,8 +104,12 @@ def trusted_hosts(cfg: dict[str, Any], root_cfg: dict[str, Any] | None = None) -
     """verify/config.yaml trusted_domains plus the host of every company feed in the root
     config, so a company's own press-release page counts."""
     hosts = {host_of("https://" + str(d).lower()) for d in cfg.get("trusted_domains") or []}
-    feeds = ((root_cfg or {}).get("companies") or {}).get("feeds") or {}
-    for feed in feeds.values():
+    # config.yaml's companies.feeds is a list of {key, name, url} entries (that is what
+    # config.load_config expands into rss sources); a {key: url-or-entry} mapping is
+    # accepted too so a hand-built config keeps working.
+    feeds = ((root_cfg or {}).get("companies") or {}).get("feeds") or []
+    entries = feeds.values() if isinstance(feeds, dict) else feeds
+    for feed in entries:
         url = feed.get("url") if isinstance(feed, dict) else feed
         if url:
             h = host_of(str(url))
