@@ -228,3 +228,17 @@ def test_a_new_run_clears_a_previous_stop(tmp_path):
     runner.terminate_active()
     (res,) = run_steps([Step("ok", [sys.executable, "-c", "print(1)"])], cwd=tmp_path)
     assert res.ok
+
+
+def test_callbacks_report_each_step_as_it_happens():
+    """The control panel shows progress mid-run through these hooks."""
+    started, finished = [], []
+    steps = [
+        Step("a", py("print('a')")),
+        Step("off", py("print('x')"), enabled=False),
+        Step("b", py("print('b')")),
+    ]
+    res = run_steps(steps, on_start=started.append, on_result=finished.append)
+    assert [s.name for s in started] == ["a", "b"], "skipped steps never start"
+    assert [r.name for r in finished] == ["a", "off", "b"]
+    assert finished == res

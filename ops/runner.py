@@ -14,7 +14,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -134,14 +134,26 @@ def run_steps(
     python: str = sys.executable,
     cwd: str | os.PathLike[str] | None = None,
     tail_chars: int = 4000,
+    on_start: Callable[[Step], None] | None = None,
+    on_result: Callable[[StepResult], None] | None = None,
 ) -> list[StepResult]:
-    """Run each enabled step in order. See module docstring for the skip/stop rules."""
+    """Run each enabled step in order. See module docstring for the skip/stop rules.
+
+    `on_start` is called just before a step's process is launched and `on_result` with
+    every StepResult as it is produced (run, skipped or timed out), so a caller watching
+    the run (the control panel) can show progress before the whole list returns.
+    """
     workdir = Path(cwd) if cwd else Path.cwd()
     selected = set(only) if only is not None else None
     child_env = None if env is None else {**os.environ, **env}
     results: list[StepResult] = []
     upstream_failed = False
     _STOP.clear()
+
+    def add(result: StepResult) -> None:
+        results.append(result)
+        if on_result is not None:
+            on_result(result)
 
     for step in steps:
         if selected is not None and step.name not in selected:
@@ -150,29 +162,31 @@ def run_steps(
         now = _now()
         if _STOP.is_set():
             log.warning("step %s: skipped, the run was stopped", step.name)
-            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_CANCELLED))
+            add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_CANCELLED))
             continue
         if not step.enabled:
             log.info("step %s: disabled, skipping", step.name)
-            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DISABLED))
+            add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DISABLED))
             continue
         if upstream_failed:
             log.warning("step %s: skipped because a required upstream step failed", step.name)
-            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_UPSTREAM))
+            add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_UPSTREAM))
             continue
         if cli_missing(argv, workdir):
             log.warning(
                 "step %s: %s not found on this checkout (not merged); skipping", step.name, argv[1]
             )
-            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_NOT_MERGED))
+            add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_NOT_MERGED))
             continue
         if dry_run:
             log.info("step %s: would run %s (timeout %ss)", step.name, argv, step.timeout_seconds)
-            results.append(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DRY_RUN))
+            add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DRY_RUN))
             continue
 
+        if on_start is not None:
+            on_start(step)
         result = _run_one(step, argv, workdir, child_env, tail_chars)
-        results.append(result)
+        add(result)
         if result.failed and step.required:
             upstream_failed = True
     return results
