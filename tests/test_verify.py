@@ -24,7 +24,12 @@ CFG = {
     "max_claims_per_draft": 6,
     "trusted_domains": ["clinicaltrials.gov", "sec.gov"],
 }
-ROOT = {"companies": {"feeds": {"acme": {"url": "https://ir.acme-bio.com/rss"}}}}
+# The real shape: config.yaml's companies.feeds is a LIST of {key, name, url} entries.
+ROOT = {
+    "companies": {
+        "feeds": [{"key": "acme", "name": "Acme Bio", "url": "https://ir.acme-bio.com/rss"}]
+    }
+}
 
 
 def test_parse_reply_accepts_prose_around_json_and_rejects_bad_verdicts():
@@ -47,6 +52,24 @@ def test_trusted_hosts_include_config_domains_and_company_feed_hosts():
     assert not verifier.is_trusted("https://clinicaltrials.gov.evil.com/", hosts)
     assert not verifier.is_trusted("https://news.example.com/", hosts)
     assert not verifier.is_trusted("", hosts)
+
+
+def test_trusted_hosts_read_the_real_config_and_a_mapping_alike():
+    """The shipped config.yaml is the shape that crashed: a list, not a mapping."""
+    import config
+
+    real = verifier.trusted_hosts(CFG, config.load_config())
+    assert "merck.com" in real and "investor.regeneron.com" in real
+    mapping = {"companies": {"feeds": {"acme": "https://ir.acme-bio.com/rss", "b": {"url": ""}}}}
+    assert verifier.trusted_hosts(CFG, mapping) == {
+        "clinicaltrials.gov",
+        "sec.gov",
+        "ir.acme-bio.com",
+    }
+    assert verifier.trusted_hosts(CFG, {"companies": {"feeds": None}}) == {
+        "clinicaltrials.gov",
+        "sec.gov",
+    }
 
 
 def test_verify_claim_marks_trust_and_passes_context(monkeypatch):
