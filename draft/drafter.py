@@ -94,6 +94,7 @@ class DraftResult:
     model: str
     attempts: int
     flagged_numbers: list[str] = field(default_factory=list)
+    dropped_chart_numbers: list[str] = field(default_factory=list)
 
 
 def model_name() -> str:
@@ -202,6 +203,42 @@ def verify_numbers(draft: Draft, source_text: str) -> list[str]:
             seen.add(num)
             if not _number_in_source(num, source_text):
                 missing.append(num)
+    return missing
+
+
+def verify_chart(draft: Draft, source_text: str) -> list[str]:
+    """Every number in the draft's chart (values, title, labels, note) that is not verbatim in
+    the source. Empty when there is no chart."""
+    if draft.chart is None:
+        return []
+    missing: list[str] = []
+    for num in draft.chart.numbers():
+        # JSON cannot tell 2 from 2.0, so a whole-number value also matches its ".0" spelling.
+        spellings = [num]
+        if "." not in num:
+            spellings.append(num.replace("%", "") + ".0" + ("%" if num.endswith("%") else ""))
+        if not any(_number_in_source(n, source_text) for n in spellings) and num not in missing:
+            missing.append(num)
+    for text in draft.chart.texts():
+        for num in numbers_in(text):
+            if not _number_in_source(num, source_text) and num not in missing:
+                missing.append(num)
+    return missing
+
+
+def drop_unverified_chart(draft: Draft, source_text: str) -> list[str]:
+    """A chart with a number the source does not contain is dropped (chart=None) and the
+    reviewer told why through a low-confidence claim. A chart is a picture of numbers, so one
+    unverifiable number makes the whole picture unusable; the post text is unaffected."""
+    missing = verify_chart(draft, source_text)
+    if missing:
+        draft.chart = None
+        draft.claims_to_verify.append(
+            Claim(
+                claim="Chart dropped: number(s) not in the source: " + ", ".join(missing),
+                confidence="low",
+            )
+        )
     return missing
 
 
@@ -411,7 +448,16 @@ def _generate(
         flagged = flag_unverified_numbers(draft, source_text)
         if flagged:
             log.info("numbers not found in source, flagged for review: %s", flagged)
-        return DraftResult(draft=draft, model=model, attempts=attempt, flagged_numbers=flagged)
+        dropped = drop_unverified_chart(draft, source_text)
+        if dropped:
+            log.warning("chart dropped, numbers not found in source: %s", dropped)
+        return DraftResult(
+            draft=draft,
+            model=model,
+            attempts=attempt,
+            flagged_numbers=flagged,
+            dropped_chart_numbers=dropped,
+        )
     if last_reasons:
         log.error("draft rejected for %r after %d attempts: %s", url, max_attempts, last_reasons)
         raise DraftRejected(last_reasons)

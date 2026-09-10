@@ -4,7 +4,9 @@ Owns two tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline 
 
   drafts(id INTEGER PK, item_id TEXT UNIQUE, cluster_id, model, single_post, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
-         snoozed_until, created_at, updated_at)
+         snoozed_until, created_at, updated_at,
+         chart_json, image_path)   -- added by guarded migrations: the drafter's chart spec
+            -- (draft/chart.py) and the PNG rendered from it, relative to image_dir()
   decisions(id INTEGER PK, draft_id FK, action, original_text, edited_text, note, created_at,
             category)   -- category added by step 7 through a guarded ALTER TABLE migration
             -- action 'revise': the drafter rewrote the text on the human's instructions
@@ -27,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from draft.chart import IMAGES_DIRNAME, Chart, chart_from_json
 from draft.schema import Claim, Draft
 
 DEFAULT_DB_PATH = "./pipeline.db"
@@ -112,7 +115,11 @@ CREATE INDEX IF NOT EXISTS idx_draft_examples_decision ON draft_examples(decisio
 # (table, column, ALTER TABLE statement). Never a destructive rebuild: steps 4 and 5 read
 # decisions through adapters that select named columns and must keep working on old and new
 # databases alike.
-_MIGRATIONS = (("decisions", "category", "ALTER TABLE decisions ADD COLUMN category TEXT"),)
+_MIGRATIONS = (
+    ("decisions", "category", "ALTER TABLE decisions ADD COLUMN category TEXT"),
+    ("drafts", "chart_json", "ALTER TABLE drafts ADD COLUMN chart_json TEXT"),
+    ("drafts", "image_path", "ALTER TABLE drafts ADD COLUMN image_path TEXT"),
+)
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -139,8 +146,30 @@ def db_path() -> Path:
         return Path(DEFAULT_DB_PATH)
 
 
+def image_dir() -> Path:
+    """Where rendered draft images live: an `images` folder next to the pipeline DB.
+    drafts.image_path is stored relative to it, so the data folder can move."""
+    return db_path().resolve().parent / IMAGES_DIRNAME
+
+
+def image_file(draft_id: int) -> Path:
+    return image_dir() / f"draft_{draft_id}.png"
+
+
+def resolve_image(image_path: str | None) -> Path | None:
+    """Absolute path of a draft's image, or None when there is none or the file is gone."""
+    if not image_path:
+        return None
+    path = image_dir() / image_path
+    return path if path.is_file() else None
+
+
 def _now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+def _chart_json(draft: Draft) -> str | None:
+    return json.dumps(draft.chart.to_dict()) if draft.chart is not None else None
 
 
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
@@ -273,6 +302,7 @@ class DraftRow:
     total: float | None = None
     rationale: str = ""
     suggested_angle: str = ""
+    image_path: str | None = None  # relative to image_dir(); None: no image
 
 
 def _row_to_draft(r: sqlite3.Row) -> DraftRow:
@@ -283,6 +313,7 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
         suggested_visual=r["suggested_visual"],
         why_it_matters=r["why_it_matters"],
         claims_to_verify=[Claim(**c) for c in json.loads(r["claims_json"])],
+        chart=chart_from_json(r["chart_json"]) if "chart_json" in keys else None,
     )
     return DraftRow(
         id=r["id"],
@@ -302,6 +333,7 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
         total=(float(r["total"]) if r["total"] is not None else None) if "total" in keys else None,
         rationale=(r["rationale"] or "") if "rationale" in keys else "",
         suggested_angle=(r["suggested_angle"] or "") if "suggested_angle" in keys else "",
+        image_path=(r["image_path"] or None) if "image_path" in keys else None,
     )
 
 
@@ -360,8 +392,8 @@ def insert_draft(
     cur = conn.execute(
         """INSERT INTO drafts (item_id, cluster_id, model, single_post, thread_json,
                                suggested_visual, why_it_matters, claims_json, status,
-                               rejection_reason, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               rejection_reason, created_at, updated_at, chart_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             item_id,
             cluster_id,
@@ -375,6 +407,7 @@ def insert_draft(
             rejection_reason,
             now,
             now,
+            _chart_json(draft),
         ),
     )
     conn.commit()
@@ -526,7 +559,8 @@ def revise(
     revised = _serialise_text(draft.single_post, draft.thread)
     conn.execute(
         """UPDATE drafts SET single_post = ?, thread_json = ?, suggested_visual = ?,
-                             why_it_matters = ?, claims_json = ?, model = ?, updated_at = ?
+                             why_it_matters = ?, claims_json = ?, model = ?, updated_at = ?,
+                             chart_json = ?, image_path = NULL
            WHERE id = ?""",
         (
             draft.single_post,
@@ -536,12 +570,53 @@ def revise(
             json.dumps([c.__dict__ for c in draft.claims_to_verify]),
             model,
             _now(),
+            _chart_json(draft),
             draft_id,
         ),
     )
     did = _record_decision(conn, draft_id, ACTION_REVISE, original, revised, note, category)
     conn.commit()
     return did
+
+
+def set_image(conn: sqlite3.Connection, draft_id: int, path: Path | None) -> None:
+    """Record the rendered PNG for a draft (stored relative to image_dir()), or clear it."""
+    _require(conn, draft_id)
+    rel = None
+    if path is not None:
+        try:
+            rel = Path(path).resolve().relative_to(image_dir()).as_posix()
+        except ValueError:
+            rel = Path(path).name
+    conn.execute(
+        "UPDATE drafts SET image_path = ?, updated_at = ? WHERE id = ?", (rel, _now(), draft_id)
+    )
+    conn.commit()
+
+
+def drop_image(conn: sqlite3.Connection, draft_id: int, note: str | None = None) -> None:
+    """The human decided the post goes out without its chart: forget the chart spec and the
+    image, delete the file, and log an 'edit' decision with the text unchanged so the history
+    shows it. Nothing else about the draft changes."""
+    row = _require(conn, draft_id)
+    path = resolve_image(row.image_path)
+    conn.execute(
+        "UPDATE drafts SET chart_json = NULL, image_path = NULL, updated_at = ? WHERE id = ?",
+        (_now(), draft_id),
+    )
+    text = _serialise_text(row.draft.single_post, row.draft.thread)
+    _record_decision(conn, draft_id, ACTION_EDIT, text, text, note or "image dropped", None)
+    conn.commit()
+    if path is not None:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def chart_for(conn: sqlite3.Connection, draft_id: int) -> Chart | None:
+    r = conn.execute("SELECT chart_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
+    return chart_from_json(r["chart_json"]) if r else None
 
 
 def reject(

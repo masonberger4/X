@@ -13,8 +13,11 @@ login (`LLM_BACKEND=claude_code` in `.env`); nothing posts to X until part 5.
    ```
    git clone https://github.com/masonberger4/X.git
    cd X
-   pip install -e ".[dev]"
+   pip install -e ".[dev,images]"
    ```
+   `images` is the chart drawing library (matplotlib) for the picture that goes
+   with a post (part 3, step 1). Without it everything still works, posts
+   just go out text-only.
 2. Create your private settings file and open it.
    ```
    copy .env.example .env
@@ -108,6 +111,15 @@ source only when it is due, and score only scores what is new.
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
    python run_draft.py --retry-failed            # try again on stories whose draft failed
    ```
+   A draft may come with a picture. Nothing draws it freehand: when the source
+   has two or more comparable numbers (arms, endpoints, cohorts) the drafter
+   lists them as a small bar-chart spec, every number in it is checked
+   against the source the same way the post text is (one miss and the chart
+   is dropped, with a note under "Claims to verify"), and the code draws the
+   chart to `images\draft_<id>.png` next to `pipeline.db`. "Suggested visual"
+   on the draft page is still just the model's one-line idea for you; the
+   chart is what actually gets attached. `images: enabled: false` in
+   `draft\config.yaml` turns the drawing off.
 2. Check the claims. Each draft lists the facts the model added from its own
    knowledge (competitor pipelines, deal terms, cost claims). This step sends
    each one to Claude with web search on, which finds a primary source and
@@ -145,6 +157,11 @@ source only when it is due, and score only scores what is new.
    says why. Pick a reason (voice, factual, not newsworthy, hard rule, other)
    when you revise or reject; your notes feed the voice report. "Edit by hand"
    is still there, folded away, for a one-word fix.
+   If the draft has a chart it is shown under "Image" with the exact text a
+   screen reader will get (the alt text), and it is attached to the first
+   post when published. Check every bar against the source like any other
+   number. "Drop image" posts the text alone; a Revise redraws the chart from
+   the new draft (or removes it if the new draft has none).
    Under "Claims to verify" each claim shows its verdict, the source link and
    the quoted sentence. Open the link and read the sentence before approving;
    the verdict is a lead, the link is the proof. A contradicted claim blocks
@@ -213,6 +230,11 @@ source only when it is due, and score only scores what is new.
    A draft is posted at most once even if the command runs twice. A thread
    that fails part-way is marked partial and left for you; it is never
    retried automatically.
+4. Pictures. A draft's chart (part 3) is uploaded and attached to its first
+   post with alt text; the dry run prints the file and the alt text. If the
+   upload fails nothing is posted and the draft is marked failed, since you
+   approved it with the picture. `media: attach_images: false` in
+   `publish\config.yaml` posts every draft text-only.
 
 ---
 
@@ -442,8 +464,10 @@ can set its own `min_abstract_chars` when its feed only carries a one-line
 summary, as the Fierce Biotech and BioPharma Dive entries do; `linking:` is the
 story-linking pass that merges a release with the trade-press write-ups of it
 before scoring, `enabled: false` turns it off),
-`draft\config.yaml` (how human edits are reused), `verify\config.yaml`
+`draft\config.yaml` (how human edits are reused; `images: enabled` draws or
+skips the chart), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
-(posting slots, daily post cap, breaking-news rules), `feedback\config.yaml`
+(posting slots, daily post cap, breaking-news rules; `media: attach_images`
+attaches or skips the chart), `feedback\config.yaml`
 and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.

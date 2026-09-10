@@ -24,12 +24,19 @@ dev = [
     "pytest>=8.0",
     "pytest-mock>=3.14",
     "ruff>=0.6",
+    "matplotlib>=3.8",  # so the chart-rendering tests run for real
+]
+# Rendering the drafter's chart spec to a PNG (draft/chart.py). Without it drafts are
+# stored and published text-only; run_draft.py logs a warning per chart it could not draw.
+images = [
+    "matplotlib>=3.8",
 ]
 # The desktop window (run_desktop.py) and the build that turns it into Pipeline.exe
 # (deploy/desktop.spec). The pipeline itself never needs either.
 desktop = [
     "pywebview>=5.0",
     "pyinstaller>=6.0",
+    "matplotlib>=3.8",  # so Pipeline.exe can draw draft charts (PyInstaller has a hook for it)
 ]
 
 [build-system]

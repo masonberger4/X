@@ -24,6 +24,14 @@ report:
               how, why, all, any, some, more, most, very, just, only, also, then, still,
               yet, now, out, up, down, off, per, vs, via, s, t]
 
+# Draft images (draft/chart.py). The drafter returns an optional bar-chart spec whose
+# numbers are checked against the source; run_draft.py renders it to
+# <db folder>/images/draft_<id>.png with matplotlib (`pip install -e ".[images]"`). The
+# queue shows it, a human can drop it, and run_publish.py attaches it to the first post.
+# enabled: false keeps the spec in drafts.chart_json but renders and attaches nothing.
+images:
+  enabled: true
+
 # Fallback drafting model only. Resolution order (draft.drafter.model_name):
 # DRAFT_MODEL env, then root config.yaml `models.drafter` if the human has added
 # that key, then this value.

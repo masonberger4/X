@@ -19,6 +19,20 @@
 <p><strong>Why it matters:</strong> {{ d.draft.why_it_matters }}</p>
 {% if d.draft.suggested_visual %}<p><strong>Suggested visual:</strong> {{ d.draft.suggested_visual }}</p>{% endif %}
 
+{% if image_url %}
+<h2>Image</h2>
+<p class="meta">Attached to the first post when published. Rendered by code from the numbers below; check every bar against the source.</p>
+<p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid #ccc"></p>
+<p class="meta">{{ image_alt }}</p>
+<form class="inline" method="post" action="/drafts/{{ d.id }}/image/drop">
+  <input name="note" placeholder="why (optional)">
+  <button>Drop image</button> <span class="meta">the post goes out text-only</span>
+</form>
+{% elif d.draft.chart %}
+<h2>Image</h2>
+<p class="meta">The drafter proposed a chart ({{ d.draft.chart.title }}) but no image was rendered: images are disabled in draft/config.yaml or matplotlib is not installed. Nothing will be attached.</p>
+{% endif %}
+
 <h2>Single post</h2>
 {% set n = d.draft.single_post|tweet_length %}
 <div class="post">{{ d.draft.single_post }}</div>

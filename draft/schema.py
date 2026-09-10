@@ -10,6 +10,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from draft.chart import CHART_JSON_SCHEMA, Chart, ChartError, validate_chart
+
 MAX_POST_CHARS = 280
 URL_CHARS = 23  # X wraps every URL through t.co, which always counts as 23 chars
 THREAD_MIN = 3
@@ -36,6 +38,9 @@ class Draft:
     suggested_visual: str
     why_it_matters: str
     claims_to_verify: list[Claim] = field(default_factory=list)
+    # Optional chart spec (draft/chart.py). None: no image. Never required, so an older
+    # model output without the key still validates.
+    chart: Chart | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -74,6 +79,7 @@ OUTPUT_JSON_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "The interpretation, in one or two sentences, for the human reviewer.",
         },
+        "chart": CHART_JSON_SCHEMA,
         "claims_to_verify": {
             "type": "array",
             "items": {
@@ -132,6 +138,11 @@ def validate_output(data: Any) -> Draft:
     if not THREAD_MIN <= len(thread) <= THREAD_MAX:
         raise SchemaError(f"'thread' must have {THREAD_MIN}-{THREAD_MAX} posts, got {len(thread)}")
 
+    try:
+        chart = validate_chart(data.get("chart"))
+    except ChartError as exc:
+        raise SchemaError(str(exc)) from exc
+
     claims_raw = data["claims_to_verify"]
     if not isinstance(claims_raw, list):
         raise SchemaError("'claims_to_verify' must be a list")
@@ -155,4 +166,5 @@ def validate_output(data: Any) -> Draft:
         suggested_visual=_require_str(data, "suggested_visual"),
         why_it_matters=_require_str(data, "why_it_matters"),
         claims_to_verify=claims,
+        chart=chart,
     )

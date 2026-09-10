@@ -6,6 +6,10 @@ Usage: python run_publish.py [--dry-run | --live] [--now] [--breaking] [--limit 
 Default is --dry-run: prints what WOULD be posted and when, posts nothing. --live posts
 only if PUBLISH_ENABLED=1 is also set in the environment. Meant for cron every 15 min; a
 draft is claimed in a transaction before posting, so overlapping runs cannot post it twice.
+
+A draft whose chart was rendered (run_draft.py) and not dropped in the queue has that PNG
+attached to its first post, with alt text, unless media.attach_images is false in
+publish/config.yaml. The dry run prints the image path and alt text.
 """
 
 from __future__ import annotations
@@ -106,14 +110,33 @@ def choose(
     return pick_for_slot(approved, slot, policy), label, f"slot {label} open"
 
 
+def image_for(approved: Approved, cfg: dict) -> str | None:
+    """The PNG to attach to the first post, or None (no image, or media.attach_images false)."""
+    if not (cfg.get("media") or {}).get("attach_images", True):
+        return None
+    return approved.image_path or None
+
+
 def publish_one(
-    conn, approved: Approved, kind: str, texts: list[str], slot: str, now: datetime
+    conn,
+    approved: Approved,
+    kind: str,
+    texts: list[str],
+    slot: str,
+    now: datetime,
+    image: str | None = None,
 ) -> str:
-    """Post texts in order, chaining replies. Returns the schedule status."""
+    """Post texts in order, chaining replies; `image` is attached to the first post. Returns
+    the schedule status. An image upload failure happens before any tweet, so the draft is
+    simply 'failed' and nothing is live."""
     prev: str | None = None
     for pos, text in enumerate(texts, 1):
         try:
-            tweet_id = client.post_tweet(text, in_reply_to=prev)
+            media_ids = None
+            if pos == 1 and image:
+                media_ids = [client.upload_media(image, approved.image_alt)]
+                log.info("draft %d: image uploaded (%s)", approved.draft_id, image)
+            tweet_id = client.post_tweet(text, in_reply_to=prev, media_ids=media_ids)
         except client.PublishError as exc:
             store.record_post(
                 conn,
@@ -214,17 +237,21 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
                 store.finish(conn, cand.draft_id, store.SCHED_REFUSED, str(exc))
             return 0
 
+        image = image_for(cand, cfg)
         if not live:
             print(f"DRY RUN — would post draft {cand.draft_id} ({kind}, {reason}) [{cand.source}]")
             for i, t in enumerate(texts, 1):
                 print(f"  {i}/{len(texts)}: {t}")
+            if image:
+                print(f"  image on post 1: {image}")
+                print(f"  alt text: {cand.image_alt}")
             return 0
 
         if not store.claim(conn, cand.draft_id, slot):
             log.info("draft %d already claimed by another run; skipping", cand.draft_id)
             return 0
         log.info("claimed draft %d for %s (%s)", cand.draft_id, slot, reason)
-        status = publish_one(conn, cand, kind, texts, slot, now)
+        status = publish_one(conn, cand, kind, texts, slot, now, image=image)
         return 0 if status == store.SCHED_POSTED else 2
     finally:
         conn.close()

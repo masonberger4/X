@@ -1,5 +1,8 @@
 """The only module that talks to X. tweepy is imported inside the functions, never at import.
 
+post_tweet (v2 create_tweet) and upload_media (v1.1 media/upload + alt text) are the two
+write calls; verify_credentials is the read check.
+
 Keys come from the environment (.env via python-dotenv, loaded by the CLI):
   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET (X_ACCESS_TOKEN_SECRET also accepted)
 """
@@ -47,6 +50,17 @@ def _client():
     return tweepy.Client(**_keys())
 
 
+def _api_v1():
+    """Media upload is still a v1.1 endpoint; same OAuth 1.0a user keys as the v2 client."""
+    import tweepy
+
+    k = _keys()
+    auth = tweepy.OAuth1UserHandler(
+        k["consumer_key"], k["consumer_secret"], k["access_token"], k["access_token_secret"]
+    )
+    return tweepy.API(auth)
+
+
 def _classify(exc: Exception) -> tuple[bool, int | None]:
     """(retryable?, http status) for a tweepy exception. 429/5xx retry; 401/403 never."""
     import tweepy
@@ -78,17 +92,37 @@ def _with_retries(op: Callable[[], Any], what: str, sleep: Callable[[float], Non
     raise AssertionError("unreachable")
 
 
-def post_tweet(text: str, in_reply_to: str | None = None) -> str:
-    """Post one tweet and return its id. Raises PublishError on failure."""
+def post_tweet(
+    text: str, in_reply_to: str | None = None, media_ids: list[str] | None = None
+) -> str:
+    """Post one tweet and return its id. media_ids come from upload_media(). Raises
+    PublishError on failure."""
 
     def op():
         kwargs: dict[str, Any] = {"text": text}
         if in_reply_to:
             kwargs["in_reply_to_tweet_id"] = in_reply_to
+        if media_ids:
+            kwargs["media_ids"] = list(media_ids)
         resp = _client().create_tweet(**kwargs)
         return str(resp.data["id"])
 
     return _with_retries(op, "create_tweet")
+
+
+def upload_media(path: str, alt_text: str = "") -> str:
+    """Upload one image and return its media_id string, with alt text set when given.
+    Raises PublishError on failure (nothing was tweeted yet, so the caller can stop)."""
+
+    def op():
+        api = _api_v1()
+        media = api.media_upload(filename=path)
+        media_id = str(media.media_id)
+        if alt_text:
+            api.create_media_metadata(media_id, alt_text)
+        return media_id
+
+    return _with_retries(op, "media_upload")
 
 
 def verify_credentials() -> str:

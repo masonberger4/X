@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from draft.chart import IMAGES_DIRNAME, alt_text, chart_from_json
+
 DEFAULT_DB_PATH = "./pipeline.db"
 
 KIND_SINGLE = "single"
@@ -115,6 +117,30 @@ class Approved:
     score: float | None = None
     approved_at: str | None = None
     edited: bool = False
+    image_path: str | None = None  # absolute path of the rendered chart PNG, if still on disk
+    image_alt: str = ""
+
+
+def _db_file(conn: sqlite3.Connection) -> Path | None:
+    """The file behind a connection (None for :memory:), so image paths resolve next to it."""
+    for row in conn.execute("PRAGMA database_list"):
+        if row[1] == "main":
+            return Path(row[2]) if row[2] else None
+    return None
+
+
+def _image_for(
+    db_file: Path | None, image_path: str | None, chart_json: str | None, url: str
+) -> tuple[str | None, str]:
+    """(absolute PNG path if it exists, alt text) for an approved draft. Images live in
+    <db folder>/images (approval_queue.store.image_dir); the row stores the relative path."""
+    if not image_path or db_file is None:
+        return None, ""
+    path = db_file.resolve().parent / IMAGES_DIRNAME / image_path
+    if not path.is_file():
+        return None, ""
+    chart = chart_from_json(chart_json)
+    return str(path), (alt_text(chart, url) if chart else "")
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -144,12 +170,19 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
     """
     own = conn is None
     conn = conn or connect()
+    conn_path = _db_file(conn)
     try:
         conn.executescript(_SCHEMA)  # the caller may hand us step 2's connection
         tables = _tables(conn)
         if "drafts" not in tables:
             return []
         has_step1 = {"items", "scores"} <= tables
+        draft_cols = {r[1] for r in conn.execute("PRAGMA table_info(drafts)").fetchall()}
+        image_cols = (
+            ", d.chart_json, d.image_path"
+            if {"chart_json", "image_path"} <= draft_cols
+            else ", NULL AS chart_json, NULL AS image_path"
+        )
         meta = (
             ", i.source, i.url, i.title, s.total"
             if has_step1
@@ -170,7 +203,7 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
                       ORDER BY id DESC LIMIT 1) AS edited_text,
                    (SELECT created_at FROM decisions WHERE draft_id = d.id
                       AND action IN ('approve', 'edit') ORDER BY id DESC LIMIT 1) AS approved_at
-                   {meta}
+                   {meta}{image_cols}
             FROM drafts d {joins}
             WHERE d.status = 'approved'
               AND d.id NOT IN (SELECT draft_id FROM schedule WHERE claimed_at IS NOT NULL)
@@ -189,6 +222,9 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
         except json.JSONDecodeError:
             thread = []
         single_post, thread, edited = _apply_edit(r["edited_text"], r["single_post"], thread)
+        image_path, image_alt = _image_for(
+            conn_path, r["image_path"], r["chart_json"], r["url"] or ""
+        )
         out.append(
             Approved(
                 draft_id=int(r["id"]),
@@ -202,6 +238,8 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
                 score=float(r["total"]) if r["total"] is not None else None,
                 approved_at=r["approved_at"] or r["updated_at"],
                 edited=edited,
+                image_path=image_path,
+                image_alt=image_alt,
             )
         )
     return out

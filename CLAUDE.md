@@ -107,6 +107,20 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
   after generation (plus 280 chars/post with URLs as 23, source URL placement,
   and verbatim-number verification); drafts that fail are stored as `failed`.
+- **Draft images** (`draft/chart.py`): the drafter's optional `chart` is a bar-chart
+  SPEC (title, labels, values, unit, note), never a picture; `suggested_visual` stays a
+  text hint for the reviewer. `drafter.verify_chart` checks every number in it verbatim
+  against the source and `drop_unverified_chart` drops the chart (text untouched, a
+  low-confidence claim says why) on one miss. `run_draft.py` and the queue's revise
+  route render the survivor through `approval_queue/images.py:attach_chart` (matplotlib,
+  the `images` extra, imported inside `render_chart`; fail-soft: no image, never no
+  draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
+  and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
+  turns rendering off. The queue serves it at `/drafts/{id}/image` and `store.drop_image`
+  is the only way a human removes it. Step 3 attaches it to the FIRST post
+  (`publish/client.py:upload_media`, the third tweepy call, then `create_tweet` with
+  `media_ids`); `media.attach_images` in `publish/config.yaml` turns that off, and an upload
+  failure posts nothing and marks the draft `failed`.
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
   tables are `drafts` and `decisions`; edits log original vs edited text.
@@ -139,7 +153,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   company feed hosts. The queue blocks approve (409) on a contradicted claim
   unless `override=1`.
 - Step 3 reads step 2's tables only through `publish/store.py:fetch_approved`
-  (edited_text from `decisions` wins over `single_post`). Its own tables are
+  (edited_text from `decisions` wins over `single_post`; it also resolves the draft's
+  image path and alt text). Its own tables are
   `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
   settings live in `publish/config.yaml`, not the root config. Posting is
   idempotent via the claim; partial threads are never retried automatically.
@@ -203,12 +218,14 @@ score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories
           rater.py (second-opinion yes/no rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
-draft/    schema.py, prompt.py, voice.md, drafter.py, config.yaml, settings.py,
+draft/    schema.py, chart.py (chart spec, verification, PNG rendering), prompt.py,
+          voice.md, drafter.py, config.yaml, settings.py,
           examples.py (EditExample, select_edit_examples, format_examples_block),
           voice_report.py (VoiceReport, build_report, render_markdown, CLI)
 approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
-          fetch_decisions_for_voice, fetch_draft_stats, record_examples),
-          app.py (/voice), templates/
+          fetch_decisions_for_voice, fetch_draft_stats, record_examples, image_dir,
+          set_image, drop_image), images.py (attach_chart), app.py (/voice,
+          /drafts/{id}/image), templates/
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
           ratings), jobs.py (JobManager, background step runs), frozen.py (data dir,
           step interpreter and bundle manifest for the desktop build),
@@ -216,7 +233,7 @@ panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed 
 verify/   config.yaml, settings.py, verifier.py (ClaimCheck, verify_claim,
           call_model), store.py (claim_checks)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
-          fetch_approved), client.py
+          fetch_approved), client.py (post_tweet, upload_media, verify_credentials)
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
           store.py (tweet_metrics, follower_snapshots, feedback_reports,
           fetch_posted, fetch_post_context, due_for_snapshot), client.py
