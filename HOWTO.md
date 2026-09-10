@@ -307,6 +307,33 @@ Anyone who can reach the page can run the pipeline, so keep it on
 `localhost`. `--host` and `--port` move it and `--reload` is for development;
 only use `--host 0.0.0.0` on a network you trust.
 
+### Using it from your phone
+
+The page has no login and its buttons run the pipeline, so the phone has to
+reach the PC without the PC being open to the internet. Two ways.
+
+**On the same Wi-Fi** (quick, home only). Start the app so it listens on the
+network, not just on the PC:
+```
+python run_app.py --host 0.0.0.0
+```
+Say yes if Windows asks to let Python through the firewall. Find the PC's
+address with `ipconfig` (the "IPv4 Address" line, something like
+`192.168.1.23`) and open `http://192.168.1.23:8000` on the phone. This only
+works while the phone is on the same Wi-Fi, and anyone else on that Wi-Fi
+could open it too.
+
+**From anywhere with Tailscale** (recommended). Tailscale is a free private
+network between your own devices; nobody else can reach it.
+1. Install Tailscale on the PC and on the phone (tailscale.com) and sign in
+   to both with the same account.
+2. Start the app with `--host 0.0.0.0` as above.
+3. On the phone, open `http://<pc-name>:8000`, using the name Tailscale shows
+   for the PC.
+Works on mobile data as well as Wi-Fi. The PC still has to be on and running
+the app; to have it start by itself, add `python run_app.py --host 0.0.0.0`
+as a task in Task Scheduler (part 6) that runs at log-on.
+
 ---
 
 ## Fixing things
