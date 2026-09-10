@@ -146,6 +146,8 @@ def test_no_window_serves_the_panel_and_stops_when_the_wait_returns(db_file, mon
 
 def test_the_window_gets_the_same_url_the_server_listens_on(db_file, monkeypatch):
     opened = {}
+    # pywebview is an optional extra CI does not install; this test is about the hand-off.
+    monkeypatch.setattr(run_desktop, "window_available", lambda: True)
     monkeypatch.setattr(run_desktop, "open_window", lambda url: opened.setdefault("url", url))
     assert run_desktop.main(["--port", "0"]) == 0
     assert opened["url"].startswith("http://127.0.0.1:")
@@ -166,3 +168,18 @@ def test_a_windowed_process_logs_to_a_file_beside_the_data(frozen_at, monkeypatc
         for h in list(root.handlers):
             h.close()
             root.removeHandler(h)
+
+
+def test_a_missing_pywebview_is_one_clear_line_before_any_server_starts(monkeypatch, capsys):
+    monkeypatch.setattr(run_desktop, "window_available", lambda: False)
+    started = []
+    monkeypatch.setattr(run_desktop, "start_server", lambda *a: started.append(a))
+    assert run_desktop.main([]) == 1
+    assert 'pip install -e ".[desktop]"' in capsys.readouterr().err
+    assert started == []
+
+
+def test_no_window_does_not_need_pywebview(monkeypatch, db_file):
+    monkeypatch.setattr(run_desktop, "window_available", lambda: False)
+    monkeypatch.setattr(run_desktop, "wait_forever", lambda thread: None)
+    assert run_desktop.main(["--no-window"]) == 0
