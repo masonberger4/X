@@ -9,7 +9,7 @@
   · score <strong>{{ "%.1f"|format(d.total) if d.total is not none else "–" }}</strong>
   · model {{ d.model }}
   · created {{ d.created_at }}
-  {% if d.url %}· <a href="{{ d.url }}">primary source</a>{% endif %}
+  {% if d.url %}· <a href="{{ d.url }}" target="_blank" rel="noopener noreferrer">primary source</a>{% endif %}
 </p>
 {% if d.rejection_reason %}<p class="flash over">Hard-rule failure: {{ d.rejection_reason }}</p>{% endif %}
 {% if d.rationale %}<p><strong>Scorer rationale:</strong> {{ d.rationale }}</p>{% endif %}
@@ -40,7 +40,7 @@
     {% if k %}
       <div class="check {{ k.verdict }}">
         <strong>{{ k.label }}</strong>
-        {% if k.source_url %}· <a href="{{ k.source_url }}" rel="noopener">{{ k.source_url }}</a>{% endif %}
+        {% if k.source_url %}· <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">{{ k.source_url }}</a>{% endif %}
         {% if k.quote %}<blockquote>{{ k.quote }}</blockquote>{% endif %}
         {% if k.note %}<div class="meta">{{ k.note }}</div>{% endif %}
         <div class="meta">checked {{ k.checked_at }} by {{ k.model }}. Open the link and read the sentence before approving.</div>

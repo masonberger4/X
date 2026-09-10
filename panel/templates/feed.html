@@ -31,8 +31,8 @@ nothing about what gets drafted today.</p>
   </p>
   <p class="meta">
     {{ e.source }} · {{ e.published }}
-    {% if e.url %}· <a href="{{ e.url }}" rel="noreferrer">source</a>{% endif %}
-    {% if e.doi %}· <a href="https://doi.org/{{ e.doi }}" rel="noreferrer">doi</a>{% endif %}
+    {% if e.url %}· <a href="{{ e.url }}" target="_blank" rel="noopener noreferrer">source</a>{% endif %}
+    {% if e.doi %}· <a href="https://doi.org/{{ e.doi }}" target="_blank" rel="noopener noreferrer">doi</a>{% endif %}
     {% if e.also_in %}· also in {{ e.also_in|join(', ') }}{% endif %}
   </p>
   <p><strong>Why:</strong> {{ e.rationale }}</p>
