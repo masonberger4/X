@@ -26,6 +26,9 @@ models:
   # rater='auto:<model>' so it never masquerades as a human decision.
   rater: claude-fable-5-1
   rater_effort: low               # low | medium | high | xhigh | max
+  # Story linking (run_score.py, see `linking:` below): groups clusters that
+  # report the same event. Headline matching, so a small model is enough.
+  linker: claude-haiku-4-5-20251001
   # How the scorer and drafter reach Claude. "api" (default) calls the Anthropic
   # API with ANTHROPIC_API_KEY. "claude_code" runs the Claude Code CLI in print
   # mode instead (see README "Headless backend"); LLM_BACKEND env overrides.
@@ -127,6 +130,21 @@ expertise:
     - cancer vaccines (mRNA, neoantigen) and oncolytic viruses
     - M&A, licensing, partnerships and financings of companies in the above areas
     - upcoming catalysts for public companies in the above areas: readouts, PDUFA dates, conference data
+
+# Story linking: before scoring, one model call groups the recent clusters that
+# report the same event (a release, its wire copy, trade-press write-ups with
+# their own headlines) and merges each group into one cluster. Candidates are
+# the passed clusters of the last window_hours, scored or not, so a write-up
+# arriving after the release joins the release's cluster. Code validates the
+# groups; a failed call is logged and scoring goes on unmerged.
+linking:
+  enabled: true
+  window_hours: 48
+  max_clusters: 200               # newest first; one call per run
+  abstract_chars: 300             # snippet per cluster in the prompt
+  max_tokens: 4000
+  # effort: low                   # low | medium | high | xhigh | max; only for
+                                  # models that take an effort parameter (not Haiku 4.5)
 
 digest:
   top_n: 10
