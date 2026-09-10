@@ -164,6 +164,20 @@ def run_steps(
     return results
 
 
+def no_window_kwargs() -> dict[str, int]:
+    """Extra Popen/run kwargs so a console child opens no window of its own on Windows.
+
+    A windowed parent (pythonw, or Pipeline.exe from the desktop build) has no console, so
+    Windows would otherwise create a visible one for every console program it launches:
+    the operator saw a black "claude" window pop up and steal focus during a run. The
+    child still gets a (hidden) console, so its own children inherit it. No-op elsewhere.
+    (Also in claude_cli.py: ops never imports another step's module.)
+    """
+    if sys.platform == "win32":
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+    return {}
+
+
 def _run_one(
     step: Step, argv: list[str], cwd: Path, env: dict[str, str] | None, tail_chars: int
 ) -> StepResult:
@@ -181,6 +195,7 @@ def _run_one(
             text=True,
             timeout=step.timeout_seconds,
             check=False,
+            **no_window_kwargs(),
         )
         exit_code = proc.returncode
         stdout, stderr = proc.stdout, proc.stderr

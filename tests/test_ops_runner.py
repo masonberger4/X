@@ -146,3 +146,30 @@ def test_step_result_properties():
 @pytest.mark.parametrize("argv,missing", [(["python", "-c", "x"], False), (["ls"], False)])
 def test_cli_missing_only_for_py_files(tmp_path, argv, missing):
     assert runner.cli_missing(argv, tmp_path) is missing
+
+
+def test_steps_are_launched_without_a_console_window(monkeypatch, tmp_path):
+    seen = {}
+
+    class Done:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        seen["kwargs"] = kwargs
+        return Done()
+
+    monkeypatch.setattr(runner, "no_window_kwargs", lambda: {"creationflags": 7})
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    step = runner.Step("s", ["python", "-c", "pass"])
+    result = runner._run_one(step, ["python", "-c", "pass"], tmp_path, None, 100)
+    assert result.ok and seen["kwargs"]["creationflags"] == 7
+
+
+def test_no_window_kwargs_only_on_windows(monkeypatch):
+    monkeypatch.setattr(runner.sys, "platform", "linux")
+    assert runner.no_window_kwargs() == {}
+    monkeypatch.setattr(runner.sys, "platform", "win32")
+    monkeypatch.setattr(runner.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    assert runner.no_window_kwargs() == {"creationflags": 0x08000000}
