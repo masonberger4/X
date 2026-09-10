@@ -131,3 +131,24 @@ def test_cancel_ends_a_running_job_and_records_why(tmp_path):
     assert job.state == "stopped" and job.error == "stopped by a test"
     assert job.results[0].failed and job.results[1].skipped_reason == "cancelled"
     assert manager.cancel() is False, "nothing left to cancel"
+
+
+def test_results_appear_on_the_job_step_by_step(tmp_path):
+    """The runs page polls while a run is in flight; it must see finished steps and
+    the live one before the whole run returns, not one block at the end."""
+    cfg = _cfg(
+        tmp_path,
+        [_step("quick", "print('done')"), _step("slow", "import time; time.sleep(30)")],
+    )
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    job = manager.start(["quick", "slow"])
+    deadline = time.monotonic() + 10
+    while job.active_step != "slow" and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert job.running
+    assert [r.name for r in job.results] == ["quick"] and job.results[0].ok
+    assert job.active_step == "slow" and job.active_since is not None
+    assert job.pending_steps == []
+    manager.cancel()
+    _wait(job)
+    assert job.active_step is None and [r.name for r in job.results] == ["quick", "slow"]

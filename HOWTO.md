@@ -313,7 +313,9 @@ to stop it. Four pages:
   impressions, and the suggestions from the latest weekly report. The
   suggestions are proposals only; applying one means editing a settings file.
 - **Runs** (`/runs`) — tick the steps you want and press "Run selected
-  steps". The log appears on the page as it finishes. This runs exactly what
+  steps". The page updates as the run goes: each step's log appears the
+  moment that step finishes, the step in progress is shown with how long it
+  has been running, and the steps still to come are listed. This runs exactly what
   the scheduler in part 6 runs; if the scheduler happens to be running at
   that moment the page says so and does nothing, rather than running twice.
   While a run is going there is a "Stop this run" button: it ends the
@@ -321,6 +323,10 @@ to stop it. Four pages:
   skips the rest. Nothing is lost; the next run picks up where it left off.
 - **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
   approval pages from part 3, unchanged.
+
+Links to other websites (a story's source, a DOI, a posted tweet, a
+claim check's source, a draft's primary source) open in a new tab, or in your
+browser from the desktop window, so the page you were on stays put.
 
 The one thing it writes outside its own pages is a decision on the feed page.
 Everything else is a view.

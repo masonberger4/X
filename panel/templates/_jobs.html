@@ -13,7 +13,13 @@
     {% if r.stdout %}<pre class="log">{{ r.stdout }}</pre>{% endif %}
     {% if r.stderr %}<pre class="log">{{ r.stderr }}</pre>{% endif %}
   {% endfor %}
-  {% if j.running and not j.results %}<p class="meta">running…</p>{% endif %}
+  {% if j.running %}
+    {% if j.active_step %}
+    <p><span class="pill warn">running</span> <strong>{{ j.active_step }}</strong>
+      <span class="meta">for {{ j.active_for }}</span></p>
+    {% elif not j.results %}<p class="meta">starting…</p>{% endif %}
+    {% if j.pending_steps %}<p class="meta">then {{ j.pending_steps|join(', ') }}</p>{% endif %}
+  {% endif %}
   {% if j.running %}
   <form method="post" action="/runs/cancel" class="inline">
     <button type="submit">Stop this run</button>
