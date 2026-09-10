@@ -45,7 +45,10 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   expands `companies.feeds` into `rss` sources named `company_<key>`,
   `conferences.meetings` into `crossref` sources `conf_<key>_abstracts` (plus
   `conf_<key>_news` rss when `news_rss` is set) and `kol` into one `x_list`
-  source `kol_x_list`; an explicit `enabled:` is copied through expansion.
+  source `kol_x_list`; an explicit `enabled:` is copied through expansion. A source may set its own
+  `user_agent` (`Source.user_agent()` falls back to `http.user_agent`); the ClinicalTrials.gov
+  source must keep a `python-httpx/` token in it, since that host's firewall rejects a
+  Python client claiming to be a browser.
 - **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`;
   the only caller of `httpx.get` is its private `_request`, which retries
   429/5xx/transport errors and never logs headers),

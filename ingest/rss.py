@@ -96,9 +96,7 @@ class RSSSource(Source):
     type = "rss"
 
     def fetch_text(self) -> str:
-        return http.get_text(
-            self.cfg["url"], user_agent=(self.global_cfg.get("http") or {}).get("user_agent")
-        )
+        return http.get_text(self.cfg["url"], user_agent=self.user_agent())
 
     def fetch(self) -> list[Item]:
         items = parse_feed(self.fetch_text(), self.name)

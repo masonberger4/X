@@ -187,6 +187,16 @@ class Source(ABC):
             return w[2]
         return self.cadence_minutes
 
+    def user_agent(self) -> str | None:
+        """This source's `user_agent`, else the root `http.user_agent`.
+
+        A per-source value exists for hosts whose firewall checks the agent string against
+        the client's fingerprint: ClinicalTrials.gov accepts a Python client only when it
+        says so (`python-httpx/...`), while some feeds want a browser-like string.
+        """
+        own = self.cfg.get("user_agent")
+        return str(own) if own else (self.global_cfg.get("http") or {}).get("user_agent")
+
     def is_due(self, last_run: datetime | None, now: datetime | None = None) -> bool:
         if not self.enabled:
             return False

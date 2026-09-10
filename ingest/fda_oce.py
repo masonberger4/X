@@ -103,9 +103,7 @@ class FDAOCESource(Source):
     type = "fda_oce"
 
     def fetch_html(self) -> str:
-        return http.get_text(
-            self.cfg["url"], user_agent=(self.global_cfg.get("http") or {}).get("user_agent")
-        )
+        return http.get_text(self.cfg["url"], user_agent=self.user_agent())
 
     def fetch(self) -> list[Item]:
         try:

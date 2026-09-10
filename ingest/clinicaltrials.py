@@ -109,7 +109,7 @@ class ClinicalTrialsSource(Source):
         return http.get_json(
             self.cfg["url"],
             params=params,
-            user_agent=(self.global_cfg.get("http") or {}).get("user_agent"),
+            user_agent=self.user_agent(),
         )
 
     def build_params(self, page_token: str | None = None) -> dict[str, Any]:

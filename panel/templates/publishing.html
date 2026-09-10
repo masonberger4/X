@@ -26,7 +26,7 @@ went out, then fix the row by hand.</p>
     <td><a href="/drafts/{{ r.draft_id }}">{{ r.draft_id }}</a></td>
     <td><span class="pill fail">{{ r.status }}</span></td>
     <td class="meta">{{ (r.finished_at or r.claimed_at or r.scheduled_for) or '' }}</td>
-    <td class="low">{{ r.error or '' }}</td>
+    <td class="low wrap">{{ r.error or '' }}</td>
   </tr>
   {% endfor %}
 </table>
@@ -45,7 +45,7 @@ went out, then fix the row by hand.</p>
     <td>
       {% if p.tweet_id %}<a href="https://x.com/i/status/{{ p.tweet_id }}" rel="noreferrer">{{ p.text }}</a>
       {% else %}{{ p.text }}{% endif %}
-      {% if p.error %}<div class="low">{{ p.error }}</div>{% endif %}
+      {% if p.error %}<div class="low wrap">{{ p.error }}</div>{% endif %}
     </td>
   </tr>
   {% endfor %}

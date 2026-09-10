@@ -398,6 +398,7 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | Scoring says `scoring 0 clusters` right after a keyword change | `python run_score.py --refilter` |
 | Scoring says `pass: 0, deferred: N` | today's cap of 150 is spent; the N wait for tomorrow, or raise `daily_cap` in `config.yaml` |
 | A source keeps erroring | it is logged and skipped; the others still run. Paste the line to me |
+| `clinicaltrials_oncology` says `403 Forbidden` | ClinicalTrials.gov blocks a Python program that calls itself a browser. Its entry in `config.yaml` has its own `user_agent` starting with `python-httpx/` for that reason; if the line was removed, put it back |
 | Want a completely fresh start | delete `pipeline.db`, then `python run_ingest.py --force` |
 | The dashboard says `missing env: ANTHROPIC_API_KEY` but you use the Claude Code backend | it should not since the check follows `LLM_BACKEND`; make sure `.env` is in the folder you start `run_app.py` from |
 | The control panel says a run is already in progress | the scheduler (part 6) is mid-run; wait for it and press the button again |

@@ -102,3 +102,26 @@ def test_the_panel_has_no_publish_button(client):
         body = client.get(path).text
         assert "--live" not in body
         assert "PUBLISH_ENABLED" not in body
+
+
+def test_the_queue_pages_keep_the_panel_links_in_the_nav(client):
+    """The queue renders with its own template env; inside the panel it must still link back."""
+    for path in ("/queue", "/status/approved", "/voice"):
+        body = client.get(path).text
+        assert 'href="/"' in body and 'href="/feed"' in body and 'href="/runs"' in body, path
+
+
+def test_a_long_source_error_wraps_instead_of_widening_the_table(client, conn):
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS source_runs (source TEXT PRIMARY KEY, last_run_at TEXT,"
+        " fetched INTEGER, inserted INTEGER, error TEXT)"
+    )
+    long_url = "https://example.org/api?" + "&".join(f"p{i}=v{i}" for i in range(60))
+    conn.execute(
+        "INSERT OR REPLACE INTO source_runs VALUES ('clinicaltrials_oncology', ?, 0, 0, ?)",
+        ("2026-09-10T00:00:00+00:00", f"Client error '403 Forbidden' for url '{long_url}'"),
+    )
+    conn.commit()
+    body = client.get("/sources").text
+    cell = body.split("403 Forbidden")[0].rsplit("<td", 1)[1]
+    assert "wrap" in cell

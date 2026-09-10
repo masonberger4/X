@@ -184,7 +184,7 @@ class XListSource(Source):
         return http.get_json(
             url,
             params=params,
-            user_agent=(self.global_cfg.get("http") or {}).get("user_agent"),
+            user_agent=self.user_agent(),
             headers={"Authorization": f"Bearer {token}"},
         )
 
