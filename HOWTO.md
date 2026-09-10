@@ -152,7 +152,9 @@ source only when it is due, and score only scores what is new.
    "Revise" on the draft's page) and press Revise. The drafter rewrites the
    post from your note, keeps the rest as it was, the hard rules are checked
    again in code, and the draft comes back to you still pending with a
-   before/after diff in its history. It takes a few seconds. If the model
+   before/after diff in its history. It takes 10-30 seconds: a yellow status
+   bar at the top of the page shows while the drafter works, the form is
+   locked so it cannot be sent twice, and the page reloads by itself. If the model
    cannot produce a valid rewrite the draft is left untouched and the page
    says why. Pick a reason (voice, factual, not newsworthy, hard rule, other)
    when you revise or reject; your notes feed the voice report. "Edit by hand"
