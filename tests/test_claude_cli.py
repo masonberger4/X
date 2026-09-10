@@ -190,7 +190,7 @@ def test_scorer_headless_uses_cli_and_wraps_reply(monkeypatch):
     monkeypatch.delenv("LLM_BACKEND", raising=False)
     calls = []
 
-    def fake_run(user, *, system, model, cfg):
+    def fake_run(user, *, system, model, cfg, effort=None):
         calls.append((user, system, model))
         return "```json\n" + json.dumps({"scores": [_entry(0)]}) + "\n```"
 
@@ -288,7 +288,7 @@ def test_drafter_call_routes_to_cli_when_configured(monkeypatch):
     monkeypatch.setattr(drafter, "_root_config", lambda: {"claude_code": {"binary": "cc"}})
     seen = {}
 
-    def fake_run(user, *, system, model, cfg):
+    def fake_run(user, *, system, model, cfg, effort=None):
         seen.update(user=user, system=system, model=model, cfg=cfg)
         return '{"ok": true}'
 
@@ -365,3 +365,71 @@ def test_the_cli_and_taskkill_are_launched_without_a_console_window(monkeypatch)
     assert seen["popen"]["creationflags"] == 7
     claude_cli._kill_tree(FakeProc())
     assert seen["run"]["creationflags"] == 7
+
+
+def test_safeguard_verdict_is_a_refusal_not_a_plain_error(monkeypatch):
+    monkeypatch.setattr(claude_cli.shutil, "which", lambda b: b)
+    envelope = json.dumps(
+        {
+            "is_error": True,
+            "terminal_reason": "api_error",
+            "result": "API Error: Opus 5's safeguards flagged this message "
+            "(https://www.anthropic.com/legal/aup). Claude Code can't respond.",
+        }
+    )
+    monkeypatch.setattr(
+        claude_cli,
+        "_run_with_timeout",
+        lambda *a, **k: SimpleNamespace(returncode=1, stdout=envelope, stderr=""),
+    )
+    with pytest.raises(claude_cli.ClaudeCliRefused, match="safeguards flagged"):
+        claude_cli.run_claude("u", model="m")
+    # exit 0 with an error envelope carrying the same verdict
+    monkeypatch.setattr(
+        claude_cli,
+        "_run_with_timeout",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=envelope, stderr=""),
+    )
+    with pytest.raises(claude_cli.ClaudeCliRefused):
+        claude_cli.run_claude("u", model="m")
+    assert issubclass(claude_cli.ClaudeCliRefused, claude_cli.ClaudeCliError)
+
+
+def test_scorer_refusal_is_not_retried_and_splits_the_batch(monkeypatch, db):
+    monkeypatch.delenv("LLM_BACKEND", raising=False)
+    from tests.test_scorer import _seed
+
+    calls: list[int] = []
+
+    def refuse_big_prompts(user, **kw):
+        n = user.count("### Item ")
+        calls.append(n)
+        if n > 1:
+            raise claude_cli.ClaudeCliRefused("CLI exited 1: safeguards flagged this message")
+        return json.dumps({"scores": [_entry(0)]})
+
+    monkeypatch.setattr(claude_cli, "run_claude", refuse_big_prompts)
+    monkeypatch.setattr("score.scorer.time.sleep", lambda s: None)
+    _seed(db, 3)
+    scorer = Scorer({**CFG, "scoring": {"batch_size": 3, "max_retries": 5, "backoff_seconds": 0}})
+    scores = scorer.score_unscored(db)
+    assert len(scores) == 3
+    assert calls == [3, 1, 2, 1, 1]  # no backoff retries, one split per refusal
+
+
+def test_scorer_and_drafter_pass_effort_to_cli(monkeypatch):
+    monkeypatch.setenv("LLM_BACKEND", "claude_code")
+    seen = []
+    monkeypatch.setattr(
+        claude_cli,
+        "run_claude",
+        lambda user, **kw: seen.append(kw.get("effort")) or json.dumps({"scores": []}),
+    )
+    Scorer({**CFG, "models": {**CFG["models"], "scorer_effort": "low"}}).create_message("U")
+    monkeypatch.setattr(
+        drafter,
+        "_root_config",
+        lambda: {"models": {"backend": "claude_code", "drafter_effort": "low"}},
+    )
+    drafter.call_anthropic("S", "U", "m")
+    assert seen == ["low", "low"]

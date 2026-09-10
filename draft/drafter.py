@@ -127,8 +127,9 @@ def call_anthropic(system: str, user: str, model: str) -> str:
     claude_code backend, the CLI's result text."""
     load_dotenv()
     cfg = _root_config()
+    effort = str((cfg.get("models") or {}).get("drafter_effort") or "").strip().lower() or None
     if claude_cli.llm_backend(cfg) == claude_cli.CLAUDE_CODE:
-        return claude_cli.run_claude(user, system=system, model=model, cfg=cfg)
+        return claude_cli.run_claude(user, system=system, model=model, cfg=cfg, effort=effort)
 
     import anthropic  # imported here so tests that mock this function never touch the SDK
 
@@ -136,12 +137,15 @@ def call_anthropic(system: str, user: str, model: str) -> str:
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set (put it in .env)")
     client = anthropic.Anthropic(api_key=api_key)
-    resp = client.messages.create(
+    kwargs: dict = dict(
         model=model,
         max_tokens=MAX_TOKENS,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
+    if effort:
+        kwargs["output_config"] = {"effort": effort}
+    resp = client.messages.create(**kwargs)
     return "".join(getattr(block, "text", "") for block in resp.content)
 
 

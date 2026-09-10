@@ -437,7 +437,14 @@ envelope, and returns the reply text. The scorer, which normally relies on a
 strict tool schema, instead inlines that schema into the system prompt and
 validates the reply in code: a malformed reply fails the batch (logged, skipped,
 picked up next run); a CLI failure (not logged in, rate limited, timeout) is
-retried with the same backoff as an API error.
+retried with the same backoff as an API error. A safeguard verdict (`safeguards
+flagged this message`) is `ClaudeCliRefused`: it is deterministic for a given prompt,
+so it is never retried; instead `Scorer.score_batch_splitting` halves the batch and
+scores each half in its own call, down to single clusters, and a cluster refused on
+its own is logged and left unscored. `models.scorer_effort`, `models.drafter_effort`,
+`models.rater_effort` and `verify/config.yaml:effort` set the effort level per phase
+(`--effort` on the CLI, `output_config.effort` on the API; blank means the model's
+default).
 
 Trade-offs, so you can decide with eyes open:
 

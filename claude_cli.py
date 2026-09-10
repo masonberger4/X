@@ -44,6 +44,20 @@ class ClaudeCliError(RuntimeError):
     """The CLI could not be run or did not return a usable result."""
 
 
+class ClaudeCliRefused(ClaudeCliError):
+    """The CLI's usage-policy safeguard flagged the prompt. Deterministic for a given
+    prompt, so retrying the same call is pointless; callers shrink the prompt instead."""
+
+
+# Phrases the CLI's safeguard verdict carries (the API-side error text is the same).
+REFUSAL_MARKERS = ("safeguards flagged", "anthropic.com/legal/aup")
+
+
+def is_refusal(message: str) -> bool:
+    text = message.lower()
+    return any(marker in text for marker in REFUSAL_MARKERS)
+
+
 class ClaudeCliUnavailable(ClaudeCliError):
     """The CLI is not installed or cannot start at all. Not worth retrying."""
 
@@ -129,7 +143,8 @@ def parse_envelope(stdout: str) -> str:
         # reason in terminal_reason (e.g. "api_error"); other failures set the subtype.
         reason = data.get("terminal_reason") if data.get("is_error") else None
         reason = reason if reason and reason != "success" else subtype or "error"
-        raise ClaudeCliError(f"CLI reported {reason}: {str(data.get('result'))[:300]}")
+        message = f"CLI reported {reason}: {str(data.get('result'))[:300]}"
+        raise (ClaudeCliRefused if is_refusal(message) else ClaudeCliError)(message)
     result = data.get("result")
     if not isinstance(result, str) or not result.strip():
         raise ClaudeCliError("CLI returned an empty result")
@@ -172,7 +187,8 @@ def run_claude(
             except OSError:
                 pass
     if proc.returncode != 0:
-        raise ClaudeCliError(f"CLI exited {proc.returncode}: {_failure_reason(proc)}")
+        reason = f"CLI exited {proc.returncode}: {_failure_reason(proc)}"
+        raise (ClaudeCliRefused if is_refusal(reason) else ClaudeCliError)(reason)
     return parse_envelope(proc.stdout)
 
 
