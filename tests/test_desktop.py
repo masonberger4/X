@@ -146,6 +146,8 @@ def test_no_window_serves_the_panel_and_stops_when_the_wait_returns(db_file, mon
 
 def test_the_window_gets_the_same_url_the_server_listens_on(db_file, monkeypatch):
     opened = {}
+    # pywebview is an optional extra CI does not install; this test is about the hand-off.
+    monkeypatch.setattr(run_desktop, "window_available", lambda: True)
     monkeypatch.setattr(run_desktop, "open_window", lambda url: opened.setdefault("url", url))
     assert run_desktop.main(["--port", "0"]) == 0
     assert opened["url"].startswith("http://127.0.0.1:")
