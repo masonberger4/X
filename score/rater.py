@@ -1,5 +1,6 @@
-"""Second-opinion rater: a stronger model rates digest entries 1-5 the way a human does
-with `digest.py --rate`, so the human can compare, disagree, and tune faster.
+"""Second-opinion rater: a stronger model answers the same yes/no question the human editor
+answers with `digest.py --rate` (post this story or not, and why), so the human can compare,
+disagree, and tune faster.
 
 Ratings are stored with rater='auto:<model>' and are never confused with human
 ratings (the feedback report and the rubric-tuning workflow read human rows only).
@@ -17,32 +18,37 @@ from dataclasses import dataclass
 from typing import Any
 
 import claude_cli
+from score import editorial
 
 log = logging.getLogger(__name__)
 
 MAX_TOKENS = 400
-SCALE = """Rating scale (how the account's human editor uses it):
-5 = would post about this today: moves a thesis, names a public company or catalyst, fits the beat
-4 = worth a post, not urgent
-3 = interesting but probably would not post
-2 = marginal
-1 = noise; should not have scored this high"""
+SCALE = f"""Decision (how the account's human editor answers it):
+yes = would post about this: moves a thesis, names a public company or catalyst, fits the beat
+no = would not post: off the beat, no business implication, weak or overhyped evidence, or already covered
+
+{editorial.reasons_text()}"""
 
 SYSTEM = f"""You are a PhD-level immuno-oncology analyst at a hedge fund, acting as the editor of an X account about the business and investing side of immuno-oncology biotech: CAR-T and cell therapy, T-cell engagers and bispecifics, adjacent IO science; trial results and what they mean, upcoming catalysts for public companies, M&A and financing. The account never gives medical or investment advice.
 
-For the item you are given, decide how the editor would rate it for posting.
+For the item you are given, decide whether the editor would post about it: yes or no.
 
 {SCALE}
 
-Judge on: does it change a thesis or a competitive picture, is there a public company or a dated catalyst, is the evidence strong enough to say something non-obvious, and is it on the beat. The editor's calibration from real ratings: a DATED catalyst for a public company on the beat, with enough context to explain the disease, the technology and what success would change, is a 5 even before data exist (a pre-data announcement is a 1-2 only when it is off the beat or carries no context). A negative or informative early readout from a named public sponsor that reads across to competitors is a 5. Items with no business or investment implication at all (guidelines, grading criteria, consensus statements, reviews) are a 2 however strong the science. A well-run trial in an unrelated modality is a 2. Never infer a company or sponsor that the item text does not name; if the sponsor is not stated, say so in the note rather than guessing.
+Judge on: does it change a thesis or a competitive picture, is there a public company or a dated catalyst, is the evidence strong enough to say something non-obvious, and is it on the beat. The editor's calibration from real decisions: a DATED catalyst for a public company on the beat, with enough context to explain the disease, the technology and what success would change, is a yes even before data exist (a pre-data announcement is a no only when it is off the beat or carries no context). A negative or informative early readout from a named public sponsor that reads across to competitors is a yes. Items with no business or investment implication at all (guidelines, grading criteria, consensus statements, reviews) are a no however strong the science. A well-run trial in an unrelated modality is a no. Never infer a company or sponsor that the item text does not name; if the sponsor is not stated, say so in the note rather than guessing.
 
-Reply with ONLY a JSON object: {{"rating": <1-5>, "note": "<one sentence, <= 200 chars, the reason>"}}"""
+Reply with ONLY a JSON object: {{"decision": "yes" | "no", "note": "<one sentence, <= 200 chars, starting with the deciding reason category>"}}"""
 
 
 @dataclass
 class AutoRating:
-    rating: int
+    decision: str  # editorial.YES or editorial.NO
     note: str
+
+    @property
+    def rating(self) -> int:
+        """Numeric form stored in ratings.rating (yes = 5, no = 1)."""
+        return editorial.rating_for(self.decision)
 
 
 def build_user(entry: dict[str, Any]) -> str:
@@ -57,7 +63,7 @@ def build_user(entry: dict[str, Any]) -> str:
         "ABSTRACT:",
         (entry.get("abstract") or "(none)")[:3000],
         "",
-        "Rate it. JSON only.",
+        "Decide: yes or no. JSON only.",
     ]
     return "\n".join(parts)
 
@@ -68,11 +74,13 @@ def parse_reply(text: str) -> AutoRating:
     if not m:
         raise ValueError(f"no JSON object in reply: {text[:120]!r}")
     data = json.loads(m.group(0))
-    rating = int(data["rating"])
-    if not 1 <= rating <= 5:
-        raise ValueError(f"rating out of range: {rating}")
+    raw = data.get("decision", data.get("rating"))  # "rating" 1-5: replies from the old scale
+    try:
+        decision = editorial.parse_decision(raw)
+    except ValueError:
+        raise ValueError(f"decision is not yes/no: {raw!r}") from None
     note = str(data.get("note") or "").strip()[:200]
-    return AutoRating(rating=rating, note=note)
+    return AutoRating(decision=decision, note=note)
 
 
 def call_model(system: str, user: str, model: str, effort: str | None, cfg: dict) -> str:

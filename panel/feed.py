@@ -1,4 +1,5 @@
-"""The scored feed, as a page: what `digest.py` prints, with its rating prompt inline.
+"""The scored feed, as a page: what `digest.py` prints, with its editor prompt inline
+(post this? yes/no, plus an explanation that starts with a reason category).
 
 Step 1's data is read and written through `db.Database` — the same API `digest.py` uses
 — never through raw SQL here. `entry_views` is pure: give it a Database and the rows
@@ -11,14 +12,13 @@ from typing import Any
 
 from db import Cluster, Database, Score, window_start
 from filter.prefilter import cluster_text
+from score import editorial
 
-RATING_LABELS = {
-    1: "1 · not worth a post",
-    2: "2 · weak",
-    3: "3 · fine",
-    4: "4 · good",
-    5: "5 · post this",
+DECISION_LABELS = {
+    editorial.YES: "yes · post this",
+    editorial.NO: "no · skip it",
 }
+REASON_CATEGORIES = editorial.REASON_CATEGORIES
 MAX_ABSTRACT_CHARS = 700
 
 
@@ -39,7 +39,7 @@ def fetch_entries(
 
 
 def entry_views(db: Database, rows: list[tuple[Cluster, Score]]) -> list[dict[str, Any]]:
-    """One view per scored cluster: the digest entry, plus any ratings already recorded."""
+    """One view per scored cluster: the digest entry, plus any decisions already recorded."""
     out = []
     for rank, (cl, sc) in enumerate(rows, start=1):
         items = db.items_in_cluster(cl.id)
@@ -86,15 +86,21 @@ def _clip(text: str) -> str:
 
 def _latest(ratings: list[dict[str, Any]], *, human: bool) -> dict[str, Any] | None:
     matching = [r for r in ratings if ((r.get("rater") or "human") == "human") is human]
-    return matching[-1] if matching else None
+    if not matching:
+        return None
+    latest = dict(matching[-1])
+    latest["decision"] = editorial.decision_of(latest.get("rating"))
+    return latest
 
 
-def parse_rating(raw: str | None) -> int:
-    """A rating is 1-5. Anything else is a bad request, not a silent no-op."""
-    try:
-        value = int(str(raw).strip())
-    except (TypeError, ValueError):
-        raise ValueError("rating must be a whole number from 1 to 5") from None
-    if not 1 <= value <= 5:
-        raise ValueError("rating must be from 1 to 5")
-    return value
+def parse_decision(raw: str | None) -> str:
+    """'yes' or 'no'. Anything else is a bad request, not a silent no-op."""
+    return editorial.parse_decision(raw)
+
+
+def parse_note(raw: str | None) -> str:
+    """The explanation is the training signal, so it is required."""
+    note = (raw or "").strip()
+    if not note:
+        raise ValueError("an explanation is required: start with the deciding reason category")
+    return note

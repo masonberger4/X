@@ -21,7 +21,7 @@ models:
   drafter: claude-opus-5
   # Optional second opinion for `digest.py --auto-rate`: a stronger model rates
   # each digest entry 1-5 the way the human does with --rate. Stored with
-  # rater='auto:<model>' so it never masquerades as a human rating.
+  # rater='auto:<model>' so it never masquerades as a human decision.
   rater: claude-fable-5-1
   rater_effort: low               # low | medium | high | xhigh | max
   # How the scorer and drafter reach Claude. "api" (default) calls the Anthropic

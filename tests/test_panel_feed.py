@@ -1,7 +1,8 @@
-"""The feed page: the digest, with its rating prompt inline.
+"""The feed page: the digest, with its editor prompt inline (yes/no plus an explanation).
 
-Ratings are the human ground truth the rubric is tuned against, so saving one has to be
-exactly what `digest.py --rate` writes: a row in `ratings` with rater 'human'.
+Decisions are the human ground truth the rubric is tuned against, so saving one has to be
+exactly what `digest.py --rate` writes: a row in `ratings` (yes = 5, no = 1) with rater
+'human' and a note that starts with a reason category.
 """
 
 import pytest
@@ -30,11 +31,18 @@ def cluster_id(conn):
     return seed_item(conn, "i1", source="biorxiv", total=42)
 
 
-def test_parse_rating_accepts_1_to_5_and_nothing_else():
-    assert feed.parse_rating("3") == 3
-    for bad in ("0", "6", "", None, "four", "3.5"):
+def test_parse_decision_accepts_yes_or_no_and_nothing_else():
+    assert feed.parse_decision("yes") == "yes" and feed.parse_decision(" N ") == "no"
+    for bad in ("0", "6", "", None, "maybe", "3.5"):
         with pytest.raises(ValueError):
-            feed.parse_rating(bad)
+            feed.parse_decision(bad)
+
+
+def test_the_explanation_is_required():
+    assert feed.parse_note("  company: no sponsor named ") == "company: no sponsor named"
+    for bad in ("", "   ", None):
+        with pytest.raises(ValueError):
+            feed.parse_note(bad)
 
 
 def test_entry_views_carry_the_score_breakdown_and_the_source(database, cluster_id):
@@ -59,8 +67,8 @@ def test_entry_views_separate_the_human_rating_from_the_model_one(database, clus
     database.insert_rating(cluster_id, 2, "meh", rater="auto:claude-x")
     rows = feed.fetch_entries(database, hours=24, top_n=10, min_total=0)
     (entry,) = feed.entry_views(database, rows)
-    assert entry["human_rating"]["rating"] == 4
-    assert entry["model_rating"]["rating"] == 2
+    assert entry["human_rating"]["rating"] == 4 and entry["human_rating"]["decision"] == "yes"
+    assert entry["model_rating"]["rating"] == 2 and entry["model_rating"]["decision"] == "no"
     assert entry["model_rating"]["rater"] == "auto:claude-x"
 
 
@@ -68,6 +76,9 @@ def test_feed_page_lists_scored_clusters(client, cluster_id):
     body = client.get("/feed").text
     assert "Title i1" in body and "42/50" in body and "rationale i1" in body
     assert f'action="/feed/{cluster_id}/rate"' in body
+    # the reason-category box sits in the form, shown when the explanation gets focus
+    assert "Reason categories" in body and "<dt>catalyst</dt>" in body
+    assert 'name="note"' in body and "required" in body
 
 
 def test_the_threshold_can_be_ignored(client, conn):
@@ -75,16 +86,26 @@ def test_the_threshold_can_be_ignored(client, conn):
     assert "Title weak" in client.get("/feed?all=1").text
 
 
-def test_saving_a_rating_writes_a_human_row_and_returns_to_the_window(client, database, cluster_id):
+def test_saving_a_decision_writes_a_human_row_and_returns_to_the_window(
+    client, database, cluster_id
+):
     r = client.post(
-        f"/feed/{cluster_id}/rate", data={"rating": "5", "note": "post this", "back": "hours=72"}
+        f"/feed/{cluster_id}/rate",
+        data={"decision": "yes", "note": "catalyst: PDUFA in Q4", "back": "hours=72"},
     )
     assert r.status_code == 303 and r.headers["location"].startswith("/feed?hours=72")
     (row,) = database.ratings_for(cluster_id)
-    assert row["rating"] == 5 and row["note"] == "post this" and row["rater"] == "human"
+    assert row["rating"] == 5 and row["note"] == "catalyst: PDUFA in Q4" and row["rater"] == "human"
+    r = client.post(f"/feed/{cluster_id}/rate", data={"decision": "no", "note": "beat: off"})
+    assert r.status_code == 303 and database.ratings_for(cluster_id)[-1]["rating"] == 1
 
 
-def test_a_bad_rating_is_refused_and_an_unknown_cluster_is_404(client, database, cluster_id):
-    assert client.post(f"/feed/{cluster_id}/rate", data={"rating": "9"}).status_code == 400
-    assert client.post("/feed/9999/rate", data={"rating": "3"}).status_code == 404
+def test_a_bad_decision_or_a_missing_explanation_is_refused_and_an_unknown_cluster_is_404(
+    client, database, cluster_id
+):
+    bad = {"decision": "maybe", "note": "x"}
+    assert client.post(f"/feed/{cluster_id}/rate", data=bad).status_code == 400
+    no_note = {"decision": "yes", "note": " "}
+    assert client.post(f"/feed/{cluster_id}/rate", data=no_note).status_code == 400
+    assert client.post("/feed/9999/rate", data={"decision": "no", "note": "x"}).status_code == 404
     assert database.ratings_for(cluster_id) == []

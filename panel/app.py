@@ -4,7 +4,7 @@ Routes owned here:
   GET  /                dashboard: health checks, per-step last run, counts, backup, disk
   GET  /sources         every configured ingest source with its freshness and last error
   GET  /feed            scored clusters of the last N hours (what digest.py prints)
-  POST /feed/{id}/rate  save a 1-5 human rating and note for a cluster
+  POST /feed/{id}/rate  save the editor's yes/no decision and explanation for a cluster
   GET  /publishing      the schedule, what has posted, and anything needing a human
   GET  /feedback        follower trend, per-post metrics, and the latest report's proposals
   GET  /runs            recent runs started from the panel, with per-step logs
@@ -47,6 +47,7 @@ from ops.health import Thresholds
 from panel import feed, views
 from panel.frozen import data_dir, step_interpreter
 from panel.jobs import JobError, JobManager
+from score import editorial
 
 log = logging.getLogger(__name__)
 
@@ -190,7 +191,8 @@ def feed_page(
             "top_n": top_n,
             "min_total": min_total,
             "show_all": all,
-            "labels": feed.RATING_LABELS,
+            "labels": feed.DECISION_LABELS,
+            "reasons": feed.REASON_CATEGORIES,
             "saved": saved,
         },
     )
@@ -198,13 +200,14 @@ def feed_page(
 
 @app.post("/feed/{cluster_id}/rate")
 async def rate_cluster(cluster_id: int, request: Request):
-    """Save a human 1-5 rating: the ground truth step 4 tunes the rubric against."""
+    """Save the editor's yes/no and explanation: the ground truth the rubric is tuned against."""
     form = await read_form(request)
     try:
-        rating = feed.parse_rating(_first(form, "rating"))
+        decision = feed.parse_decision(_first(form, "decision"))
+        note = feed.parse_note(_first(form, "note"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    note = (_first(form, "note") or "").strip() or None
+    rating = editorial.rating_for(decision)
     with open_db() as database:
         if database.get_cluster(cluster_id) is None:
             raise HTTPException(status_code=404, detail="no such cluster")

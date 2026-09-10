@@ -23,8 +23,10 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - Lint: `ruff check .` and `ruff format --check .`
 - Test: `pytest`
 - Run: `python run_ingest.py`, `python run_score.py`,
-  `python digest.py [--rate] [--auto-rate]` (model ratings are stored as
-  `rater='auto:<model>'`; human ratings stay the ground truth for tuning),
+  `python digest.py [--rate] [--auto-rate]` (the editor answers yes/no per story plus
+  a required explanation that starts with a reason category from
+  `score/editorial.py`; stored in `ratings` as 5/1, and the model rater answers the
+  same question as `rater='auto:<model>'`; human decisions stay the ground truth),
   `python run_draft.py`, `python run_verify.py` (claim checks with web search),
   `python run_queue.py` (approval UI on localhost:8000),
   `python run_app.py` (control panel: dashboard, sources, runs and the queue, same port),
@@ -142,7 +144,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   logic. It reads other steps only through `ops/store.py`'s read-only adapters plus
   `run_ops.build_report`; the one exception is `panel/feed.py`, which uses step 1's own
   `db.Database` API (as `digest.py` does) to list scored clusters and to write a human
-  1-5 rating — the only row the panel writes outside its own pages, and it opens that
+  yes/no decision — the only row the panel writes outside its own pages, and it opens that
   Database inside the route because a `Database` keeps its connection to one thread.
   It renders through the pure functions in `panel/views.py`
   (`now` is a parameter; no DB, network or clock), and includes the step 2 queue's
@@ -174,7 +176,8 @@ ingest/   base.py (Item, Source ABC, windows), http.py (retry), rss.py,
           biorxiv.py, pubmed.py, clinicaltrials.py, fda_oce.py,
           crossref.py (conference abstracts), x_list.py (KOL list, read-only)
 filter/   prefilter.py, dedup.py
-score/    rubric.py, scorer.py, rater.py (second-opinion 1-5 rater)
+score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories),
+          rater.py (second-opinion yes/no rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
 draft/    schema.py, prompt.py, voice.md, drafter.py, config.yaml, settings.py,

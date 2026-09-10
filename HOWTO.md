@@ -66,19 +66,26 @@ source only when it is due, and score only scores what is new.
    Prints a start and a finish line per batch of ten. Up to 150 stories a day
    are scored; the rest wait for tomorrow. Do not click inside the window
    while it runs (see "Fixing things").
-4. Read the top stories with the model's rating beside each, and add yours.
+4. Read the top stories with the model's decision beside each, and add yours.
    ```
    python digest.py --auto-rate --rate
    ```
-   The model rates first (a number and one-line reason per entry), then you
-   are asked for a rating 1 to 5 per entry:
-   - `5` would post today, `4` worth a post, `3` interesting but no,
-     `2` marginal, `1` noise
-   - `s` skips one, `q` quits, Enter after the note when it asks for one
-   Rate on whether YOU would post it. Your notes are read by me when tuning.
+   The model decides first (yes or no and a one-line reason per entry), then
+   you are asked the same question per entry, as the editor:
+   - `y` you would post about it, `n` you would not
+   - `s` skips one, `q` quits
+   - after `y` or `n` a box lists the reason categories (beat, company,
+     catalyst, evidence, thesis, business, coverage, hype) and asks why. The
+     explanation is required: start it with the deciding category, for
+     example `catalyst: PDUFA in Q4, public sponsor` or `beat: solid tumour
+     ADC, not our modality`.
+   Decide on whether YOU would post it. Your explanations are what the
+   scoring gets tuned against, so the deciding reason matters more than the
+   yes or no. Decisions are stored in `ratings` as 5 (yes) or 1 (no), so
+   ratings made on the old 1 to 5 scale still count (4 and 5 read as yes).
 5. Optional views of the same list.
    ```
-   python digest.py                     # print only, no rating
+   python digest.py                     # print only, no decisions
    python digest.py --all --hours 72    # ignore the score threshold, 3 days
    python digest.py --out digest.md     # save to a file
    ```
@@ -277,10 +284,12 @@ to stop it. Four pages:
   three times its cadence.
 - **Feed** (`/feed`) — the same list `python digest.py` prints: the top scored
   stories of the last 24 hours, each with its score breakdown, the reason it
-  scored that way and a link to the source. Rate the ones you have an opinion
-  about 1 to 5 and add a note. This is the same rating `digest.py --rate`
-  asks for at the terminal, and it is what the scoring gets tuned against
-  later. It does not change what gets drafted today. Use the window links to
+  scored that way and a link to the source. For the ones you have an opinion
+  about, pick yes (post this) or no and write why; a box with the reason
+  categories appears while you type the explanation, which is required.
+  This is the same decision `digest.py --rate` asks for at the terminal, and
+  it is what the scoring gets tuned against later. It does not change what
+  gets drafted today. Use the window links to
   look back 72 hours or a week, or to ignore the score threshold.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
@@ -295,7 +304,7 @@ to stop it. Four pages:
 - **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
   approval pages from part 3, unchanged.
 
-The one thing it writes outside its own pages is a rating on the feed page.
+The one thing it writes outside its own pages is a decision on the feed page.
 Everything else is a view.
 
 Two things it deliberately will not do. It never posts to X: publishing is
