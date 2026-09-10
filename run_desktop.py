@@ -77,6 +77,21 @@ def start_server(host: str, port: int):
     return server, thread
 
 
+INSTALL_HINT = (
+    'pywebview is not installed. Run:  pip install -e ".[desktop]"  (once), then try again.'
+)
+
+
+def window_available() -> bool:
+    """Whether the native window can open. Checked before the server starts, so a missing
+    install is one clear line rather than a started server and a traceback."""
+    try:
+        import webview  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def open_window(url: str) -> None:
     """Block in the native window until it is closed."""
     import webview
@@ -100,6 +115,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-window", action="store_true", help="serve only; print the address")
     args = ap.parse_args(argv)
 
+    if not args.no_window and not window_available():
+        log.error(INSTALL_HINT)
+        print(INSTALL_HINT, file=sys.stderr or sys.stdout)
+        return 1
     port = pick_port(args.host, args.port)
     try:
         server, thread = start_server(args.host, port)
