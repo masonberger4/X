@@ -8,8 +8,18 @@
   <a href="/feed?hours=168">7d</a> ·
   {% if show_all %}<a href="/feed?hours={{ hours }}">threshold only</a>{% else %}<a href="/feed?hours={{ hours }}&amp;all=1">ignore threshold</a>{% endif %}
 </p>
-<p class="meta">Rating a story here is what tunes the rubric: your 1-5 is the ground truth
-the score is measured against. It changes nothing about what gets drafted today.</p>
+<p class="meta">Deciding a story here is what tunes the rubric: your yes or no, and the
+explanation behind it, are the ground truth the score is measured against. It changes
+nothing about what gets drafted today.</p>
+<style>
+  .reasons { display: none; margin: .4rem 0 0; padding: .5rem .8rem; border: 1px solid #ddd;
+             border-left: 3px solid #2e7d32; background: #f7f7f7; font-size: .85em; }
+  .reasons dt { font-weight: 600; display: inline; }
+  .reasons dd { display: inline; margin: 0 0 0 .3rem; }
+  .reasons div { margin: .1rem 0; }
+  form.decide:focus-within .reasons { display: block; }
+  form.decide .reasons.open { display: block; }
+</style>
 
 {% for e in entries %}
 <div class="entry">
@@ -29,19 +39,24 @@ the score is measured against. It changes nothing about what gets drafted today.
   <p><strong>Angle:</strong> {{ e.suggested_angle }}</p>
   {% if e.abstract %}<blockquote class="meta">{{ e.abstract }}</blockquote>{% endif %}
   {% if e.model_rating %}
-  <p class="meta">Model rating ({{ e.model_rating.rater }}): {{ e.model_rating.rating }}/5
+  <p class="meta">Model decision ({{ e.model_rating.rater }}): {{ e.model_rating.decision }}
     {% if e.model_rating.note %}— {{ e.model_rating.note }}{% endif %}</p>
   {% endif %}
   {% if e.human_rating %}
-  <p class="high">You rated this {{ e.human_rating.rating }}/5{% if e.human_rating.note %} — {{ e.human_rating.note }}{% endif %}</p>
+  <p class="high">You said {{ e.human_rating.decision }}{% if e.human_rating.note %} — {{ e.human_rating.note }}{% endif %}</p>
   {% endif %}
-  <form method="post" action="/feed/{{ e.cluster_id }}/rate">
+  <form method="post" action="/feed/{{ e.cluster_id }}/rate" class="decide">
     <input type="hidden" name="back" value="hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}">
-    <select name="rating" aria-label="rating">
+    <select name="decision" aria-label="decision">
       {% for value, label in labels.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
     </select>
-    <input type="text" name="note" placeholder="why (optional)" size="40">
-    <button type="submit">{{ 'Re-rate' if e.human_rating else 'Save rating' }}</button>
+    <input type="text" name="note" placeholder="why: start with the deciding reason" size="48" required
+           aria-describedby="reasons-{{ e.cluster_id }}">
+    <button type="submit">{{ 'Change decision' if e.human_rating else 'Save decision' }}</button>
+    <dl class="reasons" id="reasons-{{ e.cluster_id }}">
+      <div><strong>Start the explanation with the deciding factor.</strong> Reason categories:</div>
+      {% for name, what in reasons %}<div><dt>{{ name }}</dt><dd>{{ what }}</dd></div>{% endfor %}
+    </dl>
   </form>
   <p class="meta">scored by {{ e.model }} ({{ e.prompt_version }})</p>
 </div>

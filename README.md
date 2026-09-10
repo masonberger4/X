@@ -31,7 +31,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 |---|---|
 | `/` | health checks, the last outcome of every orchestrator step, row counts, database size, latest backup |
 | `/sources` | every configured ingest source with its freshness, last error and item counts |
-| `/feed` | the scored clusters `digest.py` prints, with its 1-5 rating prompt inline |
+| `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline |
 | `/publishing` | approved and waiting, what has posted, and any partial thread needing a human |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | start a run of any enabled step and watch its log; recent runs with per-step output |
@@ -46,7 +46,7 @@ disabled in `ops/config.yaml` is skipped, never run: publishing stays off. The p
 never edits `config.yaml`, `draft/voice.md` or a draft's text, and has no publish
 button. The feedback page renders a report's suggestions; applying one is still a human
 editing a settings file and bumping `PROMPT_VERSION`. The one thing the panel writes
-outside its own steps is a human 1-5 rating on the feed page, through step 1's API, which
+outside its own steps is a human yes/no decision on the feed page, through step 1's API, which
 is exactly what `digest.py --rate` writes.
 
 There is no authentication. Bind it to localhost and reach it over an SSH tunnel or a
@@ -119,9 +119,9 @@ python run_score.py --dry-run   # see what would be scored
 python run_score.py --refilter  # after editing prefilter keywords: re-evaluate earlier drops
 python digest.py                # top-N clusters of the last 24h as markdown
 python digest.py --all --hours 72 --out digest.md
-python digest.py --rate         # rate each entry 1-5 with a note (saved to `ratings`)
-python digest.py --auto-rate    # models.rater (config.yaml) rates each entry; shown in --rate
-python digest.py --auto-rate --rate   # model first, then you, with its rating as a hint
+python digest.py --rate         # yes/no per entry plus a required explanation (saved to `ratings`)
+python digest.py --auto-rate    # models.rater (config.yaml) answers the same yes/no; shown in --rate
+python digest.py --auto-rate --rate   # model first, then you, with its decision as a hint
 python run_draft.py             # draft approved candidates
 python run_verify.py            # check each draft's claims against the web (step 2b)
 python run_queue.py             # approval UI alone on localhost:8000
@@ -163,7 +163,8 @@ snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
    hype risk, rationale and suggested angle. `total` = sum of dimensions minus
    half the hype risk (0-50).
 5. **Digest** (`digest.py`): top clusters above `scoring.threshold` in the
-   window, as markdown. `--rate` collects human ratings for rubric tuning.
+   window, as markdown. `--rate` collects the editor's yes/no decisions and
+   explanations (reason categories in `score/editorial.py`) for rubric tuning.
 
 ## Claim verification (step 2b)
 

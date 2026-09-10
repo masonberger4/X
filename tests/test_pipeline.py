@@ -96,16 +96,18 @@ def test_ingest_cadence_errors_and_digest(tmp_path, monkeypatch):
     assert md.startswith("# Cancer research digest")
     assert "## 1. " in md and "**Score 45/50**" in md and "Angle: angle" in md
 
-    answers = iter(["5", "great", "x", "s", "q"])
+    # yes + explanation for the first; "x" is neither y nor n; skip the second; quit
+    answers = iter(["y", "thesis: moves the story", "x", "s", "q"])
     saved = digest_mod.rate(db, rows, ask=lambda _p: next(answers))
     assert saved == 1
-    assert db.ratings_for(rows[0][0].id)[0]["note"] == "great"
+    (row,) = db.ratings_for(rows[0][0].id)
+    assert row["rating"] == 5 and row["note"] == "thesis: moves the story"
     db.close()
 
 
 def test_auto_rate_stores_model_ratings_separately_and_shows_them(db, monkeypatch, capsys):
-    """digest --auto-rate: one rating per entry tagged auto:<model>, skipped on rerun, shown as
-    a hint in --rate, and never read by the feedback report as a human rating."""
+    """digest --auto-rate: one yes/no per entry tagged auto:<model>, skipped on rerun, shown as
+    a hint in --rate, and never read by the feedback report as a human decision."""
     import digest as digest_mod
     from score import rater
 
@@ -155,26 +157,30 @@ def test_auto_rate_stores_model_ratings_separately_and_shows_them(db, monkeypatc
 
     def fake_call(system, user, model, effort, cfg_):
         seen.append((model, effort))
-        assert "Rating scale" in system and "TITLE:" in user
-        return '```json\n{"rating": 4, "note": "Public-company readout on the beat."}\n```'
+        assert "yes or no" in system and "Reason categories" in system and "TITLE:" in user
+        return '```json\n{"decision": "yes", "note": "company: public readout on the beat."}\n```'
 
     assert digest_mod.auto_rate(db, cfg, rows, call=fake_call) == len(rows)
     assert seen[0] == ("claude-fable-5-1", "low")
     assert digest_mod.auto_rate(db, cfg, rows, call=fake_call) == 0  # idempotent per model
     r = db.ratings_for(rows[0][0].id)
-    assert r[-1]["rater"] == "auto:claude-fable-5-1" and r[-1]["rating"] == 4
+    assert r[-1]["rater"] == "auto:claude-fable-5-1" and r[-1]["rating"] == 5  # yes
 
-    answers = iter(["5", "", "q"])
+    # an empty explanation is asked again; the reason-category box precedes the prompt
+    answers = iter(["n", "", "beat: off the beat", "q"])
     digest_mod.rate(db, rows, ask=lambda _p: next(answers))
     out = capsys.readouterr().out
-    assert "model rating (auto:claude-fable-5-1): 4" in out
+    assert "model decision (auto:claude-fable-5-1): yes" in out
+    assert "Reason categories" in out and "beat:" in out
     human = [x for x in db.ratings_for(rows[0][0].id) if x["rater"] == "human"]
-    assert human and human[-1]["rating"] == 5
+    assert human and human[-1]["rating"] == 1 and human[-1]["note"] == "beat: off the beat"
 
-    # rater.parse_reply rejects out-of-range and non-JSON replies
+    # rater.parse_reply: yes/no only (an old-scale "rating" still maps), non-JSON rejected
     import pytest
 
+    assert rater.parse_reply('{"decision": "no", "note": "x"}').rating == 1
+    assert rater.parse_reply('{"rating": 4, "note": "x"}').decision == "yes"
     with pytest.raises(ValueError):
-        rater.parse_reply('{"rating": 7, "note": "x"}')
+        rater.parse_reply('{"decision": "maybe", "note": "x"}')
     with pytest.raises(ValueError):
         rater.parse_reply("no json here")

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Print the top-N scored clusters from the last window as markdown.
 
-`--rate` walks the same list interactively and stores a 1-5 rating plus a note
-per cluster in the ratings table (training data for rubric tuning). `--auto-rate`
-asks the model in config.yaml `models.rater` for the same 1-5 rating on each
-entry and stores it as rater='auto:<model>', a second opinion shown next to the
-prompt in `--rate`; human ratings stay the ground truth."""
+`--rate` walks the same list interactively as the editor: yes or no, post this story
+or not, plus an explanation that starts with the deciding reason category
+(`score/editorial.py:REASON_CATEGORIES`, printed as a hint before the note prompt).
+Each decision is stored in the ratings table (yes = 5, no = 1; training data for rubric
+tuning). `--auto-rate` asks the model in config.yaml `models.rater` the same yes/no
+question and stores its answer as rater='auto:<model>', a second opinion shown next to
+the prompt in `--rate`; human decisions stay the ground truth."""
 
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from typing import Any
 from config import load_config, setup_logging
 from db import Cluster, Database, Score, window_start
 from filter.prefilter import cluster_text
-from score import rater
+from score import editorial, rater
 
 log = logging.getLogger("digest")
 
@@ -82,24 +84,33 @@ def _auto_ratings(db: Database, cluster_id: int) -> list[dict[str, Any]]:
 
 
 def rate(db: Database, rows: list[tuple[Cluster, Score]], ask: Callable[[str], str] = input) -> int:
-    """Prompt for a 1-5 rating and note per cluster. Returns number saved."""
+    """Ask yes/no (post this?) and an explanation per cluster. Returns number saved."""
     saved = 0
     for i, (cl, sc) in enumerate(rows):
         print(render_entry(i + 1, db, cl, sc))
         for r in _auto_ratings(db, cl.id)[-1:]:
-            print(f"model rating ({r['rater']}): {r['rating']} — {r.get('note') or ''}")
+            print(
+                f"model decision ({r['rater']}): {editorial.decision_of(r['rating'])} "
+                f"— {r.get('note') or ''}"
+            )
         while True:
-            ans = ask("rating 1-5 (s=skip, q=quit): ").strip().lower()
+            ans = ask("post this? y/n (s=skip, q=quit): ").strip().lower()
             if ans in ("q", "quit"):
                 return saved
             if ans in ("s", "skip", ""):
                 break
-            if ans.isdigit() and 1 <= int(ans) <= 5:
-                note = ask("note (optional): ").strip() or None
-                db.insert_rating(cl.id, int(ans), note)
-                saved += 1
-                break
-            print("enter 1-5, s, or q")
+            try:
+                decision = editorial.parse_decision(ans)
+            except ValueError:
+                print("enter y, n, s, or q")
+                continue
+            print(editorial.reasons_text())
+            note = ask("why: ").strip()
+            while not note:
+                note = ask("why (an explanation is required): ").strip()
+            db.insert_rating(cl.id, editorial.rating_for(decision), note)
+            saved += 1
+            break
     return saved
 
 
@@ -138,7 +149,7 @@ def auto_rate(
             continue
         db.insert_rating(cl.id, ar.rating, ar.note, rater=name)
         saved += 1
-        print(f"{i + 1}. [{ar.rating}] {title[:90]}\n   {ar.note}")
+        print(f"{i + 1}. [{ar.decision}] {title[:90]}\n   {ar.note}")
     log.info("saved %d model ratings (%s)", saved, name)
     return saved
 
@@ -149,11 +160,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--top", type=int, default=None)
     ap.add_argument("--hours", type=int, default=None)
     ap.add_argument("--all", action="store_true", help="ignore the score threshold")
-    ap.add_argument("--rate", action="store_true", help="interactively rate each entry")
+    ap.add_argument("--rate", action="store_true", help="decide yes/no per entry, with a reason")
     ap.add_argument(
         "--auto-rate",
         action="store_true",
-        help="have config.yaml models.rater rate each entry 1-5 (stored as rater='auto:<model>')",
+        help="have config.yaml models.rater decide yes/no per entry (rater='auto:<model>')",
     )
     ap.add_argument("--out", default=None, help="write markdown to this file")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -171,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
         if args.rate:
             n = rate(db, rows)
-            log.info("saved %d ratings", n)
+            log.info("saved %d decisions", n)
             return 0
         if args.out:
             with open(args.out, "w", encoding="utf-8") as fh:
