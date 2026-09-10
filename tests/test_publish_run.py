@@ -3,6 +3,7 @@
 client.post_tweet is monkeypatched everywhere; tweepy is never imported.
 """
 
+import json
 import logging
 import sys
 from datetime import datetime
@@ -12,6 +13,7 @@ import pytest
 
 import run_publish
 from approval_queue import store as qstore
+from draft.chart import Chart
 from draft.schema import Draft
 from publish import client, store
 from tests.conftest import URL, seed_item
@@ -36,24 +38,49 @@ def seed_draft(conn, item_id, *, source="pubmed", approve=True, thread=None, edi
 
 
 class FakeX:
-    def __init__(self, fail_at: int | None = None):
+    def __init__(self, fail_at: int | None = None, fail_upload: bool = False):
         self.calls: list[tuple[str, str | None]] = []
+        self.media: list[tuple[str, str | None]] = []  # (text, media_id) per tweet
+        self.uploads: list[tuple[str, str]] = []  # (path, alt text)
         self.fail_at = fail_at
+        self.fail_upload = fail_upload
 
-    def __call__(self, text, in_reply_to=None):
+    def __call__(self, text, in_reply_to=None, media_ids=None):
         self.calls.append((text, in_reply_to))
+        self.media.append((text, media_ids[0] if media_ids else None))
         if self.fail_at is not None and len(self.calls) == self.fail_at:
             raise client.PublishError("HTTP 500", retryable=True, status=500)
         return f"tw{len(self.calls)}"
+
+    def upload(self, path, alt_text=""):
+        if self.fail_upload:
+            raise client.PublishError("media_upload: HTTP 400", status=400)
+        self.uploads.append((path, alt_text))
+        return f"m{len(self.uploads)}"
 
 
 @pytest.fixture
 def fake_x(monkeypatch):
     fx = FakeX()
     monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setattr(client, "upload_media", fx.upload)
     monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
     monkeypatch.delenv("PUBLISH_ENABLED", raising=False)
     return fx
+
+
+def seed_image(conn, did, *, chart=None):
+    """Give a draft a chart spec and a (fake) rendered PNG in the images folder."""
+    chart = chart or Chart("ORR by arm", ["A", "B"], [88.0, 14.6], "%", "n=97")
+    conn.execute(
+        "UPDATE drafts SET chart_json = ? WHERE id = ?", (json.dumps(chart.to_dict()), did)
+    )
+    conn.commit()
+    path = qstore.image_file(did)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG fake")
+    qstore.set_image(conn, did, path)
+    return path
 
 
 def test_tweepy_not_imported_at_module_import():
@@ -275,3 +302,68 @@ def test_fetch_approved_uses_ai_revision_over_older_human_edit(conn):
     qstore.approve(conn, 1)
     (got,) = store.fetch_approved(10, conn=conn)
     assert got.single_post == f"Revised {URL}" and got.thread == ["r1", "r2", f"r3 {URL}"]
+
+
+# --- images ------------------------------------------------------------------
+
+
+def test_fetch_approved_carries_image_and_alt_text(conn):
+    did = seed_draft(conn, "a")
+    path = seed_image(conn, did)
+    got = store.fetch_approved(10, conn=conn)
+    assert got[0].image_path == str(path)
+    assert got[0].image_alt.startswith("Bar chart: ORR by arm. A 88%; B 14.6%.")
+    assert "n=97." in got[0].image_alt and "Source: doi.org." in got[0].image_alt
+    # file gone (or dropped): publish as text-only rather than fail
+    path.unlink()
+    assert store.fetch_approved(10, conn=conn)[0].image_path is None
+
+
+def test_live_attaches_image_to_first_post_only(conn, fake_x, monkeypatch):
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+    path = seed_image(conn, did)
+    assert run_publish.main(["--live", "--format", "thread"], now=SLOT_TIME) == 0
+    assert fake_x.uploads == [
+        (
+            str(path),
+            store.fetch_approved.__globals__["alt_text"](
+                Chart("ORR by arm", ["A", "B"], [88.0, 14.6], "%", "n=97"), URL
+            ),
+        )
+    ]
+    assert [m for _, m in fake_x.media] == ["m1", None, None]
+    assert store.get_schedule(conn, did)["status"] == "posted"
+
+
+def test_dry_run_prints_image(conn, fake_x, capsys):
+    did = seed_draft(conn, "a")
+    path = seed_image(conn, did)
+    run_publish.main([], now=SLOT_TIME)
+    out = capsys.readouterr().out
+    assert f"image on post 1: {path}" in out and "alt text: Bar chart" in out
+    assert fake_x.uploads == [] and fake_x.calls == []
+
+
+def test_attach_images_false_posts_text_only(conn, fake_x, monkeypatch, tmp_path):
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+    seed_image(conn, did)
+    cfg = tmp_path / "publish.yaml"
+    cfg.write_text("timezone: America/New_York\nslots: ['08:30']\nmedia:\n  attach_images: false\n")
+    assert run_publish.main(["--live", "--config", str(cfg)], now=SLOT_TIME) == 0
+    assert fake_x.uploads == [] and [m for _, m in fake_x.media] == [None]
+
+
+def test_upload_failure_posts_nothing(conn, monkeypatch, caplog):
+    fx = FakeX(fail_upload=True)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setattr(client, "upload_media", fx.upload)
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+    seed_image(conn, did)
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 2
+    assert fx.calls == []
+    assert store.get_schedule(conn, did)["status"] == "failed"
+    assert "media_upload" in store.get_schedule(conn, did)["error"]

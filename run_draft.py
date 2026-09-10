@@ -7,6 +7,10 @@ Drafts that pass every hard rule are stored as pending. Drafts the model could n
 past the hard rules are stored as status=failed with the reason, so they are not retried
 on the next run and the reviewer can see why.
 
+A draft that came with a chart spec (every number verified against the source) gets the chart
+rendered to <db folder>/images/draft_<id>.png, unless images.enabled is false in
+draft/config.yaml or matplotlib is missing (then the draft is stored without an image).
+
 Step 7: unless --no-examples (or examples.enabled: false in draft/config.yaml), recent human
 edits and rejections from the approval queue are built ONCE per run into an examples block
 that goes into every draft's system prompt; draft_examples records which decisions each
@@ -22,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 
 from dotenv import load_dotenv
 
-from approval_queue import store
+from approval_queue import images, store
 from draft.drafter import DraftRejected, draft_item
 from draft.examples import (
     EditExample,
@@ -144,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             args.since_hours,
             len(todo),
         )
-        drafted = failed = 0
+        drafted = failed = charts = 0
         for c in todo:
             log.info("%s %.1f %s", c.source, c.total, c.title[:80])
             if args.dry_run:
@@ -189,7 +193,19 @@ def main(argv: list[str] | None = None) -> int:
             drafted += 1
             if result.flagged_numbers:
                 log.warning("%s: numbers flagged for review: %s", c.item_id, result.flagged_numbers)
-        log.info("done: %d drafted, %d failed hard rules", drafted, failed)
+            if result.dropped_chart_numbers:
+                log.warning(
+                    "%s: chart dropped, numbers not in source: %s",
+                    c.item_id,
+                    result.dropped_chart_numbers,
+                )
+            if images.attach_chart(
+                conn, draft_id, result.draft.chart, source_url=c.url, cfg=draft_cfg
+            ):
+                charts += 1
+        log.info(
+            "done: %d drafted (%d with a chart), %d failed hard rules", drafted, charts, failed
+        )
     finally:
         conn.close()
     return 0

@@ -32,6 +32,11 @@ HARD_RULES = f"""HARD RULES. A draft that breaks any of these is discarded autom
 7. Every post must contain an interpretation, not just a restatement (see voice guide).
 8. Any claim that goes beyond what the abstract states goes into claims_to_verify with an
    honest confidence level.
+9. "chart" is an optional bar chart that code renders and attaches to the post: give it only
+   when the source states two or more comparable numbers (arms, endpoints, cohorts), copy
+   each value exactly as written, and set it to null otherwise. Every number in the chart
+   is checked against the source like rule 4; one miss and the chart is dropped.
+   "suggested_visual" stays a one-line description for the human reviewer.
 """
 
 

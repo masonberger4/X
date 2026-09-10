@@ -177,6 +177,33 @@ snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
    window, as markdown. `--rate` collects the editor's yes/no decisions and
    explanations (reason categories in `score/editorial.py`) for rubric tuning.
 
+## Draft images (charts)
+
+The drafter's `suggested_visual` is a one-line idea for the reviewer. The
+image that actually ships is a **chart the model specifies and code renders**
+(`draft/chart.py`): the output JSON has an optional `chart` (title, labels,
+values, unit, note; `null` when the source has no comparable numbers). The
+Anthropic API draws nothing, and a picture the pipeline cannot audit would
+break "never fabricate numbers", so:
+
+- every number in the chart (values, title, labels, note) is checked verbatim
+  against the source like the post text (`drafter.verify_chart`); one miss and
+  the chart is dropped and a low-confidence claim says which number
+  (`drop_unverified_chart`). The text is unaffected;
+- `run_draft.py` renders the surviving spec with matplotlib (`pip install -e
+  ".[images]"`; without it, or with `images: enabled: false` in
+  `draft/config.yaml`, drafts are stored without an image) to
+  `<db folder>/images/draft_<id>.png` (`approval_queue/images.py:attach_chart`,
+  fail-soft). `drafts.chart_json` and `drafts.image_path` are guarded
+  migrations in `approval_queue/store.py`;
+- the queue shows the PNG and its alt text at `/drafts/{id}/image`; "Drop
+  image" (`POST /drafts/{id}/image/drop`) clears both and logs an `edit`
+  decision with the text unchanged; a revise re-renders from the new draft;
+- `run_publish.py` attaches it to the first post (`publish/client.py:
+  upload_media`, v1.1 media upload plus alt text, then `create_tweet` with
+  `media_ids`). `media: attach_images: false` in `publish/config.yaml` posts
+  text-only. An upload failure marks the draft `failed` with nothing posted.
+
 ## Claim verification (step 2b)
 
 `draft/` flags every fact the model added from its own knowledge as a claim to
@@ -228,6 +255,9 @@ Safety gates, all of which must hold before a single tweet is sent:
 - A thread that fails at post k keeps posts 1..k-1 live, records the error on
   post k, marks the draft `partial`, and stops. It is not retried; a human
   finishes or deletes it.
+- A draft's chart image (see "Draft images") goes on the first post via
+  `client.upload_media`; the upload happens before any tweet, so a failed
+  upload posts nothing.
 
 ### Bio disclosure (manual)
 
@@ -467,8 +497,9 @@ Trade-offs, so you can decide with eyes open:
 ## Database
 
 SQLite (`db_path` in config). Tables: `items`, `clusters`, `scores`,
-`ratings`, `source_runs` (step 1); `drafts`, `decisions`, `draft_examples`
-(steps 2 and 7); `schedule`, `posts` (step 3); `tweet_metrics`,
+`ratings`, `source_runs` (step 1); `drafts` (with `chart_json` and
+`image_path` for the rendered chart in `<db folder>/images/`), `decisions`,
+`draft_examples` (steps 2 and 7); `schedule`, `posts` (step 3); `tweet_metrics`,
 `follower_snapshots`, `feedback_reports` (step 4); `pipeline_runs`,
 `health_checks`, `alerts_sent` (step 5). Every score is kept, so re-scoring
 after a prompt change is additive. Each step creates only its own tables and

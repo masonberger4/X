@@ -32,11 +32,12 @@ from typing import Annotated
 from urllib.parse import parse_qs, quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from approval_queue import store
+from approval_queue import images, store
 from draft import drafter
+from draft.chart import alt_text
 from draft.examples import parse_decision_text
 from draft.prompt import VOICE_PATH, ClaimProblem
 from draft.schema import MAX_POST_CHARS, tweet_length
@@ -193,11 +194,14 @@ def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised
         raise HTTPException(404, "no such draft")
     decisions = _decision_views(store.list_decisions(conn, draft_id))
     checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
+    has_image = store.resolve_image(row.image_path) is not None
     return templates.TemplateResponse(
         request,
         "detail.html",
         {
             "d": row,
+            "image_url": f"/drafts/{draft_id}/image" if has_image else "",
+            "image_alt": alt_text(row.draft.chart, row.url) if row.draft.chart else "",
             "decisions": decisions,
             "thread_text": "\n---\n".join(row.draft.thread),
             "checks": checks,
@@ -341,6 +345,7 @@ async def revise(draft_id: int, request: Request, conn: Conn):
         conn, draft_id, draft=result.draft, model=result.model, note=note, category=category
     )
     verify_store.delete_checks(conn, draft_id)
+    images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)
     log.info(
         "draft %d revised (%d attempt(s), %d claim problem(s))",
         draft_id,
@@ -357,6 +362,30 @@ def _detail_redirect(draft_id: int, *, error: str = "", revised: bool = False) -
     elif revised:
         url += "?revised=1"
     return RedirectResponse(url, status_code=303)
+
+
+@app.get("/drafts/{draft_id}/image", include_in_schema=False)
+def image(draft_id: int, conn: Conn):
+    """The rendered chart PNG, exactly the file run_publish.py would attach."""
+    row = store.get_draft(conn, draft_id)
+    if row is None:
+        raise HTTPException(404, "no such draft")
+    path = store.resolve_image(row.image_path)
+    if path is None:
+        raise HTTPException(404, "this draft has no image")
+    return FileResponse(str(path), media_type="image/png")
+
+
+@app.post("/drafts/{draft_id}/image/drop")
+async def drop_image(draft_id: int, request: Request, conn: Conn):
+    """Post the text without the chart: forgets the spec, deletes the PNG, logs a decision."""
+    form = await read_form(request)
+    try:
+        store.drop_image(conn, draft_id, note=_note(form))
+    except KeyError as exc:
+        raise HTTPException(404, "no such draft") from exc
+    log.info("draft %d: image dropped by the reviewer", draft_id)
+    return _detail_redirect(draft_id)
 
 
 @app.post("/drafts/{draft_id}/reject")
