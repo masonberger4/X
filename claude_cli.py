@@ -176,6 +176,19 @@ def run_claude(
     return parse_envelope(proc.stdout)
 
 
+def no_window_kwargs() -> dict[str, int]:
+    """Extra Popen/run kwargs so a console child opens no window of its own on Windows.
+
+    A windowed parent (pythonw, or Pipeline.exe from the desktop build) has no console, so
+    Windows would otherwise create a visible one for every console program it launches:
+    the operator saw a black "claude" window pop up and steal focus during a run. The
+    child still gets a (hidden) console, so its own children inherit it. No-op elsewhere.
+    """
+    if sys.platform == "win32":
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+    return {}
+
+
 def _run_with_timeout(
     argv: list[str], stdin: str, timeout: float
 ) -> subprocess.CompletedProcess[str]:
@@ -191,6 +204,7 @@ def _run_with_timeout(
         text=True,
         encoding="utf-8",
         cwd=tempfile.gettempdir(),  # not the repo: no CLAUDE.md auto-discovery
+        **no_window_kwargs(),
     )
     try:
         out, err = proc.communicate(stdin, timeout=timeout)
@@ -210,6 +224,7 @@ def _kill_tree(proc: subprocess.Popen[str]) -> None:
             ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
             capture_output=True,
             check=False,
+            **no_window_kwargs(),
         )
     else:
         proc.kill()

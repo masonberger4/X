@@ -330,3 +330,38 @@ def test_run_with_timeout_runs_from_temp_dir_and_returns_output():
     assert os.path.realpath(proc.stdout.strip()[3:]) == os.path.realpath(
         claude_cli.tempfile.gettempdir()
     )
+
+
+def test_no_window_kwargs_only_on_windows(monkeypatch):
+    monkeypatch.setattr(claude_cli.sys, "platform", "linux")
+    assert claude_cli.no_window_kwargs() == {}
+    monkeypatch.setattr(claude_cli.sys, "platform", "win32")
+    monkeypatch.setattr(claude_cli.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    assert claude_cli.no_window_kwargs() == {"creationflags": 0x08000000}
+
+
+def test_the_cli_and_taskkill_are_launched_without_a_console_window(monkeypatch):
+    seen = {}
+
+    class FakeProc:
+        pid = 1
+        returncode = 0
+
+        def communicate(self, *a, **k):
+            return "", ""
+
+    def fake_popen(argv, **kwargs):
+        seen["popen"] = kwargs
+        return FakeProc()
+
+    def fake_run(argv, **kwargs):
+        seen["run"] = kwargs
+
+    monkeypatch.setattr(claude_cli, "no_window_kwargs", lambda: {"creationflags": 7})
+    monkeypatch.setattr(claude_cli.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(claude_cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(claude_cli.sys, "platform", "win32")
+    claude_cli._run_with_timeout(["claude"], "", timeout=5)
+    assert seen["popen"]["creationflags"] == 7
+    claude_cli._kill_tree(FakeProc())
+    assert seen["run"]["creationflags"] == 7
