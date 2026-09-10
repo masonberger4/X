@@ -212,23 +212,12 @@ def test_terminate_active_kills_a_running_step_and_its_children(tmp_path):
     assert results[0].name == "slow" and results[0].failed and not results[0].timed_out
     assert results[1].skipped_reason == runner.SKIP_CANCELLED
 
-    import os
-    import signal
+    from ops.lock import pid_alive  # works on Windows too (os.kill(pid, 0) does not)
 
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        try:
-            os.kill(grandchild, 0)
-        except ProcessLookupError:
-            break
-        # reaped-but-zombie children of a killed group show up as alive; give them a beat
+    while pid_alive(grandchild) and time.monotonic() < deadline:
         time.sleep(0.05)
-    else:
-        try:
-            os.kill(grandchild, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        raise AssertionError("the grandchild survived terminate_active")
+    assert not pid_alive(grandchild), "the grandchild survived terminate_active"
 
 
 def test_terminate_active_with_nothing_running_is_harmless():
