@@ -33,6 +33,9 @@ def load_publish_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg.setdefault("policy", {})
     cfg["policy"].setdefault("prefer_breaking", True)
     cfg["policy"].setdefault("order", "score_desc")
+    cfg.setdefault("retry", {})
+    cfg["retry"].setdefault("auto_release_failed", True)
+    cfg["retry"].setdefault("max_attempts", 3)
     cfg.setdefault("media", {})
     cfg["media"].setdefault("attach_images", True)
     return cfg

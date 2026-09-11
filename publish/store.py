@@ -292,6 +292,14 @@ def get_schedule(conn: sqlite3.Connection, draft_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM schedule WHERE draft_id = ?", (draft_id,)).fetchone()
 
 
+def failed_attempts(conn: sqlite3.Connection, draft_id: int) -> int:
+    """How many publish attempts of this draft failed without a tweet (one posts row each)."""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM posts WHERE draft_id = ? AND tweet_id IS NULL", (draft_id,)
+    ).fetchone()
+    return int(row[0])
+
+
 def release_failed(conn: sqlite3.Connection, draft_ids: list[int] | None = None) -> list[int]:
     """Delete the schedule rows of drafts whose publish attempt failed BEFORE anything went
     live ('failed' or 'refused', and no posts row carries a tweet_id), so fetch_approved picks

@@ -283,9 +283,11 @@ source only when it is due, and score only scores what is new.
    A draft is posted at most once even if the command runs twice. A thread
    that fails part-way is marked partial and left for you; it is never
    retried automatically.
-   A draft whose attempt failed before anything went out (a bad key, an
-   image upload error, a text refused by the checks) is also left alone. Fix
-   the cause, then release it so the next run considers it again:
+   A draft whose attempt failed before anything went out (a dropped
+   connection, an image upload error) goes back to the approved list on its
+   own and the next run tries it again, up to three failed attempts
+   (`retry` in `publish\config.yaml`). After that, or for a text the checks
+   refused, it stays put until you fix the cause and release it:
    ```
    python run_publish.py --release-failed        # every failed or refused draft
    python run_publish.py --release-failed 17     # just draft 17
