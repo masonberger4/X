@@ -292,6 +292,30 @@ def get_schedule(conn: sqlite3.Connection, draft_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM schedule WHERE draft_id = ?", (draft_id,)).fetchone()
 
 
+def release_failed(conn: sqlite3.Connection, draft_ids: list[int] | None = None) -> list[int]:
+    """Delete the schedule rows of drafts whose publish attempt failed BEFORE anything went
+    live ('failed' or 'refused', and no posts row carries a tweet_id), so fetch_approved picks
+    them up again; the failed posts log rows stay as history. 'posted' and 'partial' rows are
+    never touched: a partial thread is live on X and stays a human decision. With draft_ids,
+    only those drafts; else every eligible row. Returns the released draft ids."""
+    where = f"AND draft_id IN ({','.join('?' * len(draft_ids))})" if draft_ids else ""
+    ids = [
+        int(r[0])
+        for r in conn.execute(
+            f"""SELECT draft_id FROM schedule
+                WHERE status IN (?, ?)
+                  AND draft_id NOT IN (SELECT draft_id FROM posts WHERE tweet_id IS NOT NULL)
+                  {where}
+                ORDER BY draft_id""",
+            [SCHED_FAILED, SCHED_REFUSED, *(draft_ids or [])],
+        ).fetchall()
+    ]
+    if ids:
+        conn.execute(f"DELETE FROM schedule WHERE draft_id IN ({','.join('?' * len(ids))})", ids)
+        conn.commit()
+    return ids
+
+
 # ---------------------------------------------------------------------------
 # Posts log
 # ---------------------------------------------------------------------------

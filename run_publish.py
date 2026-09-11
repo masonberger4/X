@@ -2,6 +2,7 @@
 
 Usage: python run_publish.py [--dry-run | --live] [--now] [--breaking] [--limit N]
                              [--format single|thread] [-v]
+       python run_publish.py --release-failed [DRAFT_ID ...]
 
 Default is --dry-run: prints what WOULD be posted and when, posts nothing. --live posts
 only if PUBLISH_ENABLED=1 is also set in the environment. Meant for cron every 15 min; a
@@ -10,6 +11,11 @@ draft is claimed in a transaction before posting, so overlapping runs cannot pos
 A draft whose chart was rendered (run_draft.py) and not dropped in the queue has that PNG
 attached to its first post, with alt text, unless media.attach_images is false in
 publish/config.yaml. The dry run prints the image path and alt text.
+
+A draft whose attempt failed before anything went live (status 'failed' or 'refused') stays
+claimed and is never retried on its own. --release-failed drops those claims (all of them, or
+the given draft ids) so the next run considers the drafts again; it posts nothing and never
+touches a 'posted' or 'partial' row, since a partial thread is live on X.
 """
 
 from __future__ import annotations
@@ -184,6 +190,21 @@ def publish_one(
     return store.SCHED_POSTED
 
 
+def release_failed(draft_ids: list[int]) -> int:
+    """--release-failed: drop the claims of drafts whose attempt posted nothing."""
+    conn = store.connect()
+    try:
+        released = store.release_failed(conn, draft_ids or None)
+    finally:
+        conn.close()
+    if not released:
+        print("nothing to release: no failed or refused claim without a live post")
+        return 0
+    for did in released:
+        print(f"released draft {did}: approved again, considered on the next run")
+    return 0
+
+
 def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     load_dotenv()
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -197,12 +218,23 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     ap.add_argument("--limit", type=int, default=10, help="max approved drafts to consider")
     ap.add_argument("--format", choices=("single", "thread"), default=None)
     ap.add_argument("--config", default=None, help="path to publish/config.yaml override")
+    ap.add_argument(
+        "--release-failed",
+        nargs="*",
+        type=int,
+        metavar="DRAFT_ID",
+        default=None,
+        help="release failed/refused claims (all, or these draft ids) so they can be retried; "
+        "posts nothing",
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if args.release_failed is not None:
+        return release_failed(args.release_failed)
     if os.environ.get("BIO_DISCLOSURE_CONFIRMED") != "1":
         log.warning(BIO_WARNING)
 

@@ -6,7 +6,7 @@ client.post_tweet is monkeypatched everywhere; tweepy is never imported.
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -367,3 +367,70 @@ def test_upload_failure_posts_nothing(conn, monkeypatch, caplog):
     assert fx.calls == []
     assert store.get_schedule(conn, did)["status"] == "failed"
     assert "media_upload" in store.get_schedule(conn, did)["error"]
+
+
+def test_release_failed_reopens_failed_and_refused_only(conn, monkeypatch, caplog, capsys):
+    fx = FakeX(fail_at=1)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    failed = seed_draft(conn, "a")
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 2
+    assert store.get_schedule(conn, failed)["status"] == "failed"
+    refused = seed_draft(conn, "b", edit_to="edited without the link")
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
+    assert store.get_schedule(conn, refused)["status"] == "refused"
+    # neither is a candidate while claimed
+    assert [a.draft_id for a in store.fetch_approved(10, conn=conn)] == []
+
+    assert run_publish.main(["--release-failed"]) == 0
+    out = capsys.readouterr().out
+    assert f"released draft {failed}" in out and f"released draft {refused}" in out
+    assert store.get_schedule(conn, failed) is None
+    assert store.get_schedule(conn, refused) is None
+    assert {a.draft_id for a in store.fetch_approved(10, conn=conn)} == {failed, refused}
+    # the failed attempt stays in the posts log
+    assert [r["status"] for r in store.list_posts(conn, failed)] == ["failed"]
+    # nothing was posted by the release itself
+    assert len(fx.calls) == 1
+
+
+def test_release_failed_by_id_and_never_partial_or_posted(conn, monkeypatch, capsys):
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    # partial thread: post 2 of a's thread fails
+    fx = FakeX(fail_at=2)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    partial = seed_draft(conn, "a")
+    assert run_publish.main(["--live", "--now", "--format", "thread"], now=OFF_SLOT) == 2
+    assert store.get_schedule(conn, partial)["status"] == "partial"
+    # posted single
+    fx2 = FakeX()
+    monkeypatch.setattr(client, "post_tweet", fx2)
+    posted = seed_draft(conn, "b")
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT + timedelta(hours=3)) == 0
+    assert store.get_schedule(conn, posted)["status"] == "posted"
+    # two failed
+    fx3 = FakeX(fail_at=1)
+    monkeypatch.setattr(client, "post_tweet", fx3)
+    f1 = seed_draft(conn, "c")
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT + timedelta(hours=6)) == 2
+    fx4 = FakeX(fail_at=1)
+    monkeypatch.setattr(client, "post_tweet", fx4)
+    f2 = seed_draft(conn, "d")
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT + timedelta(hours=9)) == 2
+
+    # asking for the partial, the posted and one failed releases only the failed one
+    assert run_publish.main(["--release-failed", str(partial), str(posted), str(f1)]) == 0
+    out = capsys.readouterr().out
+    assert f"released draft {f1}" in out
+    assert str(partial) not in out.replace(f"draft {f1}", "")
+    assert store.get_schedule(conn, partial)["status"] == "partial"
+    assert store.get_schedule(conn, posted)["status"] == "posted"
+    assert store.get_schedule(conn, f1) is None
+    assert store.get_schedule(conn, f2)["status"] == "failed"
+
+    # nothing eligible among the given ids
+    assert run_publish.main(["--release-failed", str(partial)]) == 0
+    assert "nothing to release" in capsys.readouterr().out
+    assert store.get_schedule(conn, partial)["status"] == "partial"
