@@ -14,7 +14,7 @@ max_posts_per_day: 3
 min_gap_minutes: 90
 
 # Which draft text to publish: "single" posts single_post, "thread" posts the thread.
-post_format: single
+post_format: thread
 
 # Breaking items may post outside slots (still subject to the caps above).
 breaking:
