@@ -174,15 +174,16 @@ def feed_page(
     hours: int | None = None,
     top: int | None = None,
     all: bool = False,
+    hide_decided: bool = False,
     saved: int | None = None,
 ):
     settings = feed.feed_settings(root_config.load_config())
     hours = hours or settings["hours"]
-    top_n = top or settings["top_n"]
+    top_n = feed.clamp_top_n(top) if top else settings["top_n"]
     min_total = 0 if all else settings["threshold"]
     with open_db() as database:
         rows = feed.fetch_entries(database, hours=hours, top_n=top_n, min_total=min_total)
-        entries = feed.entry_views(database, rows)
+        entries = feed.entry_views(database, rows, hide_decided=hide_decided)
     return templates.TemplateResponse(
         request,
         "feed.html",
@@ -192,6 +193,7 @@ def feed_page(
             "top_n": top_n,
             "min_total": min_total,
             "show_all": all,
+            "hide_decided": hide_decided,
             "labels": feed.DECISION_LABELS,
             "reasons": feed.REASON_CATEGORIES,
             "saved": saved,
