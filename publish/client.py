@@ -1,7 +1,8 @@
 """The only module that talks to X. tweepy is imported inside the functions, never at import.
 
-post_tweet (v2 create_tweet) and upload_media (v1.1 media/upload + alt text) are the two
-write calls; verify_credentials is the read check.
+post_tweet (v2 create_tweet) and upload_media (v2 media/upload + media/metadata for the alt
+text, sent through tweepy's OAuth 1.0a session because tweepy has no v2 media call and X
+retired the v1.1 upload endpoint) are the two write calls; verify_credentials is the read check.
 
 Keys come from the environment (.env via python-dotenv, loaded by the CLI):
   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET (X_ACCESS_TOKEN_SECRET also accepted)
@@ -19,6 +20,11 @@ log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 4
 BACKOFF_BASE_SECONDS = 2.0
+MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload"
+MEDIA_METADATA_URL = "https://api.x.com/2/media/metadata"
+MEDIA_CATEGORY = "tweet_image"
+REQUEST_TIMEOUT_SECONDS = 60
+TRANSPORT_PREFIX = "Failed to send request"  # tweepy's own wording for a transport error
 
 
 class PublishError(RuntimeError):
@@ -50,8 +56,8 @@ def _client():
     return tweepy.Client(**_keys())
 
 
-def _api_v1():
-    """Media upload is still a v1.1 endpoint; same OAuth 1.0a user keys as the v2 client."""
+def _oauth1_api():
+    """A tweepy.API for its OAuth 1.0a signing session; the v2 media calls go through it."""
     import tweepy
 
     k = _keys()
@@ -61,8 +67,45 @@ def _api_v1():
     return tweepy.API(auth)
 
 
+def _http_error(resp: Any) -> Exception:
+    """The tweepy exception for a v2 response status, so _classify treats both paths alike."""
+    import tweepy
+
+    code = resp.status_code
+    if code == 400:
+        return tweepy.BadRequest(resp)
+    if code == 401:
+        return tweepy.Unauthorized(resp)
+    if code == 403:
+        return tweepy.Forbidden(resp)
+    if code == 404:
+        return tweepy.NotFound(resp)
+    if code == 429:
+        return tweepy.TooManyRequests(resp)
+    if code >= 500:
+        return tweepy.TwitterServerError(resp)
+    return tweepy.HTTPException(resp)
+
+
+def _v2_request(api: Any, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+    """One signed v2 call on tweepy's session. Transport errors become a TweepyException with
+    tweepy's own prefix (retryable in _classify); HTTP errors become tweepy's status classes."""
+    import tweepy
+
+    try:
+        resp = api.session.request(
+            method, url, auth=api.auth.apply_auth(), timeout=REQUEST_TIMEOUT_SECONDS, **kwargs
+        )
+    except Exception as exc:  # noqa: BLE001 - requests transport errors, wrapped like tweepy does
+        raise tweepy.TweepyException(f"{TRANSPORT_PREFIX}: {exc}") from exc
+    if resp.status_code >= 400:
+        raise _http_error(resp)
+    return resp.json() if resp.content else {}
+
+
 def _classify(exc: Exception) -> tuple[bool, int | None]:
-    """(retryable?, http status) for a tweepy exception. 429/5xx retry; 401/403 never."""
+    """(retryable?, http status) for a tweepy exception. 429/5xx and transport errors retry;
+    401/403 never."""
     import tweepy
 
     if isinstance(exc, tweepy.TooManyRequests):
@@ -73,6 +116,8 @@ def _classify(exc: Exception) -> tuple[bool, int | None]:
         return False, 401
     if isinstance(exc, tweepy.Forbidden):
         return False, 403
+    if isinstance(exc, tweepy.TweepyException) and str(exc).startswith(TRANSPORT_PREFIX):
+        return True, None  # connection reset, timeout: nothing reached X, safe to retry
     return False, getattr(getattr(exc, "response", None), "status_code", None)
 
 
@@ -111,15 +156,28 @@ def post_tweet(
 
 
 def upload_media(path: str, alt_text: str = "") -> str:
-    """Upload one image and return its media_id string, with alt text set when given.
-    Raises PublishError on failure (nothing was tweeted yet, so the caller can stop)."""
+    """Upload one image through v2 media/upload and return its media id string, with alt text
+    set through v2 media/metadata when given. Raises PublishError on failure (nothing was
+    tweeted yet, so the caller can stop)."""
 
     def op():
-        api = _api_v1()
-        media = api.media_upload(filename=path)
-        media_id = str(media.media_id)
+        api = _oauth1_api()
+        with open(path, "rb") as fh:
+            data = _v2_request(
+                api,
+                "POST",
+                MEDIA_UPLOAD_URL,
+                files={"media": (os.path.basename(path), fh)},
+                data={"media_category": MEDIA_CATEGORY},
+            )
+        media_id = str(data["data"]["id"])
         if alt_text:
-            api.create_media_metadata(media_id, alt_text)
+            _v2_request(
+                api,
+                "POST",
+                MEDIA_METADATA_URL,
+                json={"id": media_id, "metadata": {"alt_text": {"text": alt_text}}},
+            )
         return media_id
 
     return _with_retries(op, "media_upload")

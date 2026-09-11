@@ -238,11 +238,14 @@ def test_client_retry_classification(monkeypatch):
 
     class Forbidden(Exception): ...
 
+    class TweepyException(Exception): ...
+
     fake = types.SimpleNamespace(
         TooManyRequests=TooManyRequests,
         TwitterServerError=TwitterServerError,
         Unauthorized=Unauthorized,
         Forbidden=Forbidden,
+        TweepyException=TweepyException,
     )
     monkeypatch.setitem(sys.modules, "tweepy", fake)
     slept = []
@@ -270,6 +273,132 @@ def test_client_retry_classification(monkeypatch):
     with pytest.raises(client.PublishError) as ei:
         client._with_retries(unauthorized, "op", sleep=slept.append)
     assert ei.value.status == 401 and len(slept) == 2
+
+    # a transport error (connection reset, timeout) never reached X: retry it
+    attempts["n"] = 0
+
+    def reset():
+        attempts["n"] += 1
+        if attempts["n"] < 2:
+            raise TweepyException("Failed to send request: Connection aborted.")
+        return "ok"
+
+    assert client._with_retries(reset, "op", sleep=slept.append) == "ok"
+    assert slept == [2.0, 4.0, 2.0]
+    monkeypatch.delitem(sys.modules, "tweepy")
+
+
+class _FakeResponse:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.content = b"x" if payload else b""
+
+    def json(self):
+        return self._payload
+
+
+def _fake_tweepy_for_upload(monkeypatch, responses):
+    """A tweepy stand-in whose API.session.request records calls and pops canned responses."""
+    import types
+
+    calls = []
+
+    class Session:
+        def request(self, method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            r = responses.pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+    class Auth:
+        def __init__(self, *a):
+            self.keys = a
+
+        def apply_auth(self):
+            return "oauth1-signature"
+
+    class API:
+        def __init__(self, auth):
+            self.auth = auth
+            self.session = Session()
+
+    class HTTPException(Exception):
+        def __init__(self, resp):
+            super().__init__(f"HTTP {resp.status_code}")
+            self.response = resp
+
+    fake = types.SimpleNamespace(
+        OAuth1UserHandler=Auth,
+        API=API,
+        TweepyException=type("TweepyException", (Exception,), {}),
+        HTTPException=HTTPException,
+        BadRequest=type("BadRequest", (HTTPException,), {}),
+        Unauthorized=type("Unauthorized", (HTTPException,), {}),
+        Forbidden=type("Forbidden", (HTTPException,), {}),
+        NotFound=type("NotFound", (HTTPException,), {}),
+        TooManyRequests=type("TooManyRequests", (HTTPException,), {}),
+        TwitterServerError=type("TwitterServerError", (HTTPException,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "tweepy", fake)
+    for k, v in {
+        "X_API_KEY": "k",
+        "X_API_SECRET": "s",
+        "X_ACCESS_TOKEN": "t",
+        "X_ACCESS_TOKEN_SECRET": "ts",
+    }.items():
+        monkeypatch.setenv(k, v)
+    return calls
+
+
+def test_upload_media_uses_v2_endpoints_with_alt_text(monkeypatch, tmp_path):
+    png = tmp_path / "draft_19.png"
+    png.write_bytes(b"\x89PNG fake")
+    calls = _fake_tweepy_for_upload(
+        monkeypatch,
+        [_FakeResponse(200, {"data": {"id": "777", "media_key": "3_777"}}), _FakeResponse(200)],
+    )
+    assert client.upload_media(str(png), "Table: pCR vs survival") == "777"
+    assert [(m, u) for m, u, _ in calls] == [
+        ("POST", client.MEDIA_UPLOAD_URL),
+        ("POST", client.MEDIA_METADATA_URL),
+    ]
+    up = calls[0][2]
+    assert up["auth"] == "oauth1-signature"
+    assert up["data"] == {"media_category": "tweet_image"}
+    assert up["files"]["media"][0] == "draft_19.png"
+    assert calls[1][2]["json"] == {
+        "id": "777",
+        "metadata": {"alt_text": {"text": "Table: pCR vs survival"}},
+    }
+    monkeypatch.delitem(sys.modules, "tweepy")
+
+
+def test_upload_media_skips_metadata_without_alt_text(monkeypatch, tmp_path):
+    png = tmp_path / "d.png"
+    png.write_bytes(b"\x89PNG fake")
+    calls = _fake_tweepy_for_upload(monkeypatch, [_FakeResponse(200, {"data": {"id": "1"}})])
+    assert client.upload_media(str(png)) == "1"
+    assert len(calls) == 1
+    monkeypatch.delitem(sys.modules, "tweepy")
+
+
+def test_upload_media_retries_connection_reset_then_fails_on_403(monkeypatch, tmp_path):
+    png = tmp_path / "d.png"
+    png.write_bytes(b"\x89PNG fake")
+    calls = _fake_tweepy_for_upload(
+        monkeypatch,
+        [ConnectionResetError(10054, "forcibly closed"), _FakeResponse(200, {"data": {"id": "5"}})],
+    )
+    monkeypatch.setattr(client.time, "sleep", lambda s: None)
+    assert client.upload_media(str(png)) == "5"
+    assert len(calls) == 2
+
+    calls = _fake_tweepy_for_upload(monkeypatch, [_FakeResponse(403, {"title": "Forbidden"})])
+    with pytest.raises(client.PublishError) as ei:
+        client.upload_media(str(png))
+    assert ei.value.status == 403 and not ei.value.retryable and len(calls) == 1
     monkeypatch.delitem(sys.modules, "tweepy")
 
 
