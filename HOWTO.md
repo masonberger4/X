@@ -154,12 +154,24 @@ source only when it is due, and score only scores what is new.
    the company is configured. Add `ticker: AMGN` to the company's line under
    `companies: feeds:` in `config.yaml`, or list a company that has no feed
    under `branding: companies:` (with `aliases:` for other spellings, e.g.
-   J&J). For a logo, save the company's press-kit PNG as
-   `assets\logos\<key>.png` (the `key` from that config line; see
-   `assets\logos\README.md`). Nothing is downloaded or guessed: a company
-   that is not configured is drawn exactly as the drafter wrote it, and a
-   private company listed without a ticker gets its logo only. The table
-   header is drawn as a rounded navy bar with a shadow.
+   J&J). For logos run
+
+       python run_logos.py
+
+   once: for every configured company it opens the company's own website
+   (`domain:` on the config line, or the feed's host with `ir.` / `investors.`
+   / `www.` removed) and saves the icon that site advertises (its
+   apple-touch-icon, else the largest favicon) as `assets\logos\<key>.png`.
+   Look through the folder afterwards and delete any you do not like; a
+   company whose feed sits on an investor-relations platform (gcs-web.com
+   and the like) needs a `domain:` in its config line, and the run tells you
+   which ones. `--only amgen --only jnj` limits it to those keys, `--force`
+   refetches existing files (after a rebrand), `--dry-run` only prints what
+   it would fetch. You can always drop a press-kit PNG in by hand instead
+   (see `assets\logos\README.md`). The pipeline itself downloads nothing:
+   a company that is not configured is drawn exactly as the drafter wrote
+   it, and a private company listed without a ticker gets its logo only. The
+   table header is drawn as a rounded navy bar with a shadow.
    The other kind of picture is a comparison table (a competitor landscape,
    a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
    first column naming the company, asset or trial. Unlike a chart its cells

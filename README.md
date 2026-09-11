@@ -210,8 +210,11 @@ break "never fabricate numbers", so:
 - tables carry company branding (`draft/branding.py`): a company cell that
   names a configured company gets "($TICKER)" from `ticker:` in `config.yaml`
   (`companies.feeds` or `branding.companies`) and the logo from
-  `assets/logos/<key>.png` if a human has put one there. Nothing is fetched or
-  guessed; an unconfigured company is left as written. The header row is a
+  `assets/logos/<key>.png`. `python run_logos.py` fills that folder from each
+  company's own site icon (apple-touch-icon, else favicon; `draft/logos.py`
+  picks and normalises, `ingest/http.py` fetches) for a human to review;
+  `--only KEY`, `--force`, `--dry-run`. The pipeline itself fetches nothing
+  and an unconfigured company is left as written. The header row is a
   rounded navy bar with a drop shadow and sheen;
 - the queue shows the PNG and its alt text at `/drafts/{id}/image`; "Drop
   image" (`POST /drafts/{id}/image/drop`) clears both and logs an `edit`

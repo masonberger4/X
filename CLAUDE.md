@@ -36,7 +36,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`),
   `python run_feedback.py snapshot|report|followers`,
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
-  `ops/config.yaml` and `deploy/`)
+  `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
+  (operator command: each configured company's own site icon into `assets/logos/`)
 
 ## Rules
 - **Config drives everything.** Feeds, queries, company list, keywords,
@@ -49,7 +50,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `user_agent` (`Source.user_agent()` falls back to `http.user_agent`); the ClinicalTrials.gov
   source must keep a `python-httpx/` token in it, since that host's firewall rejects a
   Python client claiming to be a browser.
-- **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`;
+- **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`, `get_bytes`;
   the only caller of `httpx.get` is its private `_request`, which retries
   429/5xx/transport errors and never logs headers),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
@@ -252,7 +253,8 @@ db.py     sqlite: items, clusters, scores, ratings, source_runs
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
 draft/    schema.py, chart.py (chart + table specs, verification, PNG rendering, Style
           knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,
-          grade_image, call_grader), branding.py (tickers + logos for company cells), prompt.py,
+          grade_image, call_grader), branding.py (tickers + logos for company cells),
+          logos.py (site icon discovery + PNG normalisation for run_logos.py), prompt.py,
           voice.md, drafter.py, config.yaml, settings.py,
           examples.py (EditExample, select_edit_examples, format_examples_block),
           voice_report.py (VoiceReport, build_report, render_markdown, CLI)
@@ -279,5 +281,6 @@ ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
 assets/   logos/<company key>.png (human-supplied company logos for table cells)
 deploy/   crontab.example, pipeline.service, pipeline.timer, desktop.spec, README.md
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
-run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py   (CLIs)
+run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py
+run_logos.py   (CLIs)
 ```

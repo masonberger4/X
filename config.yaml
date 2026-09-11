@@ -302,7 +302,7 @@ companies:
     - {key: iovance,      name: Iovance,                 url: https://ir.iovance.com/rss/news-releases.xml, ticker: IOVA}
     - {key: legend,       name: Legend Biotech,          url: https://investors.legendbiotech.com/rss/news-releases.xml, ticker: LEGN}
     - {key: allogene,     name: Allogene,                url: https://ir.allogene.com/rss/news-releases.xml, ticker: ALLO}
-    - {key: crispr_tx,    name: CRISPR Therapeutics,     url: https://crisprtx.gcs-web.com/rss/news-releases.xml, ticker: CRSP}
+    - {key: crispr_tx,    name: CRISPR Therapeutics,     url: https://crisprtx.gcs-web.com/rss/news-releases.xml, ticker: CRSP, domain: crisprtx.com}
     - {key: intellia,     name: Intellia,                url: https://ir.intelliatx.com/rss/news-releases.xml, ticker: NTLA}
     - {key: beam,         name: Beam Therapeutics,       url: https://investors.beamtx.com/rss/news-releases.xml, ticker: BEAM}
     - {key: caribou,      name: Caribou Biosciences,     url: https://investor.cariboubio.com/rss/news-releases.xml, ticker: CRBU}
@@ -327,7 +327,7 @@ companies:
     - {key: carisma,      name: Carisma Therapeutics,    url: https://ir.carismatx.com/rss/news-releases.xml, ticker: CARM}
     - {key: alx,          name: ALX Oncology,            url: https://ir.alxoncology.com/rss/news-releases.xml, ticker: ALXO}
     # Cell therapy / T-cell engager pure plays, feeds verified Sept 2026.
-    - {key: autolus,      name: Autolus,                 url: https://autolus.gcs-web.com/rss/news-releases.xml, ticker: AUTL}
+    - {key: autolus,      name: Autolus,                 url: https://autolus.gcs-web.com/rss/news-releases.xml, ticker: AUTL, domain: autolus.com}
     - {key: nkarta,       name: Nkarta,                  url: https://ir.nkartatx.com/rss/news-releases.xml, ticker: NKTX}
     - {key: fate,         name: Fate Therapeutics,       url: https://ir.fatetherapeutics.com/rss/news-releases.xml, ticker: FATE}
     - {key: sana,         name: Sana Biotechnology,      url: https://ir.sana.com/rss/news-releases.xml, ticker: SANA}
@@ -353,24 +353,27 @@ companies:
 
 # Company branding in table images (draft/branding.py). A `ticker:` on a company feed
 # entry above, or an entry here for a company without a feed, puts "($TICKER)" after that
-# company's name in a table's company/sponsor column; a PNG at <logos_dir>/<key>.png (a
-# human drops the press-kit file there; nothing is downloaded) is drawn beside it. Cells
-# naming a company not listed here are left untouched. Tickers as of Sept 2026; verify
-# after any listing change or acquisition.
+# company's name in a table's company/sponsor column; a PNG at <logos_dir>/<key>.png is
+# drawn beside it. `python run_logos.py` fills that folder from each company's own site
+# icon (its apple-touch-icon or favicon): the site is `domain:` here, else the host of
+# the company's feed URL with ir./investors./www. stripped (hosts on an IR platform such
+# as gcs-web.com need an explicit `domain:`). The pipeline itself never downloads
+# anything; review the folder after a run. Cells naming a company not listed here are
+# left untouched. Tickers as of Sept 2026; verify after any listing change or acquisition.
 branding:
   logos_dir: assets/logos
   company_columns: [company, sponsor, developer, partner, owner, acquirer]
   companies:
-    - {key: jnj,          name: Johnson & Johnson,       ticker: JNJ,  aliases: [J&J, Janssen]}
-    - {key: pfizer,       name: Pfizer,                  ticker: PFE}
-    - {key: bms,          name: Bristol Myers Squibb,    ticker: BMY,  aliases: [Bristol-Myers Squibb, BMS]}
-    - {key: gilead,       name: Gilead,                  ticker: GILD, aliases: [Gilead Sciences, Kite]}
-    - {key: astrazeneca,  name: AstraZeneca,             ticker: AZN}
-    - {key: roche,        name: Roche,                   ticker: RHHBY, aliases: [Genentech]}
-    - {key: novartis,     name: Novartis,                ticker: NVS}
-    - {key: gsk,          name: GSK,                     ticker: GSK,  aliases: [GlaxoSmithKline]}
-    - {key: sanofi,       name: Sanofi,                  ticker: SNY}
-    - {key: boehringer,   name: Boehringer Ingelheim}    # private: name only, no ticker
+    - {key: jnj,          name: Johnson & Johnson,       ticker: JNJ,  aliases: [J&J, Janssen], domain: jnj.com}
+    - {key: pfizer,       name: Pfizer,                  ticker: PFE,  domain: pfizer.com}
+    - {key: bms,          name: Bristol Myers Squibb,    ticker: BMY,  aliases: [Bristol-Myers Squibb, BMS], domain: bms.com}
+    - {key: gilead,       name: Gilead,                  ticker: GILD, aliases: [Gilead Sciences, Kite], domain: gilead.com}
+    - {key: astrazeneca,  name: AstraZeneca,             ticker: AZN,  domain: astrazeneca.com}
+    - {key: roche,        name: Roche,                   ticker: RHHBY, aliases: [Genentech], domain: roche.com}
+    - {key: novartis,     name: Novartis,                ticker: NVS,  domain: novartis.com}
+    - {key: gsk,          name: GSK,                     ticker: GSK,  aliases: [GlaxoSmithKline], domain: gsk.com}
+    - {key: sanofi,       name: Sanofi,                  ticker: SNY,  domain: sanofi.com}
+    - {key: boehringer,   name: Boehringer Ingelheim,    domain: boehringer-ingelheim.com}   # private: no ticker
 
 # ---------------------------------------------------------------------------
 # Step 6: conference abstracts (Crossref) and the curated KOL X list.
