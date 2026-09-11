@@ -452,6 +452,47 @@ def get_draft(conn: sqlite3.Connection, draft_id: int) -> DraftRow | None:
     return _row_to_draft(r) if r else None
 
 
+@dataclass
+class PublishInfo:
+    """What step 3 did with a draft, read from its schedule/posts tables (never written here)."""
+
+    status: str  # posted | partial | failed | refused | claimed | pending
+    tweet_id: str | None = None  # first post's tweet id, when it is live
+    posted_at: str | None = None
+    error: str | None = None
+
+    @property
+    def tweet_url(self) -> str:
+        return f"https://x.com/i/web/status/{self.tweet_id}" if self.tweet_id else ""
+
+
+def publish_states(conn: sqlite3.Connection, draft_ids: list[int]) -> dict[int, PublishInfo]:
+    """Read-only look at step 3's `schedule` and `posts` for these drafts, so the approved
+    page can say which of them already went out. Empty when the tables do not exist yet (no
+    publish run so far) or for a draft step 3 never claimed."""
+    if not draft_ids:
+        return {}
+    present = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {"schedule", "posts"} <= present:
+        return {}
+    marks = ",".join("?" * len(draft_ids))
+    out: dict[int, PublishInfo] = {}
+    for r in conn.execute(
+        f"SELECT draft_id, status, error FROM schedule WHERE draft_id IN ({marks})", draft_ids
+    ).fetchall():
+        out[int(r["draft_id"])] = PublishInfo(status=str(r["status"]), error=r["error"])
+    for r in conn.execute(
+        f"""SELECT draft_id, tweet_id, posted_at FROM posts
+            WHERE position = 1 AND tweet_id IS NOT NULL AND draft_id IN ({marks})""",
+        draft_ids,
+    ).fetchall():
+        info = out.get(int(r["draft_id"]))
+        if info is not None:
+            info.tweet_id = str(r["tweet_id"])
+            info.posted_at = r["posted_at"]
+    return out
+
+
 def list_drafts(conn: sqlite3.Connection, status: str = STATUS_PENDING) -> list[DraftRow]:
     """Drafts in a status. For 'pending', snoozed drafts whose snooze has expired are included."""
     if status == STATUS_PENDING:
