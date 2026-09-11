@@ -23,6 +23,7 @@
           {% if k.supported %}<span class="badge supported">{{ k.supported }} supported</span>{% endif %}
           {% if k.unverified %}<span class="badge">{{ k.unverified }} unverified</span>{% endif %}
           {% if k.unchecked %}<span class="badge">{{ k.unchecked }} unchecked</span>{% endif %}
+          {% if k.auto_rounds %}<span class="badge">auto-revised {{ k.auto_rounds }}×{% if k.contradicted or k.unverified %}, needs you{% endif %}</span>{% endif %}
         </div>{% endif %}
         {% if status == "pending" %}
         <form method="post" action="/drafts/{{ d.id }}/revise" class="revise">

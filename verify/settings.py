@@ -19,6 +19,7 @@ DEFAULTS: dict[str, Any] = {
     "timeout_seconds": 240,
     "trusted_domains": [],
     "tables": {"enabled": True, "max_cells_per_draft": 30, "min_supported_ratio": 0.6},
+    "auto_revise": {"enabled": False, "max_rounds": 3, "max_rounds_per_draft": 6},
 }
 
 
@@ -30,4 +31,5 @@ def load_verify_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
             out.update(yaml.safe_load(fh) or {})
     out["trusted_domains"] = [str(d).lower().strip() for d in out.get("trusted_domains") or []]
     out["tables"] = {**DEFAULTS["tables"], **(out.get("tables") or {})}
+    out["auto_revise"] = {**DEFAULTS["auto_revise"], **(out.get("auto_revise") or {})}
     return out

@@ -39,11 +39,12 @@ from approval_queue import images, store
 from draft import drafter
 from draft.chart import alt_text
 from draft.examples import parse_decision_text
-from draft.prompt import VOICE_PATH, ClaimProblem
+from draft.prompt import VOICE_PATH
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.settings import load_draft_config
 from draft.voice_report import build_report
 from verify import store as verify_store
+from verify.autorevise import auto_rounds_used, claim_problems  # noqa: F401  (re-exported)
 
 log = logging.getLogger(__name__)
 
@@ -160,7 +161,8 @@ def index(request: Request, conn: Conn):
 
 
 def _check_summaries(conn, drafts) -> dict[int, dict[str, int]]:
-    """Per draft: how many claims are supported / contradicted / unverified / unchecked."""
+    """Per draft: how many claims are supported / contradicted / unverified / unchecked, and
+    how many automatic revisions (run_verify.py --auto-revise) it has had."""
     out: dict[int, dict[str, int]] = {}
     for d in drafts:
         n = len(d.draft.claims_to_verify)
@@ -171,6 +173,7 @@ def _check_summaries(conn, drafts) -> dict[int, dict[str, int]]:
         for c in rows:
             counts[c.verdict] = counts.get(c.verdict, 0) + 1
         counts["unchecked"] = n - len(rows)
+        counts["auto_rounds"] = auto_rounds_used(conn, d.id)
         out[d.id] = counts
     return out
 
@@ -232,30 +235,12 @@ def _render_detail(
             "checks": checks,
             "contradicted": any(c.verdict == "contradicted" for c in checks.values()),
             "claim_problems": len(claim_problems(checks.values())),
+            "auto_rounds": auto_rounds_used(conn, draft_id),
             "error": error,
             "revised": revised,
         },
         status_code=status_code,
     )
-
-
-def claim_problems(checks) -> list[ClaimProblem]:
-    """The step 2b verdicts a revision must fix: contradicted claims, plus unverified ones
-    the model is told to soften or drop. Supported claims are left alone."""
-    out: list[ClaimProblem] = []
-    for c in checks:
-        if c.verdict == "supported":
-            continue
-        out.append(
-            ClaimProblem(
-                claim=c.claim,
-                verdict=c.verdict,
-                note=c.note,
-                quote=c.quote,
-                source_url=c.source_url,
-            )
-        )
-    return out
 
 
 @app.get("/voice", response_class=HTMLResponse)
