@@ -226,11 +226,22 @@ replaces the draft in place (still pending, logged as a `revise` decision
 with the before/after text) and drops its claim checks so the next
 `run_verify.py` checks the new claims.
 `ops/config.yaml` runs it after `draft` as an optional step.
+`--auto-revise` (or `auto_revise: enabled: true` in `verify/config.yaml`) closes
+the loop without a human: after the pass, a draft with a contradicted or
+unverified claim is revised through the same `revise_item` call with no
+instructions (`verify/autorevise.py`, decision note `auto: fix fact-check
+failures`), supported verdicts are carried over, the new claims are checked,
+and so on until all are supported or `max_rounds` per run /
+`max_rounds_per_draft` for life is hit. A revision that keeps the claim set
+unchanged is discarded. The queue badges each draft with its automatic round
+count. Tables are not part of the loop.
 
 ```bash
 python run_verify.py             # pending drafts with unchecked claims
 python run_verify.py --dry-run   # list, no calls
 python run_verify.py --redo      # replace earlier verdicts
+python run_verify.py --auto-revise     # then revise and re-check failed claims
+python run_verify.py --no-auto-revise  # one run without the loop
 ```
 
 ## Publishing (step 3)

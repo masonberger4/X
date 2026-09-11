@@ -166,8 +166,18 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `tools=["WebSearch","WebFetch"]`, the one caller that passes `tools` to
   `claude_cli.run_claude`; or the API `web_search` server tool). It owns
   `claim_checks`, reads drafts only through `approval_queue.store`, never edits a
-  draft, and a verdict is `trusted` only for hosts in `verify/config.yaml` or
-  company feed hosts. The queue blocks approve (409) on a contradicted claim
+  draft's text itself, and a verdict is `trusted` only for hosts in `verify/config.yaml` or
+  company feed hosts. The one exception is the **verify-revise loop**
+  (`verify/autorevise.py`, `run_verify.py --auto-revise` or `auto_revise.enabled` in
+  `verify/config.yaml`, off by default): after the claim pass, a draft with a
+  contradicted or unverified claim is revised through the queue's own path
+  (`drafter.revise_item` with `claim_problems` and no instructions, `store.revise` with
+  note `autorevise.AUTO_NOTE`, `carry_over_checks`), its new claims are checked, and the
+  round repeats until every claim is supported or `max_rounds` (per run) /
+  `max_rounds_per_draft` (per draft, counted from `revise` decisions with that note) is
+  hit. A revision whose claim set is unchanged is discarded; a draft with an unchecked
+  claim is never revised. Tables are outside the loop. `claim_problems` lives there and
+  the queue app imports it. The queue blocks approve (409) on a contradicted claim
   unless `override=1`.
 - Step 3 reads step 2's tables only through `publish/store.py:fetch_approved`
   (edited_text from `decisions` wins over `single_post`; it also resolves the draft's

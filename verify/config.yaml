@@ -16,6 +16,19 @@ tables:
   max_cells_per_draft: 30     # bigger tables are dropped before any call
   min_supported_ratio: 0.6    # fewer verified fact cells than this share -> table dropped
 
+# The verify-revise loop (verify/autorevise.py). When on, a draft left with a contradicted
+# or unverified claim after the claim pass is sent back through the drafter with those
+# claims (the same call as the queue's Revise button with an empty box), its supported
+# verdicts are kept, the new or changed claims are checked, and so on until every claim is
+# supported or a limit is hit. Each round costs one drafter call plus one web call per new
+# claim. Tables are not part of the loop. `--auto-revise` / `--no-auto-revise` on
+# run_verify.py override `enabled` for one run.
+auto_revise:
+  enabled: false
+  max_rounds: 3               # rounds per draft per run
+  max_rounds_per_draft: 6     # automatic revisions over the draft's whole life; after that
+                              # the draft waits for a human ("auto-revise gave up" on the queue)
+
 # A "supported" or "contradicted" verdict counts as verified only when the source is on
 # one of these hosts (subdomains included). Anything else is shown as a lead the human
 # must check. Company domains are not listed: an IR press release page on the company's
