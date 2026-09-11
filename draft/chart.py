@@ -589,12 +589,15 @@ def render_table(
     source_url: str = "",
     blanked: frozenset[tuple[int, int]] = frozenset(),
     style: Style | None = None,
+    logos: dict[tuple[int, int], Path] | None = None,
 ) -> Path:
     """Draw the table as a PNG at `path`. Cells in `blanked` (the fact-checker could not
-    support them) are drawn as BLANK_CELL and the footer says so. Raises ImportError without
-    matplotlib, like render_chart.
+    support them) are drawn as BLANK_CELL and the footer says so. `logos` maps a body cell
+    (row, col) to a PNG drawn at the cell's left edge (draft/branding.py). Raises
+    ImportError without matplotlib, like render_chart.
 
-    A navy header row, zebra rows, horizontal hairlines only, bold row labels."""
+    A rounded navy header bar with a drop shadow and a top sheen, zebra rows, horizontal
+    hairlines only, bold row labels."""
     st = style or Style()
     fs = st.font_scale
     plt = _setup()
@@ -637,16 +640,16 @@ def render_table(
     )
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(6.8 * fs)
+    logos = logos or {}
     for (r, c), cell in tbl.get_celld().items():
         cell.PAD = 0.05
         cell.set_linewidth(0.5)
         if r == 0:
-            cell.set_facecolor(HEADER_FILL)
-            cell.set_edgecolor(HEADER_FILL)
-            cell.set_text_props(fontweight="bold", color="white", fontsize=5.8 * fs)
+            cell.set_visible(False)  # drawn as one rounded bar by _header_bar below
             continue
-        cell.visible_edges = "B"
-        cell.set_edgecolor(RULE)
+        if (r - 1, c) in logos:
+            cell.PAD = 0.05 + _LOGO_PAD / max(widths[c], 0.01)
+        cell.set_linewidth(0)  # rows are shaded and ruled by _row_bands below
         cell.set_facecolor(ZEBRA if r % 2 == 0 else SURFACE)
         if c == 0:
             cell.set_text_props(fontweight="bold", color=INK)
@@ -654,9 +657,122 @@ def render_table(
             cell.set_text_props(color=INK)
         if (r - 1, c) in blanked:
             cell.set_text_props(color=INK_3)
+    fig.canvas.draw()  # positions the cells so the header bar and logos can use them
+    _row_bands(ax, tbl, len(body), len(table.columns))
+    _header_bar(ax, tbl, [c.upper() for c in table.columns], fontsize=5.8 * fs)
+    for (r, c), logo in logos.items():
+        _draw_logo(ax, tbl, r + 1, c, logo)
     fig.savefig(path, format="png", dpi=DPI, facecolor=SURFACE)
     plt.close(fig)
     return path
+
+
+_LOGO_PAD = 0.055  # axes fraction reserved left of the text in a cell that carries a logo
+HEADER_SHADOW = "#08213d"
+HEADER_RADIUS = 0.012  # axes fraction
+
+
+def _row_bands(ax, tbl, nrows: int, ncols: int) -> None:
+    """Zebra shading and one hairline under each body row, drawn as plain patches: a
+    matplotlib table cell only paints along its visible edges, so a cell with just a
+    bottom edge shows no fill."""
+    from matplotlib.patches import Rectangle
+
+    for r in range(1, nrows + 1):
+        cells = [tbl[r, c] for c in range(ncols)]
+        x0 = min(c.get_x() for c in cells)
+        x1 = max(c.get_x() + c.get_width() for c in cells)
+        y0, h = cells[0].get_y(), cells[0].get_height()
+        if r % 2 == 0:
+            ax.add_patch(
+                Rectangle(
+                    (x0, y0), x1 - x0, h, facecolor=ZEBRA, lw=0, zorder=1, transform=ax.transAxes
+                )
+            )
+        ax.plot([x0, x1], [y0, y0], color=RULE, lw=0.5, zorder=1.5, transform=ax.transAxes)
+    tbl.set_zorder(2)  # the table (and its text) above the bands, below the header bar
+    for cell in tbl.get_celld().values():
+        cell.set_facecolor("none")
+
+
+def _header_bar(ax, tbl, labels: list[str], *, fontsize: float) -> None:
+    """One rounded navy bar over the header row: a soft drop shadow beneath, the bar, a
+    translucent sheen on its upper half (the 3D read), then the column labels."""
+    from matplotlib.patches import FancyBboxPatch, Rectangle
+
+    cells = [tbl[0, c] for c in range(len(labels))]
+    x0 = min(c.get_x() for c in cells)
+    x1 = max(c.get_x() + c.get_width() for c in cells)
+    y0 = min(c.get_y() for c in cells)
+    h = max(c.get_height() for c in cells)
+    box = dict(boxstyle=f"round,pad=0,rounding_size={HEADER_RADIUS}", lw=0)
+    ax.add_patch(
+        FancyBboxPatch(
+            (x0 + 0.004, y0 - 0.012),
+            x1 - x0,
+            h,
+            facecolor=HEADER_SHADOW,
+            alpha=0.28,
+            zorder=3,
+            transform=ax.transAxes,
+            **box,
+        )
+    )
+    bar = FancyBboxPatch(
+        (x0, y0), x1 - x0, h, facecolor=HEADER_FILL, zorder=4, transform=ax.transAxes, **box
+    )
+    ax.add_patch(bar)
+    sheen = Rectangle(
+        (x0, y0 + h * 0.5),
+        x1 - x0,
+        h * 0.5,
+        facecolor="white",
+        alpha=0.10,
+        lw=0,
+        zorder=5,
+        transform=ax.transAxes,
+    )
+    sheen.set_clip_path(bar)
+    ax.add_patch(sheen)
+    for cell, label in zip(cells, labels, strict=True):
+        ax.text(
+            cell.get_x() + cell.get_width() * cell.PAD,
+            y0 + h / 2,
+            label,
+            fontsize=fontsize,
+            fontweight="bold",
+            color="white",
+            ha="left",
+            va="center",
+            zorder=6,
+            transform=ax.transAxes,
+        )
+
+
+def _draw_logo(ax, tbl, row: int, col: int, logo: Path) -> None:
+    """A logo PNG at the left edge of a body cell, scaled to ~60% of the row height.
+    An unreadable file is skipped: the ticker text still carries the identity."""
+    from matplotlib.image import imread
+    from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+
+    try:
+        img = imread(str(logo))
+    except Exception:
+        return
+    cell = tbl[row, col]
+    fig = ax.figure
+    ax_h_px = ax.get_window_extent().height
+    target_px = cell.get_height() * ax_h_px * 0.6
+    zoom = target_px / max(img.shape[0], 1) * (72.0 / fig.dpi)
+    box = AnnotationBbox(
+        OffsetImage(img, zoom=zoom),
+        (cell.get_x() + _LOGO_PAD / 2 + 0.006, cell.get_y() + cell.get_height() / 2),
+        xycoords=ax.transAxes,
+        frameon=False,
+        box_alignment=(0.5, 0.5),
+        zorder=6,
+    )
+    ax.add_artist(box)
 
 
 __all__ = [

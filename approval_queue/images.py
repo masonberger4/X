@@ -21,7 +21,7 @@ import sqlite3
 from pathlib import Path
 
 from approval_queue import store
-from draft import grader
+from draft import branding, grader
 from draft.chart import Chart, Style, Table, alt_text, render_chart, render_table
 from draft.settings import load_draft_config
 
@@ -68,17 +68,33 @@ def attach_table(
     blanked: frozenset[tuple[int, int]] = frozenset(),
     cfg: dict | None = None,
 ) -> Path | None:
-    """Render a table whose cells step 2b has checked; `blanked` cells are drawn as blanks."""
+    """Render a table whose cells step 2b has checked; `blanked` cells are drawn as blanks.
+    Company cells get their configured ticker and logo first (draft/branding.py); the alt
+    text describes the branded table so it matches the picture."""
+    drawn, logos = _brand(table)
     return _render(
         conn,
         draft_id,
-        table,
+        drawn,
         lambda path, style: render_table(
-            table, path, source_url=source_url, blanked=blanked, style=style
+            drawn, path, source_url=source_url, blanked=blanked, style=style, logos=logos
         ),
-        alt_text(table, source_url, blanked),
+        alt_text(drawn, source_url, blanked),
         cfg,
     )
+
+
+def _brand(table: Table) -> tuple[Table, dict]:
+    """Tickers and logos from the root config; any failure means the table as it is."""
+    try:
+        import config as root_config
+        from panel.frozen import data_dir
+
+        root = root_config.load_config()
+        return branding.brand_table(table, branding.load_branding(root, data_dir()))
+    except Exception:
+        log.exception("table branding skipped")
+        return table, {}
 
 
 def _render(
@@ -148,6 +164,7 @@ def _grade_loop(
             adjustments=grade.adjustments,
             style=style.to_dict(),
             model=grade.model,
+            criteria=grade.criteria,
         )
         if grade.score > best_score:
             best_score, best_style, best_grade_id = grade.score, style, grade_id

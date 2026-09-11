@@ -203,7 +203,16 @@ break "never fabricate numbers", so:
   (`draft/chart.py:Style`: text scale, bar thickness, row pitch, highlight,
   gridlines, track) and draws again, up to `max_iterations` (4) renders; the
   best-scoring render is kept. Grades live in `image_grades` and show on the
-  draft page. The grader never touches a number, label or title;
+  draft page, together with a professional-finish checklist (readability at
+  thumbnail size, hierarchy, alignment, header finish, branding cells, number
+  format, source footer, consistency) scored 1-10 each. The grader never
+  touches a number, label or title;
+- tables carry company branding (`draft/branding.py`): a company cell that
+  names a configured company gets "($TICKER)" from `ticker:` in `config.yaml`
+  (`companies.feeds` or `branding.companies`) and the logo from
+  `assets/logos/<key>.png` if a human has put one there. Nothing is fetched or
+  guessed; an unconfigured company is left as written. The header row is a
+  rounded navy bar with a drop shadow and sheen;
 - the queue shows the PNG and its alt text at `/drafts/{id}/image`; "Drop
   image" (`POST /drafts/{id}/image/drop`) clears both and logs an `edit`
   decision with the text unchanged; a revise re-renders from the new draft;

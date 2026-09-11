@@ -142,6 +142,11 @@ _MIGRATIONS = (
     ("drafts", "chart_json", "ALTER TABLE drafts ADD COLUMN chart_json TEXT"),
     ("drafts", "image_path", "ALTER TABLE drafts ADD COLUMN image_path TEXT"),
     ("drafts", "image_alt", "ALTER TABLE drafts ADD COLUMN image_alt TEXT"),
+    (
+        "image_grades",
+        "criteria_json",
+        "ALTER TABLE image_grades ADD COLUMN criteria_json TEXT NOT NULL DEFAULT '{}'",
+    ),
 )
 
 
@@ -677,6 +682,7 @@ class ImageGradeRow:
     model: str
     kept: bool
     created_at: str
+    criteria: dict = field(default_factory=dict)
 
 
 def record_image_grade(
@@ -690,12 +696,14 @@ def record_image_grade(
     adjustments: dict,
     style: dict,
     model: str,
+    criteria: dict | None = None,
 ) -> int:
     """One grader verdict for one render of a draft's image (draft/grader.py)."""
     _require(conn, draft_id)
     cur = conn.execute(
         "INSERT INTO image_grades (draft_id, iteration, score, flaws_json, fixes_json, "
-        "adjustments_json, style_json, model, kept, created_at) VALUES (?,?,?,?,?,?,?,?,0,?)",
+        "adjustments_json, style_json, model, kept, created_at, criteria_json) "
+        "VALUES (?,?,?,?,?,?,?,?,0,?,?)",
         (
             draft_id,
             iteration,
@@ -706,6 +714,7 @@ def record_image_grade(
             json.dumps(style),
             model,
             _now(),
+            json.dumps(criteria or {}),
         ),
     )
     conn.commit()
@@ -741,6 +750,7 @@ def list_image_grades(conn: sqlite3.Connection, draft_id: int) -> list[ImageGrad
             model=r["model"],
             kept=bool(r["kept"]),
             created_at=r["created_at"],
+            criteria=json.loads(r["criteria_json"] or "{}"),
         )
         for r in rows
     ]

@@ -54,6 +54,18 @@ def test_parse_grade_reads_fenced_json_and_clamps():
         grader.parse_grade('{"flaws": []}', Style())
 
 
+def test_parse_grade_reads_checklist_criteria():
+    text = (
+        '{"score": 7, "criteria": {"readability": 9, "header_finish": "6.4", '
+        '"bogus": 3, "branding_cells": "x"}}'
+    )
+    g = grader.parse_grade(text, Style())
+    assert g.criteria == {"readability": 9, "header_finish": 6}
+    for name in ("header_finish", "branding_cells", "hierarchy", "alignment"):
+        assert name in grader.CHECKLIST and name in grader.SYSTEM_PROMPT
+    assert "rounded corners" in grader.SYSTEM_PROMPT and "stock ticker" in grader.SYSTEM_PROMPT
+
+
 def test_parse_grade_drops_adjustments_that_change_nothing():
     g = grader.parse_grade('{"score": 5, "adjustments": {"gridlines": true}}', Style())
     assert g.adjustments == {}
@@ -106,12 +118,13 @@ def _seeded(conn):
 
 def test_loop_stops_at_min_score(conn, monkeypatch, tmp_path):
     did = _seeded(conn)
-    fake = FakeGrader([{"score": 9, "flaws": [], "fixes": []}])
+    fake = FakeGrader([{"score": 9, "flaws": [], "fixes": [], "criteria": {"alignment": 9}}])
     monkeypatch.setattr(grader, "grade_image", fake)
     path = images.attach_chart(conn, did, CHART, source_url=URL, cfg=_cfg())
     assert path is not None and path.is_file()
     grades = store.list_image_grades(conn, did)
     assert [g.score for g in grades] == [9] and grades[0].kept and grades[0].iteration == 1
+    assert grades[0].criteria == {"alignment": 9}
     assert grades[0].model == "grader-model" and grades[0].style == Style().to_dict()
     assert fake.previous == [None]
 
