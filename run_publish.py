@@ -12,10 +12,11 @@ A draft whose chart was rendered (run_draft.py) and not dropped in the queue has
 attached to its first post, with alt text, unless media.attach_images is false in
 publish/config.yaml. The dry run prints the image path and alt text.
 
-A draft whose attempt failed before anything went live (status 'failed' or 'refused') stays
-claimed and is never retried on its own. --release-failed drops those claims (all of them, or
-the given draft ids) so the next run considers the drafts again; it posts nothing and never
-touches a 'posted' or 'partial' row, since a partial thread is live on X.
+A draft whose attempt posted nothing (status 'failed') goes back to approved on its own, up to
+retry.max_attempts times (publish/config.yaml); after that, and for a 'refused' text, it stays
+claimed. --release-failed drops those claims (all of them, or the given draft ids) so the next
+run considers the drafts again; it posts nothing and never touches a 'posted' or 'partial'
+row, since a partial thread is live on X.
 """
 
 from __future__ import annotations
@@ -205,6 +206,33 @@ def release_failed(draft_ids: list[int]) -> int:
     return 0
 
 
+def auto_release(conn, draft_id: int, retry_cfg: dict) -> bool:
+    """After an attempt that posted nothing: put the draft back to approved unless it has
+    already failed retry.max_attempts times, so a persistent failure ends up with a human.
+    Never called for a partial thread or a refused text."""
+    if not retry_cfg.get("auto_release_failed", True):
+        return False
+    attempts = store.failed_attempts(conn, draft_id)
+    limit = int(retry_cfg.get("max_attempts", 3))
+    if attempts >= limit:
+        log.error(
+            "draft %d: %d failed attempts, staying failed; fix the cause and run "
+            "run_publish.py --release-failed %d",
+            draft_id,
+            attempts,
+            draft_id,
+        )
+        return False
+    store.release_failed(conn, [draft_id])
+    log.warning(
+        "draft %d released back to approved after failed attempt %d/%d; next run retries it",
+        draft_id,
+        attempts,
+        limit,
+    )
+    return True
+
+
 def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     load_dotenv()
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -284,6 +312,8 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
             return 0
         log.info("claimed draft %d for %s (%s)", cand.draft_id, slot, reason)
         status = publish_one(conn, cand, kind, texts, slot, now, image=image)
+        if status == store.SCHED_FAILED:
+            auto_release(conn, cand.draft_id, cfg["retry"])
         return 0 if status == store.SCHED_POSTED else 2
     finally:
         conn.close()

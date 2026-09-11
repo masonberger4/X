@@ -34,3 +34,12 @@ policy:
 # the image.
 media:
   attach_images: true
+
+# A draft whose attempt posted nothing (the image upload or the first tweet failed, and
+# the error was not a permission or content problem) goes back to approved on its own, so
+# the next run tries it again; after max_attempts failed attempts it stays failed for a
+# human (run_publish.py --release-failed). A refused text (fails the hard checks) and a
+# partial thread (some posts are live) are never released automatically.
+retry:
+  auto_release_failed: true
+  max_attempts: 3
