@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from draft.chart import IMAGES_DIRNAME, alt_text, chart_from_json
+from draft.chart import IMAGES_DIRNAME, alt_text, visual_from_json
 
 DEFAULT_DB_PATH = "./pipeline.db"
 
@@ -130,17 +130,25 @@ def _db_file(conn: sqlite3.Connection) -> Path | None:
 
 
 def _image_for(
-    db_file: Path | None, image_path: str | None, chart_json: str | None, url: str
+    db_file: Path | None,
+    image_path: str | None,
+    chart_json: str | None,
+    url: str,
+    image_alt: str | None = None,
 ) -> tuple[str | None, str]:
     """(absolute PNG path if it exists, alt text) for an approved draft. Images live in
-    <db folder>/images (approval_queue.store.image_dir); the row stores the relative path."""
+    <db folder>/images (approval_queue.store.image_dir); the row stores the relative path.
+    The stored alt text (written with the picture) wins; rows from before it existed get
+    the alt text of their chart spec."""
     if not image_path or db_file is None:
         return None, ""
     path = db_file.resolve().parent / IMAGES_DIRNAME / image_path
     if not path.is_file():
         return None, ""
-    chart = chart_from_json(chart_json)
-    return str(path), (alt_text(chart, url) if chart else "")
+    if image_alt:
+        return str(path), image_alt
+    visual = visual_from_json(chart_json)
+    return str(path), (alt_text(visual, url) if visual else "")
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -183,6 +191,7 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
             if {"chart_json", "image_path"} <= draft_cols
             else ", NULL AS chart_json, NULL AS image_path"
         )
+        image_cols += ", d.image_alt" if "image_alt" in draft_cols else ", NULL AS image_alt"
         meta = (
             ", i.source, i.url, i.title, s.total"
             if has_step1
@@ -223,7 +232,7 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
             thread = []
         single_post, thread, edited = _apply_edit(r["edited_text"], r["single_post"], thread)
         image_path, image_alt = _image_for(
-            conn_path, r["image_path"], r["chart_json"], r["url"] or ""
+            conn_path, r["image_path"], r["chart_json"], r["url"] or "", r["image_alt"]
         )
         out.append(
             Approved(

@@ -10,7 +10,15 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from draft.chart import CHART_JSON_SCHEMA, Chart, ChartError, validate_chart
+from draft.chart import (
+    CHART_JSON_SCHEMA,
+    TABLE_JSON_SCHEMA,
+    Chart,
+    ChartError,
+    Table,
+    validate_chart,
+    validate_table,
+)
 
 MAX_POST_CHARS = 280
 URL_CHARS = 23  # X wraps every URL through t.co, which always counts as 23 chars
@@ -41,6 +49,13 @@ class Draft:
     # Optional chart spec (draft/chart.py). None: no image. Never required, so an older
     # model output without the key still validates.
     chart: Chart | None = None
+    # Optional comparison table (draft/chart.py:Table), the alternative to a chart. Its cells
+    # are web-verified by step 2b before anything is rendered.
+    table: Table | None = None
+
+    @property
+    def visual(self) -> Chart | Table | None:
+        return self.chart if self.chart is not None else self.table
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -80,6 +95,7 @@ OUTPUT_JSON_SCHEMA: dict[str, Any] = {
             "description": "The interpretation, in one or two sentences, for the human reviewer.",
         },
         "chart": CHART_JSON_SCHEMA,
+        "table": TABLE_JSON_SCHEMA,
         "claims_to_verify": {
             "type": "array",
             "items": {
@@ -140,8 +156,11 @@ def validate_output(data: Any) -> Draft:
 
     try:
         chart = validate_chart(data.get("chart"))
+        table = validate_table(data.get("table"))
     except ChartError as exc:
         raise SchemaError(str(exc)) from exc
+    if chart is not None and table is not None:
+        raise SchemaError("give a chart or a table, not both")
 
     claims_raw = data["claims_to_verify"]
     if not isinstance(claims_raw, list):
@@ -167,4 +186,5 @@ def validate_output(data: Any) -> Draft:
         why_it_matters=_require_str(data, "why_it_matters"),
         claims_to_verify=claims,
         chart=chart,
+        table=table,
     )

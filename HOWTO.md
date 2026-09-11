@@ -120,6 +120,12 @@ source only when it is due, and score only scores what is new.
    on the draft page is still just the model's one-line idea for you; the
    chart is what actually gets attached. `images: enabled: false` in
    `draft\config.yaml` turns the drawing off.
+   The other kind of picture is a comparison table (a competitor landscape,
+   a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
+   first column naming the company, asset or trial. Unlike a chart its cells
+   may come from the model's own knowledge, so it is NOT drawn here: step 2
+   fact-checks every cell on the web first (see below). Until then the draft
+   page shows the cells and says the picture is pending.
 2. Check the claims. Each draft lists the facts the model added from its own
    knowledge (competitor pipelines, deal terms, cost claims). This step sends
    each one to Claude with web search on, which finds a primary source and
@@ -132,6 +138,17 @@ source only when it is due, and score only scores what is new.
    python run_verify.py --redo        # check again, replacing old verdicts
    python run_verify.py --draft 12    # one draft
    ```
+   The same run then handles comparison tables: every cell that is not
+   verbatim in the source article is one more web-search call (the row label
+   and column header are sent with it, so "Agenus, Stage: Phase 2" stands on
+   its own). Once every cell has a verdict the table is drawn to
+   `images\draft_<id>.png` with a blank where a cell could not be tied to a
+   trusted primary source (the footer says so), or dropped, on the draft's
+   record, when a cell was contradicted, fewer than `min_supported_ratio` of
+   the fact cells passed, fewer than two rows kept a verified label, or the
+   table had more than `max_cells_per_draft` cells. `tables:` in
+   `verify\config.yaml` holds those knobs and `enabled: false` skips tables
+   altogether (they then stay unrendered and are dropped at approval).
    About one to two minutes per claim. Verdicts are only "verified" when
    the source is on a trusted site (`verify\config.yaml`, plus every company
    site in `config.yaml`); anything else is shown as a lead. Once the
@@ -164,6 +181,12 @@ source only when it is due, and score only scores what is new.
    post when published. Check every bar against the source like any other
    number. "Drop image" posts the text alone; a Revise redraws the chart from
    the new draft (or removes it if the new draft has none).
+   A table shows under "Table cells" with each cell's verdict and source link
+   (green: kept; amber: blanked in the picture; red: contradicted). The
+   picture appears once every cell is checked. Approving before that posts
+   the text alone and records why, so a picture is never attached after you
+   stopped looking. A Revise keeps the verdict of every cell whose row label,
+   column and text did not change.
    Under "Claims to verify" each claim shows its verdict, the source link and
    the quoted sentence. Open the link and read the sentence before approving;
    the verdict is a lead, the link is the proof. A contradicted claim blocks

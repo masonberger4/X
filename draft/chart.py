@@ -1,4 +1,4 @@
-"""The draft's image: a chart the model SPECIFIES and code RENDERS.
+"""The draft's image: a chart or table the model SPECIFIES and code RENDERS.
 
 The Anthropic API does not generate pictures, and a picture the pipeline cannot audit would
 break "never fabricate numbers". So the drafter returns a small chart spec (title, labels,
@@ -8,6 +8,12 @@ number is dropped, never rendered. render_chart() turns a verified spec into a P
 matplotlib (the `images` extra; imported inside the function so nothing else needs it).
 The approval queue shows the PNG, a human can drop it, and step 3 attaches it to the first
 post of whatever it publishes.
+
+A Table is the second kind of visual: a small comparison (rows of entities, columns of
+facts) such as a competitor landscape. Its cells go beyond the source, so unlike a chart it
+is NOT rendered at draft time: step 2b (run_verify.py) fact-checks every cell on the web
+first, blanks the ones it cannot support, drops the table when a cell is contradicted or
+too few cells are supported, and only then renders it through render_table().
 """
 
 from __future__ import annotations
@@ -27,6 +33,13 @@ MAX_ALT_TEXT = 1000  # X's limit for image alt text
 WIDTH_PX = 1600
 HEIGHT_PX = 900
 DPI = 200
+
+TABLE_MIN_ROWS = 2
+TABLE_MAX_ROWS = 8
+TABLE_MIN_COLS = 2
+TABLE_MAX_COLS = 5
+TABLE_MAX_CELL_CHARS = 60
+BLANK_CELL = "—"  # what a cell the fact-checker could not support becomes in the picture
 
 _HOST_RE = re.compile(r"^https?://(?:www\.)?([^/]+)")
 
@@ -53,6 +66,67 @@ class Chart:
     def texts(self) -> list[str]:
         """The free-text parts (title, labels, note), whose numbers are checked too."""
         return [self.title, *self.labels, self.note]
+
+
+@dataclass
+class Table:
+    """A comparison table: `columns[0]` is the row label (company, asset, trial), the other
+    columns are facts about it. Every cell except the headers is fact-checked before the
+    table is rendered."""
+
+    title: str
+    columns: list[str]
+    rows: list[list[str]]
+    note: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": "table", **asdict(self)}
+
+    def cells(self) -> list[tuple[int, int, str]]:
+        """(row, col, text) for every non-empty body cell, row-major."""
+        return [
+            (r, c, cell)
+            for r, row in enumerate(self.rows)
+            for c, cell in enumerate(row)
+            if cell.strip()
+        ]
+
+
+TABLE_JSON_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "required": ["title", "columns", "rows"],
+    "properties": {
+        "title": {"type": "string", "description": "Table title, one line."},
+        "columns": {
+            "type": "array",
+            "minItems": TABLE_MIN_COLS,
+            "maxItems": TABLE_MAX_COLS,
+            "items": {"type": "string"},
+            "description": "Column headers; the first is the row label (company, asset...).",
+        },
+        "rows": {
+            "type": "array",
+            "minItems": TABLE_MIN_ROWS,
+            "maxItems": TABLE_MAX_ROWS,
+            "items": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": TABLE_MAX_CELL_CHARS},
+            },
+            "description": (
+                "One list of cells per row, same length as columns. Short factual cells "
+                "(a stage, a date, a mechanism, a number); empty string when unknown."
+            ),
+        },
+        "note": {"type": "string", "description": "Optional footnote."},
+    },
+    "description": (
+        "Optional comparison table (landscape, competitor set, catalyst list) to attach "
+        "INSTEAD of a chart. Cells may use your own knowledge: every cell is fact-checked on "
+        "the web before the table is drawn, unsupported cells are blanked and a contradicted "
+        "cell drops the table. Null when a table would not add anything."
+    ),
+}
 
 
 CHART_JSON_SCHEMA: dict[str, Any] = {
@@ -131,23 +205,96 @@ def validate_chart(data: Any) -> Chart | None:
     )
 
 
-def chart_from_json(text: str | None) -> Chart | None:
-    """A Chart from the JSON stored in drafts.chart_json; None when empty or unreadable."""
+def validate_table(data: Any) -> Table | None:
+    """Turn the model's `table` value into a Table, or None for null. Raises ChartError."""
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ChartError("'table' must be an object or null")
+    extra = set(data) - set(TABLE_JSON_SCHEMA["properties"]) - {"kind"}
+    if extra:
+        raise ChartError(f"table has unexpected keys: {', '.join(sorted(extra))}")
+    title = data.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise ChartError("table.title must be a non-empty string")
+    columns = data.get("columns")
+    if not isinstance(columns, list) or not all(isinstance(x, str) and x.strip() for x in columns):
+        raise ChartError("table.columns must be a list of non-empty strings")
+    if not TABLE_MIN_COLS <= len(columns) <= TABLE_MAX_COLS:
+        raise ChartError(
+            f"table needs {TABLE_MIN_COLS}-{TABLE_MAX_COLS} columns, got {len(columns)}"
+        )
+    rows = data.get("rows")
+    if not isinstance(rows, list) or not all(isinstance(r, list) for r in rows):
+        raise ChartError("table.rows must be a list of lists")
+    if not TABLE_MIN_ROWS <= len(rows) <= TABLE_MAX_ROWS:
+        raise ChartError(f"table needs {TABLE_MIN_ROWS}-{TABLE_MAX_ROWS} rows, got {len(rows)}")
+    clean: list[list[str]] = []
+    for i, row in enumerate(rows):
+        if len(row) != len(columns) or not all(isinstance(x, str) for x in row):
+            raise ChartError(f"table.rows[{i}] must have {len(columns)} string cells")
+        cells = [x.strip() for x in row]
+        if not cells[0]:
+            raise ChartError(f"table.rows[{i}] has an empty row label")
+        if any(len(x) > TABLE_MAX_CELL_CHARS for x in cells):
+            raise ChartError(f"table.rows[{i}] has a cell over {TABLE_MAX_CELL_CHARS} chars")
+        clean.append(cells)
+    note = data.get("note", "")
+    if not isinstance(note, str):
+        raise ChartError("table.note must be a string")
+    return Table(
+        title=title.strip(), columns=[x.strip() for x in columns], rows=clean, note=note.strip()
+    )
+
+
+def visual_from_json(text: str | None) -> Chart | Table | None:
+    """The visual stored in drafts.chart_json: a Table when the JSON says kind=table, else a
+    Chart (older rows have no kind). None when empty or unreadable."""
     import json
 
     if not text:
         return None
     try:
-        return validate_chart(json.loads(text))
+        data = json.loads(text)
+        if isinstance(data, dict) and data.get("kind") == "table":
+            return validate_table(data)
+        return validate_chart(data)
     except (ValueError, TypeError):
         return None
 
 
-def alt_text(chart: Chart, source_url: str = "") -> str:
-    """Alt text for the image: the title and every bar, so the chart reads without the picture."""
-    bars = "; ".join(f"{lab} {val}" for lab, val in zip(chart.labels, chart.numbers(), strict=True))
-    unit = f" ({chart.unit})" if chart.unit and chart.unit != "%" else ""
-    parts = [f"Bar chart: {chart.title}{unit}. {bars}."]
+def chart_from_json(text: str | None) -> Chart | None:
+    """A Chart from drafts.chart_json; None when the row holds no chart (or holds a table)."""
+    v = visual_from_json(text)
+    return v if isinstance(v, Chart) else None
+
+
+def table_from_json(text: str | None) -> Table | None:
+    v = visual_from_json(text)
+    return v if isinstance(v, Table) else None
+
+
+def alt_text(
+    chart: Chart | Table, source_url: str = "", blanked: frozenset[tuple[int, int]] = frozenset()
+) -> str:
+    """Alt text for the image: the title and every bar (or row), so it reads without the
+    picture. For a table, `blanked` cells read as 'n/a' like they do in the picture."""
+    if isinstance(chart, Table):
+        rows = []
+        for r, row in enumerate(chart.rows):
+            facts = "; ".join(
+                f"{col} {'n/a' if (r, c) in blanked or not cell else cell}"
+                for c, (col, cell) in enumerate(zip(chart.columns, row, strict=True))
+                if c > 0
+            )
+            rows.append(f"{row[0]}: {facts}")
+        parts = [f"Table: {chart.title}. " + ". ".join(rows) + "."]
+    else:
+        bars = "; ".join(
+            f"{lab} {val}" for lab, val in zip(chart.labels, chart.numbers(), strict=True)
+        )
+        unit = f" ({chart.unit})" if chart.unit and chart.unit != "%" else ""
+        parts = [f"Bar chart: {chart.title}{unit}. {bars}."]
     if chart.note:
         parts.append(chart.note.rstrip(".") + ".")
     host = _HOST_RE.match(source_url or "")
@@ -212,8 +359,82 @@ def render_chart(chart: Chart, path: str | Path, *, source_url: str = "") -> Pat
     return path
 
 
+def render_table(
+    table: Table,
+    path: str | Path,
+    *,
+    source_url: str = "",
+    blanked: frozenset[tuple[int, int]] = frozenset(),
+) -> Path:
+    """Draw the table as a PNG at `path`. Cells in `blanked` (the fact-checker could not
+    support them) are drawn as BLANK_CELL and the footer says so. Raises ImportError without
+    matplotlib, like render_chart."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
+    fig.patch.set_facecolor("white")
+    ax.axis("off")
+    body = [
+        [BLANK_CELL if (r, c) in blanked or not cell else cell for c, cell in enumerate(row)]
+        for r, row in enumerate(table.rows)
+    ]
+    # Column widths follow the longest text in each column (headers included).
+    longest = [max(len(col), *(len(row[c]) for row in body)) for c, col in enumerate(table.columns)]
+    longest = [min(max(n, 6), 40) for n in longest]
+    widths = [n / sum(longest) for n in longest]
+    fig.subplots_adjust(left=0.03, right=0.97, top=0.9, bottom=0.05)
+    tbl = ax.table(
+        cellText=body,
+        colLabels=table.columns,
+        colWidths=widths,
+        cellLoc="left",
+        colLoc="left",
+        loc="upper center",
+        bbox=(0.0, 0.08, 1.0, 0.84),
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(6.5)
+    for (r, c), cell in tbl.get_celld().items():
+        cell.set_edgecolor("#dddddd")
+        cell.set_linewidth(0.5)
+        cell.PAD = 0.04
+        if r == 0:
+            cell.set_text_props(fontweight="bold", color="#333333")
+            cell.set_facecolor("#f2f2f2")
+        elif c == 0:
+            cell.set_text_props(fontweight="bold")
+        if r > 0 and (r - 1, c) in blanked:
+            cell.set_text_props(color="#999999")
+    ax.set_title(table.title, fontsize=9, fontweight="bold", loc="left", pad=6)
+    footer = []
+    if table.note:
+        footer.append(table.note)
+    if blanked:
+        footer.append(f"{BLANK_CELL} = could not be verified against a primary source")
+    host = _HOST_RE.match(source_url or "")
+    if host:
+        footer.append(f"Source: {host.group(1)}")
+    if footer:
+        fig.text(0.02, 0.02, "  ·  ".join(footer), fontsize=6, color="#555555")
+    fig.savefig(path, format="png", dpi=DPI, facecolor="white")
+    plt.close(fig)
+    return path
+
+
 __all__ = [
+    "BLANK_CELL",
     "CHART_JSON_SCHEMA",
+    "TABLE_JSON_SCHEMA",
+    "Table",
+    "render_table",
+    "table_from_json",
+    "validate_table",
+    "visual_from_json",
     "Chart",
     "ChartError",
     "alt_text",

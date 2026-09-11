@@ -195,13 +195,17 @@ def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised
     decisions = _decision_views(store.list_decisions(conn, draft_id))
     checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
     has_image = store.resolve_image(row.image_path) is not None
+    table_checks = {(k.row, k.col): k for k in verify_store.table_checks_for_draft(conn, draft_id)}
     return templates.TemplateResponse(
         request,
         "detail.html",
         {
             "d": row,
+            "table_checks": table_checks,
+            "table_unverified": row.draft.table is not None and not has_image,
             "image_url": f"/drafts/{draft_id}/image" if has_image else "",
-            "image_alt": alt_text(row.draft.chart, row.url) if row.draft.chart else "",
+            "image_alt": row.image_alt
+            or (alt_text(row.draft.visual, row.url) if row.draft.visual else ""),
             "decisions": decisions,
             "thread_text": "\n---\n".join(row.draft.thread),
             "checks": checks,
@@ -264,10 +268,15 @@ async def approve(draft_id: int, request: Request, conn: Conn):
         raise HTTPException(
             409, "a claim in this draft was contradicted by its source; edit it or approve anyway"
         )
-    try:
-        store.approve(conn, draft_id, note=_note(form))
-    except KeyError as exc:
-        raise HTTPException(404, "no such draft") from exc
+    row = store.get_draft(conn, draft_id)
+    if row is None:
+        raise HTTPException(404, "no such draft")
+    if row.draft.table is not None and store.resolve_image(row.image_path) is None:
+        # The table's cells were never all verified, so its picture must never be attached
+        # after the human has stopped looking: the post goes out text-only, on the record.
+        store.drop_table(conn, draft_id, "not verified when the draft was approved")
+        log.info("draft %d: unverified table dropped at approval", draft_id)
+    store.approve(conn, draft_id, note=_note(form))
     log.info("draft %d approved%s", draft_id, " (override)" if form.get("override") else "")
     return _redirect_home()
 
@@ -349,13 +358,18 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     kept = verify_store.carry_over_checks(
         conn, draft_id, [c.claim for c in result.draft.claims_to_verify]
     )
+    kept_cells = verify_store.carry_over_table_checks(
+        conn, draft_id, row.draft.table, result.draft.table
+    )
     images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)
     log.info(
-        "draft %d revised (%d attempt(s), %d claim problem(s), %d verdict(s) kept)",
+        "draft %d revised (%d attempt(s), %d claim problem(s), %d verdict(s) and %d table "
+        "cell(s) kept)",
         draft_id,
         result.attempts,
         len(problems),
         kept,
+        kept_cells,
     )
     return _detail_redirect(draft_id, revised=True)
 
