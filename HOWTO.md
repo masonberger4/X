@@ -216,7 +216,9 @@ source only when it is due, and score only scores what is new.
    claims (the same thing as pressing Revise with an empty box), supported
    verdicts are kept, only the new or changed claims are checked, and that
    repeats until every claim is supported or a limit is hit: `max_rounds`
-   per run (3) and `max_rounds_per_draft` over the draft's life (6). A
+   per run (3) and `max_rounds_per_draft` over the draft's life (0, meaning
+   no lifetime cap; set a number to make a draft wait for you after that many
+   automatic revisions). A
    revision that leaves the claims unchanged is thrown away and the loop
    stops, so the verdicts you see are always real ones. The queue shows
    "auto-revised N×" on each draft, with "needs you" when the loop gave up

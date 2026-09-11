@@ -181,7 +181,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   (`drafter.revise_item` with `claim_problems` and no instructions, `store.revise` with
   note `autorevise.AUTO_NOTE`, `carry_over_checks`), its new claims are checked, and the
   round repeats until every claim is supported or `max_rounds` (per run) /
-  `max_rounds_per_draft` (per draft, counted from `revise` decisions with that note) is
+  `max_rounds_per_draft` (per draft, counted from `revise` decisions with that note;
+  0, the shipped value, means no lifetime cap) is
   hit. A revision whose claim set is unchanged is discarded; a draft with an unchecked
   claim is never revised. Tables are outside the loop. `claim_problems` lives there and
   the queue app imports it. The queue blocks approve (409) on a contradicted claim

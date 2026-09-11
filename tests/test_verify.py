@@ -433,7 +433,7 @@ def test_auto_revise_stops_when_the_drafter_changes_no_claim_and_at_the_caps(con
 
     monkeypatch.setattr(drafter, "revise_item", boom)
     before = store.get_draft(conn, did).draft
-    res = revise_round(conn, did, lifetime_cap=10)
+    res = revise_round(conn, did, lifetime_cap=0)  # 0 = uncapped: still revises
     assert not res.revised and "api down" in res.reason
     assert store.get_draft(conn, did).draft == before
     assert len(vstore.checks_for_draft(conn, did)) == 3

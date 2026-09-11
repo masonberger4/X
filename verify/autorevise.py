@@ -6,7 +6,7 @@ through the drafter exactly as the queue's Revise button with an empty box does
 `approval_queue.store.revise` under AUTO_NOTE, its supported verdicts carried over, and the
 new or changed claims checked again; and so on until every claim is supported or a round
 limit is hit. Rounds are bounded twice: `auto_revise.max_rounds` per run and
-`auto_revise.max_rounds_per_draft` over the draft's life, counted from its `revise`
+`auto_revise.max_rounds_per_draft` over the draft's life (0 = uncapped), counted from its `revise`
 decisions carrying AUTO_NOTE. A revision that keeps the claim set unchanged is discarded
 and ends the loop (the drafter changed nothing the checker could re-judge; the verdicts
 stay).
@@ -82,7 +82,7 @@ def revise_round(conn, draft_id: int, *, lifetime_cap: int) -> RoundResult:
     if not problems:
         return RoundResult(False, 0, reason="every checked claim is supported")
     used = auto_rounds_used(conn, draft_id)
-    if used >= lifetime_cap:
+    if lifetime_cap > 0 and used >= lifetime_cap:  # 0 = no lifetime cap
         return RoundResult(
             False, len(problems), reason=f"gave up: {used} automatic revision(s) already"
         )
