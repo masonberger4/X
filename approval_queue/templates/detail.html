@@ -138,17 +138,17 @@
   <p><button>Revise with AI</button> <span class="meta">takes 10–30 seconds; a status bar shows while it runs</span></p>
 </form>
 
-<details>
+<details{% if edit_open %} open{% endif %}>
 <summary>Edit by hand</summary>
 <form method="post" action="/drafts/{{ d.id }}/edit">
-  <label>Single post<br><textarea name="single_post" rows="4">{{ d.draft.single_post }}</textarea></label>
+  <label>Single post<br><textarea name="single_post" rows="4">{{ single_post_text }}</textarea></label>
   <p class="meta">Thread: separate posts with a line containing only <code>---</code>.</p>
   <label>Thread<br><textarea name="thread" rows="10">{{ thread_text }}</textarea></label>
-  <label>Note<br><input name="note" placeholder="what you changed and why (optional)"></label>
+  <label>Note<br><input name="note" placeholder="what you changed and why (optional)" value="{{ edit_note }}"></label>
   <label>Why<br>
     <select name="category">
       <option value="">(no category)</option>
-      {% for c in DECISION_CATEGORIES %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+      {% for c in DECISION_CATEGORIES %}<option value="{{ c }}"{% if c == edit_category %} selected{% endif %}>{{ c }}</option>{% endfor %}
     </select>
   </label>
   <p class="meta">Voice edits become examples for the next drafts; factual and hard-rule fixes do not.</p>

@@ -94,8 +94,13 @@ def test_edit_keep_pending(client, conn, draft_id):
 def test_edit_rejects_over_280_and_empty(client, conn, draft_id):
     r = client.post(f"/drafts/{draft_id}/edit", data={"single_post": "x" * 281, "thread": ""})
     assert r.status_code == 400 and "280" in r.text
+    # The refusal is the detail page itself, error on top and the typed text kept, with a
+    # way back; never FastAPI's bare JSON page.
+    assert "Not saved" in r.text and "single post is 281 characters" in r.text
+    assert "x" * 281 in r.text and 'href="/queue"' in r.text
+    assert "<details open>" in r.text
     r = client.post(f"/drafts/{draft_id}/edit", data={"single_post": "", "thread": "a"})
-    assert r.status_code == 400
+    assert r.status_code == 400 and "cannot be empty" in r.text
     assert store.get_draft(conn, draft_id).status == "pending"
     assert store.list_decisions(conn, draft_id) == []
 
