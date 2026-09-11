@@ -1,8 +1,10 @@
 """The only module that talks to X. tweepy is imported inside the functions, never at import.
 
-post_tweet (v2 create_tweet) and upload_media (v2 media/upload + media/metadata for the alt
-text, sent through tweepy's OAuth 1.0a session because tweepy has no v2 media call and X
-retired the v1.1 upload endpoint) are the two write calls; verify_credentials is the read check.
+Every call is an X API v2 request on tweepy's OAuth 1.0a signing session against api.x.com:
+post_tweet (POST /2/tweets) and upload_media (POST /2/media/upload, then /2/media/metadata
+for the alt text) are the two write calls; verify_credentials (GET /2/users/me) is the read
+check. tweepy.Client is not used: it hardcodes api.twitter.com, which some networks reset,
+and it has no v2 media call.
 
 Keys come from the environment (.env via python-dotenv, loaded by the CLI):
   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET (X_ACCESS_TOKEN_SECRET also accepted)
@@ -20,8 +22,11 @@ log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 4
 BACKOFF_BASE_SECONDS = 2.0
-MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload"
-MEDIA_METADATA_URL = "https://api.x.com/2/media/metadata"
+API_HOST = "https://api.x.com"  # not api.twitter.com: some networks reset the legacy host
+TWEETS_URL = f"{API_HOST}/2/tweets"
+ME_URL = f"{API_HOST}/2/users/me"
+MEDIA_UPLOAD_URL = f"{API_HOST}/2/media/upload"
+MEDIA_METADATA_URL = f"{API_HOST}/2/media/metadata"
 MEDIA_CATEGORY = "tweet_image"
 REQUEST_TIMEOUT_SECONDS = 60
 TRANSPORT_PREFIX = "Failed to send request"  # tweepy's own wording for a transport error
@@ -48,12 +53,6 @@ def _keys() -> dict[str, str]:
     if missing:
         raise PublishError(f"missing X credentials: {', '.join(missing)}")
     return keys
-
-
-def _client():
-    import tweepy  # imported here so tests never need it
-
-    return tweepy.Client(**_keys())
 
 
 def _oauth1_api():
@@ -119,7 +118,7 @@ def _classify(exc: Exception) -> tuple[bool, int | None]:
     if isinstance(exc, tweepy.TweepyException) and str(exc).startswith(TRANSPORT_PREFIX):
         return True, None  # tweepy.API wraps a transport error this way
     if isinstance(exc, OSError):
-        # tweepy.Client lets requests' ConnectionError/Timeout (both OSError) through raw.
+        # requests' ConnectionError/Timeout are OSError and reach us raw from the session.
         # Nothing reached X, or X's answer was lost; in the second case a retried tweet
         # with identical text is refused by X as a duplicate, so this cannot double-post.
         return True, None
@@ -145,17 +144,17 @@ def _with_retries(op: Callable[[], Any], what: str, sleep: Callable[[float], Non
 def post_tweet(
     text: str, in_reply_to: str | None = None, media_ids: list[str] | None = None
 ) -> str:
-    """Post one tweet and return its id. media_ids come from upload_media(). Raises
-    PublishError on failure."""
+    """Post one tweet (POST /2/tweets) and return its id. media_ids come from upload_media().
+    Raises PublishError on failure."""
 
     def op():
-        kwargs: dict[str, Any] = {"text": text}
+        body: dict[str, Any] = {"text": text}
         if in_reply_to:
-            kwargs["in_reply_to_tweet_id"] = in_reply_to
+            body["reply"] = {"in_reply_to_tweet_id": in_reply_to}
         if media_ids:
-            kwargs["media_ids"] = list(media_ids)
-        resp = _client().create_tweet(**kwargs)
-        return str(resp.data["id"])
+            body["media"] = {"media_ids": [str(m) for m in media_ids]}
+        data = _v2_request(_oauth1_api(), "POST", TWEETS_URL, json=body)
+        return str(data["data"]["id"])
 
     return _with_retries(op, "create_tweet")
 
@@ -189,10 +188,11 @@ def upload_media(path: str, alt_text: str = "") -> str:
 
 
 def verify_credentials() -> str:
-    """Return the authenticated username. Raises PublishError if the keys do not work."""
+    """Return the authenticated username (GET /2/users/me). Raises PublishError if the keys
+    do not work."""
 
     def op():
-        resp = _client().get_me()
-        return str(resp.data["username"])
+        data = _v2_request(_oauth1_api(), "GET", ME_URL)
+        return str(data["data"]["username"])
 
     return _with_retries(op, "get_me")

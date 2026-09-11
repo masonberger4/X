@@ -200,7 +200,7 @@ break "never fabricate numbers", so:
   image" (`POST /drafts/{id}/image/drop`) clears both and logs an `edit`
   decision with the text unchanged; a revise re-renders from the new draft;
 - `run_publish.py` attaches it to the first post (`publish/client.py:
-  upload_media`, v2 media upload plus alt text, then `create_tweet` with
+  upload_media`, v2 media upload plus alt text, then `post_tweet` with
   `media_ids`). `media: attach_images: false` in `publish/config.yaml` posts
   text-only. An upload failure marks the draft `failed` with nothing posted.
 

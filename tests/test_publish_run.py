@@ -590,3 +590,36 @@ def test_release_failed_by_id_and_never_partial_or_posted(conn, monkeypatch, cap
     assert run_publish.main(["--release-failed", str(partial)]) == 0
     assert "nothing to release" in capsys.readouterr().out
     assert store.get_schedule(conn, partial)["status"] == "partial"
+
+
+def test_post_tweet_uses_v2_tweets_on_api_x_com(monkeypatch):
+    calls = _fake_tweepy_for_upload(
+        monkeypatch,
+        [_FakeResponse(201, {"data": {"id": "42", "text": "hi"}})],
+    )
+    assert client.post_tweet("hi", in_reply_to="41", media_ids=["777"]) == "42"
+    method, url, kw = calls[0]
+    assert (method, url) == ("POST", "https://api.x.com/2/tweets")
+    assert kw["auth"] == "oauth1-signature"
+    assert kw["json"] == {
+        "text": "hi",
+        "reply": {"in_reply_to_tweet_id": "41"},
+        "media": {"media_ids": ["777"]},
+    }
+    monkeypatch.delitem(sys.modules, "tweepy")
+
+
+def test_post_tweet_plain_body_and_verify_credentials(monkeypatch):
+    calls = _fake_tweepy_for_upload(
+        monkeypatch,
+        [
+            _FakeResponse(201, {"data": {"id": "1"}}),
+            _FakeResponse(200, {"data": {"id": "9", "username": "biotech_leads"}}),
+        ],
+    )
+    assert client.post_tweet("solo") == "1"
+    assert calls[0][2]["json"] == {"text": "solo"}
+    assert client.verify_credentials() == "biotech_leads"
+    assert (calls[1][0], calls[1][1]) == ("GET", "https://api.x.com/2/users/me")
+    assert not any("api.twitter.com" in u for _, u, _ in calls)
+    monkeypatch.delitem(sys.modules, "tweepy")
