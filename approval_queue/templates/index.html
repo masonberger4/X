@@ -3,6 +3,11 @@
 {% block content %}
 <h1>{{ status|capitalize }} drafts <span class="meta">({{ drafts|length }})</span></h1>
 <p class="meta">Tell the drafter what to change and it rewrites the post; open a draft for the full text, claims and approve buttons. Your notes and rejection reasons teach the drafter: see the <a href="/voice">voice report</a>.</p>
+{% if status == "approved" %}
+  <p class="meta">Waiting to be published by <code>run_publish.py</code>.
+  {% if hidden_posted %}{{ hidden_posted }} already posted, hidden. <a href="/status/approved?posted=1">Show posted</a>.
+  {% elif show_posted %}Posted drafts included. <a href="/status/approved">Hide posted</a>.{% endif %}</p>
+{% endif %}
 {% if not drafts %}
   <p class="meta">Nothing here.</p>
 {% else %}
@@ -12,7 +17,14 @@
   {% for d in drafts %}
     <tr>
       <td>{{ "%.1f"|format(d.total) if d.total is not none else "–" }}</td>
-      <td>{{ d.source or "?" }}{% if d.status != status %}<br><span class="meta">{{ d.status }}</span>{% endif %}</td>
+      <td>{{ d.source or "?" }}{% if d.status != status %}<br><span class="meta">{{ d.status }}</span>{% endif %}
+        {% if status == "approved" %}{% set p = publish.get(d.id) %}<br>
+          {% if not p %}<span class="pill skip">waiting</span>
+          {% elif p.status == "posted" %}<a class="pill ok" href="{{ p.tweet_url }}" target="_blank" rel="noopener noreferrer">posted</a>
+          {% elif p.status == "partial" %}<span class="pill fail" title="{{ p.error }}">partial thread</span>
+          {% elif p.status in ("failed", "refused") %}<span class="pill fail" title="{{ p.error }}">{{ p.status }}</span>
+          {% else %}<span class="pill warn">{{ p.status }}</span>{% endif %}
+        {% endif %}</td>
       <td>
         <a href="/drafts/{{ d.id }}"><strong>{{ d.title or d.item_id }}</strong></a>
         <div class="meta">{{ d.draft.single_post }}</div>
