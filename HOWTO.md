@@ -479,6 +479,7 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | `git pull` refuses because you edited a file | `git checkout <file>` to discard, or ask me to commit the change |
 | Scoring says `scoring 0 clusters` right after a keyword change | `python run_score.py --refilter` |
 | Scoring says `pass: 0, deferred: N` | today's cap of 150 is spent; the N wait for tomorrow, or raise `daily_cap` in `config.yaml` |
+| The queue still shows `N unchecked` after `run_verify.py` | claims past `max_claims_per_draft` in `verify/config.yaml` (12) are never checked; raise it. If the run ended with `M errors`, rerun: a failed web call leaves the claim unchecked |
 | A source keeps erroring | it is logged and skipped; the others still run. Paste the line to me |
 | `clinicaltrials_oncology` says `403 Forbidden` | ClinicalTrials.gov blocks a Python program that calls itself a browser. Its entry in `config.yaml` has its own `user_agent` starting with `python-httpx/` for that reason; if the line was removed, put it back |
 | A score run logs `safeguards flagged this message` | the CLI's usage-policy check tripped on a batch full of biology abstracts. The scorer does not retry the same prompt; it halves the batch and scores each half in a fresh call, down to single stories. A single story still refused is logged and left for the next run. `scorer_effort` / `drafter_effort` in `config.yaml` set how hard the model thinks (`low` is the cheapest) |
