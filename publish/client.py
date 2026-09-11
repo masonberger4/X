@@ -117,7 +117,12 @@ def _classify(exc: Exception) -> tuple[bool, int | None]:
     if isinstance(exc, tweepy.Forbidden):
         return False, 403
     if isinstance(exc, tweepy.TweepyException) and str(exc).startswith(TRANSPORT_PREFIX):
-        return True, None  # connection reset, timeout: nothing reached X, safe to retry
+        return True, None  # tweepy.API wraps a transport error this way
+    if isinstance(exc, OSError):
+        # tweepy.Client lets requests' ConnectionError/Timeout (both OSError) through raw.
+        # Nothing reached X, or X's answer was lost; in the second case a retried tweet
+        # with identical text is refused by X as a duplicate, so this cannot double-post.
+        return True, None
     return False, getattr(getattr(exc, "response", None), "status_code", None)
 
 

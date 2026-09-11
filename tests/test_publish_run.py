@@ -285,6 +285,18 @@ def test_client_retry_classification(monkeypatch):
 
     assert client._with_retries(reset, "op", sleep=slept.append) == "ok"
     assert slept == [2.0, 4.0, 2.0]
+
+    # tweepy.Client (v2) lets requests' raw ConnectionError through: an OSError, also retried
+    attempts["n"] = 0
+
+    def raw_reset():
+        attempts["n"] += 1
+        if attempts["n"] < 2:
+            raise ConnectionResetError(10054, "An existing connection was forcibly closed")
+        return "ok"
+
+    assert client._with_retries(raw_reset, "op", sleep=slept.append) == "ok"
+    assert slept == [2.0, 4.0, 2.0, 2.0]
     monkeypatch.delitem(sys.modules, "tweepy")
 
 
