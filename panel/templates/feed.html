@@ -3,10 +3,15 @@
 {% block content %}
 <h1>Feed</h1>
 <p class="meta">
-  Top {{ top_n }} scored clusters of the last {{ hours }}h{% if min_total %}, score {{ min_total }}+{% endif %}.
-  Window: <a href="/feed?hours=24">24h</a> · <a href="/feed?hours=72">72h</a> ·
-  <a href="/feed?hours=168">7d</a> ·
-  {% if show_all %}<a href="/feed?hours={{ hours }}">threshold only</a>{% else %}<a href="/feed?hours={{ hours }}&amp;all=1">ignore threshold</a>{% endif %}
+  {% set keep = "top=" ~ top_n ~ ("&amp;all=1" if show_all else "") ~ ("&amp;hide_decided=1" if hide_decided else "") %}
+  Top {{ top_n }} scored clusters of the last {{ hours }}h{% if min_total %}, score {{ min_total }}+{% endif %}{% if hide_decided %}, decided stories hidden{% endif %}.
+  Window: <a href="/feed?hours=24&amp;{{ keep }}">24h</a> · <a href="/feed?hours=72&amp;{{ keep }}">72h</a> ·
+  <a href="/feed?hours=168&amp;{{ keep }}">7d</a> ·
+  Show: <a href="/feed?hours={{ hours }}&amp;top=10{% if show_all %}&amp;all=1{% endif %}{% if hide_decided %}&amp;hide_decided=1{% endif %}">10</a> ·
+  <a href="/feed?hours={{ hours }}&amp;top=25{% if show_all %}&amp;all=1{% endif %}{% if hide_decided %}&amp;hide_decided=1{% endif %}">25</a> ·
+  <a href="/feed?hours={{ hours }}&amp;top=100{% if show_all %}&amp;all=1{% endif %}{% if hide_decided %}&amp;hide_decided=1{% endif %}">100</a> ·
+  {% if show_all %}<a href="/feed?hours={{ hours }}&amp;top={{ top_n }}{% if hide_decided %}&amp;hide_decided=1{% endif %}">threshold only</a>{% else %}<a href="/feed?hours={{ hours }}&amp;top={{ top_n }}&amp;all=1{% if hide_decided %}&amp;hide_decided=1{% endif %}">ignore threshold</a>{% endif %} ·
+  {% if hide_decided %}<a href="/feed?hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}">show decided</a>{% else %}<a href="/feed?hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}&amp;hide_decided=1">hide decided</a>{% endif %}
 </p>
 <p class="meta">Deciding a story here is what tunes the rubric: your yes or no, and the
 explanation behind it, are the ground truth the score is measured against. It changes
@@ -46,7 +51,7 @@ nothing about what gets drafted today.</p>
   <p class="high">You said {{ e.human_rating.decision }}{% if e.human_rating.note %} — {{ e.human_rating.note }}{% endif %}</p>
   {% endif %}
   <form method="post" action="/feed/{{ e.cluster_id }}/rate" class="decide">
-    <input type="hidden" name="back" value="hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}">
+    <input type="hidden" name="back" value="hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}{% if hide_decided %}&amp;hide_decided=1{% endif %}">
     <select name="decision" aria-label="decision">
       {% for value, label in labels.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
     </select>
@@ -61,7 +66,7 @@ nothing about what gets drafted today.</p>
   <p class="meta">scored by {{ e.model }} ({{ e.prompt_version }})</p>
 </div>
 {% else %}
-<p class="meta">Nothing scored in this window. Run ingest and score from
+<p class="meta">{% if hide_decided %}Nothing undecided in this window.{% else %}Nothing scored in this window.{% endif %} Run ingest and score from
   <a href="/runs">the runs page</a>, or widen the window above.</p>
 {% endfor %}
 {% endblock %}

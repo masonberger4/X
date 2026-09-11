@@ -20,16 +20,22 @@ DECISION_LABELS = {
 }
 REASON_CATEGORIES = editorial.REASON_CATEGORIES
 MAX_ABSTRACT_CHARS = 700
+MAX_TOP_N = 100
 
 
 def feed_settings(cfg: dict[str, Any]) -> dict[str, int]:
     """Defaults for the feed page, from the root config.yaml's digest/scoring blocks."""
     dcfg = cfg.get("digest") or {}
     return {
-        "top_n": int(dcfg.get("top_n", 10)),
+        "top_n": clamp_top_n(int(dcfg.get("top_n", 10))),
         "hours": int(dcfg.get("window_hours", 24)),
         "threshold": int((cfg.get("scoring") or {}).get("threshold", 0)),
     }
+
+
+def clamp_top_n(top_n: int) -> int:
+    """The feed shows at most MAX_TOP_N stories, and never fewer than one."""
+    return max(1, min(top_n, MAX_TOP_N))
 
 
 def fetch_entries(
@@ -38,14 +44,23 @@ def fetch_entries(
     return db.top_scored_clusters(window_start(hours), top_n, min_total)
 
 
-def entry_views(db: Database, rows: list[tuple[Cluster, Score]]) -> list[dict[str, Any]]:
-    """One view per scored cluster: the digest entry, plus any decisions already recorded."""
+def entry_views(
+    db: Database, rows: list[tuple[Cluster, Score]], *, hide_decided: bool = False
+) -> list[dict[str, Any]]:
+    """One view per scored cluster: the digest entry, plus any decisions already recorded.
+
+    With `hide_decided`, clusters that already carry a human yes/no are left out; the
+    remaining entries keep their digest rank so the numbers still match `digest.py`.
+    """
     out = []
     for rank, (cl, sc) in enumerate(rows, start=1):
+        ratings = db.ratings_for(cl.id)
+        human = _latest(ratings, human=True)
+        if hide_decided and human is not None:
+            continue
         items = db.items_in_cluster(cl.id)
         title, abstract = cluster_text(items) if items else (cl.title, "")
         primary = items[0] if items else None
-        ratings = db.ratings_for(cl.id)
         out.append(
             {
                 "rank": rank,
@@ -71,7 +86,7 @@ def entry_views(db: Database, rows: list[tuple[Cluster, Score]]) -> list[dict[st
                 "suggested_angle": sc.suggested_angle,
                 "model": sc.model,
                 "prompt_version": sc.prompt_version,
-                "human_rating": _latest(ratings, human=True),
+                "human_rating": human,
                 "model_rating": _latest(ratings, human=False),
             }
         )

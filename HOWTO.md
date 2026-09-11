@@ -397,7 +397,11 @@ to stop it. Four pages:
   This is the same decision `digest.py --rate` asks for at the terminal, and
   it is what the scoring gets tuned against later. It does not change what
   gets drafted today. Use the window links to
-  look back 72 hours or a week, or to ignore the score threshold.
+  look back 72 hours or a week, to show 10, 25 or 100 stories (100 is the
+  most the page lists), or to ignore the score threshold. "Hide decided"
+  drops the stories you have already answered, so what is left is your
+  to-do list; a decided story otherwise stays until it ages out of the
+  window. "Show decided" brings them back.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
   halfway is never retried for you). Read-only: there is no post button here.
