@@ -326,7 +326,7 @@ RULE = "#dcdad3"
 ACCENT = "#123f6b"  # the series colour; one hue, magnitude only
 ACCENT_SOFT = "#c9d6e4"  # the track behind each bar
 HEADER_FILL = "#123f6b"
-ZEBRA = "#f1f0ec"
+ZEBRA = "#e9edf2"  # visibly cooler than the surface
 EYEBROW = "IMMUNO-ONCOLOGY  ·  DATA BRIEF"
 FONT_FAMILIES = [
     "Inter",

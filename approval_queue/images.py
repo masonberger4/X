@@ -154,7 +154,8 @@ def _grade_loop(
         if grade.passed(settings.min_score):
             log.info("draft %d: image scored %d/10, done", draft_id, grade.score)
             break
-        if iteration == settings.max_iterations or not grade.adjustments:
+        adjustments = grade.adjustments or grader.fallback_adjustments(visual, style)
+        if iteration == settings.max_iterations or not adjustments:
             log.info(
                 "draft %d: image scored %d/10 after %d render(s), keeping the best (%d/10)",
                 draft_id,
@@ -163,7 +164,9 @@ def _grade_loop(
                 best_score,
             )
             break
-        style = style.apply(grade.adjustments)
+        if not grade.adjustments:
+            log.info("draft %d: grader sent no adjustments, stepping %s", draft_id, adjustments)
+        style = style.apply(adjustments)
         previous = grade
         try:
             draw(path, style)

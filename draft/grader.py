@@ -115,9 +115,31 @@ You steer the next render only through these layout knobs (omit any you would ke
 - track (true/false): the light bar behind each bar showing the full scale
 - table_row_height (0.06-0.16): vertical space per table row (table only)
 
+Whenever the score is below 8, "adjustments" MUST name at least one knob change that
+addresses the biggest flaw (for example a table that leaves the bottom of the card empty
+needs a larger table_row_height and font_scale). Only a picture you score 8 or higher may
+have empty adjustments.
+
 Reply with ONLY a JSON object:
 {{"score": <1-10>, "flaws": ["..."], "fixes": ["..."], "adjustments": {{"knob": value}}}}
 """
+
+
+def fallback_adjustments(visual: Chart | Table, style: Style) -> dict[str, Any]:
+    """The knob step the loop takes when a low grade comes with no adjustments: a bigger,
+    fuller picture. Empty once every knob it moves is at its ceiling (the loop then ends)."""
+    if isinstance(visual, Table):
+        keys = ("table_row_height", "font_scale")
+    else:
+        keys = ("row_pitch", "bar_height", "font_scale")
+    step = {"table_row_height": 0.03, "font_scale": 0.15, "row_pitch": 0.03, "bar_height": 0.12}
+    out: dict[str, Any] = {}
+    for key in keys:
+        current = getattr(style, key)
+        hi = Style.RANGES[key][1]
+        if current < hi:
+            out[key] = min(hi, current + step[key])
+    return out
 
 
 def build_user_prompt(visual: Chart | Table, style: Style, previous: ImageGrade | None) -> str:
@@ -252,6 +274,7 @@ __all__ = [
     "ImageGrade",
     "build_user_prompt",
     "call_grader",
+    "fallback_adjustments",
     "grade_image",
     "grader_settings",
     "parse_grade",

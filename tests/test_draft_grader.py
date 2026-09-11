@@ -147,13 +147,26 @@ def test_loop_iterates_with_adjustments_and_keeps_the_best(conn, monkeypatch):
     assert len(draws) == 5 and draws[-1] == fake.styles[1] and draws[-1].row_pitch == 0.14
 
 
-def test_loop_ends_when_grader_offers_no_change(conn, monkeypatch):
+def test_low_grade_without_adjustments_still_iterates(conn, monkeypatch):
     did = _seeded(conn)
     fake = FakeGrader([{"score": 6, "flaws": ["meh"]}, {"score": 9}])
     monkeypatch.setattr(grader, "grade_image", fake)
     images.attach_chart(conn, did, CHART, source_url=URL, cfg=_cfg())
     grades = store.list_image_grades(conn, did)
-    assert [g.score for g in grades] == [6] and grades[0].kept and fake.replies  # no 2nd call
+    assert [g.score for g in grades] == [6, 9] and grades[1].kept
+    # the fallback step made the second render bigger and fuller
+    assert fake.styles[1].row_pitch > Style().row_pitch and fake.styles[1].font_scale > 1
+
+
+def test_fallback_adjustments_step_up_and_stop_at_the_ceiling():
+    from draft.chart import Table
+
+    table = Table("t", ["a", "b"], [["x", "y"], ["z", "w"]])
+    step = grader.fallback_adjustments(table, Style())
+    assert set(step) == {"table_row_height", "font_scale"} and step["font_scale"] == 1.15
+    maxed = Style(table_row_height=0.16, font_scale=1.6)
+    assert grader.fallback_adjustments(table, maxed) == {}
+    assert "bar_height" in grader.fallback_adjustments(CHART, Style())
 
 
 def test_loop_fails_soft_and_keeps_the_render(conn, monkeypatch, caplog):
