@@ -86,6 +86,31 @@ def test_the_threshold_can_be_ignored(client, conn):
     assert "Title weak" in client.get("/feed?all=1").text
 
 
+def test_hide_decided_drops_stories_with_a_human_decision(client, conn, database, cluster_id):
+    seed_item(conn, "fresh", total=40)
+    database.insert_rating(cluster_id, 5, "catalyst: yes")
+    body = client.get("/feed?hide_decided=1").text
+    assert "Title fresh" in body and "Title i1" not in body
+    assert "show decided" in body
+    assert 'name="back" value="hours=24&amp;top=10&amp;hide_decided=1"' in body
+    both = client.get("/feed").text
+    assert "Title fresh" in both and "Title i1" in both and "hide decided" in both
+
+
+def test_a_model_only_rating_is_not_a_decision(client, conn, database):
+    cid = seed_item(conn, "auto", total=40)
+    database.insert_rating(cid, 1, "beat: off", rater="auto:test")
+    assert "Title auto" in client.get("/feed?hide_decided=1").text
+
+
+def test_the_feed_shows_at_most_100_stories(client, conn):
+    for i in range(101):
+        seed_item(conn, f"n{i}", total=40)
+    assert feed.clamp_top_n(500) == 100 and feed.clamp_top_n(0) == 1
+    body = client.get("/feed?top=500").text
+    assert "Top 100 scored" in body and body.count('class="entry"') == 100
+
+
 def test_saving_a_decision_writes_a_human_row_and_returns_to_the_window(
     client, database, cluster_id
 ):
