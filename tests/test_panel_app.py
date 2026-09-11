@@ -41,12 +41,14 @@ def test_dashboard_shows_health_steps_and_counts(client):
     assert "database" in body and "disk free" in body
 
 
-def test_dashboard_marks_the_publish_step_disabled(client):
+def test_dashboard_marks_a_disabled_step(client):
     body = client.get("/").text
-    # the steps table is below the checks table, which also has a "publish" row
-    row = body.rsplit("<strong>publish</strong>", 1)[1].split("</tr>")[0]
+    # feedback is the step shipped disabled; the steps table is below the checks table
+    row = body.rsplit("<strong>feedback</strong>", 1)[1].split("</tr>")[0]
     assert "disabled" in row
-    assert 'value="publish"' not in row, "a disabled step has no run checkbox"
+    assert 'value="feedback"' not in row, "a disabled step has no run checkbox"
+    # publish is shipped enabled (a dry run) and so gets a run checkbox
+    assert 'value="publish"' in body and 'value="feedback"' not in body
 
 
 def test_sources_page_lists_configured_sources(client):

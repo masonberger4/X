@@ -175,7 +175,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   trust from each stored verdict's source URL against the current host list, so adding a
   company to config makes its checked cells count without a new web call. The one exception is the **verify-revise loop**
   (`verify/autorevise.py`, `run_verify.py --auto-revise` or `auto_revise.enabled` in
-  `verify/config.yaml`, off by default): after the claim pass, a draft with a
+  `verify/config.yaml`, on in the shipped config; `--no-auto-revise` skips a run): after
+  the claim pass, a draft with a
   contradicted or unverified claim is revised through the queue's own path
   (`drafter.revise_item` with `claim_problems` and no instructions, `store.revise` with
   note `autorevise.AUTO_NOTE`, `carry_over_checks`), its new claims are checked, and the

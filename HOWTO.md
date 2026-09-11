@@ -209,8 +209,9 @@ source only when it is due, and score only scores what is new.
    python run_verify.py --auto-revise       # this run only
    python run_verify.py --no-auto-revise    # skip it once when the config has it on
    ```
-   or set `auto_revise: enabled: true` in `verify\config.yaml` so the scheduler
-   does it every time. After the claim pass, a draft that still has a
+   The shipped `verify\config.yaml` has `auto_revise: enabled: true`, so the
+   scheduler does it every time; set it to `false` to make it opt-in per run.
+   After the claim pass, a draft that still has a
    contradicted or unverified claim goes back through the drafter with those
    claims (the same thing as pressing Revise with an empty box), supported
    verdicts are kept, only the new or changed claims are checked, and that
@@ -378,11 +379,12 @@ source only when it is due, and score only scores what is new.
    In the Task Scheduler app, open each task and tick "Run whether user is
    logged on or not" and "Wake the computer to run this task". The PC must be
    on for them to fire.
-3. Publishing is off in the scheduler until you enable it. When ready, edit
-   `ops\config.yaml` and change the `publish` step from
+3. The scheduler runs the `publish` step as a dry run: it lists what it would
+   post and posts nothing. When ready, edit `ops\config.yaml` and change the
+   `publish` step from
    ```
      argv: ["python", "run_publish.py"]
-     enabled: false
+     enabled: true
    ```
    to
    ```

@@ -138,7 +138,9 @@ def test_a_corrupt_suggestions_blob_does_not_break_the_report(conn):
 
 
 def test_both_pages_render_before_their_tables_exist(client):
-    assert "Publishing is off" in client.get("/publishing").text
+    body = client.get("/publishing").text
+    assert "Publishing is off" not in body  # the shipped publish step is on (dry run)
+    assert "approved, waiting" in body
     assert "No metrics yet" in client.get("/feedback").text
 
 

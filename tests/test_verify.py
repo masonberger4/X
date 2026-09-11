@@ -369,7 +369,7 @@ def test_auto_revise_loops_until_every_claim_is_supported(conn, monkeypatch):
     assert calls == [] and revisions == []
 
 
-def test_auto_revise_is_off_by_default_and_flag_overrides_config(conn, monkeypatch):
+def test_auto_revise_follows_config_and_the_flags_override_it(conn, monkeypatch):
     from draft import drafter
 
     _seed_problem_draft(conn)
@@ -377,13 +377,20 @@ def test_auto_revise_is_off_by_default_and_flag_overrides_config(conn, monkeypat
     monkeypatch.setattr(run_verify, "verify_claim", _fake_verifier(calls))
     monkeypatch.setattr(run_verify, "_root_config", lambda: ROOT)
     monkeypatch.setattr(drafter, "revise_item", _fake_reviser(revisions))
-    run_verify.main([])
-    assert revisions == []  # shipped config: enabled false
-    cfg = dict(load_verify_config())
-    cfg["auto_revise"] = {**cfg["auto_revise"], "enabled": True}
+    shipped = load_verify_config()
+    assert shipped["auto_revise"]["enabled"] is True  # the shipped config runs the loop
+    cfg = dict(shipped)
+    cfg["auto_revise"] = {**cfg["auto_revise"], "enabled": False}
     monkeypatch.setattr(run_verify, "load_verify_config", lambda: cfg)
+    run_verify.main([])
+    assert revisions == []  # config off: no revision
+    run_verify.main(["--auto-revise"])
+    assert len(revisions) == 1  # the flag turns it on for one run
+    revisions.clear()
+    monkeypatch.setattr(run_verify, "load_verify_config", lambda: shipped)
+    _seed_problem_draft(conn, item_id="i2")  # a fresh draft with claim problems
     run_verify.main(["--no-auto-revise"])
-    assert revisions == []
+    assert revisions == []  # config on, the flag skips it once
     run_verify.main([])
     assert len(revisions) == 1
     # --dry-run never revises
