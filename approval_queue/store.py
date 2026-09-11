@@ -116,6 +116,21 @@ CREATE TABLE IF NOT EXISTS draft_examples (
 );
 CREATE INDEX IF NOT EXISTS idx_draft_examples_draft ON draft_examples(draft_id);
 CREATE INDEX IF NOT EXISTS idx_draft_examples_decision ON draft_examples(decision_id);
+
+CREATE TABLE IF NOT EXISTS image_grades (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id         INTEGER NOT NULL REFERENCES drafts(id),
+    iteration        INTEGER NOT NULL,
+    score            INTEGER NOT NULL,
+    flaws_json       TEXT NOT NULL DEFAULT '[]',
+    fixes_json       TEXT NOT NULL DEFAULT '[]',
+    adjustments_json TEXT NOT NULL DEFAULT '{}',
+    style_json       TEXT NOT NULL DEFAULT '{}',
+    model            TEXT NOT NULL DEFAULT '',
+    kept             INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_image_grades_draft ON image_grades(draft_id);
 """
 
 # Guarded, additive migrations for databases created before a column existed. Each entry is
@@ -647,6 +662,88 @@ def set_image(conn: sqlite3.Connection, draft_id: int, path: Path | None, alt: s
         (rel, alt if rel else "", _now(), draft_id),
     )
     conn.commit()
+
+
+@dataclass
+class ImageGradeRow:
+    id: int
+    draft_id: int
+    iteration: int
+    score: int
+    flaws: list[str]
+    fixes: list[str]
+    adjustments: dict
+    style: dict
+    model: str
+    kept: bool
+    created_at: str
+
+
+def record_image_grade(
+    conn: sqlite3.Connection,
+    draft_id: int,
+    *,
+    iteration: int,
+    score: int,
+    flaws: list[str],
+    fixes: list[str],
+    adjustments: dict,
+    style: dict,
+    model: str,
+) -> int:
+    """One grader verdict for one render of a draft's image (draft/grader.py)."""
+    _require(conn, draft_id)
+    cur = conn.execute(
+        "INSERT INTO image_grades (draft_id, iteration, score, flaws_json, fixes_json, "
+        "adjustments_json, style_json, model, kept, created_at) VALUES (?,?,?,?,?,?,?,?,0,?)",
+        (
+            draft_id,
+            iteration,
+            score,
+            json.dumps(flaws),
+            json.dumps(fixes),
+            json.dumps(adjustments),
+            json.dumps(style),
+            model,
+            _now(),
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def mark_image_grade_kept(conn: sqlite3.Connection, draft_id: int, grade_id: int) -> None:
+    """Flag the grade whose render the draft keeps; every other grade of the draft is not."""
+    conn.execute("UPDATE image_grades SET kept = 0 WHERE draft_id = ?", (draft_id,))
+    conn.execute("UPDATE image_grades SET kept = 1 WHERE id = ?", (grade_id,))
+    conn.commit()
+
+
+def clear_image_grades(conn: sqlite3.Connection, draft_id: int) -> None:
+    conn.execute("DELETE FROM image_grades WHERE draft_id = ?", (draft_id,))
+    conn.commit()
+
+
+def list_image_grades(conn: sqlite3.Connection, draft_id: int) -> list[ImageGradeRow]:
+    rows = conn.execute(
+        "SELECT * FROM image_grades WHERE draft_id = ? ORDER BY iteration, id", (draft_id,)
+    ).fetchall()
+    return [
+        ImageGradeRow(
+            id=r["id"],
+            draft_id=r["draft_id"],
+            iteration=r["iteration"],
+            score=r["score"],
+            flaws=json.loads(r["flaws_json"] or "[]"),
+            fixes=json.loads(r["fixes_json"] or "[]"),
+            adjustments=json.loads(r["adjustments_json"] or "{}"),
+            style=json.loads(r["style_json"] or "{}"),
+            model=r["model"],
+            kept=bool(r["kept"]),
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
 
 
 def drop_image(conn: sqlite3.Connection, draft_id: int, note: str | None = None) -> None:

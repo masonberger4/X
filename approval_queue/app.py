@@ -239,6 +239,7 @@ def _render_detail(
     checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
     has_image = store.resolve_image(row.image_path) is not None
     table_checks = {(k.row, k.col): k for k in verify_store.table_checks_for_draft(conn, draft_id)}
+    image_grades = store.list_image_grades(conn, draft_id)
     edit_form = edit_form or {}
     return templates.TemplateResponse(
         request,
@@ -247,6 +248,7 @@ def _render_detail(
             "d": row,
             "publish": store.publish_states(conn, [draft_id]).get(draft_id),
             "table_checks": table_checks,
+            "image_grades": image_grades,
             "table_unverified": row.draft.table is not None and not has_image,
             "image_url": f"/drafts/{draft_id}/image" if has_image else "",
             "image_alt": row.image_alt

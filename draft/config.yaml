@@ -31,6 +31,18 @@ report:
 # enabled: false keeps the spec in drafts.chart_json but renders and attaches nothing.
 images:
   enabled: true
+  # The image grader (draft/grader.py): a second model looks at the rendered PNG and scores
+  # it 1-10 on readability, use of colour and graphics, and limited negative space. Under
+  # min_score the renderer applies the grader's layout-knob changes and draws again, up to
+  # max_iterations renders; the best-scoring render is kept and every grade is stored in
+  # image_grades (shown on the queue's draft page). It only ever moves layout knobs
+  # (draft.chart.Style), never a number or a label. IMAGE_GRADER_MODEL env or root
+  # config.yaml `models.image_grader` override the model; an empty model disables it.
+  grader:
+    enabled: true
+    model: claude-sonnet-5
+    min_score: 8
+    max_iterations: 4
 
 # Fallback drafting model only. Resolution order (draft.drafter.model_name):
 # DRAFT_MODEL env, then root config.yaml `models.drafter` if the human has added

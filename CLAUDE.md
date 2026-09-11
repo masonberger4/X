@@ -55,7 +55,9 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
   (Anthropic), `draft/drafter.py:call_anthropic`, `score/rater.py:call_model`
   (the `digest.py --auto-rate` second-opinion rater, and the call behind
-  `filter/link.py` story linking), `claude_cli.run_claude` (the
+  `filter/link.py` story linking), `draft/grader.py:call_grader` (the image
+  grader: the PNG as an image block, or the CLI with `tools=["Read"]`),
+  `claude_cli.run_claude` (the
   optional `models.backend: claude_code` path: the only place that spawns the
   Claude Code CLI; both Claude call sites route through it when selected, and
   the API stays the default), and `publish/client.py`
@@ -248,13 +250,15 @@ score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories
           rater.py (second-opinion yes/no rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
-draft/    schema.py, chart.py (chart + table specs, verification, PNG rendering), prompt.py,
+draft/    schema.py, chart.py (chart + table specs, verification, PNG rendering, Style
+          knobs), grader.py (image grader: ImageGrade, grade_image, call_grader), prompt.py,
           voice.md, drafter.py, config.yaml, settings.py,
           examples.py (EditExample, select_edit_examples, format_examples_block),
           voice_report.py (VoiceReport, build_report, render_markdown, CLI)
 approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
           fetch_decisions_for_voice, fetch_draft_stats, record_examples, image_dir,
-          set_image, drop_image), images.py (attach_chart), app.py (/voice,
+          set_image, drop_image, image_grades), images.py (attach_chart, attach_table,
+          render-grade loop), app.py (/voice,
           /drafts/{id}/image), templates/
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
           ratings), jobs.py (JobManager, background step runs), frozen.py (data dir,

@@ -45,6 +45,17 @@ def _isolate_from_dotenv(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_image_grader_network(monkeypatch):
+    """The image grader is on by default; tests that want it replace this stub."""
+    from draft import grader
+
+    def offline(*a, **k):
+        raise RuntimeError("image grader network call in tests")
+
+    monkeypatch.setattr(grader, "call_grader", offline)
+
+
 @pytest.fixture
 def db():
     d = Database(":memory:")
