@@ -154,7 +154,9 @@ source only when it is due, and score only scores what is new.
    the company is configured. Add `ticker: AMGN` to the company's line under
    `companies: feeds:` in `config.yaml`, or list a company that has no feed
    under `branding: companies:` (with `aliases:` for other spellings, e.g.
-   J&J). For logos run
+   J&J). That `domain:` also makes the company's own press releases a trusted
+   source for the fact-checker, so a table cell backed by jnj.com or pfizer.com
+   is kept rather than blanked. For logos run
 
        python run_logos.py
 
