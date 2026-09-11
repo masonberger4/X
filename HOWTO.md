@@ -119,7 +119,14 @@ source only when it is due, and score only scores what is new.
    chart to `images\draft_<id>.png` next to `pipeline.db`. "Suggested visual"
    on the draft page is still just the model's one-line idea for you; the
    chart is what actually gets attached. `images: enabled: false` in
-   `draft\config.yaml` turns the drawing off.
+   `draft\config.yaml` turns the drawing off. Every picture (chart or table)
+   uses one house style: a 16:9 card with a navy rule and an
+   "IMMUNO-ONCOLOGY · DATA BRIEF" eyebrow, the title, horizontal bars in one
+   blue with a light track showing the full scale and the verified value at
+   each tip (tables get a navy header row and zebra rows), and a footer with
+   the note on the left and the source host on the right. The colours, the
+   eyebrow text and the font list are constants at the top of the rendering
+   section of `draft\chart.py`.
    The other kind of picture is a comparison table (a competitor landscape,
    a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
    first column naming the company, asset or trial. Unlike a chart its cells

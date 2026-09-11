@@ -312,49 +312,203 @@ def matplotlib_available() -> bool:
     return True
 
 
-def render_chart(chart: Chart, path: str | Path, *, source_url: str = "") -> Path:
-    """Draw the chart as a PNG at `path` (parent dirs created). Raises ImportError without
-    matplotlib, which the callers turn into 'no image' rather than 'no draft'."""
+# --- rendering: one house style for every picture -----------------------------------------
+# A 16:9 card: off-white surface, an accent rule and an eyebrow line at the top, a bold
+# title, the data in one deep blue, a hairline footer with the source and note. Every
+# number a reader sees is still the verified `format_value` text; the style changes nothing
+# the fact checks look at.
+
+SURFACE = "#fbfaf7"
+INK = "#101418"
+INK_2 = "#525a63"
+INK_3 = "#8a929b"
+RULE = "#dcdad3"
+ACCENT = "#123f6b"  # the series colour; one hue, magnitude only
+ACCENT_SOFT = "#c9d6e4"  # the track behind each bar
+HEADER_FILL = "#123f6b"
+ZEBRA = "#f1f0ec"
+EYEBROW = "IMMUNO-ONCOLOGY  ·  DATA BRIEF"
+FONT_FAMILIES = [
+    "Inter",
+    "Helvetica Neue",
+    "Liberation Sans",
+    "DejaVu Sans",
+]  # first installed wins
+
+# Figure coordinates (0-1) shared by charts and tables.
+_MARGIN_X = 0.055
+_TITLE_Y = 0.845
+_FOOTER_Y = 0.055
+_PLOT_TOP = 0.74
+_PLOT_BOTTOM = 0.16
+
+
+def _setup():
+    """Import matplotlib for drawing (raises ImportError without it) and return pyplot."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
 
+    installed = {f.name for f in font_manager.fontManager.ttflist}
+    family = next((f for f in FONT_FAMILIES if f in installed), "sans-serif")
+    plt.rcParams.update(
+        {
+            "font.family": family,
+            "text.color": INK,
+            "axes.edgecolor": RULE,
+            "axes.labelcolor": INK_2,
+            "xtick.color": INK_2,
+            "ytick.color": INK_2,
+            "svg.fonttype": "none",
+        }
+    )
+    return plt
+
+
+def _wrap(text: str, width: int) -> str:
+    import textwrap
+
+    return "\n".join(textwrap.wrap(text, width=width)) or text
+
+
+def _frame(fig, plt, *, title: str, footer: list[str], subtitle: str = "") -> None:
+    """The chrome around the data: accent rule, eyebrow, title, subtitle, footer rule
+    and footer texts (note on the left, source on the right)."""
+    from matplotlib.patches import Rectangle
+
+    fig.patch.set_facecolor(SURFACE)
+    # accent rule across the top
+    fig.add_artist(Rectangle((0, 0.985), 1, 0.015, transform=fig.transFigure, color=ACCENT, lw=0))
+    fig.text(
+        _MARGIN_X,
+        0.925,
+        EYEBROW,
+        fontsize=6.2,
+        color=INK_3,
+        fontweight="bold",
+        ha="left",
+        va="center",
+    )
+    fig.text(
+        _MARGIN_X,
+        _TITLE_Y,
+        _wrap(title, 62),
+        fontsize=12.5,
+        fontweight="bold",
+        color=INK,
+        ha="left",
+        va="center",
+        linespacing=1.15,
+    )
+    if subtitle:
+        fig.text(
+            _MARGIN_X,
+            _PLOT_TOP + 0.035,
+            _wrap(subtitle, 120),
+            fontsize=6.8,
+            color=INK_2,
+            ha="left",
+            va="center",
+        )
+    fig.add_artist(
+        plt.Line2D(
+            [_MARGIN_X, 1 - _MARGIN_X],
+            [_FOOTER_Y + 0.035] * 2,
+            transform=fig.transFigure,
+            color=RULE,
+            lw=0.6,
+        )
+    )
+    if footer:
+        left, right = footer[0], footer[1:]
+        fig.text(
+            _MARGIN_X, _FOOTER_Y, _wrap(left, 110), fontsize=6, color=INK_2, ha="left", va="center"
+        )
+        if right:
+            fig.text(
+                1 - _MARGIN_X,
+                _FOOTER_Y,
+                "   ·   ".join(right),
+                fontsize=6,
+                color=INK_3,
+                ha="right",
+                va="center",
+            )
+
+
+def _source_label(source_url: str) -> str:
+    host = _HOST_RE.match(source_url or "")
+    return f"Source: {host.group(1)}" if host else ""
+
+
+def render_chart(chart: Chart, path: str | Path, *, source_url: str = "") -> Path:
+    """Draw the chart as a PNG at `path` (parent dirs created). Raises ImportError without
+    matplotlib, which the callers turn into 'no image' rather than 'no draft'.
+
+    Horizontal bars (arm and endpoint names are long), one hue, a light track showing the
+    full scale behind each bar, the verified value at every bar's tip."""
+    plt = _setup()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
-    fig.patch.set_facecolor("white")
-    x = range(len(chart.values))
-    bars = ax.bar(x, chart.values, color="#1f4e79", width=0.6)
-    ax.set_xticks(list(x))
-    ax.set_xticklabels(chart.labels, fontsize=7, wrap=True)
-    ax.set_title(chart.title, fontsize=9, fontweight="bold", loc="left", pad=10)
-    if chart.unit:
-        ax.set_ylabel(chart.unit, fontsize=7)
-    ax.tick_params(axis="y", labelsize=7)
-    for bar, text in zip(bars, chart.numbers(), strict=True):
+    fig = plt.figure(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
+    footer = [chart.note or " "]
+    src = _source_label(source_url)
+    if src:
+        footer.append(src)
+    unit_label = ""
+    if chart.unit and chart.unit != "%":
+        unit_label = f"Values in {chart.unit}"
+    _frame(fig, plt, title=chart.title, footer=footer, subtitle=unit_label)
+
+    n = len(chart.values)
+    wrap_at = 30 if n <= 5 else 44  # dense charts get a wider gutter and fewer wrapped lines
+    longest = max(len(line) for lab in chart.labels for line in _wrap(lab, wrap_at).split("\n"))
+    label_w = min(max(0.05 + 0.0072 * longest, 0.12), 0.36)  # gutter for the bar labels
+    avail = _PLOT_TOP - _PLOT_BOTTOM
+    span = min(avail, 0.10 * n + 0.06)  # rows keep a fixed height, centred in the plot area
+    bottom = _PLOT_BOTTOM + (avail - span) / 2
+    ax = fig.add_axes((_MARGIN_X + label_w, bottom, 1 - 2 * _MARGIN_X - label_w - 0.06, span))
+    ax.set_facecolor(SURFACE)
+    top = max(chart.values + [0.0]) or 1.0
+    scale = 100.0 if chart.unit.strip() == "%" and top <= 100 else top
+    y = list(range(n))[::-1]  # first label at the top
+    height = 0.46
+    ax.barh(y, [scale] * n, height=height, color=ACCENT_SOFT, alpha=0.55, lw=0)
+    ax.barh(y, chart.values, height=height, color=ACCENT, lw=0)
+    ax.set_xlim(0, scale * 1.16)
+    ax.set_ylim(-0.6, n - 0.4)
+    ax.set_yticks(y)
+    ax.set_yticklabels(
+        [_wrap(lab, wrap_at) for lab in chart.labels],
+        fontsize=7.2 if n <= 5 else 6.4,
+        color=INK,
+        linespacing=1.1,
+    )
+    ax.tick_params(axis="y", length=0, pad=10)
+    ax.tick_params(axis="x", labelsize=6, length=0, colors=INK_3)
+    ax.xaxis.grid(True, color=RULE, lw=0.5)
+    ax.set_axisbelow(True)
+    ticks = ax.get_xticks()
+    ax.set_xticks([t for t in ticks if 0 <= t <= scale])
+    if chart.unit.strip() == "%":
+        ax.set_xticklabels([f"{t:g}%" for t in ax.get_xticks()])
+    for side in ax.spines.values():
+        side.set_visible(False)
+    for yi, val, text in zip(y, chart.values, chart.numbers(), strict=True):
         ax.annotate(
             text,
-            (bar.get_x() + bar.get_width() / 2, bar.get_height()),
-            ha="center",
-            va="bottom",
-            fontsize=7,
-            xytext=(0, 2),
+            (val, yi),
+            xytext=(5, 0),
             textcoords="offset points",
+            ha="left",
+            va="center",
+            fontsize=8,
+            fontweight="bold",
+            color=INK,
         )
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    ax.set_ylim(0, max(chart.values + [0.0]) * 1.18 or 1)
-    footer = []
-    if chart.note:
-        footer.append(chart.note)
-    host = _HOST_RE.match(source_url or "")
-    if host:
-        footer.append(f"Source: {host.group(1)}")
-    if footer:
-        fig.text(0.02, 0.02, "  ·  ".join(footer), fontsize=6, color="#555555")
-    fig.tight_layout(rect=(0, 0.06 if footer else 0, 1, 1))
-    fig.savefig(path, format="png", dpi=DPI, facecolor="white")
+    fig.savefig(path, format="png", dpi=DPI, facecolor=SURFACE)
     plt.close(fig)
     return path
 
@@ -368,17 +522,21 @@ def render_table(
 ) -> Path:
     """Draw the table as a PNG at `path`. Cells in `blanked` (the fact-checker could not
     support them) are drawn as BLANK_CELL and the footer says so. Raises ImportError without
-    matplotlib, like render_chart."""
-    import matplotlib
+    matplotlib, like render_chart.
 
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
+    A navy header row, zebra rows, horizontal hairlines only, bold row labels."""
+    plt = _setup()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
-    fig.patch.set_facecolor("white")
-    ax.axis("off")
+    fig = plt.figure(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
+    footer = [table.note or " "]
+    if blanked:
+        footer.append(f"{BLANK_CELL} not verifiable against a primary source")
+    src = _source_label(source_url)
+    if src:
+        footer.append(src)
+    _frame(fig, plt, title=table.title, footer=footer)
+
     body = [
         [BLANK_CELL if (r, c) in blanked or not cell else cell for c, cell in enumerate(row)]
         for r, row in enumerate(table.rows)
@@ -387,41 +545,44 @@ def render_table(
     longest = [max(len(col), *(len(row[c]) for row in body)) for c, col in enumerate(table.columns)]
     longest = [min(max(n, 6), 40) for n in longest]
     widths = [n / sum(longest) for n in longest]
-    fig.subplots_adjust(left=0.03, right=0.97, top=0.9, bottom=0.05)
+    nrows = len(body) + 1
+    row_h = min(0.105, (_PLOT_TOP + 0.03 - _PLOT_BOTTOM) / nrows)
+    ax = fig.add_axes((_MARGIN_X, _PLOT_BOTTOM, 1 - 2 * _MARGIN_X, _PLOT_TOP + 0.03 - _PLOT_BOTTOM))
+    ax.axis("off")
     tbl = ax.table(
-        cellText=body,
-        colLabels=table.columns,
+        cellText=[[_wrap(c, 34) for c in row] for row in body],
+        colLabels=[c.upper() for c in table.columns],
         colWidths=widths,
         cellLoc="left",
         colLoc="left",
-        loc="upper center",
-        bbox=(0.0, 0.08, 1.0, 0.84),
+        loc="upper left",
+        bbox=(
+            0.0,
+            1 - row_h * nrows / (_PLOT_TOP + 0.03 - _PLOT_BOTTOM),
+            1.0,
+            row_h * nrows / (_PLOT_TOP + 0.03 - _PLOT_BOTTOM),
+        ),
     )
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(6.5)
+    tbl.set_fontsize(6.8)
     for (r, c), cell in tbl.get_celld().items():
-        cell.set_edgecolor("#dddddd")
+        cell.PAD = 0.05
         cell.set_linewidth(0.5)
-        cell.PAD = 0.04
         if r == 0:
-            cell.set_text_props(fontweight="bold", color="#333333")
-            cell.set_facecolor("#f2f2f2")
-        elif c == 0:
-            cell.set_text_props(fontweight="bold")
-        if r > 0 and (r - 1, c) in blanked:
-            cell.set_text_props(color="#999999")
-    ax.set_title(table.title, fontsize=9, fontweight="bold", loc="left", pad=6)
-    footer = []
-    if table.note:
-        footer.append(table.note)
-    if blanked:
-        footer.append(f"{BLANK_CELL} = could not be verified against a primary source")
-    host = _HOST_RE.match(source_url or "")
-    if host:
-        footer.append(f"Source: {host.group(1)}")
-    if footer:
-        fig.text(0.02, 0.02, "  ·  ".join(footer), fontsize=6, color="#555555")
-    fig.savefig(path, format="png", dpi=DPI, facecolor="white")
+            cell.set_facecolor(HEADER_FILL)
+            cell.set_edgecolor(HEADER_FILL)
+            cell.set_text_props(fontweight="bold", color="white", fontsize=5.8)
+            continue
+        cell.visible_edges = "B"
+        cell.set_edgecolor(RULE)
+        cell.set_facecolor(ZEBRA if r % 2 == 0 else SURFACE)
+        if c == 0:
+            cell.set_text_props(fontweight="bold", color=INK)
+        else:
+            cell.set_text_props(color=INK)
+        if (r - 1, c) in blanked:
+            cell.set_text_props(color=INK_3)
+    fig.savefig(path, format="png", dpi=DPI, facecolor=SURFACE)
     plt.close(fig)
     return path
 
