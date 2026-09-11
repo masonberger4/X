@@ -101,20 +101,30 @@ def host_of(url: str) -> str:
 
 
 def trusted_hosts(cfg: dict[str, Any], root_cfg: dict[str, Any] | None = None) -> set[str]:
-    """verify/config.yaml trusted_domains plus the host of every company feed in the root
-    config, so a company's own press-release page counts."""
+    """verify/config.yaml trusted_domains plus every company's own site from the root
+    config: the host of each `companies.feeds` URL, its `domain:` when set, and the
+    `domain:` of each `branding.companies` entry (J&J, Pfizer and other companies without
+    a feed), so a company's own press-release page counts wherever it is listed."""
     hosts = {host_of("https://" + str(d).lower()) for d in cfg.get("trusted_domains") or []}
+    root = root_cfg or {}
     # config.yaml's companies.feeds is a list of {key, name, url} entries (that is what
     # config.load_config expands into rss sources); a {key: url-or-entry} mapping is
     # accepted too so a hand-built config keeps working.
-    feeds = ((root_cfg or {}).get("companies") or {}).get("feeds") or []
-    entries = feeds.values() if isinstance(feeds, dict) else feeds
+    feeds = (root.get("companies") or {}).get("feeds") or []
+    entries = list(feeds.values() if isinstance(feeds, dict) else feeds)
+    entries += (root.get("branding") or {}).get("companies") or []
     for feed in entries:
-        url = feed.get("url") if isinstance(feed, dict) else feed
-        if url:
-            h = host_of(str(url))
-            if h:
-                hosts.add(h)
+        candidates = []
+        if isinstance(feed, dict):
+            candidates = [feed.get("url"), feed.get("domain")]
+        else:
+            candidates = [feed]
+        for value in candidates:
+            if value:
+                text = str(value)
+                h = host_of(text if "://" in text else "https://" + text)
+                if h:
+                    hosts.add(h)
     return {h for h in hosts if h}
 
 

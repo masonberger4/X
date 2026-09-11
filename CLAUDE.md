@@ -170,7 +170,10 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `claude_cli.run_claude`; or the API `web_search` server tool). It owns
   `claim_checks`, reads drafts only through `approval_queue.store`, never edits a
   draft's text itself, and a verdict is `trusted` only for hosts in `verify/config.yaml` or
-  company feed hosts. The one exception is the **verify-revise loop**
+  a company's own site (`verifier.trusted_hosts`: each `companies.feeds` URL host and
+  `domain:`, plus every `branding.companies` `domain:`). `run_verify._decide` re-derives
+  trust from each stored verdict's source URL against the current host list, so adding a
+  company to config makes its checked cells count without a new web call. The one exception is the **verify-revise loop**
   (`verify/autorevise.py`, `run_verify.py --auto-revise` or `auto_revise.enabled` in
   `verify/config.yaml`, off by default): after the claim pass, a draft with a
   contradicted or unverified claim is revised through the queue's own path
