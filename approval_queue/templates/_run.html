@@ -1,0 +1,22 @@
+{# The run buttons on the feed, pending and approved pages. Rendered by both template envs
+   (the panel's and the queue's); HAS_PANEL is False under run_queue.py, so alone the queue
+   shows nothing here. `buttons` is a list of {label, steps, title}; `back` is the page to
+   return to. Every log stays on /runs. #}
+{% if HAS_PANEL %}
+{% set run = current_run() %}
+<div class="runbar">
+  {% if run %}
+  <span class="pill warn">running</span> <strong>{{ run.steps|join(', ') }}</strong>
+  <span class="meta">{% if run.active_step %}{{ run.active_step }} for {{ run.active_for }}{% else %}starting…{% endif %}
+    · <a href="/runs">watch the log</a></span>
+  {% endif %}
+  {% for b in buttons %}
+  <form method="post" action="/runs" class="inline">
+    {% for s in b.steps %}<input type="hidden" name="step" value="{{ s }}">{% endfor %}
+    <input type="hidden" name="back" value="{{ back }}">
+    <button type="submit" {% if run %}disabled{% endif %} title="{{ b.title }}">{{ b.label }}</button>
+  </form>
+  {% endfor %}
+  {% if not run and buttons %}<span class="meta">logs on <a href="/runs">the runs page</a></span>{% endif %}
+</div>
+{% endif %}

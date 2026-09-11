@@ -109,3 +109,20 @@ def test_pick_respects_daily_cap_and_min_gap():
     assert "min gap" in recent.blocked_reason(slot)
     ok = Policy(min_gap_minutes=90, last_posted_at=slot - timedelta(minutes=95))
     assert pick_for_slot([approved()], slot, ok) is not None
+
+
+def test_rank_puts_the_human_order_before_breaking_and_score():
+    from publish.scheduler import Policy, rank
+    from publish.store import Approved
+
+    def a(i, **kw):
+        base = dict(draft_id=i, item_id=f"i{i}", cluster_id=i, source="pubmed", url="", title="")
+        base.update(kw)
+        return Approved(single_post="x", **base)
+
+    fda = a(1, source="fda_oce", score=10.0)
+    high = a(2, score=50.0)
+    second = a(3, score=1.0, position=2)
+    first = a(4, score=2.0, position=1)
+    got = [x.draft_id for x in rank([fda, high, second, first], Policy())]
+    assert got == [4, 3, 1, 2]

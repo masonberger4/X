@@ -129,13 +129,15 @@ class Policy:
 
 
 def rank(approved: list[Approved], policy: Policy) -> list[Approved]:
-    """Stable ordering: breaking first (if preferred), then by policy.order."""
+    """Stable ordering: the human's order first (`Approved.position`, lowest first), then
+    breaking items (if preferred), then by policy.order."""
 
     def key(a: Approved):
+        ordered = (0, a.position) if a.position is not None else (1, 0)
         breaking = 0 if (policy.prefer_breaking and is_breaking(a, policy.breaking)) else 1
         if policy.order == "oldest_first":
-            return (breaking, a.approved_at or "", a.draft_id)
-        return (breaking, -(a.score or 0.0), a.approved_at or "", a.draft_id)
+            return (*ordered, breaking, a.approved_at or "", a.draft_id)
+        return (*ordered, breaking, -(a.score or 0.0), a.approved_at or "", a.draft_id)
 
     return sorted(approved, key=key)
 

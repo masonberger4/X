@@ -3,27 +3,55 @@
 {% block content %}
 <h1>{{ status|capitalize }} drafts <span class="meta">({{ drafts|length }})</span></h1>
 <p class="meta">Tell the drafter what to change and it rewrites the post; open a draft for the full text, claims and approve buttons. Your notes and rejection reasons teach the drafter: see the <a href="/voice">voice report</a>.</p>
+{% if status == "pending" %}
+  {% with buttons=[{"label": "Draft", "steps": ["draft"], "title": "draft posts for the stories that cleared the score threshold"},
+                   {"label": "Verify", "steps": ["verify"], "title": "check every unchecked claim against the web (and auto-revise)"}],
+          back="/queue" %}{% include "_run.html" %}{% endwith %}
+{% endif %}
 {% if status == "approved" %}
-  <p class="meta">Waiting to be published by <code>run_publish.py</code>.
+  <p class="meta">Waiting to be published by <code>run_publish.py</code> at the next slot, in the order below.
   {% if hidden_posted %}{{ hidden_posted }} already posted, hidden. <a href="/status/approved?posted=1">Show posted</a>.
   {% elif show_posted %}Posted drafts included. <a href="/status/approved">Hide posted</a>.{% endif %}</p>
+  {% if HAS_PANEL %}
+  {% set run = current_run() %}
+  {% with buttons=[], back="/status/approved" %}{% include "_run.html" %}{% endwith %}
+  {% if not publish_live() %}<p class="flash meta"><code>PUBLISH_ENABLED</code> is not <code>1</code> in <code>.env</code>, so "Publish now" only rehearses: it prints what it would post and posts nothing.</p>{% endif %}
+  <form method="post" action="/publishing/order" id="order-form" class="actions">
+    <input type="hidden" name="back" value="/status/approved">
+    <button type="button" class="order-hide" onclick="document.body.classList.add('ordering')" {% if not drafts %}disabled{% endif %}>Set schedule</button>
+    <button type="submit" class="order-only">Save order</button>
+    <button type="button" class="order-only" onclick="document.body.classList.remove('ordering')">Cancel</button>
+    <span class="meta">Number the drafts 1, 2, 3… for the order the scheduled slots post them; an unnumbered draft follows the numbered ones by score. "Publish now" posts one draft at once, outside the slots (the daily cap and minimum gap still apply).</span>
+  </form>
+  {% endif %}
 {% endif %}
 {% if not drafts %}
   <p class="meta">Nothing here.</p>
 {% else %}
 <table>
-  <thead><tr><th>Score</th><th>Source</th><th>Draft</th><th>Rationale</th></tr></thead>
+  <thead><tr>{% if status == "approved" and HAS_PANEL %}<th class="order-only">Order</th>{% endif %}<th>Score</th><th>Source</th><th>Draft</th><th>Rationale</th></tr></thead>
   <tbody>
   {% for d in drafts %}
     <tr>
+      {% if status == "approved" and HAS_PANEL %}{% set p = publish.get(d.id) %}
+      <td class="order-only">{% if not p or p.status == "pending" %}<input class="order" type="number" min="1" name="order_{{ d.id }}" form="order-form" value="{{ p.position if p and p.position else '' }}" aria-label="publishing order of draft {{ d.id }}">{% endif %}</td>
+      {% endif %}
       <td>{{ "%.1f"|format(d.total) if d.total is not none else "–" }}</td>
       <td>{{ d.source or "?" }}{% if d.status != status %}<br><span class="meta">{{ d.status }}</span>{% endif %}
         {% if status == "approved" %}{% set p = publish.get(d.id) %}<br>
-          {% if not p %}<span class="pill skip">waiting</span>
+          {% if not p or p.status == "pending" %}<span class="pill skip">waiting</span>{% if p and p.position %} <span class="pill ok" title="publishing order">#{{ p.position }}</span>{% endif %}
           {% elif p.status == "posted" %}<a class="pill ok" href="{{ p.tweet_url }}" target="_blank" rel="noopener noreferrer">posted</a>
           {% elif p.status == "partial" %}<span class="pill fail" title="{{ p.error }}">partial thread</span>
           {% elif p.status in ("failed", "refused") %}<span class="pill fail" title="{{ p.error }}">{{ p.status }}</span>
           {% else %}<span class="pill warn">{{ p.status }}</span>{% endif %}
+          {% if HAS_PANEL and (not p or p.status == "pending") %}
+          <form method="post" action="/publishing/now" class="order-hide" style="margin-top:.3rem"
+                onsubmit="return confirm('Post draft {{ d.id }} to X now?')">
+            <input type="hidden" name="draft_id" value="{{ d.id }}">
+            <input type="hidden" name="back" value="/status/approved">
+            <button type="submit" {% if run %}disabled{% endif %}>Publish now</button>
+          </form>
+          {% endif %}
         {% endif %}</td>
       <td>
         <a href="/drafts/{{ d.id }}"><strong>{{ d.title or d.item_id }}</strong></a>

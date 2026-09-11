@@ -174,3 +174,49 @@ def test_a_running_step_exposes_its_log_so_far(tmp_path, monkeypatch):
     _wait(job)
     assert job.state == STATE_DONE and job.active_stdout == ""
     assert job.results[0].stdout_tail.split() == ["one", "two"]
+
+
+def test_publish_now_runs_the_publisher_live_for_one_draft(tmp_path, monkeypatch):
+    """The one argv the panel builds itself: run_publish.py --live --now --draft ID, as a
+    run of its own so the log lands on the runs page. The step's timeout comes from the
+    config's publish step."""
+    from panel import jobs
+
+    monkeypatch.setattr(jobs, "PUBLISH_CLI", "-c")  # run python -c instead of the real CLI
+    cfg = _cfg(tmp_path, [_step("publish", "print('dry')")])
+    cfg["steps"][0]["timeout_seconds"] = 77
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    seen = {}
+
+    def fake_run_steps(steps, **kwargs):
+        seen["steps"] = list(steps)
+        for s in steps:
+            kwargs["on_start"](s)
+        return []
+
+    monkeypatch.setattr(jobs.runner, "run_steps", fake_run_steps)
+    job = _wait(manager.start_publish_now(42))
+    assert job.state == STATE_DONE and job.steps == [jobs.PUBLISH_NOW]
+    (step,) = seen["steps"]
+    assert step.argv == ["python", "-c", "--live", "--now", "--draft", "42"]
+    assert step.enabled and step.timeout_seconds == 77
+
+
+def test_publish_now_waits_for_the_run_in_progress_and_needs_a_draft(tmp_path):
+    cfg = _cfg(tmp_path, [_step("slow", "import time; time.sleep(2)")])
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    with pytest.raises(JobError, match="draft id"):
+        manager.start_publish_now(0)
+    job = manager.start(["slow"])
+    with pytest.raises(JobError, match="already in progress"):
+        manager.start_publish_now(1)
+    manager.cancel()
+    _wait(job)
+
+
+def test_config_steps_never_carry_the_live_flag_even_though_publish_now_does(tmp_path):
+    """FORBIDDEN_ARGS still guards every run built from ops/config.yaml."""
+    cfg = _cfg(tmp_path, [_step("publish", "print(1)")])
+    cfg["steps"][0]["argv"] += ["--live"]
+    with pytest.raises(JobError, match="--live"):
+        JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db").start(["publish"])

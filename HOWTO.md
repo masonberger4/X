@@ -333,10 +333,13 @@ source only when it is due, and score only scores what is new.
    python run_publish.py --live --breaking   # only FDA / company-approval items
    python run_publish.py --live --limit 1    # at most one post this run
    python run_publish.py --live --format single   # this run only: the single post, not the thread
+   python run_publish.py --live --now --draft 17  # post draft 17 now (what the panel's "Publish now" runs)
    ```
    Each draft carries a single post and a thread; `post_format` in
    `publish\config.yaml` picks which one goes out (`thread` by default) and
-   `--format` overrides it for one run.
+   `--format` overrides it for one run. When several drafts wait for one
+   slot, the order you set on the panel's approved page (part 8) goes first;
+   drafts you did not number follow it by the policy in `publish\config.yaml`.
    A draft is posted at most once even if the command runs twice. A thread
    that fails part-way is marked partial and left for you; it is never
    retried automatically.
@@ -452,15 +455,35 @@ to stop it. Four pages:
   most the page lists), or to ignore the score threshold. "Hide decided"
   drops the stories you have already answered, so what is left is your
   to-do list; a decided story otherwise stays until it ages out of the
-  window. "Show decided" brings them back.
+  window. "Show decided" brings them back. The "Ingest and score" button at
+  the top runs those two steps (the same run the runs page starts); the
+  page says a run is going and the log is on the runs page.
+- **Pending** (`/queue`) — the approval queue from part 3, with two buttons
+  at the top: "Draft" runs the drafter for the stories that cleared the
+  threshold, "Verify" runs the claim check (and the auto-revise loop) on
+  every unchecked claim. Both run on the runs page; this page just starts
+  them and says when one is going.
+- **Approved** (`/status/approved`) — the drafts waiting for a slot, and
+  where you decide what posts when. "Publish now" next to a draft posts that
+  one draft right away, outside the slots (the daily cap and the minimum gap
+  from `publish\config.yaml` still apply, and the run's log is on the runs
+  page). It only posts when `PUBLISH_ENABLED=1` is in `.env` (part 5);
+  otherwise the page says so and the button only rehearses. "Set schedule"
+  shows a number box next to each waiting draft: number them 1, 2, 3 for the
+  order the scheduled slots should post them and press "Save order". A
+  draft without a number follows the numbered ones by score. The order is
+  kept on the draft (shown as #1, #2) until it posts.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
-  halfway is never retried for you). Read-only: there is no post button here.
+  halfway is never retried for you). Read-only: posting happens from the
+  approved page or on the schedule.
 - **Feedback** (`/feedback`) — followers over time, your posts ranked by
   impressions, and the suggestions from the latest weekly report. The
   suggestions are proposals only; applying one means editing a settings file.
-- **Runs** (`/runs`) — tick the steps you want and press "Run selected
-  steps". The page updates as the run goes: the step in progress is shown
+- **Runs** (`/runs`) — every run's log, whichever page started it: the
+  feed's "Ingest and score", the pending page's "Draft" and "Verify", the
+  approved page's "Publish now", or the checkboxes here (tick the steps you
+  want and press "Run selected steps"). The page updates as the run goes: the step in progress is shown
   with how long it has been running and its log so far, refreshed every few
   seconds as the step writes, each finished step keeps its final log, and the
   steps still to come are listed. This runs exactly what

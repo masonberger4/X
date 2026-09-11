@@ -696,3 +696,41 @@ def test_auto_release_can_be_turned_off(conn, monkeypatch, tmp_path):
     assert run_publish.main(args, now=OFF_SLOT) == 2
     assert store.get_schedule(conn, did)["status"] == "failed"
     assert store.fetch_approved(10, conn=conn) == []
+
+
+def test_set_order_is_honoured_first_and_survives_a_second_open(conn, fake_x, monkeypatch):
+    """The panel's order (schedule.position) beats score; the column is a guarded migration
+    on the schedule table, so an existing database gets it on the next connect."""
+    a = seed_draft(conn, "a")
+    b = seed_draft(conn, "b")
+    conn.execute(
+        "UPDATE scores SET total = 40"
+        " WHERE cluster_id = (SELECT cluster_id FROM items WHERE id = 'a')"
+    )
+    conn.commit()
+    assert store.set_order(conn, [b, a]) == 2
+    got = {x.draft_id: x.position for x in store.fetch_approved(conn=conn)}
+    assert got == {a: 2, b: 1}
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
+    assert store.get_schedule(conn, b)["status"] == "posted"
+    assert store.get_schedule(conn, a)["status"] == "pending"  # ordered, not claimed
+    # an empty order clears every position; a claimed row is never touched
+    assert store.set_order(conn, []) == 0
+    assert store.fetch_approved(conn=conn)[0].position is None
+    assert store.get_schedule(conn, b)["status"] == "posted"
+
+
+def test_draft_flag_posts_only_that_draft_and_reports_a_missing_one(
+    conn, fake_x, monkeypatch, caplog
+):
+    a = seed_draft(conn, "a")
+    b = seed_draft(conn, "b")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    assert run_publish.main(["--live", "--now", "--draft", str(b)], now=OFF_SLOT) == 0
+    assert store.get_schedule(conn, b)["status"] == "posted"
+    assert store.get_schedule(conn, a) is None
+    with caplog.at_level(logging.ERROR):
+        assert run_publish.main(["--live", "--now", "--draft", "999"], now=OFF_SLOT) == 2
+    assert "not approved and waiting" in caplog.text
+    assert len(fake_x.calls) == 3  # b's three thread posts and nothing else

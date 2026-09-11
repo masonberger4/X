@@ -5,6 +5,11 @@ and `ops/runner.py` runs exactly what that file says, under the same `ops/lock.p
 lock cron takes. So a run started here is the same run cron would start, and a step
 that is disabled in the config (publishing, by default) is skipped, not run.
 
+The one run the panel does build itself is "Publish now" (`start_publish_now`): the
+approved page's button runs `run_publish.py --live --now --draft ID` for the draft the
+human pointed at. It is the only argv here that carries the live flag; ops/config.yaml
+still never does, and run_publish.py still posts nothing unless PUBLISH_ENABLED=1.
+
 Results are recorded in `pipeline_runs` through `ops/store.py` and a health report is
 recomputed afterwards. Manual runs never send alerts: a human is already watching.
 """
@@ -36,6 +41,9 @@ STATE_STOPPED = "stopped"
 # second lock on the same door.
 FORBIDDEN_ARGS = ("--live",)
 
+PUBLISH_NOW = "publish now"  # the step name of a start_publish_now() run
+PUBLISH_CLI = "run_publish.py"
+
 
 class JobError(RuntimeError):
     """A job could not be started: unknown step, nothing selected, or one already running."""
@@ -46,6 +54,7 @@ class Job:
     id: str
     steps: list[str]
     started_at: datetime
+    plan: list[Step] = field(default_factory=list)  # what actually runs, in order
     finished_at: datetime | None = None
     state: str = STATE_RUNNING
     results: list[StepResult] = field(default_factory=list)
@@ -146,12 +155,33 @@ class JobManager:
                 bad = [a for a in step.argv if a in FORBIDDEN_ARGS]
                 if bad:
                     raise JobError(f"step {step.name!r} carries {bad[0]}; refusing to run it")
-        ordered = [n for n in known if n in wanted]
+        plan = [s for s in self.steps() if s.name in wanted]
+        return self._launch([s.name for s in plan], plan)
 
+    def start_publish_now(self, draft_id: int) -> Job:
+        """Post one approved draft now: `run_publish.py --live --now --draft ID`, as its own
+        run, so its log lands on the runs page like any other step. The caps in
+        publish/config.yaml still apply and run_publish.py stays a dry run unless
+        PUBLISH_ENABLED=1 is set; this is the only place the panel passes the live flag."""
+        draft_id = int(draft_id)
+        if draft_id <= 0:
+            raise JobError("publish now needs a draft id")
+        base = next((s for s in self.steps() if s.name == "publish"), None)
+        timeout = base.timeout_seconds if base is not None else 300
+        step = Step(
+            name=PUBLISH_NOW,
+            argv=["python", PUBLISH_CLI, "--live", "--now", "--draft", str(draft_id)],
+            enabled=True,
+            required=False,
+            timeout_seconds=timeout,
+        )
+        return self._launch([PUBLISH_NOW], [step])
+
+    def _launch(self, names: list[str], plan: list[Step]) -> Job:
         with self._mutex:
             if self._current is not None and self._current.running:
                 raise JobError("a run is already in progress")
-            job = Job(id=uuid.uuid4().hex[:8], steps=ordered, started_at=_now())
+            job = Job(id=uuid.uuid4().hex[:8], steps=names, started_at=_now(), plan=plan)
             self._current = job
         thread = threading.Thread(target=self._execute, args=(job,), daemon=True)
         thread.start()
@@ -203,8 +233,7 @@ class JobManager:
                 job.results.append(result)
 
             runner.run_steps(
-                self.steps(),
-                only=job.steps,
+                job.plan,
                 cwd=self.repo_root,
                 python=self.python,
                 tail_chars=tail,

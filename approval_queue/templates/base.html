@@ -61,6 +61,12 @@
     #working .fill { height: 100%; width: 30%; background: #b26a00; border-radius: 2px; animation: slide 1.2s ease-in-out infinite; }
     @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
     form.busy button, form.busy input, form.busy textarea, form.busy select { opacity: .6; pointer-events: none; }
+    .runbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .6rem 0 1rem; padding: .5rem .8rem; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
+    .runbar form.inline { display: inline; margin: 0; }
+    .runbar button { margin: 0; }
+    input.order { width: 3.5em; font: inherit; }
+    body:not(.ordering) .order-only { display: none; }
+    body.ordering .order-hide { display: none; }
   </style>
 </head>
 <body>

@@ -116,3 +116,14 @@ def test_series_growth_reports_the_change_over_the_window():
     assert growth["followers"] == 93 and growth["change"] == -7 and growth["sign"] == ""
     assert growth["days"] == 2 and growth["since"] == "2026-04-01"
     assert views.series_growth([]) == {}
+
+
+def test_parse_order_sorts_by_the_typed_number_and_drops_blanks():
+    from panel.publishing import parse_order
+
+    form = {"order_12": ["2"], "order_7": ["1"], "order_9": [""], "back": ["/x"], "order_3": ["2"]}
+    assert parse_order(form) == [7, 12, 3]
+    with pytest.raises(ValueError):
+        parse_order({"order_1": ["0"]})
+    with pytest.raises(ValueError):
+        parse_order({"order_1": ["one"]})
