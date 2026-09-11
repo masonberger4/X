@@ -189,6 +189,22 @@ def by_status(status: str, request: Request, conn: Conn):
 
 @app.get("/drafts/{draft_id}", response_class=HTMLResponse)
 def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised: int = 0):
+    return _render_detail(request, conn, draft_id, error=error, revised=bool(revised))
+
+
+def _render_detail(
+    request: Request,
+    conn,
+    draft_id: int,
+    *,
+    error: str = "",
+    revised: bool = False,
+    edit_form: dict[str, str] | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """The detail page. A refused form post (text over 280 characters, a contradicted claim)
+    renders this same page with the error at the top instead of FastAPI's bare JSON error,
+    which has no way back; `edit_form` keeps what the human typed in the edit form."""
     row = store.get_draft(conn, draft_id)
     if row is None:
         raise HTTPException(404, "no such draft")
@@ -196,6 +212,7 @@ def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised
     checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
     has_image = store.resolve_image(row.image_path) is not None
     table_checks = {(k.row, k.col): k for k in verify_store.table_checks_for_draft(conn, draft_id)}
+    edit_form = edit_form or {}
     return templates.TemplateResponse(
         request,
         "detail.html",
@@ -207,13 +224,18 @@ def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised
             "image_alt": row.image_alt
             or (alt_text(row.draft.visual, row.url) if row.draft.visual else ""),
             "decisions": decisions,
-            "thread_text": "\n---\n".join(row.draft.thread),
+            "single_post_text": edit_form.get("single_post", row.draft.single_post),
+            "thread_text": edit_form.get("thread", "\n---\n".join(row.draft.thread)),
+            "edit_note": edit_form.get("note", ""),
+            "edit_category": edit_form.get("category", ""),
+            "edit_open": bool(edit_form),
             "checks": checks,
             "contradicted": any(c.verdict == "contradicted" for c in checks.values()),
             "claim_problems": len(claim_problems(checks.values())),
             "error": error,
-            "revised": bool(revised),
+            "revised": revised,
         },
+        status_code=status_code,
     )
 
 
@@ -265,8 +287,13 @@ def _redirect_home() -> RedirectResponse:
 async def approve(draft_id: int, request: Request, conn: Conn):
     form = await read_form(request)
     if verify_store.has_contradiction(conn, draft_id) and not form.get("override"):
-        raise HTTPException(
-            409, "a claim in this draft was contradicted by its source; edit it or approve anyway"
+        return _render_detail(
+            request,
+            conn,
+            draft_id,
+            error="Not approved: a claim in this draft was contradicted by its source. "
+            "Edit it, or tick 'approve anyway'.",
+            status_code=409,
         )
     row = store.get_draft(conn, draft_id)
     if row is None:
@@ -281,16 +308,44 @@ async def approve(draft_id: int, request: Request, conn: Conn):
     return _redirect_home()
 
 
+def _edit_problem(single_post: str, thread: list[str]) -> str | None:
+    """Why an edited text cannot be saved, naming the post and its length (URLs count as 23),
+    or None when every post fits."""
+    if not single_post:
+        return "the single post cannot be empty"
+    over = []
+    for label, text in [("single post", single_post)] + [
+        (f"thread post {i}", p) for i, p in enumerate(thread, 1)
+    ]:
+        n = tweet_length(text)
+        if n > MAX_POST_CHARS:
+            over.append(f"{label} is {n} characters")
+    if over:
+        return f"{len(over)} post(s) exceed {MAX_POST_CHARS} characters ({'; '.join(over)})"
+    return None
+
+
 @app.post("/drafts/{draft_id}/edit")
 async def edit(draft_id: int, request: Request, conn: Conn):
     form = await read_form(request)
     single_post = form.get("single_post", "").strip()
     thread = _split_thread(form.get("thread", ""))
-    if not single_post:
-        raise HTTPException(400, "single_post cannot be empty")
-    over = [p for p in [single_post, *thread] if tweet_length(p) > MAX_POST_CHARS]
-    if over:
-        raise HTTPException(400, f"{len(over)} post(s) exceed {MAX_POST_CHARS} characters")
+    problem = _edit_problem(single_post, thread)
+    if problem is None:
+        try:
+            category = store.validate_category(form.get("category"))
+        except ValueError as exc:
+            problem = str(exc)
+    if problem is not None:
+        # Back to the same page, error on top and the typed text kept, never a JSON page.
+        return _render_detail(
+            request,
+            conn,
+            draft_id,
+            error=f"Not saved: {problem}",
+            edit_form={k: form.get(k, "") for k in ("single_post", "thread", "note", "category")},
+            status_code=400,
+        )
     try:
         store.edit(
             conn,
@@ -299,7 +354,7 @@ async def edit(draft_id: int, request: Request, conn: Conn):
             thread=thread,
             note=_note(form),
             approve_after="keep_pending" not in form,
-            category=_category(form),
+            category=category,
         )
     except KeyError as exc:
         raise HTTPException(404, "no such draft") from exc

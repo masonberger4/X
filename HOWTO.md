@@ -175,7 +175,10 @@ source only when it is due, and score only scores what is new.
    cannot produce a valid rewrite the draft is left untouched and the page
    says why. Pick a reason (voice, factual, not newsworthy, hard rule, other)
    when you revise or reject; your notes feed the voice report. "Edit by hand"
-   is still there, folded away, for a one-word fix.
+   is still there, folded away, for a one-word fix. A save that breaks a rule (a post
+   over 280 characters, URLs counting as 23, or an empty single post) is refused on the
+   same page: the reason sits at the top, your text stays in the boxes, and nothing is
+   saved or approved. The same goes for Approve while a claim is contradicted.
    If the draft has a chart it is shown under "Image" with the exact text a
    screen reader will get (the alt text), and it is attached to the first
    post when published. Check every bar against the source like any other
