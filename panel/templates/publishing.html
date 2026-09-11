@@ -8,6 +8,15 @@
 live flag and sets <code>PUBLISH_ENABLED=1</code>. This page cannot do any of that.</p>
 {% endif %}
 
+{% if saved %}<p class="flash">Saved. The next publish run uses the new limits.</p>{% endif %}
+{% if error %}<p class="flash low">Not saved: {{ error }}</p>{% endif %}
+<form method="post" action="/publishing/caps" class="runbar">
+  <label>Posts per day <input type="number" name="max_posts_per_day" min="1" value="{{ max_posts_per_day }}" class="order"></label>
+  <label>Minimum gap (minutes) <input type="number" name="min_gap_minutes" min="0" value="{{ min_gap_minutes }}" class="order" style="width:4.5em"></label>
+  <button type="submit">Save limits</button>
+  <span class="meta">Hard limits on every post, breaking news and "Publish now" included; kept in <code>publish/config.yaml</code>.</span>
+</form>
+
 <div class="cards">
   <div class="card"><div class="n">{{ approved_waiting }}</div><div class="meta">approved, waiting</div></div>
   <div class="card"><div class="n">{{ state.posts_24h }}</div><div class="meta">posted in 24h</div></div>

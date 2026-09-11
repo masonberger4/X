@@ -29,11 +29,13 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   same question as `rater='auto:<model>'`; human decisions stay the ground truth),
   `python run_draft.py`, `python run_verify.py` (claim checks with web search),
   `python run_queue.py` (approval UI on localhost:8000),
-  `python run_app.py` (control panel: dashboard, sources, runs and the queue, same port),
+  `python run_app.py` (control panel: dashboard, sources, runs and the queue, same port;
+  the run buttons sit on the pages they affect and "Publish now" lives on the approved page),
   `pythonw run_desktop.py` (the panel in a native window; `pyinstaller deploy/desktop.spec`
   builds `dist/Pipeline/` with `Pipeline.exe` + `pipeline-cli.exe`; both need the
   `desktop` extra), `python pipeline_cli.py <run_x.py> ...` (the CLIs behind one entry point),
-  `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`),
+  `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`;
+  `--draft ID` targets one approved draft),
   `python run_feedback.py snapshot|report|followers`,
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
@@ -227,11 +229,25 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   at a time, refusing any step whose argv contains `--live`. `JobManager.cancel()` ends a run:
   `ops/runner.terminate_active()` kills the live step's process tree (own process group on
   POSIX, `taskkill /T` on Windows) and the remaining steps are skipped as `cancelled`; the
-  runs page's Stop button and `run_desktop.py` closing both call it. The panel has no publish
-  button and never writes `config.yaml`, `draft/voice.md` or a draft's text. It has
+  runs page's Stop button and `run_desktop.py` closing both call it. Run buttons sit on the
+  pages they affect (feed: ingest + score; pending: draft, verify; each posts `step` and
+  `back` to `/runs`, and the log stays on the runs page; `approval_queue/templates/_run.html`
+  renders them from the `current_run` / `publish_live` template globals the panel installs
+  on both template envs, so the standalone queue shows none). The one argv the panel builds
+  itself is `JobManager.start_publish_now(draft_id)` (`POST /publishing/now` from the
+  approved page): `run_publish.py --live --now --draft ID` as its own run, the single
+  exception to `FORBIDDEN_ARGS`, still gated by `PUBLISH_ENABLED=1` inside run_publish.py.
+  "Set schedule" on the approved page (`POST /publishing/order`, `panel/publishing.py`)
+  writes the human's order to step 3's `schedule.position` (guarded migration in
+  `publish/store.py`, `set_order`, unclaimed rows only); `scheduler.rank` puts ordered drafts
+  first, then breaking, then policy; `store.publish_states` reads it back for the pill. The
+  panel never writes `config.yaml`, `draft/voice.md` or a draft's text. The one settings
+  file it edits is `publish/config.yaml`, two keys only: `POST /publishing/caps` calls
+  `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
+  comments kept). It has
   no authentication: `run_app.py` binds localhost by default. `/publishing` and
-  `/feedback` are views: no post button, and a report's suggestions are rendered, never
-  applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
+  `/feedback` are otherwise views: no post button, and a report's suggestions are rendered,
+  never applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
   changes no step: `panel/frozen.py` decides the data dir (exe folder when frozen, else
   the repo root), the step interpreter (`pipeline-cli` when frozen) and the bundle
   manifest (every `*/config.yaml`, `draft/voice.md`, both template dirs, each CLI script

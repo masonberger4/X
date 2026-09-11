@@ -56,6 +56,10 @@ templates.env.globals["DECISION_CATEGORIES"] = store.DECISION_CATEGORIES
 # The shared nav (base.html) shows the control-panel links only when the queue is
 # served as part of it (panel/app.py sets this True); run_queue.py serves the queue alone.
 templates.env.globals["HAS_PANEL"] = False
+# The panel replaces these with live lookups (panel/app.py); alone, the queue shows no
+# run buttons, so nothing is ever in flight and nothing can post.
+templates.env.globals["current_run"] = lambda: None
+templates.env.globals["publish_live"] = lambda: False
 
 app = FastAPI(title="Approval queue")
 

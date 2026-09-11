@@ -31,11 +31,12 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 |---|---|
 | `/` | health checks, the last outcome of every orchestrator step, row counts, database size, latest backup |
 | `/sources` | every configured ingest source with its freshness, last error and item counts |
-| `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline |
-| `/publishing` | approved and waiting, what has posted, and any partial thread needing a human |
+| `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline; one "Ingest and score" button |
+| `/publishing` | approved and waiting, what has posted, any partial thread needing a human, and a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept) |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
-| `/runs` | start a run of any enabled step and watch its log, or stop the one in progress; recent runs with per-step output |
-| `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue, unchanged (its Revise box sends a draft back through the drafter with your note) |
+| `/runs` | every run's log (whichever page started it) and the checkboxes to run any enabled step; stop the one in progress |
+| `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue (its Revise box sends a draft back through the drafter with your note); the pending page has "Draft" and "Verify" buttons |
+| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`) and "Set schedule" to number the order the slots post them (`schedule.position`) |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
@@ -43,9 +44,15 @@ step 1's own `db.Database` API — the same one `digest.py` uses, and the run bu
 `ops/config.yaml`'s steps through `ops/runner.py` under the same `ops/lock.py` lock
 cron takes, so a run started in the browser is the run cron would have started. A step
 disabled in `ops/config.yaml` is skipped, never run; the shipped `publish` step runs
-`run_publish.py` as a dry run (no `--live`), so nothing posts. The panel
-never edits `config.yaml`, `draft/voice.md` or a draft's text, and has no publish
-button. The feedback page renders a report's suggestions; applying one is still a human
+`run_publish.py` as a dry run (no `--live`), so nothing posts on a schedule until the
+human enables it. The run buttons sit on the pages they affect (feed, pending, approved)
+and every log stays on `/runs`. The one argv the panel builds itself is the approved
+page's "Publish now" (`panel/jobs.py:start_publish_now`): `run_publish.py --live --now
+--draft ID` for the draft the human pointed at, which still posts nothing unless
+`PUBLISH_ENABLED=1` is set. "Set schedule" on the same page writes the human's order to
+step 3's `schedule.position` through `publish/store.py:set_order`; the scheduler posts
+ordered drafts first. The panel
+never edits `config.yaml`, `draft/voice.md` or a draft's text. The feedback page renders a report's suggestions; applying one is still a human
 editing a settings file and bumping `PROMPT_VERSION`. The one thing the panel writes
 outside its own steps is a human yes/no decision on the feed page, through step 1's API, which
 is exactly what `digest.py --rate` writes.
@@ -284,6 +291,10 @@ Safety gates, all of which must hold before a single tweet is sent:
   logged as refusals and go back to the approval queue; nothing is auto-fixed.
 - Breaking items (`fda*` sources, `company_*` PRs whose title mentions an
   approval) may post outside slots but still respect the daily cap and gap.
+- The human's order from the panel's approved page (`schedule.position`,
+  `publish/store.py:set_order`) is honoured before breaking and score;
+  `--draft ID` considers one approved draft only (the panel's "Publish now"
+  runs `--live --now --draft ID`).
 - A thread that fails at post k keeps posts 1..k-1 live, records the error on
   post k, marks the draft `partial`, and stops. It is not retried; a human
   finishes or deletes it.

@@ -13,6 +13,10 @@
   {% if show_all %}<a href="/feed?hours={{ hours }}&amp;top={{ top_n }}{% if hide_decided %}&amp;hide_decided=1{% endif %}">threshold only</a>{% else %}<a href="/feed?hours={{ hours }}&amp;top={{ top_n }}&amp;all=1{% if hide_decided %}&amp;hide_decided=1{% endif %}">ignore threshold</a>{% endif %} ·
   {% if hide_decided %}<a href="/feed?hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}">show decided</a>{% else %}<a href="/feed?hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}&amp;hide_decided=1">hide decided</a>{% endif %}
 </p>
+{% with buttons=[{"label": "Ingest and score", "steps": ["ingest", "score"], "title": "fetch every due source, then score what passed the prefilter"}],
+        back="/feed?hours=" ~ hours ~ "&top=" ~ top_n ~ ("&all=1" if show_all else "") ~ ("&hide_decided=1" if hide_decided else "") %}
+{% include "_run.html" %}
+{% endwith %}
 <p class="meta">Deciding a story here is what tunes the rubric: your yes or no, and the
 explanation behind it, are the ground truth the score is measured against. It changes
 nothing about what gets drafted today.</p>
@@ -66,7 +70,7 @@ nothing about what gets drafted today.</p>
   <p class="meta">scored by {{ e.model }} ({{ e.prompt_version }})</p>
 </div>
 {% else %}
-<p class="meta">{% if hide_decided %}Nothing undecided in this window.{% else %}Nothing scored in this window.{% endif %} Run ingest and score from
-  <a href="/runs">the runs page</a>, or widen the window above.</p>
+<p class="meta">{% if hide_decided %}Nothing undecided in this window.{% else %}Nothing scored in this window.{% endif %} Press
+  "Ingest and score" above, or widen the window.</p>
 {% endfor %}
 {% endblock %}

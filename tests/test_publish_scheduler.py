@@ -109,3 +109,44 @@ def test_pick_respects_daily_cap_and_min_gap():
     assert "min gap" in recent.blocked_reason(slot)
     ok = Policy(min_gap_minutes=90, last_posted_at=slot - timedelta(minutes=95))
     assert pick_for_slot([approved()], slot, ok) is not None
+
+
+def test_rank_puts_the_human_order_before_breaking_and_score():
+    from publish.scheduler import Policy, rank
+    from publish.store import Approved
+
+    def a(i, **kw):
+        base = dict(draft_id=i, item_id=f"i{i}", cluster_id=i, source="pubmed", url="", title="")
+        base.update(kw)
+        return Approved(single_post="x", **base)
+
+    fda = a(1, source="fda_oce", score=10.0)
+    high = a(2, score=50.0)
+    second = a(3, score=1.0, position=2)
+    first = a(4, score=2.0, position=1)
+    got = [x.draft_id for x in rank([fda, high, second, first], Policy())]
+    assert got == [4, 3, 1, 2]
+
+
+def test_save_caps_edits_only_those_lines_and_keeps_comments(tmp_path):
+    from publish.scheduler import load_publish_config, save_caps
+
+    cfg = tmp_path / "publish.yaml"
+    cfg.write_text(
+        "timezone: UTC\n# limits\nmax_posts_per_day: 3   # per day\nmin_gap_minutes: 90\n"
+        "slots:\n  - '08:30'\n"
+    )
+    assert save_caps(5, 30, cfg) == {"max_posts_per_day": 5, "min_gap_minutes": 30}
+    text = cfg.read_text()
+    assert "max_posts_per_day: 5  # per day\n" in text and "min_gap_minutes: 30\n" in text
+    assert "# limits" in text and "timezone: UTC" in text
+    loaded = load_publish_config(cfg)
+    assert loaded["max_posts_per_day"] == 5 and loaded["min_gap_minutes"] == 30
+    with pytest.raises(ValueError):
+        save_caps(0, 30, cfg)
+    with pytest.raises(ValueError):
+        save_caps(1, -1, cfg)
+    # a file without the keys gets them appended
+    cfg.write_text("timezone: UTC")
+    save_caps(2, 10, cfg)
+    assert load_publish_config(cfg)["min_gap_minutes"] == 10

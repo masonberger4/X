@@ -3,10 +3,12 @@
 Owns two tables, created with CREATE TABLE IF NOT EXISTS in the shared pipeline DB:
 
   schedule(id PK, draft_id UNIQUE, scheduled_for, claimed_at, finished_at,
-           status 'pending'|'claimed'|'posted'|'partial'|'refused'|'failed', error)
+           status 'pending'|'claimed'|'posted'|'partial'|'refused'|'failed', error, position)
       One row per draft we ever tried to publish. Claiming (claimed_at) happens inside a
       BEGIN IMMEDIATE transaction before any API call, so two overlapping cron runs cannot
-      both post the same draft.
+      both post the same draft. `position` (guarded migration) is the human's publishing
+      order from the control panel's approved page: an unclaimed 'pending' row with a
+      position is published before anything else, lowest position first (`set_order`).
   posts(id PK, draft_id, tweet_id, text, kind 'single'|'thread', position, posted_at, slot,
         status 'posted'|'failed', error)
       One row per tweet attempted. A thread that failed at post k has rows 1..k-1 with
@@ -93,8 +95,17 @@ def _now() -> str:
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path or db_path()), timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA)
+    _ensure_schema(conn)
     return conn
+
+
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    """Create the two tables and add columns that arrived later (guarded migrations)."""
+    conn.executescript(_SCHEMA)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(schedule)").fetchall()}
+    if "position" not in cols:
+        conn.execute("ALTER TABLE schedule ADD COLUMN position INTEGER")
+        conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +130,7 @@ class Approved:
     edited: bool = False
     image_path: str | None = None  # absolute path of the rendered chart PNG, if still on disk
     image_alt: str = ""
+    position: int | None = None  # the human's publishing order (set_order), 1 = first
 
 
 def _db_file(conn: sqlite3.Connection) -> Path | None:
@@ -171,8 +183,13 @@ def _apply_edit(edited_text: str | None, single_post: str, thread: list[str]):
     return edited_text, thread, True
 
 
-def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> list[Approved]:
+def fetch_approved(
+    limit: int = 10,
+    conn: sqlite3.Connection | None = None,
+    draft_ids: list[int] | None = None,
+) -> list[Approved]:
     """Approved drafts that have not been claimed for publishing, oldest approval first.
+    With `draft_ids`, only those drafts (the panel's "Publish now" names one).
 
     This is the ONLY place step 3 reads the drafts/decisions (and items/scores) tables.
     """
@@ -180,7 +197,7 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
     conn = conn or connect()
     conn_path = _db_file(conn)
     try:
-        conn.executescript(_SCHEMA)  # the caller may hand us step 2's connection
+        _ensure_schema(conn)  # the caller may hand us step 2's connection
         tables = _tables(conn)
         if "drafts" not in tables:
             return []
@@ -204,6 +221,14 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
             if has_step1
             else ""
         )
+        only = ""
+        params: list[object] = []
+        if draft_ids is not None:
+            if not draft_ids:
+                return []
+            only = f" AND d.id IN ({','.join('?' * len(draft_ids))})"
+            params.extend(int(i) for i in draft_ids)
+        params.append(limit)
         rows = conn.execute(
             f"""
             SELECT d.id, d.item_id, d.cluster_id, d.single_post, d.thread_json, d.updated_at,
@@ -211,15 +236,18 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
                       AND action IN ('edit', 'revise') AND edited_text IS NOT NULL
                       ORDER BY id DESC LIMIT 1) AS edited_text,
                    (SELECT created_at FROM decisions WHERE draft_id = d.id
-                      AND action IN ('approve', 'edit') ORDER BY id DESC LIMIT 1) AS approved_at
+                      AND action IN ('approve', 'edit') ORDER BY id DESC LIMIT 1) AS approved_at,
+                   (SELECT position FROM schedule WHERE draft_id = d.id
+                      AND claimed_at IS NULL) AS position
                    {meta}{image_cols}
             FROM drafts d {joins}
             WHERE d.status = 'approved'
               AND d.id NOT IN (SELECT draft_id FROM schedule WHERE claimed_at IS NOT NULL)
+              {only}
             ORDER BY approved_at, d.id
             LIMIT ?
             """,
-            (limit,),
+            params,
         ).fetchall()
     finally:
         if own:
@@ -249,6 +277,7 @@ def fetch_approved(limit: int = 10, conn: sqlite3.Connection | None = None) -> l
                 edited=edited,
                 image_path=image_path,
                 image_alt=image_alt,
+                position=int(r["position"]) if r["position"] is not None else None,
             )
         )
     return out
@@ -278,6 +307,34 @@ def claim(conn: sqlite3.Connection, draft_id: int, scheduled_for: str | None = N
         conn.rollback()
         raise
     return cur.rowcount == 1
+
+
+def set_order(conn: sqlite3.Connection, ordered_ids: list[int]) -> int:
+    """Store the human's publishing order: `ordered_ids[0]` posts first. Every unclaimed
+    schedule row loses its old position first, so the list given is the whole order;
+    an empty list clears it. Only unclaimed rows are touched (a claimed draft is posted,
+    posting, or failed and none of those is reordered). Returns how many rows got a
+    position."""
+    _ensure_schema(conn)  # the panel may hand us step 2's connection
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("UPDATE schedule SET position = NULL WHERE claimed_at IS NULL")
+        n = 0
+        for pos, draft_id in enumerate(ordered_ids, 1):
+            conn.execute(
+                "INSERT OR IGNORE INTO schedule (draft_id, status) VALUES (?, ?)",
+                (int(draft_id), SCHED_PENDING),
+            )
+            cur = conn.execute(
+                "UPDATE schedule SET position = ? WHERE draft_id = ? AND claimed_at IS NULL",
+                (pos, int(draft_id)),
+            )
+            n += cur.rowcount
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return n
 
 
 def finish(conn: sqlite3.Connection, draft_id: int, status: str, error: str | None = None) -> None:

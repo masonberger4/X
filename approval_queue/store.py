@@ -480,6 +480,7 @@ class PublishInfo:
     tweet_id: str | None = None  # first post's tweet id, when it is live
     posted_at: str | None = None
     error: str | None = None
+    position: int | None = None  # the human's publishing order (panel), 1 = next to post
 
     @property
     def tweet_url(self) -> str:
@@ -496,11 +497,18 @@ def publish_states(conn: sqlite3.Connection, draft_ids: list[int]) -> dict[int, 
     if not {"schedule", "posts"} <= present:
         return {}
     marks = ",".join("?" * len(draft_ids))
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(schedule)").fetchall()}
+    position = "position" if "position" in cols else "NULL AS position"
     out: dict[int, PublishInfo] = {}
     for r in conn.execute(
-        f"SELECT draft_id, status, error FROM schedule WHERE draft_id IN ({marks})", draft_ids
+        f"SELECT draft_id, status, error, {position} FROM schedule WHERE draft_id IN ({marks})",
+        draft_ids,
     ).fetchall():
-        out[int(r["draft_id"])] = PublishInfo(status=str(r["status"]), error=r["error"])
+        out[int(r["draft_id"])] = PublishInfo(
+            status=str(r["status"]),
+            error=r["error"],
+            position=int(r["position"]) if r["position"] is not None else None,
+        )
     for r in conn.execute(
         f"""SELECT draft_id, tweet_id, posted_at FROM posts
             WHERE position = 1 AND tweet_id IS NOT NULL AND draft_id IN ({marks})""",

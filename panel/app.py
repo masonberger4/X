@@ -9,21 +9,28 @@ Routes owned here:
   GET  /feedback        follower trend, per-post metrics, and the latest report's proposals
   GET  /runs            recent runs started from the panel, with per-step logs
   GET  /runs/current    HTML fragment for the in-page poll while a run is in flight
-  POST /runs            start a run of the selected orchestrator steps
+  POST /runs            start a run of the selected orchestrator steps; a `back` field
+                        sends the browser back to the page that pressed the button (the
+                        feed's "Ingest and score", the pending page's "Draft" and "Verify")
   POST /runs/cancel     stop the run in progress (kills the step and what it launched)
+  POST /publishing/now    post one approved draft now (run_publish.py --live --now --draft)
+  POST /publishing/order  save the approved page's publishing order (schedule.position)
+  POST /publishing/caps   save max_posts_per_day / min_gap_minutes into publish/config.yaml
 
 The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., /voice),
 so the operator has one URL for the whole workflow. Everything else this app shows is
 read through `ops/store.py`'s read-only adapters; it owns no tables of its own.
 
-Read-only by design: the panel never edits config.yaml, voice.md or a draft's text, and
-has no publish button. Publishing stays a disabled step in ops/config.yaml plus the
-env var and the flag, exactly as before.
+Read-only by design: the panel never edits config.yaml, voice.md or a draft's text. Its
+run buttons sit on the pages they affect and every log stays on /runs. The approved
+page's "Publish now" is the one live action: a run of the publisher for one draft, which
+still posts nothing unless PUBLISH_ENABLED=1 is set in .env.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -46,8 +53,10 @@ from ops import store as ops_store
 from ops.config import load_ops_config
 from ops.health import Thresholds
 from panel import feed, views
+from panel import publishing as publish_order_store
 from panel.frozen import data_dir, step_interpreter
 from panel.jobs import JobError, JobManager
+from publish import scheduler as publish_scheduler
 from score import editorial
 
 log = logging.getLogger(__name__)
@@ -69,6 +78,34 @@ CONFIG = load_ops_config()
 # Steps run in the data directory (the repo root, or the exe's folder in the desktop
 # build) under the interpreter that can run them there (see panel/frozen.py).
 JOBS = JobManager(CONFIG, data_dir(), python=step_interpreter())
+
+
+def current_run() -> dict[str, Any] | None:
+    """The run in flight, for the run buttons on the feed and queue pages (None when idle).
+    Registered as a template global on both template envs, so the queue's own pages can
+    show it without their routes knowing about the panel."""
+    job = JOBS.current()
+    if job is None or not job.running:
+        return None
+    now = _now()
+    return {
+        "id": job.id,
+        "steps": job.steps,
+        "active_step": job.active_step,
+        "active_for": views.fmt_duration(
+            (now - job.active_since).total_seconds() if job.active_since else None
+        ),
+        "started": views.fmt_age(now, job.started_at),
+    }
+
+
+def publish_live() -> bool:
+    """Whether "Publish now" would post: run_publish.py posts only with PUBLISH_ENABLED=1."""
+    return os.environ.get("PUBLISH_ENABLED") == "1"
+
+
+templates.env.globals["current_run"] = current_run
+templates.env.globals["publish_live"] = publish_live
 
 
 def _now() -> datetime:
@@ -230,8 +267,9 @@ def _first(form: dict[str, list[str]], key: str) -> str | None:
 
 
 @app.get("/publishing", response_class=HTMLResponse)
-def publishing(request: Request, conn: Conn):
+def publishing(request: Request, conn: Conn, saved: int = 0, error: str = ""):
     now = _now()
+    caps = publish_scheduler.load_publish_config()
     state = ops_store.fetch_publish_state(conn, now)
     rows = ops_store.fetch_publish_rows(conn)
     activity = ops_store.fetch_stage_activity(conn, now)
@@ -246,8 +284,33 @@ def publishing(request: Request, conn: Conn):
             "approved_waiting": activity.approved_drafts,
             "last_posted": views.fmt_age(now, state.latest_posted_at),
             "publish_enabled": bool(publish_step and publish_step.enabled),
+            "max_posts_per_day": int(caps["max_posts_per_day"]),
+            "min_gap_minutes": int(caps["min_gap_minutes"]),
+            "saved": bool(saved),
+            "error": error,
         },
     )
+
+
+@app.post("/publishing/caps")
+async def publishing_caps(request: Request):
+    """Save the two hard caps into publish/config.yaml (the one settings file the panel
+    edits, two keys only, comments kept). The next publish run, scheduled or "Publish
+    now", reads the new values."""
+    form = await read_form(request)
+    try:
+        publish_scheduler.save_caps(
+            int(_first(form, "max_posts_per_day") or ""), int(_first(form, "min_gap_minutes") or "")
+        )
+    except ValueError as exc:
+        msg = (
+            str(exc)
+            if "must" in str(exc) or "cannot" in str(exc)
+            else "both fields need a whole number"
+        )
+        return RedirectResponse(f"/publishing?{urlencode({'error': msg})}", status_code=303)
+    log.info("publishing caps saved: %s", {k: _first(form, k) for k in publish_scheduler.CAPS})
+    return RedirectResponse("/publishing?saved=1", status_code=303)
 
 
 @app.get("/feedback", response_class=HTMLResponse)
@@ -291,12 +354,56 @@ def runs_current(request: Request):
 
 @app.post("/runs")
 async def start_run(request: Request):
+    """Start a run. `back` (a local path) is where the button lives: the feed page's
+    "Ingest and score" and the pending page's "Draft" and "Verify" send the browser back
+    there, with the run banner pointing at /runs for the log; a refused start always
+    lands on /runs, which shows the reason."""
     form = await read_form(request)
     try:
         JOBS.start(form.get("step", []))
     except JobError as exc:
         return RedirectResponse(f"/runs?{urlencode({'error': str(exc)})}", status_code=303)
-    return RedirectResponse("/runs", status_code=303)
+    return RedirectResponse(_back(form, "/runs"), status_code=303)
+
+
+def _back(form: dict[str, list[str]], default: str) -> str:
+    """A same-site path from the form's `back` field, else `default`: never an absolute
+    URL, so a form cannot send the browser off the panel."""
+    back = _first(form, "back") or ""
+    if back.startswith("/") and not back.startswith("//"):
+        return back
+    return default
+
+
+@app.post("/publishing/now")
+async def publish_now(request: Request):
+    """The approved page's "Publish now": one run of run_publish.py for one draft, live.
+    The log lands on /runs; the approved page shows the outcome (posted, failed) as step 3
+    records it. Nothing posts unless PUBLISH_ENABLED=1 is set in .env."""
+    form = await read_form(request)
+    try:
+        draft_id = int(_first(form, "draft_id") or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="draft_id must be a number") from exc
+    try:
+        JOBS.start_publish_now(draft_id)
+    except JobError as exc:
+        return RedirectResponse(f"/runs?{urlencode({'error': str(exc)})}", status_code=303)
+    return RedirectResponse(_back(form, "/status/approved"), status_code=303)
+
+
+@app.post("/publishing/order")
+async def publish_order(request: Request):
+    """Save the approved page's publishing order. Boxes left blank drop a draft out of the
+    order (it then follows publish/config.yaml's policy after the ordered ones)."""
+    form = await read_form(request)
+    try:
+        ordered = publish_order_store.parse_order(form)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    n = publish_order_store.save_order(ordered)
+    log.info("publishing order saved: %d draft(s) ordered", n)
+    return RedirectResponse(_back(form, "/status/approved"), status_code=303)
 
 
 @app.post("/runs/cancel")
@@ -360,6 +467,10 @@ def _adopt_queue_routes() -> None:
     # links belong in the nav (run_queue.py never imports this module, so alone it stays
     # False).
     queue_app.templates.env.globals["HAS_PANEL"] = True
+    # The pending and approved pages carry run buttons; they need the run in flight and
+    # whether a live post is possible, looked up at render time.
+    queue_app.templates.env.globals["current_run"] = current_run
+    queue_app.templates.env.globals["publish_live"] = publish_live
     have = {getattr(r, "path", None) for r in app.router.routes}
     for route in queue_app.app.router.routes:
         path = getattr(route, "path", None)

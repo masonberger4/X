@@ -1,12 +1,16 @@
 """CLI: publish approved drafts to X on a slot schedule. Safe by default.
 
 Usage: python run_publish.py [--dry-run | --live] [--now] [--breaking] [--limit N]
-                             [--format single|thread] [-v]
+                             [--format single|thread] [--draft DRAFT_ID] [-v]
        python run_publish.py --release-failed [DRAFT_ID ...]
 
 Default is --dry-run: prints what WOULD be posted and when, posts nothing. --live posts
 only if PUBLISH_ENABLED=1 is also set in the environment. Meant for cron every 15 min; a
 draft is claimed in a transaction before posting, so overlapping runs cannot post it twice.
+
+--draft DRAFT_ID considers only that approved draft (the control panel's "Publish now"
+runs `--live --now --draft ID`; the caps in publish/config.yaml still apply). The order set
+on the panel's approved page (schedule.position) is honoured before the config's policy.
 
 A draft whose chart was rendered (run_draft.py) and not dropped in the queue has that PNG
 attached to its first post, with alt text, unless media.attach_images is false in
@@ -247,6 +251,13 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     ap.add_argument("--format", choices=("single", "thread"), default=None)
     ap.add_argument("--config", default=None, help="path to publish/config.yaml override")
     ap.add_argument(
+        "--draft",
+        type=int,
+        default=None,
+        metavar="DRAFT_ID",
+        help="consider only this approved draft (the panel's Publish now adds --now)",
+    )
+    ap.add_argument(
         "--release-failed",
         nargs="*",
         type=int,
@@ -275,7 +286,11 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
 
     conn = store.connect()
     try:
-        approved = store.fetch_approved(args.limit, conn=conn)
+        only = [args.draft] if args.draft is not None else None
+        approved = store.fetch_approved(args.limit, conn=conn, draft_ids=only)
+        if only and not approved:
+            log.error("draft %d is not approved and waiting; nothing to post", args.draft)
+            return 2
         policy = build_policy(conn, cfg, now)
         log.info(
             "%d approved drafts waiting; %d/%d posted today; mode=%s",
