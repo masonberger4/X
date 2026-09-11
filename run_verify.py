@@ -6,11 +6,21 @@ Usage:
   python run_verify.py --draft 12      # one draft
   python run_verify.py --redo          # check again, replacing earlier verdicts
   python run_verify.py --dry-run       # list what would be checked, no calls
+  python run_verify.py --auto-revise   # then revise drafts with failed claims and re-check
+  python run_verify.py --no-auto-revise  # one run without the loop, whatever the config says
 
 Each claim becomes one web-enabled Claude call. Results land in claim_checks and appear
 beside the claim in the approval queue with the source link and quoted sentence. A
 contradicted claim blocks the Approve button until the human edits the draft or ticks
-"approve anyway". Nothing here changes a draft's text.
+"approve anyway". Nothing here changes a draft's text, except through the verify-revise
+loop below.
+
+With `--auto-revise` (or `auto_revise: enabled: true` in verify/config.yaml) a draft that
+still has a contradicted or unverified claim after the pass goes back through the drafter
+with those claims, exactly as the queue's Revise button with an empty box does, its
+supported verdicts are kept, the new or changed claims are checked, and the round repeats
+until every claim is supported or `max_rounds` (per run) / `max_rounds_per_draft` (for
+life) is hit. See verify/autorevise.py. Tables are not part of the loop.
 
 A draft with a comparison table gets a second pass: every cell that is not verbatim in the
 source article is one more web call (table_checks); once every cell has a verdict the
@@ -30,7 +40,7 @@ from dotenv import load_dotenv
 
 from approval_queue import images
 from approval_queue import store as queue_store
-from verify import store, tables
+from verify import autorevise, store, tables
 from verify.settings import load_verify_config
 from verify.verifier import ClaimCheck, trusted_hosts, verify_claim
 
@@ -53,6 +63,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--draft", type=int, default=None, help="only this draft id")
     ap.add_argument("--redo", action="store_true", help="re-check claims already checked")
     ap.add_argument("--dry-run", action="store_true", help="list claims, make no calls")
+    ap.add_argument(
+        "--auto-revise",
+        dest="auto_revise",
+        action="store_true",
+        default=None,
+        help="revise drafts with failed claims and check again (verify/config.yaml auto_revise)",
+    )
+    ap.add_argument(
+        "--no-auto-revise",
+        dest="auto_revise",
+        action="store_false",
+        help="skip the verify-revise loop this run",
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(
@@ -92,41 +115,128 @@ def main(argv: list[str] | None = None) -> int:
             log.info("draft %d: %s", d.id, (d.title or d.item_id)[:80])
             if args.redo and not args.dry_run:
                 store.delete_checks(conn, d.id)
-            for i in idxs:
-                claim = d.draft.claims_to_verify[i]
-                log.info("  claim %d [%s]: %s", i, claim.confidence, claim.claim[:100])
-                if args.dry_run:
-                    continue
-                try:
-                    check = verify_claim(
-                        i,
-                        claim.claim,
-                        title=d.title or "",
-                        url=d.url or "",
-                        single_post=d.draft.single_post,
-                        published_at=None,
-                        cfg=cfg,
-                        root_cfg=root_cfg,
-                        hosts=hosts,
-                    )
-                except Exception as exc:  # one bad claim never stops the run
-                    errors += 1
-                    log.warning("  claim %d failed: %s", i, exc)
-                    continue
-                store.insert_check(conn, d.id, check, str(cfg.get("model")))
-                checked += 1
-                log.info(
-                    "  -> %s%s %s",
-                    check.verdict,
-                    "" if check.trusted or check.verdict == "unverified" else " (untrusted)",
-                    check.source_url,
-                )
+            c, e = check_claims(
+                conn, d, idxs, dry_run=args.dry_run, cfg=cfg, root_cfg=root_cfg, hosts=hosts
+            )
+            checked += c
+            errors += e
         log.info("done: %d claims checked, %d errors", checked, errors)
+        auto = cfg["auto_revise"]
+        enabled = auto.get("enabled", False) if args.auto_revise is None else args.auto_revise
+        if enabled and not args.dry_run:
+            drafts = store.pending_drafts_with_claims(conn)
+            if args.draft is not None:
+                drafts = [d for d in drafts if d.id == args.draft]
+            if args.limit is not None:
+                drafts = drafts[: args.limit]
+            for d in drafts:
+                auto_revise(
+                    conn,
+                    d.id,
+                    max_rounds=int(auto.get("max_rounds", 3)),
+                    lifetime_cap=int(auto.get("max_rounds_per_draft", 6)),
+                    max_claims=max_claims,
+                    cfg=cfg,
+                    root_cfg=root_cfg,
+                    hosts=hosts,
+                )
         if cfg["tables"].get("enabled", True):
             verify_tables(conn, args, cfg=cfg, root_cfg=root_cfg, hosts=hosts)
     finally:
         conn.close()
     return 0
+
+
+def check_claims(
+    conn, d, idxs: list[int], *, dry_run: bool, cfg: dict, root_cfg: dict, hosts: set[str]
+) -> tuple[int, int]:
+    """Send the given claims of one draft to the verifier and store each verdict. Returns
+    (checked, errors); one bad claim never stops the run."""
+    checked = errors = 0
+    for i in idxs:
+        claim = d.draft.claims_to_verify[i]
+        log.info("  claim %d [%s]: %s", i, claim.confidence, claim.claim[:100])
+        if dry_run:
+            continue
+        try:
+            check = verify_claim(
+                i,
+                claim.claim,
+                title=d.title or "",
+                url=d.url or "",
+                single_post=d.draft.single_post,
+                published_at=None,
+                cfg=cfg,
+                root_cfg=root_cfg,
+                hosts=hosts,
+            )
+        except Exception as exc:  # one bad claim never stops the run
+            errors += 1
+            log.warning("  claim %d failed: %s", i, exc)
+            continue
+        store.insert_check(conn, d.id, check, str(cfg.get("model")))
+        checked += 1
+        log.info(
+            "  -> %s%s %s",
+            check.verdict,
+            "" if check.trusted or check.verdict == "unverified" else " (untrusted)",
+            check.source_url,
+        )
+    return checked, errors
+
+
+def auto_revise(
+    conn,
+    draft_id: int,
+    *,
+    max_rounds: int,
+    lifetime_cap: int,
+    max_claims: int,
+    cfg: dict,
+    root_cfg: dict,
+    hosts: set[str],
+) -> int:
+    """The verify-revise loop for one draft (verify/autorevise.py). Returns the number of
+    revisions made. A claim left unchecked (a failed web call, or past max_claims) stops the
+    loop: the drafter is only ever handed verdicts, never guesses."""
+    rounds = 0
+    for _ in range(max_rounds):
+        d = queue_store.get_draft(conn, draft_id)
+        if d is None:
+            return rounds
+        if [i for i in store.unchecked_indexes(conn, d) if i < max_claims]:
+            log.info("draft %d: unchecked claims remain, not revising", draft_id)
+            return rounds
+        res = autorevise.revise_round(conn, draft_id, lifetime_cap=lifetime_cap)
+        if not res.revised:
+            if res.problems:
+                log.warning(
+                    "draft %d: %d claim problem(s) left, %s", draft_id, res.problems, res.reason
+                )
+            else:
+                log.info("draft %d: %s", draft_id, res.reason)
+            return rounds
+        rounds += 1
+        log.info(
+            "draft %d: auto-revised (round %d, %d problem(s), %d verdict(s) kept)",
+            draft_id,
+            rounds,
+            res.problems,
+            res.kept,
+        )
+        d = queue_store.get_draft(conn, draft_id)
+        idxs = [i for i in store.unchecked_indexes(conn, d) if i < max_claims]
+        check_claims(conn, d, idxs, dry_run=False, cfg=cfg, root_cfg=root_cfg, hosts=hosts)
+    d = queue_store.get_draft(conn, draft_id)
+    left = autorevise.claim_problems(store.checks_for_draft(conn, draft_id)) if d else []
+    if left:
+        log.warning(
+            "draft %d: %d claim problem(s) left after %d round(s) this run",
+            draft_id,
+            len(left),
+            rounds,
+        )
+    return rounds
 
 
 def verify_tables(conn, args, *, cfg: dict, root_cfg: dict, hosts: set[str]) -> None:

@@ -277,3 +277,195 @@ def test_queue_approve_is_unblocked_when_supported(client, conn):
     body = client.get(f"/drafts/{did}").text
     assert "supported (untrusted source)" in body and "approve anyway" not in body
     assert client.post(f"/drafts/{did}/approve").status_code == 303
+
+
+# --- the verify-revise loop (run_verify.py --auto-revise) ------------------------------
+
+
+def _fake_verifier(calls):
+    """A claim mentioning 'bad' is contradicted, 'meh' is unverified, anything else supported."""
+
+    def fake(index, claim, **kw):
+        calls.append(claim)
+        if "bad" in claim:
+            return verifier.ClaimCheck(
+                index, claim, "contradicted", "https://sec.gov/x", "q", "n", True
+            )
+        if "meh" in claim:
+            return verifier.ClaimCheck(index, claim, "unverified", "", "", "n", False)
+        return verifier.ClaimCheck(index, claim, "supported", "https://sec.gov/x", "q", "n", True)
+
+    return fake
+
+
+def _fake_reviser(revisions, *, fix=True):
+    """The drafter: drops 'bad', softens 'meh' to 'ok' on each call (or changes nothing)."""
+
+    def fake(*, current, instructions, claim_problems, **kw):
+        from draft.drafter import DraftResult
+
+        revisions.append((instructions, [p.verdict for p in claim_problems]))
+        claims = current.claims_to_verify
+        if fix:
+            claims = [
+                Claim(c.claim.replace("bad", "fine").replace("meh", "ok"), c.confidence)
+                for c in claims
+            ]
+        d = Draft(
+            single_post=current.single_post + " (rev)",
+            thread=current.thread,
+            suggested_visual="",
+            why_it_matters="w",
+            claims_to_verify=claims,
+        )
+        return DraftResult(draft=d, model="m2", attempts=1)
+
+    return fake
+
+
+def _seed_problem_draft(conn, item_id="i1"):
+    seed_item(conn, item_id)
+    d = Draft(
+        single_post=f"post {URL}",
+        thread=["a", "b", f"c {URL}"],
+        suggested_visual="",
+        why_it_matters="w",
+        claims_to_verify=[Claim("good one", "high"), Claim("bad one", "low"), Claim("meh", "low")],
+    )
+    return store.insert_draft(conn, item_id=item_id, model="m", draft=d)
+
+
+def test_auto_revise_loops_until_every_claim_is_supported(conn, monkeypatch):
+    from draft import drafter
+
+    did = _seed_problem_draft(conn)
+    calls, revisions = [], []
+    monkeypatch.setattr(run_verify, "verify_claim", _fake_verifier(calls))
+    monkeypatch.setattr(run_verify, "_root_config", lambda: ROOT)
+    monkeypatch.setattr(drafter, "revise_item", _fake_reviser(revisions))
+
+    assert run_verify.main(["--auto-revise"]) == 0
+    # round 0 checked all three; the revision handed over the two problems with no
+    # instructions; only the two changed claims were checked again
+    assert calls == ["good one", "bad one", "meh", "fine one", "ok"]
+    assert revisions == [(None, ["contradicted", "unverified"])]
+    row = store.get_draft(conn, did)
+    assert row.status == "pending" and row.draft.single_post.endswith("(rev)")
+    checks = vstore.checks_for_draft(conn, did)
+    assert [c.verdict for c in checks] == ["supported"] * 3
+    assert not vstore.has_contradiction(conn, did)
+    decisions = store.list_decisions(conn, did)
+    assert [(x["action"], x["note"]) for x in decisions] == [
+        ("revise", "auto: fix fact-check failures")
+    ]
+    from verify.autorevise import auto_rounds_used
+
+    assert auto_rounds_used(conn, did) == 1
+
+    # a second run has nothing to do: no calls, no revision
+    calls.clear()
+    revisions.clear()
+    run_verify.main(["--auto-revise"])
+    assert calls == [] and revisions == []
+
+
+def test_auto_revise_is_off_by_default_and_flag_overrides_config(conn, monkeypatch):
+    from draft import drafter
+
+    _seed_problem_draft(conn)
+    calls, revisions = [], []
+    monkeypatch.setattr(run_verify, "verify_claim", _fake_verifier(calls))
+    monkeypatch.setattr(run_verify, "_root_config", lambda: ROOT)
+    monkeypatch.setattr(drafter, "revise_item", _fake_reviser(revisions))
+    run_verify.main([])
+    assert revisions == []  # shipped config: enabled false
+    cfg = dict(load_verify_config())
+    cfg["auto_revise"] = {**cfg["auto_revise"], "enabled": True}
+    monkeypatch.setattr(run_verify, "load_verify_config", lambda: cfg)
+    run_verify.main(["--no-auto-revise"])
+    assert revisions == []
+    run_verify.main([])
+    assert len(revisions) == 1
+    # --dry-run never revises
+    revisions.clear()
+    run_verify.main(["--dry-run", "--redo"])
+    assert revisions == []
+
+
+def test_auto_revise_stops_when_the_drafter_changes_no_claim_and_at_the_caps(conn, monkeypatch):
+    from draft import drafter
+
+    did = _seed_problem_draft(conn)
+    calls, revisions = [], []
+    monkeypatch.setattr(run_verify, "verify_claim", _fake_verifier(calls))
+    monkeypatch.setattr(run_verify, "_root_config", lambda: ROOT)
+    monkeypatch.setattr(drafter, "revise_item", _fake_reviser(revisions, fix=False))
+    run_verify.main(["--auto-revise"])
+    # one drafter call, claims identical -> the revision is discarded and the loop ends;
+    # nothing re-checked, the draft and its verdicts untouched, no decision logged
+    assert len(revisions) == 1
+    assert calls == ["good one", "bad one", "meh"]
+    checks = vstore.checks_for_draft(conn, did)
+    assert [c.verdict for c in checks] == ["supported", "contradicted", "unverified"]
+    assert vstore.has_contradiction(conn, did)
+    assert not store.get_draft(conn, did).draft.single_post.endswith("(rev)")
+    assert store.list_decisions(conn, did) == []
+
+    # the lifetime cap: with one automatic revision on record and a cap of 1, no more
+    from verify.autorevise import AUTO_NOTE, revise_round
+
+    store.revise(conn, did, draft=store.get_draft(conn, did).draft, model="m", note=AUTO_NOTE)
+    revisions.clear()
+    res = revise_round(conn, did, lifetime_cap=1)
+    assert not res.revised and res.problems == 2 and "gave up" in res.reason
+    assert revisions == []
+
+    # a drafter failure leaves the draft and its verdicts untouched
+    def boom(**kw):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(drafter, "revise_item", boom)
+    before = store.get_draft(conn, did).draft
+    res = revise_round(conn, did, lifetime_cap=10)
+    assert not res.revised and "api down" in res.reason
+    assert store.get_draft(conn, did).draft == before
+    assert len(vstore.checks_for_draft(conn, did)) == 3
+
+
+def test_auto_revise_skips_a_draft_with_unchecked_claims(conn, monkeypatch):
+    """A failed web call leaves a claim unchecked; the drafter is never handed a guess."""
+    from draft import drafter
+
+    _seed_problem_draft(conn)
+    revisions = []
+
+    def flaky(index, claim, **kw):
+        if index == 0:
+            raise RuntimeError("timeout")
+        return verifier.ClaimCheck(
+            index, claim, "contradicted", "https://sec.gov/x", "q", "n", True
+        )
+
+    monkeypatch.setattr(run_verify, "verify_claim", flaky)
+    monkeypatch.setattr(run_verify, "_root_config", lambda: ROOT)
+    monkeypatch.setattr(drafter, "revise_item", _fake_reviser(revisions))
+    run_verify.main(["--auto-revise"])
+    assert revisions == []
+
+
+def test_queue_shows_auto_revise_rounds(client, conn):
+    from verify.autorevise import AUTO_NOTE
+
+    did = _seed_problem_draft(conn)
+    vstore.insert_check(
+        conn,
+        did,
+        verifier.ClaimCheck(1, "bad one", "contradicted", "https://s", "q", "n", True),
+        "m",
+    )
+    store.revise(conn, did, draft=store.get_draft(conn, did).draft, model="m", note=AUTO_NOTE)
+    assert "auto-revised 1×, needs you" in client.get("/queue").text or (
+        "auto-revised 1×, needs you" in client.get("/").text
+    )
+    page = client.get(f"/drafts/{did}").text
+    assert "Auto-revised 1 time by the verify-revise loop" in page and "needs you" in page

@@ -149,6 +149,26 @@ source only when it is due, and score only scores what is new.
    table had more than `max_cells_per_draft` cells. `tables:` in
    `verify\config.yaml` holds those knobs and `enabled: false` skips tables
    altogether (they then stay unrendered and are dropped at approval).
+   To take yourself out of the run-verify, press-Revise, run-verify loop, turn
+   on the verify-revise loop:
+   ```
+   python run_verify.py --auto-revise       # this run only
+   python run_verify.py --no-auto-revise    # skip it once when the config has it on
+   ```
+   or set `auto_revise: enabled: true` in `verify\config.yaml` so the scheduler
+   does it every time. After the claim pass, a draft that still has a
+   contradicted or unverified claim goes back through the drafter with those
+   claims (the same thing as pressing Revise with an empty box), supported
+   verdicts are kept, only the new or changed claims are checked, and that
+   repeats until every claim is supported or a limit is hit: `max_rounds`
+   per run (3) and `max_rounds_per_draft` over the draft's life (6). A
+   revision that leaves the claims unchanged is thrown away and the loop
+   stops, so the verdicts you see are always real ones. The queue shows
+   "auto-revised N×" on each draft, with "needs you" when the loop gave up
+   and a claim problem remains; those are the only ones to open with the
+   Revise box. Comparison tables are not part of the loop (their cells are
+   blanked or the table dropped instead). Each round costs one drafter call
+   plus one web call per new claim.
    About one to two minutes per claim. Verdicts are only "verified" when
    the source is on a trusted site (`verify\config.yaml`, plus every company
    site in `config.yaml`); anything else is shown as a lead. Once the
