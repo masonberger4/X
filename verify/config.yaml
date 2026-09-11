@@ -26,8 +26,9 @@ tables:
 auto_revise:
   enabled: true
   max_rounds: 3               # rounds per draft per run
-  max_rounds_per_draft: 6     # automatic revisions over the draft's whole life; after that
-                              # the draft waits for a human ("auto-revise gave up" on the queue)
+  max_rounds_per_draft: 0     # automatic revisions over the draft's whole life; 0 = no cap.
+                              # A positive number makes the draft wait for a human after that
+                              # many ("auto-revise gave up" on the queue)
 
 # A "supported" or "contradicted" verdict counts as verified only when the source is on
 # one of these hosts (subdomains included). Anything else is shown as a lead the human

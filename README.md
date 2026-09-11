@@ -253,7 +253,7 @@ unverified claim is revised through the same `revise_item` call with no
 instructions (`verify/autorevise.py`, decision note `auto: fix fact-check
 failures`), supported verdicts are carried over, the new claims are checked,
 and so on until all are supported or `max_rounds` per run /
-`max_rounds_per_draft` for life is hit. A revision that keeps the claim set
+`max_rounds_per_draft` for life (0 = uncapped, the shipped value) is hit. A revision that keeps the claim set
 unchanged is discarded. The queue badges each draft with its automatic round
 count. Tables are not part of the loop.
 
