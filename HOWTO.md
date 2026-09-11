@@ -259,6 +259,14 @@ source only when it is due, and score only scores what is new.
    A draft is posted at most once even if the command runs twice. A thread
    that fails part-way is marked partial and left for you; it is never
    retried automatically.
+   A draft whose attempt failed before anything went out (a bad key, an
+   image upload error, a text refused by the checks) is also left alone. Fix
+   the cause, then release it so the next run considers it again:
+   ```
+   python run_publish.py --release-failed        # every failed or refused draft
+   python run_publish.py --release-failed 17     # just draft 17
+   ```
+   This posts nothing and never touches a posted or partial draft.
 4. Pictures. A draft's chart (part 3) is uploaded and attached to its first
    post with alt text; the dry run prints the file and the alt text. If the
    upload fails nothing is posted and the draft is marked failed, since you
