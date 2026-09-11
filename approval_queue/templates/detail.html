@@ -37,7 +37,7 @@
 <details>
   <summary class="meta">Image grader: {% for g in image_grades %}{% if g.kept %}<strong>{{ g.score }}/10</strong> (kept){% else %}{{ g.score }}/10{% endif %}{% if not loop.last %} → {% endif %}{% endfor %} over {{ image_grades|length }} render{{ 's' if image_grades|length != 1 else '' }}</summary>
   {% for g in image_grades %}
-  <p class="meta">Render {{ g.iteration }}: {{ g.score }}/10{% if g.kept %} (kept){% endif %}{% if g.flaws %} — flaws: {{ g.flaws|join('; ') }}{% endif %}{% if g.fixes %} — fixes: {{ g.fixes|join('; ') }}{% endif %}</p>
+  <p class="meta">Render {{ g.iteration }}: {{ g.score }}/10{% if g.kept %} (kept){% endif %}{% if g.criteria %} — {% for name, v in g.criteria.items() %}{{ name }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if g.flaws %} — flaws: {{ g.flaws|join('; ') }}{% endif %}{% if g.fixes %} — fixes: {{ g.fixes|join('; ') }}{% endif %}</p>
   {% endfor %}
 </details>
 {% endif %}

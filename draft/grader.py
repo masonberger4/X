@@ -45,6 +45,29 @@ CRITERIA = (
     "it limits negative space (empty areas)",
 )
 
+# The professional-finish checklist the grader scores 1-10 each, alongside the three
+# headline criteria. Names are the keys of ImageGrade.criteria.
+CHECKLIST: dict[str, str] = {
+    "readability": "easy to read at timeline size (a 600 px wide thumbnail): text large "
+    "enough, strong contrast, nothing clipped or overlapping",
+    "colour_graphics": "colour and graphics used well: one accent hue, neutral ink, "
+    "recessive rules, emphasis on the key row or bar",
+    "negative_space": "limited negative space: the card is filled, no empty band larger than a row",
+    "hierarchy": "typographic hierarchy: eyebrow, title, headers, body and footer each "
+    "clearly one level, title dominant",
+    "alignment": "alignment and grid: columns and labels share a left edge, consistent "
+    "margins and gutters, the header bar spans the table exactly",
+    "header_finish": "header boxes have rounded corners and a 3D finish (drop shadow and "
+    "top sheen), crisp and even",
+    "branding_cells": "company or sponsor cells show the company's logo and stock ticker "
+    "where available; logos are sized to the row and aligned with the text",
+    "number_format": "numbers and units are consistently formatted (same decimals, unit "
+    "shown once, thousands separated) and value labels sit clear of the bar ends",
+    "source_footer": "the source and note are legible but recessive, on one footer line",
+    "consistency": "consistent with the house style: same eyebrow, accent colour, fonts "
+    "and layout as other cards from this account",
+}
+
 
 class GraderError(RuntimeError):
     """The grader's reply could not be used (bad JSON, missing score)."""
@@ -53,6 +76,7 @@ class GraderError(RuntimeError):
 @dataclass
 class ImageGrade:
     score: int
+    criteria: dict[str, int] = field(default_factory=dict)  # CHECKLIST name -> 1-10
     flaws: list[str] = field(default_factory=list)
     fixes: list[str] = field(default_factory=list)
     adjustments: dict[str, Any] = field(default_factory=dict)  # Style changes, already clamped
@@ -95,14 +119,24 @@ def grader_settings(cfg: dict | None = None) -> GraderSettings:
     )
 
 
+_CHECKLIST_TEXT = "\n".join(f"- {name}: {text}" for name, text in CHECKLIST.items())
+
 SYSTEM_PROMPT = f"""You are a strict graphic-design grader for data graphics attached to X posts
 by a biotech investing account. You are shown one rendered PNG (1600x900) and its spec.
 
-Grade the picture 1-10 against exactly these criteria: (1) {CRITERIA[0]}, (2) {CRITERIA[1]},
-(3) {CRITERIA[2]}. Be honest and specific: list every flaw you see and where it is, and for
-each flaw a concrete fix. Never comment on the data, and never propose adding, removing or
-changing any number, label, title or note: every word in the picture is fact-checked and
-the renderer will not change it. Do not suggest logos or brand names.
+Grade the picture 1-10 overall against three headline criteria: (1) {CRITERIA[0]},
+(2) {CRITERIA[1]}, (3) {CRITERIA[2]}. Then score each item of this professional-finish
+checklist 1-10 (10 = nothing to improve):
+{_CHECKLIST_TEXT}
+
+The overall score is the picture as a whole, not an average: one glaring flaw caps it.
+Be honest and specific: list every flaw you see and where it is, and for each flaw a
+concrete fix. Never comment on the data, and never propose adding, removing or changing
+any number, label, title, ticker or note: every word in the picture is fact-checked or
+comes from config, and the renderer will not change it. A logo or ticker that is absent
+is absent because the company is not configured, so do not ask for one to be invented;
+score branding_cells on what is there. Do not suggest logos or brand names for the
+account itself.
 
 You steer the next render only through these layout knobs (omit any you would keep):
 - font_scale (0.7-1.6): every text size except the title
@@ -115,9 +149,32 @@ You steer the next render only through these layout knobs (omit any you would ke
 - track (true/false): the light bar behind each bar showing the full scale
 - table_row_height (0.06-0.16): vertical space per table row (table only)
 
+Whenever the score is below 8, "adjustments" MUST name at least one knob change that
+addresses the biggest flaw (for example a table that leaves the bottom of the card empty
+needs a larger table_row_height and font_scale). Only a picture you score 8 or higher may
+have empty adjustments.
+
 Reply with ONLY a JSON object:
-{{"score": <1-10>, "flaws": ["..."], "fixes": ["..."], "adjustments": {{"knob": value}}}}
+{{"score": <1-10>, "criteria": {{"<checklist name>": <1-10>, ...}}, "flaws": ["..."],
+ "fixes": ["..."], "adjustments": {{"knob": value}}}}
 """
+
+
+def fallback_adjustments(visual: Chart | Table, style: Style) -> dict[str, Any]:
+    """The knob step the loop takes when a low grade comes with no adjustments: a bigger,
+    fuller picture. Empty once every knob it moves is at its ceiling (the loop then ends)."""
+    if isinstance(visual, Table):
+        keys = ("table_row_height", "font_scale")
+    else:
+        keys = ("row_pitch", "bar_height", "font_scale")
+    step = {"table_row_height": 0.03, "font_scale": 0.15, "row_pitch": 0.03, "bar_height": 0.12}
+    out: dict[str, Any] = {}
+    for key in keys:
+        current = getattr(style, key)
+        hi = Style.RANGES[key][1]
+        if current < hi:
+            out[key] = min(hi, current + step[key])
+    return out
 
 
 def build_user_prompt(visual: Chart | Table, style: Style, previous: ImageGrade | None) -> str:
@@ -204,11 +261,21 @@ def parse_grade(text: str, style: Style, *, model: str = "", iteration: int = 1)
     except (TypeError, ValueError) as exc:
         raise GraderError("grader reply has no numeric score") from exc
     score = min(max(score, 1), 10)
+    criteria: dict[str, int] = {}
+    raw_crit = data.get("criteria")
+    if isinstance(raw_crit, dict):
+        for name, value in raw_crit.items():
+            if name in CHECKLIST:
+                try:
+                    criteria[name] = min(max(int(round(float(value))), 1), 10)
+                except (TypeError, ValueError):
+                    continue
     raw_adj = data.get("adjustments") or {}
     adjusted = style.apply(raw_adj if isinstance(raw_adj, dict) else {})
     changes = {k: v for k, v in adjusted.to_dict().items() if v != getattr(style, k)}
     return ImageGrade(
         score=score,
+        criteria=criteria,
         flaws=_texts(data.get("flaws")),
         fixes=_texts(data.get("fixes")),
         adjustments=changes,
@@ -244,6 +311,7 @@ def grade_image(
 
 
 __all__ = [
+    "CHECKLIST",
     "CRITERIA",
     "DEFAULT_MAX_ITERATIONS",
     "DEFAULT_MIN_SCORE",
@@ -252,6 +320,7 @@ __all__ = [
     "ImageGrade",
     "build_user_prompt",
     "call_grader",
+    "fallback_adjustments",
     "grade_image",
     "grader_settings",
     "parse_grade",

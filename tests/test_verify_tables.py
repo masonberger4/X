@@ -332,3 +332,18 @@ def test_attach_chart_leaves_a_table_for_the_verifier(conn):
     t = Table("T", ["a", "b"], [["x", "y"], ["z", ""]])
     assert images.attach_table(conn, did, t, blanked=frozenset({(0, 1)})) is not None
     assert store.get_draft(conn, did).image_alt == "Table: T. x: b n/a. z: b n/a."
+
+
+def test_trusted_hosts_include_branding_domains_and_decide_rereads_trust(conn, monkeypatch):
+    from verify.verifier import is_trusted, trusted_hosts
+
+    root = {
+        "companies": {
+            "feeds": [{"key": "a", "url": "https://investors.amgen.com/rss", "domain": "amgen.com"}]
+        },
+        "branding": {"companies": [{"key": "jnj", "name": "J&J", "domain": "jnj.com"}]},
+    }
+    hosts = trusted_hosts({"trusted_domains": ["fda.gov"]}, root)
+    assert {"fda.gov", "investors.amgen.com", "amgen.com", "jnj.com"} <= hosts
+    assert is_trusted("https://www.jnj.com/media-center/x", hosts)
+    assert not is_trusted("https://www.tecvaylihcp.com/", hosts)

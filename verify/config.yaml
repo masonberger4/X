@@ -31,8 +31,9 @@ auto_revise:
 
 # A "supported" or "contradicted" verdict counts as verified only when the source is on
 # one of these hosts (subdomains included). Anything else is shown as a lead the human
-# must check. Company domains are not listed: an IR press release page on the company's
-# own site is matched through companies.feeds in the root config.yaml.
+# must check. Company domains are not listed: a press release on the company's own site is
+# matched through the root config.yaml (the host of each companies.feeds URL, a feed's
+# `domain:`, and the `domain:` of each branding.companies entry).
 trusted_domains:
   - clinicaltrials.gov
   - pubmed.ncbi.nlm.nih.gov

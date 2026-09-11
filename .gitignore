@@ -25,3 +25,9 @@ data/
 pipeline.lock
 backups/
 logs/
+
+# Rendered draft images (next to pipeline.db)
+images/
+
+# Fetched or hand-placed company logos are trademarks: keep them local (run_logos.py refills)
+assets/logos/*.png
