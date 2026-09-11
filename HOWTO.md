@@ -144,7 +144,34 @@ source only when it is due, and score only scores what is new.
    `max_iterations`; `IMAGE_GRADER_MODEL` in `.env` overrides the model. Each
    grade is one model call with the image, so a draft costs up to four extra
    calls. If the grader fails (no key, a bad reply) the picture is kept as
-   drawn and the log says so.
+   drawn and the log says so. Besides the overall score the grader rates a
+   checklist of professional touches (readable at thumbnail size, clear
+   hierarchy, aligned columns, a rounded 3D header, logos and tickers in
+   company cells, consistent numbers, a quiet source line, house style), and
+   those per-item scores show next to each render on the draft page.
+
+   Company cells in a table get a stock ticker and a logo automatically when
+   the company is configured. Add `ticker: AMGN` to the company's line under
+   `companies: feeds:` in `config.yaml`, or list a company that has no feed
+   under `branding: companies:` (with `aliases:` for other spellings, e.g.
+   J&J). For logos run
+
+       python run_logos.py
+
+   once: for every configured company it opens the company's own website
+   (`domain:` on the config line, or the feed's host with `ir.` / `investors.`
+   / `www.` removed) and saves the icon that site advertises (its
+   apple-touch-icon, else the largest favicon) as `assets\logos\<key>.png`.
+   Look through the folder afterwards and delete any you do not like; a
+   company whose feed sits on an investor-relations platform (gcs-web.com
+   and the like) needs a `domain:` in its config line, and the run tells you
+   which ones. `--only amgen --only jnj` limits it to those keys, `--force`
+   refetches existing files (after a rebrand), `--dry-run` only prints what
+   it would fetch. You can always drop a press-kit PNG in by hand instead
+   (see `assets\logos\README.md`). The pipeline itself downloads nothing:
+   a company that is not configured is drawn exactly as the drafter wrote
+   it, and a private company listed without a ticker gets its logo only. The
+   table header is drawn as a rounded navy bar with a shadow.
    The other kind of picture is a comparison table (a competitor landscape,
    a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
    first column naming the company, asset or trial. Unlike a chart its cells

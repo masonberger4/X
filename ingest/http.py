@@ -104,6 +104,25 @@ def get_text(
     return r.text
 
 
+def get_bytes(
+    url: str,
+    *,
+    user_agent: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    headers: dict[str, str] | None = None,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> tuple[bytes, str]:
+    """The response body and its Content-Type (for images: run_logos.py)."""
+    r = _request(
+        url,
+        params=None,
+        headers=_headers(user_agent, headers),
+        timeout=timeout,
+        max_attempts=max_attempts,
+    )
+    return r.content, r.headers.get("content-type", "")
+
+
 def get_json(
     url: str,
     *,

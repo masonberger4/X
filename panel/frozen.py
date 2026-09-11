@@ -36,6 +36,7 @@ CLIS = (
     "run_publish",
     "run_feedback",
     "run_ops",
+    "run_logos",
 )
 
 
