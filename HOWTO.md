@@ -461,16 +461,35 @@ the whole folder wherever you like; inside it:
 - `Pipeline.exe` is the app. Double-click it.
 - `pipeline-cli.exe` is what the runs page uses to run each step. Leave it
   next to `Pipeline.exe`.
-- `.env`, `pipeline.db`, `backups\` and `desktop.log` live in that same
-  folder (copy your `.env` in before the first start). `desktop.log` is
-  where messages go, since there is no command prompt; send it to me if the
-  window does not open.
-- the settings files (`config.yaml`, `ops\config.yaml`, `draft\voice.md`
-  and the others) are under `_internal\`. Editing them there works, but
-  they are copies: the next build takes the repo's versions again, so make
-  lasting changes in the repo and rebuild.
-After every `git pull` that changes code, rebuild; the exe does not update
-itself. Everything else is the same as in the browser, including the rule
+- the settings files (`config.yaml`, `ops\config.yaml`, `verify\config.yaml`,
+  `draft\voice.md` and the others) are under `_internal\`. Editing them there
+  works, but they are copies: the next build takes the repo's versions again,
+  so make lasting changes in the repo and rebuild.
+
+**Where the data lives.** The exe keeps its data next to itself, NOT in the
+repo: `.env`, `pipeline.db`, `backups\`, `images\` and `desktop.log` all sit in
+the folder that holds `Pipeline.exe`. Copy your `.env` in before the first
+start (and `pipeline.db` too if you want the stories and drafts you already
+have from running the scripts in the repo folder; otherwise the app starts
+with an empty database). `desktop.log` is where messages go, since there is
+no command prompt; send it to me if the window does not open.
+
+**Rebuilding.** After every `git pull` that changes code, or after a
+settings change in the repo, rebuild; the exe does not update itself. Close
+`Pipeline.exe` first. PyInstaller asks
+`The output directory "...\dist\Pipeline" and ALL ITS CONTENTS will be
+REMOVED! Continue?` and means it: if you have been running the app from
+`dist\Pipeline`, its `.env`, `pipeline.db`, `backups\` and `images\` go with
+it. Two ways to keep them:
+- keep the app outside `dist\` (say `C:\Users\you\Pipeline`): answer `y`,
+  then copy `Pipeline.exe`, `pipeline-cli.exe` and `_internal\` from
+  `dist\Pipeline` over the top of that folder. Its data files are never in
+  the way. This is the simplest habit.
+- or run it from `dist\Pipeline`: answer `N`, copy `.env`, `pipeline.db`,
+  `backups\` and `images\` somewhere safe, rebuild with `y`, and copy them
+  back. If the copy says `The system cannot find the file specified`, that
+  file was never there and there is nothing to keep.
+Everything else is the same as in the browser, including the rule
 that publishing stays off unless you turn it on in `ops\config.yaml`.
 
 ### Using it from your phone
