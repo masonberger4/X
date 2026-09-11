@@ -241,10 +241,13 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   writes the human's order to step 3's `schedule.position` (guarded migration in
   `publish/store.py`, `set_order`, unclaimed rows only); `scheduler.rank` puts ordered drafts
   first, then breaking, then policy; `store.publish_states` reads it back for the pill. The
-  panel never writes `config.yaml`, `draft/voice.md` or a draft's text. It has
+  panel never writes `config.yaml`, `draft/voice.md` or a draft's text. The one settings
+  file it edits is `publish/config.yaml`, two keys only: `POST /publishing/caps` calls
+  `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
+  comments kept). It has
   no authentication: `run_app.py` binds localhost by default. `/publishing` and
-  `/feedback` are views: no post button, and a report's suggestions are rendered, never
-  applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
+  `/feedback` are otherwise views: no post button, and a report's suggestions are rendered,
+  never applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
   changes no step: `panel/frozen.py` decides the data dir (exe folder when frozen, else
   the repo root), the step interpreter (`pipeline-cli` when frozen) and the bundle
   manifest (every `*/config.yaml`, `draft/voice.md`, both template dirs, each CLI script

@@ -5,6 +5,7 @@ No DB and no network. Everything time-related takes an aware datetime.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -39,6 +40,40 @@ def load_publish_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg.setdefault("media", {})
     cfg["media"].setdefault("attach_images", True)
     return cfg
+
+
+CAPS = ("max_posts_per_day", "min_gap_minutes")
+
+
+def save_caps(
+    max_posts_per_day: int, min_gap_minutes: int, path: str | Path | None = None
+) -> dict[str, int]:
+    """Write the two hard caps back into publish/config.yaml, editing just their lines so
+    the file's comments survive (the control panel's publishing page calls this). A key
+    missing from the file is appended. Values are validated here: at least one post a
+    day, a gap of zero or more minutes."""
+    values = {"max_posts_per_day": int(max_posts_per_day), "min_gap_minutes": int(min_gap_minutes)}
+    if values["max_posts_per_day"] < 1:
+        raise ValueError("max_posts_per_day must be at least 1")
+    if values["min_gap_minutes"] < 0:
+        raise ValueError("min_gap_minutes cannot be negative")
+    target = Path(path or CONFIG_PATH)
+    lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+    seen: set[str] = set()
+    for i, line in enumerate(lines):
+        for key in CAPS:
+            if re.match(rf"^{key}\s*:", line):
+                comment = line.split("#", 1)[1] if "#" in line else ""
+                tail = f"  #{comment}" if comment else "\n"
+                lines[i] = f"{key}: {values[key]}{tail}"
+                seen.add(key)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    for key in CAPS:
+        if key not in seen:
+            lines.append(f"{key}: {values[key]}\n")
+    target.write_text("".join(lines), encoding="utf-8")
+    return values
 
 
 def _parse_slot(slot: str) -> time:

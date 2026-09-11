@@ -475,8 +475,11 @@ to stop it. Four pages:
   kept on the draft (shown as #1, #2) until it posts.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
-  halfway is never retried for you). Read-only: posting happens from the
-  approved page or on the schedule.
+  halfway is never retried for you). Posting happens from the approved page
+  or on the schedule; the two limits at the top, posts per day and the
+  minimum gap between posts in minutes, are the only settings the panel
+  edits ("Save limits" writes them into `publish\config.yaml`, and the next
+  publish run uses them).
 - **Feedback** (`/feedback`) — followers over time, your posts ranked by
   impressions, and the suggestions from the latest weekly report. The
   suggestions are proposals only; applying one means editing a settings file.

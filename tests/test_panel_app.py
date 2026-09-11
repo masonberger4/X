@@ -267,3 +267,22 @@ def test_the_standalone_queue_shows_no_run_or_publish_buttons(conn, draft_id):
             assert "Set schedule" not in body and 'action="/runs"' not in body
     finally:
         panel_app._adopt_queue_routes()
+
+
+def test_the_publishing_page_edits_the_two_caps(client, monkeypatch, tmp_path):
+    from publish import scheduler as publish_scheduler
+
+    cfg = tmp_path / "publish.yaml"
+    cfg.write_text("timezone: UTC\nmax_posts_per_day: 3\nmin_gap_minutes: 90\n")
+    monkeypatch.setattr(publish_scheduler, "CONFIG_PATH", cfg)
+    body = client.get("/publishing").text
+    assert 'name="max_posts_per_day"' in body and 'value="90"' in body
+    r = client.post("/publishing/caps", data={"max_posts_per_day": "4", "min_gap_minutes": "45"})
+    assert r.status_code == 303 and r.headers["location"] == "/publishing?saved=1"
+    assert "min_gap_minutes: 45" in cfg.read_text()
+    assert 'value="45"' in client.get("/publishing?saved=1").text
+    r = client.post("/publishing/caps", data={"max_posts_per_day": "0", "min_gap_minutes": "45"})
+    assert "at least 1" in unquote_plus(r.headers["location"])
+    r = client.post("/publishing/caps", data={"max_posts_per_day": "x", "min_gap_minutes": "45"})
+    assert "whole number" in unquote_plus(r.headers["location"])
+    assert "max_posts_per_day: 4" in cfg.read_text()

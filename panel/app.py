@@ -15,6 +15,7 @@ Routes owned here:
   POST /runs/cancel     stop the run in progress (kills the step and what it launched)
   POST /publishing/now    post one approved draft now (run_publish.py --live --now --draft)
   POST /publishing/order  save the approved page's publishing order (schedule.position)
+  POST /publishing/caps   save max_posts_per_day / min_gap_minutes into publish/config.yaml
 
 The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., /voice),
 so the operator has one URL for the whole workflow. Everything else this app shows is
@@ -55,6 +56,7 @@ from panel import feed, views
 from panel import publishing as publish_order_store
 from panel.frozen import data_dir, step_interpreter
 from panel.jobs import JobError, JobManager
+from publish import scheduler as publish_scheduler
 from score import editorial
 
 log = logging.getLogger(__name__)
@@ -265,8 +267,9 @@ def _first(form: dict[str, list[str]], key: str) -> str | None:
 
 
 @app.get("/publishing", response_class=HTMLResponse)
-def publishing(request: Request, conn: Conn):
+def publishing(request: Request, conn: Conn, saved: int = 0, error: str = ""):
     now = _now()
+    caps = publish_scheduler.load_publish_config()
     state = ops_store.fetch_publish_state(conn, now)
     rows = ops_store.fetch_publish_rows(conn)
     activity = ops_store.fetch_stage_activity(conn, now)
@@ -281,8 +284,33 @@ def publishing(request: Request, conn: Conn):
             "approved_waiting": activity.approved_drafts,
             "last_posted": views.fmt_age(now, state.latest_posted_at),
             "publish_enabled": bool(publish_step and publish_step.enabled),
+            "max_posts_per_day": int(caps["max_posts_per_day"]),
+            "min_gap_minutes": int(caps["min_gap_minutes"]),
+            "saved": bool(saved),
+            "error": error,
         },
     )
+
+
+@app.post("/publishing/caps")
+async def publishing_caps(request: Request):
+    """Save the two hard caps into publish/config.yaml (the one settings file the panel
+    edits, two keys only, comments kept). The next publish run, scheduled or "Publish
+    now", reads the new values."""
+    form = await read_form(request)
+    try:
+        publish_scheduler.save_caps(
+            int(_first(form, "max_posts_per_day") or ""), int(_first(form, "min_gap_minutes") or "")
+        )
+    except ValueError as exc:
+        msg = (
+            str(exc)
+            if "must" in str(exc) or "cannot" in str(exc)
+            else "both fields need a whole number"
+        )
+        return RedirectResponse(f"/publishing?{urlencode({'error': msg})}", status_code=303)
+    log.info("publishing caps saved: %s", {k: _first(form, k) for k in publish_scheduler.CAPS})
+    return RedirectResponse("/publishing?saved=1", status_code=303)
 
 
 @app.get("/feedback", response_class=HTMLResponse)

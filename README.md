@@ -32,7 +32,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/` | health checks, the last outcome of every orchestrator step, row counts, database size, latest backup |
 | `/sources` | every configured ingest source with its freshness, last error and item counts |
 | `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline; one "Ingest and score" button |
-| `/publishing` | approved and waiting, what has posted, and any partial thread needing a human |
+| `/publishing` | approved and waiting, what has posted, any partial thread needing a human, and a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept) |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | every run's log (whichever page started it) and the checkboxes to run any enabled step; stop the one in progress |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue (its Revise box sends a draft back through the drafter with your note); the pending page has "Draft" and "Verify" buttons |
