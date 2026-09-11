@@ -5,6 +5,16 @@ max_claims_per_draft: 6       # extra claims stay "unchecked" and are listed as 
 max_searches_per_claim: 5     # web_search max_uses on the API backend
 timeout_seconds: 240          # per claim, claude_code backend
 
+# Comparison tables (draft/chart.py:Table). The drafter may propose a table whose cells go
+# beyond the source article; run_verify.py checks every cell that is not verbatim in the
+# article with one web-search call each, blanks the cells it cannot tie to a trusted
+# primary source, drops the table on a contradicted cell or when too few cells pass, and
+# only then draws the picture. enabled: false leaves tables unverified and unrendered.
+tables:
+  enabled: true
+  max_cells_per_draft: 30     # bigger tables are dropped before any call
+  min_supported_ratio: 0.6    # fewer verified fact cells than this share -> table dropped
+
 # A "supported" or "contradicted" verdict counts as verified only when the source is on
 # one of these hosts (subdomains included). Anything else is shown as a lead the human
 # must check. Company domains are not listed: an IR press release page on the company's

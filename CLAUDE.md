@@ -121,6 +121,21 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   (`publish/client.py:upload_media`, the third tweepy call, then `create_tweet` with
   `media_ids`); `media.attach_images` in `publish/config.yaml` turns that off, and an upload
   failure posts nothing and marks the draft `failed`.
+- **Draft tables** (`draft/chart.py:Table`, the alternative to a chart; `Draft.visual` is
+  whichever is set, both stored in `chart_json` with `kind: table` for a table): cells may
+  go beyond the source, so `attach_chart` never renders one. `run_verify.py`'s table pass
+  (`verify/tables.py`, pure) marks cells verbatim in the article as supported
+  (`model='source'`), sends every other cell to `verify_claim` as
+  `"<row label>, <column>: <cell>"`, stores verdicts in `table_checks` (verify's second
+  table), and once every cell has one either renders through
+  `approval_queue/images.py:attach_table` with unsupported cells blanked, or drops the
+  table via `store.drop_table` (an `edit` decision carrying the reason) on a contradicted
+  cell, too few supported cells (`tables.min_supported_ratio`), fewer than two verified row
+  labels, or more than `tables.max_cells_per_draft` cells. This is the one place step 2b
+  changes a draft row, and it never touches the text. The queue's approve route drops a
+  table whose picture was not rendered yet; revise calls
+  `verify/store.py:carry_over_table_checks` (same row label, column and cell text keeps
+  its verdict). `check_hard_rules` scans table cells for advice phrases.
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
   tables are `drafts` and `decisions`; edits log original vs edited text.
@@ -220,7 +235,7 @@ score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories
           rater.py (second-opinion yes/no rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
-draft/    schema.py, chart.py (chart spec, verification, PNG rendering), prompt.py,
+draft/    schema.py, chart.py (chart + table specs, verification, PNG rendering), prompt.py,
           voice.md, drafter.py, config.yaml, settings.py,
           examples.py (EditExample, select_edit_examples, format_examples_block),
           voice_report.py (VoiceReport, build_report, render_markdown, CLI)
@@ -233,7 +248,8 @@ panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed 
           step interpreter and bundle manifest for the desktop build),
           app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback), templates/
 verify/   config.yaml, settings.py, verifier.py (ClaimCheck, verify_claim,
-          call_model), store.py (claim_checks)
+          call_model), store.py (claim_checks, table_checks), tables.py (cell claims,
+          source-backed cells, the render/drop decision)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
           fetch_approved), client.py (post_tweet, upload_media, verify_credentials)
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,

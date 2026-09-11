@@ -29,7 +29,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from draft.chart import IMAGES_DIRNAME, Chart, chart_from_json
+from draft.chart import (
+    IMAGES_DIRNAME,
+    Chart,
+    Table,
+    chart_from_json,
+    table_from_json,
+    visual_from_json,
+)
 from draft.schema import Claim, Draft
 
 DEFAULT_DB_PATH = "./pipeline.db"
@@ -119,6 +126,7 @@ _MIGRATIONS = (
     ("decisions", "category", "ALTER TABLE decisions ADD COLUMN category TEXT"),
     ("drafts", "chart_json", "ALTER TABLE drafts ADD COLUMN chart_json TEXT"),
     ("drafts", "image_path", "ALTER TABLE drafts ADD COLUMN image_path TEXT"),
+    ("drafts", "image_alt", "ALTER TABLE drafts ADD COLUMN image_alt TEXT"),
 )
 
 
@@ -169,7 +177,8 @@ def _now() -> str:
 
 
 def _chart_json(draft: Draft) -> str | None:
-    return json.dumps(draft.chart.to_dict()) if draft.chart is not None else None
+    """The draft's visual (chart or table) as stored in drafts.chart_json."""
+    return json.dumps(draft.visual.to_dict()) if draft.visual is not None else None
 
 
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
@@ -303,6 +312,7 @@ class DraftRow:
     rationale: str = ""
     suggested_angle: str = ""
     image_path: str | None = None  # relative to image_dir(); None: no image
+    image_alt: str = ""  # alt text of the rendered picture (set with image_path)
 
 
 def _row_to_draft(r: sqlite3.Row) -> DraftRow:
@@ -314,6 +324,7 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
         why_it_matters=r["why_it_matters"],
         claims_to_verify=[Claim(**c) for c in json.loads(r["claims_json"])],
         chart=chart_from_json(r["chart_json"]) if "chart_json" in keys else None,
+        table=table_from_json(r["chart_json"]) if "chart_json" in keys else None,
     )
     return DraftRow(
         id=r["id"],
@@ -334,6 +345,7 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
         rationale=(r["rationale"] or "") if "rationale" in keys else "",
         suggested_angle=(r["suggested_angle"] or "") if "suggested_angle" in keys else "",
         image_path=(r["image_path"] or None) if "image_path" in keys else None,
+        image_alt=(r["image_alt"] or "") if "image_alt" in keys else "",
     )
 
 
@@ -560,7 +572,7 @@ def revise(
     conn.execute(
         """UPDATE drafts SET single_post = ?, thread_json = ?, suggested_visual = ?,
                              why_it_matters = ?, claims_json = ?, model = ?, updated_at = ?,
-                             chart_json = ?, image_path = NULL
+                             chart_json = ?, image_path = NULL, image_alt = NULL
            WHERE id = ?""",
         (
             draft.single_post,
@@ -579,8 +591,9 @@ def revise(
     return did
 
 
-def set_image(conn: sqlite3.Connection, draft_id: int, path: Path | None) -> None:
-    """Record the rendered PNG for a draft (stored relative to image_dir()), or clear it."""
+def set_image(conn: sqlite3.Connection, draft_id: int, path: Path | None, alt: str = "") -> None:
+    """Record the rendered PNG for a draft (stored relative to image_dir()) and its alt
+    text, or clear both."""
     _require(conn, draft_id)
     rel = None
     if path is not None:
@@ -589,7 +602,8 @@ def set_image(conn: sqlite3.Connection, draft_id: int, path: Path | None) -> Non
         except ValueError:
             rel = Path(path).name
     conn.execute(
-        "UPDATE drafts SET image_path = ?, updated_at = ? WHERE id = ?", (rel, _now(), draft_id)
+        "UPDATE drafts SET image_path = ?, image_alt = ?, updated_at = ? WHERE id = ?",
+        (rel, alt if rel else "", _now(), draft_id),
     )
     conn.commit()
 
@@ -601,7 +615,8 @@ def drop_image(conn: sqlite3.Connection, draft_id: int, note: str | None = None)
     row = _require(conn, draft_id)
     path = resolve_image(row.image_path)
     conn.execute(
-        "UPDATE drafts SET chart_json = NULL, image_path = NULL, updated_at = ? WHERE id = ?",
+        "UPDATE drafts SET chart_json = NULL, image_path = NULL, image_alt = NULL, "
+        "updated_at = ? WHERE id = ?",
         (_now(), draft_id),
     )
     text = _serialise_text(row.draft.single_post, row.draft.thread)
@@ -617,6 +632,18 @@ def drop_image(conn: sqlite3.Connection, draft_id: int, note: str | None = None)
 def chart_for(conn: sqlite3.Connection, draft_id: int) -> Chart | None:
     r = conn.execute("SELECT chart_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
     return chart_from_json(r["chart_json"]) if r else None
+
+
+def visual_for(conn: sqlite3.Connection, draft_id: int) -> Chart | Table | None:
+    r = conn.execute("SELECT chart_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
+    return visual_from_json(r["chart_json"]) if r else None
+
+
+def drop_table(conn: sqlite3.Connection, draft_id: int, reason: str) -> None:
+    """Step 2b decided the draft's table cannot be shown (a contradicted cell, too few
+    supported cells). Same as drop_image but with the fact-checker's reason in the decision
+    note, so the history says why the post went out text-only."""
+    drop_image(conn, draft_id, note=f"table dropped by the fact-checker: {reason}")
 
 
 def reject(

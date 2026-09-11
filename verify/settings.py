@@ -18,6 +18,7 @@ DEFAULTS: dict[str, Any] = {
     "max_searches_per_claim": 5,
     "timeout_seconds": 240,
     "trusted_domains": [],
+    "tables": {"enabled": True, "max_cells_per_draft": 30, "min_supported_ratio": 0.6},
 }
 
 
@@ -28,4 +29,5 @@ def load_verify_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
         with open(path, encoding="utf-8") as fh:
             out.update(yaml.safe_load(fh) or {})
     out["trusted_domains"] = [str(d).lower().strip() for d in out.get("trusted_domains") or []]
+    out["tables"] = {**DEFAULTS["tables"], **(out.get("tables") or {})}
     return out

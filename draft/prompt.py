@@ -37,6 +37,14 @@ HARD_RULES = f"""HARD RULES. A draft that breaks any of these is discarded autom
    each value exactly as written, and set it to null otherwise. Every number in the chart
    is checked against the source like rule 4; one miss and the chart is dropped.
    "suggested_visual" stays a one-line description for the human reviewer.
+10. "table" is the alternative to a chart: a small comparison (2-8 rows, 2-5 columns; the
+   first column names the company, asset or trial) such as a competitor landscape, a set
+   of upcoming catalysts or the deal terms side by side. Unlike a chart its cells MAY come
+   from your own knowledge: every cell is fact-checked on the web before the table is drawn,
+   a cell that cannot be tied to a primary source is blanked, and one contradicted cell
+   drops the table. So keep cells short, factual and checkable (a phase, a date, a
+   mechanism, a ticker, a number), never an opinion, and give at most one of chart/table
+   (null for the other). Use "suggested_visual" to say what the table shows.
 """
 
 

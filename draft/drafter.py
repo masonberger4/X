@@ -258,6 +258,12 @@ def check_hard_rules(draft: Draft, *, url: str, source: str) -> list[str]:
             problems.append(
                 f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
+    if draft.table is not None:
+        for text in [draft.table.title, draft.table.note, *(c for _, _, c in draft.table.cells())]:
+            if _ADVICE_RE.search(text):
+                problems.append(f"table reads as medical advice: {text!r}")
+            elif _INVEST_RE.search(text):
+                problems.append(f"table reads as investment advice: {text!r}")
     if not _url_in(draft.single_post, url):
         problems.append("single_post is missing the primary source URL")
     if not _url_in(draft.thread[-1], url):

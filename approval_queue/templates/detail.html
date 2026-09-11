@@ -21,7 +21,11 @@
 
 {% if image_url %}
 <h2>Image</h2>
+{% if d.draft.table %}
+<p class="meta">Attached to the first post when published. Drawn by code from the table below after every cell was fact-checked; a blank cell is one the checker could not tie to a primary source.</p>
+{% else %}
 <p class="meta">Attached to the first post when published. Rendered by code from the numbers below; check every bar against the source.</p>
+{% endif %}
 <p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid #ccc"></p>
 <p class="meta">{{ image_alt }}</p>
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/drop">
@@ -31,6 +35,33 @@
 {% elif d.draft.chart %}
 <h2>Image</h2>
 <p class="meta">The drafter proposed a chart ({{ d.draft.chart.title }}) but no image was rendered: images are disabled in draft/config.yaml or matplotlib is not installed. Nothing will be attached.</p>
+{% elif d.draft.table %}
+<h2>Image</h2>
+<p class="flash">The drafter proposed a table ({{ d.draft.table.title }}). Its cells are being fact-checked on the web (<code>python run_verify.py</code>); the picture is drawn once every cell has a verdict. Approving before then posts the text alone.</p>
+{% endif %}
+
+{% if d.draft.table %}
+<h2>Table cells</h2>
+<p class="meta">{{ table_checks|length }} of {{ d.draft.table.cells()|length }} cells checked. A supported cell from a trusted source keeps its text; anything else is blanked in the picture; one contradicted cell drops the table.</p>
+<div style="overflow-x:auto"><table class="cells">
+  <thead><tr>{% for col in d.draft.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for row in d.draft.table.rows %}
+    {% set r = loop.index0 %}
+    <tr>
+    {% for cell in row %}
+      {% set k = table_checks.get((r, loop.index0)) %}
+      <td class="cell {% if k %}{{ 'shown' if k.shown else k.verdict }}{% elif cell %}unchecked{% endif %}">
+        {{ cell or "" }}
+        {% if k %}<div class="meta">{{ k.label }}{% if k.source_url %} · <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">source</a>{% endif %}</div>
+        {% elif cell %}<div class="meta">not checked yet</div>{% endif %}
+      </td>
+    {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% if d.draft.table.note %}<p class="meta">{{ d.draft.table.note }}</p>{% endif %}
 {% endif %}
 
 <h2>Single post</h2>
