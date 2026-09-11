@@ -335,6 +335,59 @@ FONT_FAMILIES = [
     "DejaVu Sans",
 ]  # first installed wins
 
+ACCENT_TINT = "#7f9bbd"  # comparators when the first bar is highlighted
+
+
+@dataclass
+class Style:
+    """Layout knobs the image grader (draft/grader.py) may turn between iterations. Each is
+    clamped to its range by `clamp`, so a grader can never push text off the card. Defaults
+    are the house style; None from the grader means "leave as is"."""
+
+    font_scale: float = 1.0  # every text size except the title (0.7-1.6)
+    title_scale: float = 1.0  # the title alone (0.7-1.6)
+    bar_height: float = 0.46  # bar thickness as a fraction of the row pitch (0.3-0.8)
+    row_pitch: float = 0.10  # figure fraction per chart row (0.06-0.16)
+    label_wrap: int = 30  # characters per line for bar labels (16-60)
+    highlight_first: bool = False  # first bar in navy, the rest in a tint
+    gridlines: bool = True
+    track: bool = True  # light bar behind each bar showing the full scale
+    table_row_height: float = 0.105  # figure fraction per table row (0.06-0.16)
+
+    RANGES = {
+        "font_scale": (0.7, 1.6),
+        "title_scale": (0.7, 1.6),
+        "bar_height": (0.3, 0.8),
+        "row_pitch": (0.06, 0.16),
+        "label_wrap": (16, 60),
+        "table_row_height": (0.06, 0.16),
+    }
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def apply(self, changes: dict[str, Any] | None) -> Style:
+        """A copy with `changes` applied: unknown keys and None values are ignored, numbers
+        are clamped to their range, flags are coerced to bool."""
+        from dataclasses import replace
+
+        clean: dict[str, Any] = {}
+        for key, value in (changes or {}).items():
+            if value is None or key not in self.__dataclass_fields__:
+                continue
+            if key in self.RANGES:
+                lo, hi = self.RANGES[key]
+                try:
+                    num = float(value)
+                except (TypeError, ValueError):
+                    continue
+                num = min(max(num, lo), hi)
+                clean[key] = int(round(num)) if key == "label_wrap" else num
+            else:
+                clean[key] = bool(value)
+        return replace(self, **clean)
+
+
 # Figure coordinates (0-1) shared by charts and tables.
 _MARGIN_X = 0.055
 _TITLE_Y = 0.845
@@ -373,11 +426,15 @@ def _wrap(text: str, width: int) -> str:
     return "\n".join(textwrap.wrap(text, width=width)) or text
 
 
-def _frame(fig, plt, *, title: str, footer: list[str], subtitle: str = "") -> None:
+def _frame(
+    fig, plt, *, title: str, footer: list[str], subtitle: str = "", style: Style | None = None
+) -> None:
     """The chrome around the data: accent rule, eyebrow, title, subtitle, footer rule
     and footer texts (note on the left, source on the right)."""
     from matplotlib.patches import Rectangle
 
+    st = style or Style()
+    fs, ts = st.font_scale, st.title_scale
     fig.patch.set_facecolor(SURFACE)
     # accent rule across the top
     fig.add_artist(Rectangle((0, 0.985), 1, 0.015, transform=fig.transFigure, color=ACCENT, lw=0))
@@ -385,7 +442,7 @@ def _frame(fig, plt, *, title: str, footer: list[str], subtitle: str = "") -> No
         _MARGIN_X,
         0.925,
         EYEBROW,
-        fontsize=6.2,
+        fontsize=6.2 * fs,
         color=INK_3,
         fontweight="bold",
         ha="left",
@@ -394,8 +451,8 @@ def _frame(fig, plt, *, title: str, footer: list[str], subtitle: str = "") -> No
     fig.text(
         _MARGIN_X,
         _TITLE_Y,
-        _wrap(title, 62),
-        fontsize=12.5,
+        _wrap(title, max(20, int(62 / ts))),
+        fontsize=12.5 * ts,
         fontweight="bold",
         color=INK,
         ha="left",
@@ -407,7 +464,7 @@ def _frame(fig, plt, *, title: str, footer: list[str], subtitle: str = "") -> No
             _MARGIN_X,
             _PLOT_TOP + 0.035,
             _wrap(subtitle, 120),
-            fontsize=6.8,
+            fontsize=6.8 * fs,
             color=INK_2,
             ha="left",
             va="center",
@@ -424,14 +481,20 @@ def _frame(fig, plt, *, title: str, footer: list[str], subtitle: str = "") -> No
     if footer:
         left, right = footer[0], footer[1:]
         fig.text(
-            _MARGIN_X, _FOOTER_Y, _wrap(left, 110), fontsize=6, color=INK_2, ha="left", va="center"
+            _MARGIN_X,
+            _FOOTER_Y,
+            _wrap(left, 110),
+            fontsize=6 * fs,
+            color=INK_2,
+            ha="left",
+            va="center",
         )
         if right:
             fig.text(
                 1 - _MARGIN_X,
                 _FOOTER_Y,
                 "   ·   ".join(right),
-                fontsize=6,
+                fontsize=6 * fs,
                 color=INK_3,
                 ha="right",
                 va="center",
@@ -443,12 +506,16 @@ def _source_label(source_url: str) -> str:
     return f"Source: {host.group(1)}" if host else ""
 
 
-def render_chart(chart: Chart, path: str | Path, *, source_url: str = "") -> Path:
+def render_chart(
+    chart: Chart, path: str | Path, *, source_url: str = "", style: Style | None = None
+) -> Path:
     """Draw the chart as a PNG at `path` (parent dirs created). Raises ImportError without
     matplotlib, which the callers turn into 'no image' rather than 'no draft'.
 
     Horizontal bars (arm and endpoint names are long), one hue, a light track showing the
     full scale behind each bar, the verified value at every bar's tip."""
+    st = style or Style()
+    fs = st.font_scale
     plt = _setup()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -460,23 +527,25 @@ def render_chart(chart: Chart, path: str | Path, *, source_url: str = "") -> Pat
     unit_label = ""
     if chart.unit and chart.unit != "%":
         unit_label = f"Values in {chart.unit}"
-    _frame(fig, plt, title=chart.title, footer=footer, subtitle=unit_label)
+    _frame(fig, plt, title=chart.title, footer=footer, subtitle=unit_label, style=st)
 
     n = len(chart.values)
-    wrap_at = 30 if n <= 5 else 44  # dense charts get a wider gutter and fewer wrapped lines
+    wrap_at = st.label_wrap if n <= 5 else max(st.label_wrap, 44)  # dense charts wrap less
     longest = max(len(line) for lab in chart.labels for line in _wrap(lab, wrap_at).split("\n"))
-    label_w = min(max(0.05 + 0.0072 * longest, 0.12), 0.36)  # gutter for the bar labels
+    label_w = min(max(0.05 + 0.0072 * longest * fs, 0.12), 0.36)  # gutter for the bar labels
     avail = _PLOT_TOP - _PLOT_BOTTOM
-    span = min(avail, 0.10 * n + 0.06)  # rows keep a fixed height, centred in the plot area
+    span = min(avail, st.row_pitch * n + 0.06)  # rows keep a fixed height, centred
     bottom = _PLOT_BOTTOM + (avail - span) / 2
     ax = fig.add_axes((_MARGIN_X + label_w, bottom, 1 - 2 * _MARGIN_X - label_w - 0.06, span))
     ax.set_facecolor(SURFACE)
     top = max(chart.values + [0.0]) or 1.0
     scale = 100.0 if chart.unit.strip() == "%" and top <= 100 else top
     y = list(range(n))[::-1]  # first label at the top
-    height = 0.46
-    ax.barh(y, [scale] * n, height=height, color=ACCENT_SOFT, alpha=0.55, lw=0)
-    ax.barh(y, chart.values, height=height, color=ACCENT, lw=0)
+    height = st.bar_height
+    if st.track:
+        ax.barh(y, [scale] * n, height=height, color=ACCENT_SOFT, alpha=0.55, lw=0)
+    colors = [ACCENT] + [ACCENT_TINT] * (n - 1) if st.highlight_first else [ACCENT] * n
+    ax.barh(y, chart.values, height=height, color=colors, lw=0)
     ax.set_xlim(0, scale * 1.16)
     ax.set_ylim(-0.6, n - 0.4)
     ax.set_yticks(y)
@@ -487,8 +556,8 @@ def render_chart(chart: Chart, path: str | Path, *, source_url: str = "") -> Pat
         linespacing=1.1,
     )
     ax.tick_params(axis="y", length=0, pad=10)
-    ax.tick_params(axis="x", labelsize=6, length=0, colors=INK_3)
-    ax.xaxis.grid(True, color=RULE, lw=0.5)
+    ax.tick_params(axis="x", labelsize=6 * fs, length=0, colors=INK_3)
+    ax.xaxis.grid(st.gridlines, color=RULE, lw=0.5)
     ax.set_axisbelow(True)
     ticks = ax.get_xticks()
     ax.set_xticks([t for t in ticks if 0 <= t <= scale])
@@ -504,7 +573,7 @@ def render_chart(chart: Chart, path: str | Path, *, source_url: str = "") -> Pat
             textcoords="offset points",
             ha="left",
             va="center",
-            fontsize=8,
+            fontsize=8 * fs,
             fontweight="bold",
             color=INK,
         )
@@ -519,12 +588,15 @@ def render_table(
     *,
     source_url: str = "",
     blanked: frozenset[tuple[int, int]] = frozenset(),
+    style: Style | None = None,
 ) -> Path:
     """Draw the table as a PNG at `path`. Cells in `blanked` (the fact-checker could not
     support them) are drawn as BLANK_CELL and the footer says so. Raises ImportError without
     matplotlib, like render_chart.
 
     A navy header row, zebra rows, horizontal hairlines only, bold row labels."""
+    st = style or Style()
+    fs = st.font_scale
     plt = _setup()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -535,7 +607,7 @@ def render_table(
     src = _source_label(source_url)
     if src:
         footer.append(src)
-    _frame(fig, plt, title=table.title, footer=footer)
+    _frame(fig, plt, title=table.title, footer=footer, style=st)
 
     body = [
         [BLANK_CELL if (r, c) in blanked or not cell else cell for c, cell in enumerate(row)]
@@ -546,11 +618,11 @@ def render_table(
     longest = [min(max(n, 6), 40) for n in longest]
     widths = [n / sum(longest) for n in longest]
     nrows = len(body) + 1
-    row_h = min(0.105, (_PLOT_TOP + 0.03 - _PLOT_BOTTOM) / nrows)
+    row_h = min(st.table_row_height, (_PLOT_TOP + 0.03 - _PLOT_BOTTOM) / nrows)
     ax = fig.add_axes((_MARGIN_X, _PLOT_BOTTOM, 1 - 2 * _MARGIN_X, _PLOT_TOP + 0.03 - _PLOT_BOTTOM))
     ax.axis("off")
     tbl = ax.table(
-        cellText=[[_wrap(c, 34) for c in row] for row in body],
+        cellText=[[_wrap(c, max(12, int(34 / fs))) for c in row] for row in body],
         colLabels=[c.upper() for c in table.columns],
         colWidths=widths,
         cellLoc="left",
@@ -564,14 +636,14 @@ def render_table(
         ),
     )
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(6.8)
+    tbl.set_fontsize(6.8 * fs)
     for (r, c), cell in tbl.get_celld().items():
         cell.PAD = 0.05
         cell.set_linewidth(0.5)
         if r == 0:
             cell.set_facecolor(HEADER_FILL)
             cell.set_edgecolor(HEADER_FILL)
-            cell.set_text_props(fontweight="bold", color="white", fontsize=5.8)
+            cell.set_text_props(fontweight="bold", color="white", fontsize=5.8 * fs)
             continue
         cell.visible_edges = "B"
         cell.set_edgecolor(RULE)
@@ -591,6 +663,7 @@ __all__ = [
     "BLANK_CELL",
     "CHART_JSON_SCHEMA",
     "TABLE_JSON_SCHEMA",
+    "Style",
     "Table",
     "render_table",
     "table_from_json",

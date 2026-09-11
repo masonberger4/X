@@ -196,6 +196,14 @@ break "never fabricate numbers", so:
   `<db folder>/images/draft_<id>.png` (`approval_queue/images.py:attach_chart`,
   fail-soft). `drafts.chart_json` and `drafts.image_path` are guarded
   migrations in `approval_queue/store.py`;
+- every render is graded by a second model (`draft/grader.py`, settings under
+  `images: grader:` in `draft/config.yaml`): 1-10 on readability, use of
+  colour and graphics, and limited negative space, with flaws and fixes. Under
+  `min_score` (8) the renderer applies the grader's layout-knob changes
+  (`draft/chart.py:Style`: text scale, bar thickness, row pitch, highlight,
+  gridlines, track) and draws again, up to `max_iterations` (4) renders; the
+  best-scoring render is kept. Grades live in `image_grades` and show on the
+  draft page. The grader never touches a number, label or title;
 - the queue shows the PNG and its alt text at `/drafts/{id}/image`; "Drop
   image" (`POST /drafts/{id}/image/drop`) clears both and logs an `edit`
   decision with the text unchanged; a revise re-renders from the new draft;

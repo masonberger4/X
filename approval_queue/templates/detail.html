@@ -28,6 +28,14 @@
 {% endif %}
 <p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid #ccc"></p>
 <p class="meta">{{ image_alt }}</p>
+{% if image_grades %}
+<details>
+  <summary class="meta">Image grader: {% for g in image_grades %}{% if g.kept %}<strong>{{ g.score }}/10</strong> (kept){% else %}{{ g.score }}/10{% endif %}{% if not loop.last %} → {% endif %}{% endfor %} over {{ image_grades|length }} render{{ 's' if image_grades|length != 1 else '' }}</summary>
+  {% for g in image_grades %}
+  <p class="meta">Render {{ g.iteration }}: {{ g.score }}/10{% if g.kept %} (kept){% endif %}{% if g.flaws %} — flaws: {{ g.flaws|join('; ') }}{% endif %}{% if g.fixes %} — fixes: {{ g.fixes|join('; ') }}{% endif %}</p>
+  {% endfor %}
+</details>
+{% endif %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/drop">
   <input name="note" placeholder="why (optional)">
   <button>Drop image</button> <span class="meta">the post goes out text-only</span>

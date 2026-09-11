@@ -127,6 +127,22 @@ source only when it is due, and score only scores what is new.
    the note on the left and the source host on the right. The colours, the
    eyebrow text and the font list are constants at the top of the rendering
    section of `draft\chart.py`.
+
+   Every picture is then graded. A second model looks at the PNG and scores
+   it 1 to 10 on three things: easy to read, good use of colour and graphics,
+   little empty space. It also lists the flaws it saw and a fix for each.
+   A score of 8 or more is done. Below that the code applies the grader's
+   layout changes (text size, bar thickness, row spacing, a highlighted first
+   bar, gridlines, the scale track) and draws the picture again, up to four
+   times, and keeps the best-scoring version. The grader can only move layout;
+   it can never add or change a number, a label or a title. Each draft page in
+   the queue shows the scores under the image ("Image grader: 6/10 → 8/10")
+   with the flaws and fixes behind a click. `images: grader:` in
+   `draft\config.yaml` sets `enabled`, the `model`, `min_score` and
+   `max_iterations`; `IMAGE_GRADER_MODEL` in `.env` overrides the model. Each
+   grade is one model call with the image, so a draft costs up to four extra
+   calls. If the grader fails (no key, a bad reply) the picture is kept as
+   drawn and the log says so.
    The other kind of picture is a comparison table (a competitor landscape,
    a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
    first column naming the company, asset or trial. Unlike a chart its cells
