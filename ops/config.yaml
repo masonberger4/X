@@ -41,7 +41,7 @@ steps:
   # test asserts this file never contains it.
   - name: publish
     argv: ["python", "run_publish.py"]
-    enabled: false
+    enabled: true
     required: false
     timeout_seconds: 300
   # Daily metrics snapshot (step 4). Optional; enable once feedback/ has

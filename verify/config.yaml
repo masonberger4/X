@@ -24,7 +24,7 @@ tables:
 # claim. Tables are not part of the loop. `--auto-revise` / `--no-auto-revise` on
 # run_verify.py override `enabled` for one run.
 auto_revise:
-  enabled: false
+  enabled: true
   max_rounds: 3               # rounds per draft per run
   max_rounds_per_draft: 6     # automatic revisions over the draft's whole life; after that
                               # the draft waits for a human ("auto-revise gave up" on the queue)
