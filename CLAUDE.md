@@ -118,7 +118,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
   turns rendering off. The queue serves it at `/drafts/{id}/image` and `store.drop_image`
   is the only way a human removes it. Step 3 attaches it to the FIRST post
-  (`publish/client.py:upload_media`, the third tweepy call, then `create_tweet` with
+  (`publish/client.py:upload_media`, v2 media/upload + media/metadata on tweepy's OAuth 1.0a session, then `create_tweet` with
   `media_ids`); `media.attach_images` in `publish/config.yaml` turns that off, and an upload
   failure posts nothing and marks the draft `failed`.
 - **Draft tables** (`draft/chart.py:Table`, the alternative to a chart; `Draft.visual` is
