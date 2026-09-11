@@ -275,7 +275,11 @@ source only when it is due, and score only scores what is new.
    python run_publish.py --live --now        # ignore slots, post the top candidate once
    python run_publish.py --live --breaking   # only FDA / company-approval items
    python run_publish.py --live --limit 1    # at most one post this run
+   python run_publish.py --live --format single   # this run only: the single post, not the thread
    ```
+   Each draft carries a single post and a thread; `post_format` in
+   `publish\config.yaml` picks which one goes out (`thread` by default) and
+   `--format` overrides it for one run.
    A draft is posted at most once even if the command runs twice. A thread
    that fails part-way is marked partial and left for you; it is never
    retried automatically.
