@@ -419,7 +419,10 @@ to stop it. Four pages:
   claim's verdict is saved the moment it lands, so stopping the run keeps
   every claim already checked and only the one in flight is redone next time.
 - **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
-  approval pages from part 3, unchanged.
+  approval pages from part 3. The Approved page is the waiting list for
+  `run_publish.py`: each row says `waiting`, `posted` (a link to the tweet),
+  `failed` or `partial thread`, and drafts already posted are hidden until you
+  press "Show posted". The draft page shows the same, with the posting time.
 
 Links to other websites (a story's source, a DOI, a posted tweet, a
 claim check's source, a draft's primary source) open in a new tab, or in your

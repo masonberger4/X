@@ -10,6 +10,11 @@
   · model {{ d.model }}
   · created {{ d.created_at }}
   {% if d.url %}· <a href="{{ d.url }}" target="_blank" rel="noopener noreferrer">primary source</a>{% endif %}
+  {% if publish %}· published
+    {% if publish.status == "posted" %}<a class="pill ok" href="{{ publish.tweet_url }}" target="_blank" rel="noopener noreferrer">posted{% if publish.posted_at %} {{ publish.posted_at[:16] }}{% endif %}</a>
+    {% elif publish.status == "partial" %}<span class="pill fail">partial thread</span>{% if publish.tweet_url %} <a href="{{ publish.tweet_url }}" target="_blank" rel="noopener noreferrer">first post</a>{% endif %} <span class="meta">{{ publish.error }}</span>
+    {% else %}<span class="pill {{ 'warn' if publish.status == 'claimed' else 'fail' }}">{{ publish.status }}</span>{% if publish.error %} <span class="meta">{{ publish.error }}</span>{% endif %}{% endif %}
+  {% endif %}
 </p>
 {% if error %}<p class="flash over">{{ error }}</p>{% endif %}
 {% if revised %}<p class="flash">Revised. Read the new text below; claims whose text changed lost their verdict; supported claims that stayed the same kept theirs (run <code>python run_verify.py</code> or wait for the scheduler).</p>{% endif %}
