@@ -156,7 +156,14 @@ def index(request: Request, conn: Conn):
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"drafts": drafts, "status": "pending", "checks": _check_summaries(conn, drafts)},
+        {
+            "drafts": drafts,
+            "status": "pending",
+            "checks": _check_summaries(conn, drafts),
+            "publish": {},
+            "hidden_posted": 0,
+            "show_posted": False,
+        },
     )
 
 
@@ -179,14 +186,31 @@ def _check_summaries(conn, drafts) -> dict[int, dict[str, int]]:
 
 
 @app.get("/status/{status}", response_class=HTMLResponse)
-def by_status(status: str, request: Request, conn: Conn):
+def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
+    """On the approved list each row carries what step 3 did with it (read-only), and drafts
+    already posted are hidden unless ?posted=1: the approved page is the waiting list."""
     if status not in store.STATUSES:
         raise HTTPException(404, "unknown status")
     drafts = store.list_drafts(conn, status)
+    publish = store.publish_states(conn, [d.id for d in drafts])
+    hidden = 0
+    if status == store.STATUS_APPROVED and not posted:
+        shown = [
+            d for d in drafts if publish.get(d.id, None) is None or publish[d.id].status != "posted"
+        ]
+        hidden = len(drafts) - len(shown)
+        drafts = shown
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"drafts": drafts, "status": status, "checks": _check_summaries(conn, drafts)},
+        {
+            "drafts": drafts,
+            "status": status,
+            "checks": _check_summaries(conn, drafts),
+            "publish": publish,
+            "hidden_posted": hidden,
+            "show_posted": bool(posted),
+        },
     )
 
 
@@ -222,6 +246,7 @@ def _render_detail(
         "detail.html",
         {
             "d": row,
+            "publish": store.publish_states(conn, [draft_id]).get(draft_id),
             "table_checks": table_checks,
             "image_grades": image_grades,
             "table_unverified": row.draft.table is not None and not has_image,

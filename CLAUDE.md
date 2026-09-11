@@ -187,6 +187,9 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
   settings live in `publish/config.yaml`, not the root config. Posting is
   idempotent via the claim; partial threads are never retried automatically.
+  The queue reads those two tables back only through
+  `approval_queue/store.py:publish_states` (read-only, empty when the tables are
+  missing) to label and hide posted drafts on the approved page.
   Texts are re-checked before posting and refused, never edited, on failure.
 - Step 4 reads other steps' tables only through `feedback/store.py:fetch_posted`
   (posts) and `fetch_post_context` (drafts/decisions/items/scores/ratings). Its

@@ -281,3 +281,64 @@ def test_pending_page_has_inline_revise_box(client, draft_id):
     body = client.get("/queue").text
     assert f'action="/drafts/{draft_id}/revise"' in body
     assert 'action="/drafts/' not in client.get("/status/approved").text
+
+
+def _publish_draft(conn, draft_id, *, status="posted", tweet_id="555", error=None):
+    """Write what step 3 would: a schedule claim and a first post row."""
+    from publish import store as pstore
+
+    pstore.connect(conn.execute("PRAGMA database_list").fetchone()[2]).close()  # tables
+    pstore.claim(conn, draft_id, "08:30")
+    pstore.record_post(
+        conn,
+        draft_id=draft_id,
+        text="one",
+        kind="single",
+        position=1,
+        slot="08:30",
+        tweet_id=tweet_id,
+        posted_at=None,
+        error=error,
+    )
+    pstore.finish(conn, draft_id, status, error)
+
+
+def test_approved_page_hides_posted_drafts_and_links_the_tweet(client, conn, draft_id):
+    store.approve(conn, draft_id)
+    seed_item(conn, "i2", source="pubmed")
+    other = store.insert_draft(
+        conn,
+        item_id="i2",
+        model="m",
+        draft=Draft(single_post=f"Second {URL}", thread=[], suggested_visual="", why_it_matters=""),
+    )
+    store.approve(conn, other)
+    # before any publish run: both listed as waiting, no tables yet
+    body = client.get("/status/approved").text
+    assert f"/drafts/{draft_id}" in body and f"/drafts/{other}" in body
+    assert body.count("waiting") >= 2 and "already posted" not in body
+
+    _publish_draft(conn, draft_id, tweet_id="555")
+    body = client.get("/status/approved").text
+    assert f"/drafts/{draft_id}" not in body and f"/drafts/{other}" in body
+    assert "1 already posted, hidden" in body and "?posted=1" in body
+    body = client.get("/status/approved?posted=1").text
+    assert f"/drafts/{draft_id}" in body
+    assert 'href="https://x.com/i/web/status/555"' in body and ">posted<" in body
+    assert "Hide posted" in body
+    # the detail page shows the same link
+    detail = client.get(f"/drafts/{draft_id}").text
+    assert "https://x.com/i/web/status/555" in detail and "published" in detail
+
+
+def test_approved_page_shows_failed_and_partial_but_keeps_them(client, conn, draft_id):
+    store.approve(conn, draft_id)
+    _publish_draft(conn, draft_id, status="failed", tweet_id=None, error="HTTP 403")
+    body = client.get("/status/approved").text
+    assert f"/drafts/{draft_id}" in body and ">failed<" in body and 'title="HTTP 403"' in body
+    conn.execute("UPDATE schedule SET status = 'partial' WHERE draft_id = ?", (draft_id,))
+    conn.commit()
+    body = client.get("/status/approved").text
+    assert f"/drafts/{draft_id}" in body and "partial thread" in body
+    # the pending list never shows publish pills
+    assert "waiting" not in client.get("/queue").text
