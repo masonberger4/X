@@ -134,7 +134,9 @@ source only when it is due, and score only scores what is new.
    A score of 8 or more is done. Below that the code applies the grader's
    layout changes (text size, bar thickness, row spacing, a highlighted first
    bar, gridlines, the scale track) and draws the picture again, up to four
-   times, and keeps the best-scoring version. The grader can only move layout;
+   times, and keeps the best-scoring version. A low score always costs another
+   render: if the grader names no layout change, the code steps the text size and
+   row spacing up itself. The grader can only move layout;
    it can never add or change a number, a label or a title. Each draft page in
    the queue shows the scores under the image ("Image grader: 6/10 → 8/10")
    with the flaws and fixes behind a click. `images: grader:` in

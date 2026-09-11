@@ -25,3 +25,6 @@ data/
 pipeline.lock
 backups/
 logs/
+
+# Rendered draft images (next to pipeline.db)
+images/
