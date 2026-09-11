@@ -51,6 +51,12 @@
     .entry blockquote { margin: .5rem 0; padding-left: .8rem; border-left: 3px solid #ddd; }
     details.run { border: 1px solid #ddd; border-radius: 8px; padding: .5rem .8rem; margin: .5rem 0; }
     .badge.contradicted { background: #fde7e9; color: #8a1c1c; } .badge.supported { background: #e6f4ea; color: #1b5e20; }
+    #working { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 10; background: #fff8e1; border-bottom: 1px solid #e0c060; padding: .5rem 1rem; font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,.1); }
+    #working.on { display: block; }
+    #working .track { height: 4px; background: #f0e2b0; border-radius: 2px; margin-top: .4rem; overflow: hidden; }
+    #working .fill { height: 100%; width: 30%; background: #b26a00; border-radius: 2px; animation: slide 1.2s ease-in-out infinite; }
+    @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+    form.busy button, form.busy input, form.busy textarea, form.busy select { opacity: .6; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -70,6 +76,24 @@
   <a href="/publishing">Publishing</a>
   <a href="/feedback">Feedback</a>{% endif %}
 </nav>
+<div id="working" role="status" aria-live="polite"><span class="msg"></span><div class="track"><div class="fill"></div></div></div>
 <main>{% block content %}{% endblock %}</main>
+<script>
+  // Long-running forms (the AI revise) give no feedback while the browser waits
+  // for the redirect; show a status bar and lock the form so it is not sent twice.
+  document.addEventListener("submit", function (ev) {
+    var form = ev.target;
+    if (!form.matches("form[action$='/revise']")) return;
+    if (form.classList.contains("busy")) { ev.preventDefault(); return; }
+    form.classList.add("busy");
+    var bar = document.getElementById("working");
+    bar.querySelector(".msg").textContent = "Revising with AI\u2026 the drafter is rewriting the post; the page reloads when it is done (usually 10\u201330 seconds).";
+    bar.classList.add("on");
+  });
+  window.addEventListener("pageshow", function () {
+    document.getElementById("working").classList.remove("on");
+    document.querySelectorAll("form.busy").forEach(function (f) { f.classList.remove("busy"); });
+  });
+</script>
 </body>
 </html>

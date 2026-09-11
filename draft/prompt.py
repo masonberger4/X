@@ -163,7 +163,9 @@ def build_revision_user_prompt(
         "Rewrite the draft applying the instructions and fixes above. Keep everything the "
         "instructions do not touch as close to the current draft as possible (same angle, same "
         "structure, same wording where it still fits). Every hard rule still applies. Update "
-        "claims_to_verify so it lists only claims that remain in the revised text. "
+        "claims_to_verify so it lists only claims that remain in the revised text, keeping the "
+        "exact wording of every claim that still holds (a fact-checker's verdict is kept only "
+        "for a claim whose text is unchanged). "
         "Output the full JSON object only."
     )
     return "\n".join(parts)

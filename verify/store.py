@@ -4,6 +4,7 @@ tables."""
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -125,6 +126,47 @@ def delete_checks(conn: sqlite3.Connection, draft_id: int) -> None:
     ensure_schema(conn)
     conn.execute("DELETE FROM claim_checks WHERE draft_id = ?", (draft_id,))
     conn.commit()
+
+
+def _norm_claim(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().rstrip(".").casefold()
+
+
+def carry_over_checks(conn: sqlite3.Connection, draft_id: int, new_claims: list[str]) -> int:
+    """After a revision, keep the SUPPORTED verdicts whose claim survives unchanged (same
+    text up to case, spacing and a trailing full stop), re-indexed to the claim's new
+    position; drop every other check. Contradicted and unverified verdicts are always
+    dropped: they were handed to the drafter to fix, so the claim must be checked again.
+    Returns the number of verdicts kept."""
+    ensure_schema(conn)
+    old = checks_for_draft(conn, draft_id)
+    supported = {_norm_claim(c.claim): c for c in old if c.verdict == SUPPORTED}
+    conn.execute("DELETE FROM claim_checks WHERE draft_id = ?", (draft_id,))
+    kept = 0
+    for i, claim in enumerate(new_claims):
+        c = supported.get(_norm_claim(claim))
+        if c is None:
+            continue
+        conn.execute(
+            """INSERT INTO claim_checks (draft_id, claim_index, claim, verdict, source_url,
+                                         quote, note, trusted, model, checked_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                draft_id,
+                i,
+                claim,
+                c.verdict,
+                c.source_url,
+                c.quote,
+                c.note,
+                int(c.trusted),
+                c.model,
+                c.checked_at,
+            ),
+        )
+        kept += 1
+    conn.commit()
+    return kept
 
 
 def has_contradiction(conn: sqlite3.Connection, draft_id: int) -> bool:
