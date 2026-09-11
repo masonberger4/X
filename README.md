@@ -42,7 +42,8 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 step 1's own `db.Database` API — the same one `digest.py` uses, and the run buttons execute
 `ops/config.yaml`'s steps through `ops/runner.py` under the same `ops/lock.py` lock
 cron takes, so a run started in the browser is the run cron would have started. A step
-disabled in `ops/config.yaml` is skipped, never run: publishing stays off. The panel
+disabled in `ops/config.yaml` is skipped, never run; the shipped `publish` step runs
+`run_publish.py` as a dry run (no `--live`), so nothing posts. The panel
 never edits `config.yaml`, `draft/voice.md` or a draft's text, and has no publish
 button. The feedback page renders a report's suggestions; applying one is still a human
 editing a settings file and bumping `PROMPT_VERSION`. The one thing the panel writes
