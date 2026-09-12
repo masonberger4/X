@@ -1,7 +1,7 @@
 # Claim verification settings (step 2b). Read by verify/settings.py.
 model: claude-fable-5-1       # the verifier: web search on, one call per claim
 effort: low
-max_claims_per_draft: 12      # per-draft cost bound: one web call per claim; claims past it stay
+max_claims_per_draft: 50      # per-draft cost bound: one web call per claim; claims past it stay
                               # "unchecked" on the queue page until the cap is raised
 max_searches_per_claim: 5     # web_search max_uses on the API backend
 timeout_seconds: 240          # per claim, claude_code backend
@@ -13,7 +13,7 @@ timeout_seconds: 240          # per claim, claude_code backend
 # only then draws the picture. enabled: false leaves tables unverified and unrendered.
 tables:
   enabled: true
-  max_cells_per_draft: 30     # bigger tables are dropped before any call
+  max_cells_per_draft: 50     # bigger tables are dropped before any call
   min_supported_ratio: 0.6    # fewer verified fact cells than this share -> table dropped
 
 # The verify-revise loop (verify/autorevise.py). When on, a draft left with a contradicted

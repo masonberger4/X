@@ -219,7 +219,7 @@ def test_run_verify_checks_unchecked_claims_and_survives_one_failure(conn, monke
 
 
 def test_run_verify_respects_limit_and_max_claims(conn, monkeypatch):
-    a = _draft_with_claims(conn, "a", n=14)
+    a = _draft_with_claims(conn, "a", n=52)
     _draft_with_claims(conn, "b", n=1)
     calls = []
     monkeypatch.setattr(
@@ -231,7 +231,7 @@ def test_run_verify_respects_limit_and_max_claims(conn, monkeypatch):
     )
     monkeypatch.setattr(run_verify, "_root_config", lambda: {})
     run_verify.main(["--draft", str(a)])
-    assert calls == list(range(12))  # max_claims_per_draft from the shipped config
+    assert calls == list(range(50))  # max_claims_per_draft from the shipped config
     calls.clear()
     run_verify.main(["--limit", "1"])
     assert len(calls) == 1  # draft b, the only one with unchecked claims left
