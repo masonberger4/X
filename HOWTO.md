@@ -266,7 +266,10 @@ source only when it is due, and score only scores what is new.
    screen reader will get (the alt text), and it is attached to the first
    post when published. Check every bar against the source like any other
    number. "Drop image" posts the text alone; a Revise redraws the chart from
-   the new draft (or removes it if the new draft has none).
+   the new draft (or removes it if the new draft has none). "Redraw" remakes
+   the picture from the same spec: a chart is rendered again through the
+   grader loop, a table is redrawn from the cell verdicts already stored.
+   No web call, no text change, and the table is kept (unlike "Drop image").
    A table shows under "Table cells" with each cell's verdict and source link
    (green: kept; amber: blanked in the picture; red: contradicted). The
    picture appears once every cell is checked. Approving before that posts

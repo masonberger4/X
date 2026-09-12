@@ -45,6 +45,9 @@
   <input name="note" placeholder="why (optional)">
   <button>Drop image</button> <span class="meta">the post goes out text-only</span>
 </form>
+<form class="inline" method="post" action="/drafts/{{ d.id }}/image/redraw">
+  <button>Redraw</button> <span class="meta">remake the picture from the same {{ 'table and its verdicts' if d.draft.table else 'numbers' }}; nothing else changes</span>
+</form>
 {% elif d.draft.chart %}
 <h2>Image</h2>
 <p class="meta">The drafter proposed a chart ({{ d.draft.chart.title }}) but no image was rendered: images are disabled in draft/config.yaml or matplotlib is not installed. Nothing will be attached.</p>

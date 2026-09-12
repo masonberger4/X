@@ -142,3 +142,21 @@ def test_revise_replaces_the_image(client, conn, monkeypatch):
     client.post(f"/drafts/{did}/revise", data={"instructions": "drop chart"})
     row = store.get_draft(conn, did)
     assert row.draft.chart is None and row.image_path is None
+
+
+def test_redraw_button_remakes_a_chart(conn, db_file):
+    seed_item(conn, "i1")
+    chart = Chart("t", ["A", "B"], [88.0, 4.1], "%")
+    did = store.insert_draft(conn, item_id="i1", model="m", draft=_draft(chart))
+    path = images.attach_chart(conn, did, chart, source_url=URL)
+    old = path.read_bytes()
+    path.write_bytes(b"stale")
+    client = TestClient(app, follow_redirects=False)
+    r = client.post(f"/drafts/{did}/image/redraw")
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}"
+    assert path.read_bytes() == old and store.get_draft(conn, did).draft.chart == chart
+    # nothing to redraw: refused with a message, not an error page
+    seed_item(conn, "i2")
+    plain = store.insert_draft(conn, item_id="i2", model="m", draft=_draft())
+    r = client.post(f"/drafts/{plain}/image/redraw")
+    assert r.status_code == 303 and "error=" in r.headers["location"]
