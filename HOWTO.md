@@ -228,11 +228,13 @@ source only when it is due, and score only scores what is new.
    plus one web call per new claim.
    About one to two minutes per claim. Verdicts are only "verified" when
    the source is on a trusted site (`verify\config.yaml`, plus every company
-   site in `config.yaml`); anything else is shown as a lead. To accept a
-   site the checker keeps citing (a society's own page such as
-   learn.astct.org, say), add its host under `trusted_domains` and rerun
-   `run_verify.py --draft <id>`: trust is re-read from the stored verdicts,
-   so no new web calls are made. Once the
+   site in `config.yaml`); anything else is shown as a lead with a
+   "trust <host>" link beside it. Pressing it (a society's own page such as
+   learn.astct.org, say) adds that host to `trusted_domains` in
+   `verify\config.yaml` for good, flips every stored verdict from that host
+   to trusted, and redraws this draft's table from the verdicts it already
+   has: no new web call, no text change. Doing it by hand is the same: add
+   the host to the list and rerun `run_verify.py --draft <id>`. Once the
    scheduler in part 6 is running, this happens automatically after every
    drafting run, so by the time you open the queue the evidence is already
    attached; running it by hand is only for drafts you made by hand.

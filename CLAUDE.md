@@ -175,7 +175,14 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   a company's own site (`verifier.trusted_hosts`: each `companies.feeds` URL host and
   `domain:`, plus every `branding.companies` `domain:`). `run_verify._decide` re-derives
   trust from each stored verdict's source URL against the current host list, so adding a
-  company to config makes its checked cells count without a new web call. The one exception is the **verify-revise loop**
+  company to config makes its checked cells count without a new web call. The render/drop
+  step itself lives in `verify/render.py:finalize_table` (the one module in `verify/` that
+  writes the picture), shared with the queue's **trust button**: `POST /drafts/{id}/trust`
+  beside an "(untrusted source)" verdict calls `verify/settings.py:add_trusted_domain` (a
+  line edit of `trusted_domains` in `verify/config.yaml`, comments kept; the one key the
+  queue writes in any settings file), `verify/store.py:mark_host_trusted` (flips `trusted`
+  on stored verdicts from that host, verdicts untouched) and, for a pending draft with a
+  table, `finalize_table`; no web call, no text change. The one exception is the **verify-revise loop**
   (`verify/autorevise.py`, `run_verify.py --auto-revise` or `auto_revise.enabled` in
   `verify/config.yaml`, on in the shipped config; `--no-auto-revise` skips a run): after
   the claim pass, a draft with a
@@ -242,7 +249,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `publish/store.py`, `set_order`, unclaimed rows only); `scheduler.rank` puts ordered drafts
   first, then breaking, then policy; `store.publish_states` reads it back for the pill. The
   panel never writes `config.yaml`, `draft/voice.md` or a draft's text. The one settings
-  file it edits is `publish/config.yaml`, two keys only: `POST /publishing/caps` calls
+  file it edits itself is `publish/config.yaml`, two keys only (the included queue routes
+  add `trusted_domains` in `verify/config.yaml`, above): `POST /publishing/caps` calls
   `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
   comments kept). It has
   no authentication: `run_app.py` binds localhost by default. `/publishing` and
@@ -288,9 +296,10 @@ panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed 
           ratings), jobs.py (JobManager, background step runs), frozen.py (data dir,
           step interpreter and bundle manifest for the desktop build),
           app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback), templates/
-verify/   config.yaml, settings.py, verifier.py (ClaimCheck, verify_claim,
-          call_model), store.py (claim_checks, table_checks), tables.py (cell claims,
-          source-backed cells, the render/drop decision)
+verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck,
+          verify_claim, call_model), store.py (claim_checks, table_checks,
+          mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop
+          decision), render.py (finalize_table: decide, then draw or drop)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
           fetch_approved), client.py (post_tweet, upload_media, verify_credentials)
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,

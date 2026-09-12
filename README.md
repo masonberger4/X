@@ -243,7 +243,11 @@ verify. `run_verify.py` sends each claim to Claude with web search enabled
 in its own table `claim_checks` (`verify/store.py`). A verdict counts as
 verified only when the source host is in `verify/config.yaml`
 `trusted_domains` or is a company feed host from the root config; otherwise
-it is shown as a lead. The queue shows the evidence beside each claim and
+it is shown as a lead with a "trust <host>" button (`POST /drafts/{id}/trust`)
+that adds the host to `trusted_domains` (`verify/settings.py:add_trusted_domain`,
+a line edit), marks the stored verdicts from it trusted
+(`verify/store.py:mark_host_trusted`) and redraws the draft's table
+(`verify/render.py:finalize_table`) without a web call. The queue shows the evidence beside each claim and
 refuses Approve with 409 while any claim is contradicted, unless the form
 carries `override=1` ("approve anyway"). The verifier never edits a draft.
 Fixing a draft is the drafter's job, on request: the queue's Revise action

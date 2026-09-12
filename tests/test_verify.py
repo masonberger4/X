@@ -476,3 +476,71 @@ def test_queue_shows_auto_revise_rounds(client, conn):
     )
     page = client.get(f"/drafts/{did}").text
     assert "Auto-revised 1 time by the verify-revise loop" in page and "needs you" in page
+
+
+# --- trusting a source by hand ------------------------------------------------------------
+
+
+def test_add_trusted_domain_edits_only_the_list_and_keeps_comments(tmp_path):
+    from verify.settings import add_trusted_domain, load_verify_config, normalize_host
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "model: m   # the verifier\n"
+        "# listed hosts count as verified\n"
+        "trusted_domains:\n"
+        "  - fda.gov\n"
+        "  - sec.gov   # filings\n"
+        "\n"
+        "tables:\n"
+        "  enabled: true\n",
+        encoding="utf-8",
+    )
+    assert normalize_host("https://www.Learn.ASTCT.org/path?x=1") == "learn.astct.org"
+    assert add_trusted_domain("https://www.Learn.ASTCT.org/path", cfg) is True
+    assert add_trusted_domain("learn.astct.org", cfg) is False  # already there
+    assert add_trusted_domain("SEC.gov", cfg) is False
+    text = cfg.read_text(encoding="utf-8")
+    assert text.startswith("model: m   # the verifier\n# listed hosts count as verified\n")
+    assert "  - sec.gov   # filings\n  - learn.astct.org\n\ntables:\n  enabled: true\n" in text
+    assert load_verify_config(cfg)["trusted_domains"][-1] == "learn.astct.org"
+    with pytest.raises(ValueError):
+        add_trusted_domain("not a host", cfg)
+    with pytest.raises(ValueError):
+        add_trusted_domain("", cfg)
+    # a file without the key gets one
+    bare = tmp_path / "bare.yaml"
+    bare.write_text("model: m", encoding="utf-8")
+    assert add_trusted_domain("nejm.org", bare) is True
+    assert bare.read_text(encoding="utf-8") == "model: m\ntrusted_domains:\n  - nejm.org\n"
+
+
+def test_mark_host_trusted_flips_stored_verdicts_from_that_host(conn):
+    from approval_queue import store as qstore
+    from draft.schema import Claim, Draft
+    from tests.conftest import seed_item
+    from verify import store as vstore
+    from verify.verifier import ClaimCheck
+
+    seed_item(conn, "i1")
+    d = Draft(
+        single_post=f"post {URL}",
+        thread=[],
+        suggested_visual="",
+        why_it_matters="",
+        claims_to_verify=[Claim("a", "low"), Claim("b", "low")],
+    )
+    did = qstore.insert_draft(conn, item_id="i1", model="m", draft=d)
+    astct = ClaimCheck(0, "a", "supported", "https://www.learn.astct.org/p", "", "", False)
+    vstore.insert_check(conn, did, astct, "m")
+    vstore.insert_check(
+        conn, did, ClaimCheck(1, "b", "supported", "https://other.org/p", "", "", False), "m"
+    )
+    before = vstore.checks_for_draft(conn, did)
+    assert [c.trustable for c in before] == [True, True]
+    assert before[0].host == "learn.astct.org"
+    assert vstore.mark_host_trusted(conn, "learn.astct.org") == 1
+    after = {c.claim_index: c for c in vstore.checks_for_draft(conn, did)}
+    assert after[0].trusted and after[0].label == "supported" and not after[0].trustable
+    assert not after[1].trusted and after[1].trustable
+    assert vstore.mark_host_trusted(conn, "learn.astct.org") == 0

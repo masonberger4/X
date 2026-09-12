@@ -347,3 +347,46 @@ def test_trusted_hosts_include_branding_domains_and_decide_rereads_trust(conn, m
     assert {"fda.gov", "investors.amgen.com", "amgen.com", "jnj.com"} <= hosts
     assert is_trusted("https://www.jnj.com/media-center/x", hosts)
     assert not is_trusted("https://www.tecvaylihcp.com/", hosts)
+
+
+# --- the queue's "trust this source" button ---------------------------------------------
+
+
+def test_trust_button_adds_host_flips_cells_and_redraws(conn, monkeypatch, tmp_path):
+    from verify import settings as vsettings
+
+    cfg = tmp_path / "verify.yaml"
+    cfg.write_text("model: m\ntrusted_domains:\n  - sec.gov\n", encoding="utf-8")
+    monkeypatch.setattr(vsettings, "CONFIG_PATH", cfg)
+    monkeypatch.setattr(run_verify, "load_verify_config", lambda: vsettings.load_verify_config(cfg))
+    vsettings.load_verify_config.cache_clear()
+    did = _seed(conn)
+
+    def verdict_for(claim):
+        if "Phase 3 planned" in claim:
+            return "supported", "learn.astct.org"  # not trusted yet: blanked
+        return "supported", "sec.gov"
+
+    _fake_verify(monkeypatch, verdict_for)
+    assert run_verify.main([]) == 0
+    row = store.get_draft(conn, did)
+    assert "Phase 3 planned" not in row.image_alt  # blanked: its source is not trusted
+    cell = next(k for k in vstore.table_checks_for_draft(conn, did) if "astct" in k.source_url)
+    assert cell.label == "supported (untrusted source)" and cell.trustable
+    client = TestClient(app, follow_redirects=False)
+    body = client.get(f"/drafts/{did}").text
+    assert f'action="/drafts/{did}/trust"' in body and 'value="learn.astct.org"' in body
+
+    r = client.post(f"/drafts/{did}/trust", data={"host": "https://www.learn.astct.org/x"})
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}"
+    assert "  - learn.astct.org\n" in cfg.read_text(encoding="utf-8")
+    cell = next(k for k in vstore.table_checks_for_draft(conn, did) if "astct" in k.source_url)
+    assert cell.trusted and cell.shown
+    row = store.get_draft(conn, did)
+    assert "Phase 3 planned" in row.image_alt  # redrawn from the stored verdicts, no web call
+    assert "trust learn.astct.org" not in client.get(f"/drafts/{did}").text
+    # a bad host is refused with a message, and nothing is written
+    r = client.post(f"/drafts/{did}/trust", data={"host": "not a host"})
+    assert r.status_code == 303 and "error=" in r.headers["location"]
+    assert client.post("/drafts/999/trust", data={"host": "x.org"}).status_code == 404
+    vsettings.load_verify_config.cache_clear()

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from approval_queue import store as queue_store
-from verify.verifier import CONTRADICTED, SUPPORTED, ClaimCheck
+from verify.verifier import CONTRADICTED, SUPPORTED, ClaimCheck, host_of, is_trusted
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS claim_checks (
@@ -66,6 +66,17 @@ class CheckRow:
         if self.verdict == CONTRADICTED:
             return "contradicted" if self.trusted else "contradicted (untrusted source)"
         return "unverified"
+
+    @property
+    def host(self) -> str:
+        """The source's host, what the "Trust this source" button offers to add."""
+        return host_of(self.source_url or "")
+
+    @property
+    def trustable(self) -> bool:
+        """Whether the human can make this verdict count by trusting its host: a supported
+        or contradicted verdict from a source the config does not list yet."""
+        return bool(self.host) and not self.trusted and self.verdict in (SUPPORTED, CONTRADICTED)
 
 
 def connect(path=None) -> sqlite3.Connection:
@@ -211,6 +222,17 @@ class TableCheckRow:
         return "unverified"
 
     @property
+    def host(self) -> str:
+        """The source's host, what the "Trust this source" button offers to add."""
+        return host_of(self.source_url or "")
+
+    @property
+    def trustable(self) -> bool:
+        """Whether the human can make this verdict count by trusting its host: a supported
+        or contradicted verdict from a source the config does not list yet."""
+        return bool(self.host) and not self.trusted and self.verdict in (SUPPORTED, CONTRADICTED)
+
+    @property
     def shown(self) -> bool:
         """Whether the cell keeps its text in the picture."""
         return self.verdict == SUPPORTED and self.trusted
@@ -338,3 +360,23 @@ def pending_drafts_with_claims(conn: sqlite3.Connection) -> list[queue_store.Dra
 def unchecked_indexes(conn: sqlite3.Connection, draft: queue_store.DraftRow) -> list[int]:
     done = {c.claim_index for c in checks_for_draft(conn, draft.id)}
     return [i for i in range(len(draft.draft.claims_to_verify)) if i not in done]
+
+
+def mark_host_trusted(conn: sqlite3.Connection, host: str) -> int:
+    """Flip `trusted` on every stored claim and cell verdict whose source is on `host` (or a
+    subdomain), after the human added it to trusted_domains. Verdicts and quotes are
+    untouched; only what the label and the picture make of them changes. Returns the
+    number of rows changed."""
+    ensure_schema(conn)
+    hosts = {host.lower()}
+    changed = 0
+    for tbl in ("claim_checks", "table_checks"):
+        rows = conn.execute(
+            f"SELECT id, source_url FROM {tbl} WHERE trusted = 0 AND source_url != ''"
+        ).fetchall()
+        ids = [r["id"] for r in rows if is_trusted(r["source_url"], hosts)]
+        for i in ids:
+            conn.execute(f"UPDATE {tbl} SET trusted = 1 WHERE id = ?", (i,))
+        changed += len(ids)
+    conn.commit()
+    return changed
