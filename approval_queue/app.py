@@ -43,8 +43,11 @@ from draft.prompt import VOICE_PATH
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.settings import load_draft_config
 from draft.voice_report import build_report
+from verify import render as verify_render
+from verify import settings as verify_settings
 from verify import store as verify_store
 from verify.autorevise import auto_rounds_used, claim_problems  # noqa: F401  (re-exported)
+from verify.verifier import trusted_hosts
 
 log = logging.getLogger(__name__)
 
@@ -475,6 +478,36 @@ async def drop_image(draft_id: int, request: Request, conn: Conn):
     except KeyError as exc:
         raise HTTPException(404, "no such draft") from exc
     log.info("draft %d: image dropped by the reviewer", draft_id)
+    return _detail_redirect(draft_id)
+
+
+@app.post("/drafts/{draft_id}/trust")
+async def trust_source(draft_id: int, request: Request, conn: Conn):
+    """The "Trust this source" button beside an "(untrusted source)" verdict: add the host
+    to `trusted_domains` in verify/config.yaml (the one settings key the queue edits), flip
+    every stored verdict from that host to trusted, and redraw this draft's table from the
+    verdicts it already has. No web call is made and no text changes."""
+    form = await read_form(request)
+    row = store.get_draft(conn, draft_id)
+    if row is None:
+        raise HTTPException(404, "no such draft")
+    try:
+        host = verify_settings.normalize_host(form.get("host", ""))
+    except ValueError as exc:
+        return _detail_redirect(draft_id, error=str(exc))
+    added = verify_settings.add_trusted_domain(host)
+    changed = verify_store.mark_host_trusted(conn, host)
+    log.info(
+        "draft %d: host %s %s, %d verdict(s) now trusted",
+        draft_id,
+        host,
+        "added to trusted_domains" if added else "already trusted",
+        changed,
+    )
+    if row.draft.table is not None and row.status == "pending":
+        cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
+        hosts = trusted_hosts(cfg, verify_render.root_config()) | {host}
+        verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
     return _detail_redirect(draft_id)
 
 

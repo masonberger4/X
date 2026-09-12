@@ -55,7 +55,7 @@
 
 {% if d.draft.table %}
 <h2>Table cells</h2>
-<p class="meta">{{ table_checks|length }} of {{ d.draft.table.cells()|length }} cells checked. A supported cell from a trusted source keeps its text; anything else is blanked in the picture; one contradicted cell drops the table.</p>
+<p class="meta">{{ table_checks|length }} of {{ d.draft.table.cells()|length }} cells checked. A supported cell from a trusted source keeps its text; anything else is blanked in the picture; one contradicted cell drops the table. "trust host" adds that site to the trusted list for good and redraws the picture from the verdicts already stored.</p>
 <div style="overflow-x:auto"><table class="cells">
   <thead><tr>{% for col in d.draft.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
   <tbody>
@@ -66,7 +66,7 @@
       {% set k = table_checks.get((r, loop.index0)) %}
       <td class="cell {% if k %}{{ 'shown' if k.shown else k.verdict }}{% elif cell %}unchecked{% endif %}">
         {{ cell or "" }}
-        {% if k %}<div class="meta">{{ k.label }}{% if k.source_url %} · <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">source</a>{% endif %}</div>
+        {% if k %}<div class="meta">{{ k.label }}{% if k.source_url %} · <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">source</a>{% endif %}{% if k.trustable %} · <form method="post" action="/drafts/{{ d.id }}/trust" class="inline"><input type="hidden" name="host" value="{{ k.host }}"><button type="submit" class="link" title="Add {{ k.host }} to trusted_domains in verify/config.yaml and redraw the table">trust {{ k.host }}</button></form>{% endif %}</div>
         {% elif cell %}<div class="meta">not checked yet</div>{% endif %}
       </td>
     {% endfor %}
@@ -102,6 +102,7 @@
       <div class="check {{ k.verdict }}">
         <strong>{{ k.label }}</strong>
         {% if k.source_url %}· <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">{{ k.source_url }}</a>{% endif %}
+        {% if k.trustable %}· <form method="post" action="/drafts/{{ d.id }}/trust" class="inline"><input type="hidden" name="host" value="{{ k.host }}"><button type="submit" class="link" title="Add {{ k.host }} to trusted_domains in verify/config.yaml">trust {{ k.host }}</button></form>{% endif %}
         {% if k.quote %}<blockquote>{{ k.quote }}</blockquote>{% endif %}
         {% if k.note %}<div class="meta">{{ k.note }}</div>{% endif %}
         <div class="meta">checked {{ k.checked_at }} by {{ k.model }}. Open the link and read the sentence before approving.</div>

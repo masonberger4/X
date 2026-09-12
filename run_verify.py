@@ -38,22 +38,16 @@ import sys
 
 from dotenv import load_dotenv
 
-from approval_queue import images
 from approval_queue import store as queue_store
-from verify import autorevise, store, tables
+from verify import autorevise, render, store, tables
 from verify.settings import load_verify_config
-from verify.verifier import ClaimCheck, is_trusted, trusted_hosts, verify_claim
+from verify.verifier import ClaimCheck, trusted_hosts, verify_claim
 
 log = logging.getLogger("run_verify")
 
 
 def _root_config() -> dict:
-    try:
-        from config import load_config
-
-        return load_config()
-    except Exception:  # root config missing or unreadable
-        return {}
+    return render.root_config()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -279,7 +273,7 @@ def verify_tables(conn, args, *, cfg: dict, root_cfg: dict, hosts: set[str]) -> 
                     ),
                     tables.SOURCE_MODEL,
                 )
-        decision = _decide(conn, d, table, ratio=ratio, max_cells=max_cells, hosts=hosts)
+        decision = render.decide(conn, d, table, ratio=ratio, max_cells=max_cells, hosts=hosts)
         for r, c in decision.unchecked:
             claim = tables.cell_claim(table, r, c)
             log.info("  cell (%d,%d): %s", r, c, claim[:100])
@@ -309,46 +303,7 @@ def verify_tables(conn, args, *, cfg: dict, root_cfg: dict, hosts: set[str]) -> 
             )
         if args.dry_run:
             continue
-        decision = _decide(conn, d, table, ratio=ratio, max_cells=max_cells, hosts=hosts)
-        if decision.status == tables.PENDING:
-            log.info("  table still has %d unchecked cell(s)", len(decision.unchecked))
-        elif decision.status == tables.DROP:
-            log.warning("  table dropped: %s", decision.reason)
-            queue_store.drop_table(conn, d.id, decision.reason)
-        else:
-            drawn = tables.apply_row_drops(table, decision.blanked)
-            path = images.attach_table(
-                conn,
-                d.id,
-                drawn,
-                source_url=d.url or "",
-                blanked=_reindex(table, decision.blanked),
-            )
-            log.info("  table rendered to %s (%d cell(s) blanked)", path, len(decision.blanked))
-
-
-def _decide(conn, d, table, *, ratio, max_cells, hosts=None):
-    """The render/drop decision from the stored cell verdicts. Trust is re-read from each
-    verdict's source URL against the CURRENT host list (`hosts`) as well as the flag stored
-    at check time, so adding a company to config.yaml makes its already-checked cells
-    count without another web call."""
-    verdicts = [
-        tables.CellVerdict(
-            k.row,
-            k.col,
-            k.verdict,
-            k.trusted or (bool(hosts) and is_trusted(k.source_url or "", hosts)),
-        )
-        for k in store.table_checks_for_draft(conn, d.id)
-    ]
-    return tables.decide(table, verdicts, min_supported_ratio=ratio, max_cells=max_cells)
-
-
-def _reindex(table, blanked: frozenset[tuple[int, int]]) -> frozenset[tuple[int, int]]:
-    """Blanked positions in the drawn table, whose rows with a blanked label are gone."""
-    keep = [r for r in range(len(table.rows)) if (r, 0) not in blanked]
-    new_row = {r: i for i, r in enumerate(keep)}
-    return frozenset((new_row[r], c) for r, c in blanked if r in new_row)
+        render.finalize_table(conn, d, cfg=cfg, hosts=hosts)
 
 
 if __name__ == "__main__":
