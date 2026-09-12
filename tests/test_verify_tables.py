@@ -390,3 +390,24 @@ def test_trust_button_adds_host_flips_cells_and_redraws(conn, monkeypatch, tmp_p
     assert r.status_code == 303 and "error=" in r.headers["location"]
     assert client.post("/drafts/999/trust", data={"host": "x.org"}).status_code == 404
     vsettings.load_verify_config.cache_clear()
+
+
+def test_redraw_button_remakes_the_table_picture_and_keeps_the_spec(conn, monkeypatch):
+    did = _seed(conn)
+    _fake_verify(monkeypatch, lambda c: ("supported", "sec.gov"))
+    assert run_verify.main([]) == 0
+    row = store.get_draft(conn, did)
+    path = store.resolve_image(row.image_path)
+    assert path is not None
+    old = path.read_bytes()
+    path.write_bytes(b"stale")  # the picture on disk is wrong; the spec is fine
+    client = TestClient(app, follow_redirects=False)
+    assert f'action="/drafts/{did}/image/redraw"' in client.get(f"/drafts/{did}").text
+    r = client.post(f"/drafts/{did}/image/redraw")
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}"
+    row = store.get_draft(conn, did)
+    assert row.draft.table is not None and store.resolve_image(row.image_path) == path
+    assert path.read_bytes() == old  # redrawn from the stored verdicts, no web call
+    assert len(vstore.table_checks_for_draft(conn, did)) == 9  # verdicts untouched
+    assert all(d["action"] != "edit" for d in store.list_decisions(conn, did))
+    assert client.post("/drafts/999/image/redraw").status_code == 404

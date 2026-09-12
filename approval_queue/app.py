@@ -481,6 +481,30 @@ async def drop_image(draft_id: int, request: Request, conn: Conn):
     return _detail_redirect(draft_id)
 
 
+@app.post("/drafts/{draft_id}/image/redraw")
+async def redraw_image(draft_id: int, conn: Conn):
+    """Remake the picture from the spec the draft already has: a chart is rendered again
+    through the render-grade loop, a table is redrawn from the cell verdicts already
+    stored (verify/render.py:finalize_table). The spec, the verdicts and the text are
+    untouched and no web call is made; only the PNG and its grades are replaced."""
+    row = store.get_draft(conn, draft_id)
+    if row is None:
+        raise HTTPException(404, "no such draft")
+    if row.draft.visual is None:
+        return _detail_redirect(draft_id, error="this draft has no chart or table to redraw")
+    if row.draft.table is not None:
+        cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
+        hosts = trusted_hosts(cfg, verify_render.root_config())
+        decision = verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
+        log.info("draft %d: table redrawn by the reviewer (%s)", draft_id, decision.status)
+    else:
+        path = images.attach_chart(conn, draft_id, row.draft.chart, source_url=row.url)
+        log.info("draft %d: chart redrawn by the reviewer -> %s", draft_id, path)
+        if path is None:
+            return _detail_redirect(draft_id, error="the chart could not be rendered")
+    return _detail_redirect(draft_id)
+
+
 @app.post("/drafts/{draft_id}/trust")
 async def trust_source(draft_id: int, request: Request, conn: Conn):
     """The "Trust this source" button beside an "(untrusted source)" verdict: add the host
