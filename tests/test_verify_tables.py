@@ -411,3 +411,72 @@ def test_redraw_button_remakes_the_table_picture_and_keeps_the_spec(conn, monkey
     assert len(vstore.table_checks_for_draft(conn, did)) == 9  # verdicts untouched
     assert all(d["action"] != "edit" for d in store.list_decisions(conn, did))
     assert client.post("/drafts/999/image/redraw").status_code == 404
+
+
+def _cell_form(rows):
+    return {f"cell_{r}_{c}": cell for r, row in enumerate(rows) for c, cell in enumerate(row)}
+
+
+def test_reviewer_edits_cells_keeps_verdicts_and_redraws(client, conn):
+    did = _seed(conn)
+    for (r, c), v in {
+        (0, 0): "supported",
+        (0, 1): "supported",
+        (0, 2): "supported",
+        (1, 0): "supported",
+        (1, 1): "supported",
+        (1, 2): "contradicted",
+        (2, 0): "supported",
+        (2, 1): "supported",
+        (2, 2): "unverified",
+    }.items():
+        vstore.insert_table_check(
+            conn,
+            did,
+            r,
+            c,
+            TABLE["rows"][r][c],
+            ClaimCheck(0, "c", v, "https://sec.gov/x", "q", "n", True),
+            "m",
+        )
+    body = client.get(f"/drafts/{did}").text
+    assert 'name="cell_1_2"' in body and "Save cells" in body
+    rows = [
+        ["Solstice", "porustobart", "phase 2"],
+        ["Agenus", "botensilimab", "Phase 3 (ROBBIN)"],  # corrected by hand
+        ["Xilio", "vilastobart", ""],  # cleared
+    ]
+    r = client.post(f"/drafts/{did}/table", data=_cell_form(rows))
+    assert r.status_code == 303 and "error" not in r.headers["location"]
+    row = store.get_draft(conn, did)
+    assert row.draft.table.rows == rows
+    assert row.draft.single_post.startswith("ORR 88%")  # text untouched
+    checks = {(k.row, k.col): k for k in vstore.table_checks_for_draft(conn, did)}
+    assert checks[(1, 2)].verdict == "supported" and checks[(1, 2)].model == "human"
+    assert checks[(1, 2)].trusted and (2, 2) not in checks
+    assert checks[(0, 1)].model == "m"  # unchanged cell keeps its verdict
+    # no contradicted cell is left, so the picture was drawn
+    assert store.resolve_image(row.image_path) is not None
+    notes = [d["note"] for d in store.list_decisions(conn, did)]
+    assert any("table cells edited by the reviewer (2 changed)" in n for n in notes)
+    body = client.get(f"/drafts/{did}").text
+    assert "(typed in)" in body
+
+
+def test_reviewer_cell_edit_is_validated(client, conn):
+    did = _seed(conn)
+    bad = [list(r) for r in TABLE["rows"]]
+    bad[0][0] = ""  # empty row label
+    r = client.post(f"/drafts/{did}/table", data=_cell_form(bad))
+    assert "error=" in r.headers["location"] and "row%20label" in r.headers["location"]
+    advice = [list(r) for r in TABLE["rows"]]
+    advice[1][2] = "buy the stock"
+    r = client.post(f"/drafts/{did}/table", data=_cell_form(advice))
+    assert "investment" in r.headers["location"]
+    assert store.get_draft(conn, did).draft.table.rows == TABLE["rows"]
+    store.approve(conn, did)
+    r = client.post(f"/drafts/{did}/table", data=_cell_form(TABLE["rows"]))
+    assert "pending" in r.headers["location"]
+    # a draft with no table
+    did2 = _seed(conn, item_id="i2", table=None)
+    assert "no%20table" in client.post(f"/drafts/{did2}/table", data={}).headers["location"]

@@ -35,6 +35,7 @@ from draft.chart import (
     Table,
     chart_from_json,
     table_from_json,
+    validate_table,
     visual_from_json,
 )
 from draft.schema import Claim, Draft
@@ -793,6 +794,57 @@ def chart_for(conn: sqlite3.Connection, draft_id: int) -> Chart | None:
 def visual_for(conn: sqlite3.Connection, draft_id: int) -> Chart | Table | None:
     r = conn.execute("SELECT chart_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
     return visual_from_json(r["chart_json"]) if r else None
+
+
+def edit_table(
+    conn: sqlite3.Connection, draft_id: int, rows: list[list[str]], note: str | None = None
+) -> tuple[Table, Table, list[tuple[int, int]]]:
+    """The human retyped table cells. Validate the new grid against the current headers
+    (same shape rules as the drafter's output: 2-8 rows, a non-empty row label, cells up to
+    TABLE_MAX_CELL_CHARS; an empty body cell is allowed and simply blank), store it in
+    chart_json, forget the now-stale picture, and log an 'edit' decision with the text
+    unchanged so the history shows it. The text is never touched. Returns (old, new,
+    changed) where changed lists the (row, col) positions whose text differs, so the
+    caller can record their verdicts. Raises ChartError on a bad grid, ValueError when the
+    draft has no table."""
+    row = _require(conn, draft_id)
+    old = row.draft.table
+    if old is None:
+        raise ValueError("this draft has no table")
+    new = validate_table(
+        {"title": old.title, "columns": old.columns, "rows": rows, "note": old.note}
+    )
+    assert new is not None
+    changed = [
+        (r, c)
+        for r in range(max(len(old.rows), len(new.rows)))
+        for c in range(len(old.columns))
+        if (old.rows[r][c] if r < len(old.rows) else None)
+        != (new.rows[r][c] if r < len(new.rows) else None)
+    ]
+    path = resolve_image(row.image_path)
+    conn.execute(
+        "UPDATE drafts SET chart_json = ?, image_path = NULL, image_alt = NULL, updated_at = ? "
+        "WHERE id = ?",
+        (json.dumps(new.to_dict()), _now(), draft_id),
+    )
+    text = _serialise_text(row.draft.single_post, row.draft.thread)
+    _record_decision(
+        conn,
+        draft_id,
+        ACTION_EDIT,
+        text,
+        text,
+        note or f"table cells edited by the reviewer ({len(changed)} changed)",
+        None,
+    )
+    conn.commit()
+    if path is not None and changed:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    return old, new, changed
 
 
 def drop_table(conn: sqlite3.Connection, draft_id: int, reason: str) -> None:
