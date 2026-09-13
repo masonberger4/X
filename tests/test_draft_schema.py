@@ -12,11 +12,11 @@ from draft.schema import (
 
 def good_output(**overrides):
     data = {
-        "single_post": "ORR 88% in a single-arm trial. Watch for OS. https://example.org/x",
         "thread": ["one", "two", "three https://example.org/x"],
-        "suggested_visual": "swimmer plot",
+        "suggested_visual": "bar chart",
         "why_it_matters": "Single-arm data cannot answer sequencing.",
         "claims_to_verify": [{"claim": "ORR 88%", "confidence": "high"}],
+        "chart": {"title": "t", "labels": ["A", "B"], "values": [88, 12], "unit": "%"},
     }
     data.update(overrides)
     return data
@@ -27,7 +27,23 @@ def test_validate_good_output():
     assert isinstance(draft, Draft)
     assert draft.thread == ["one", "two", "three https://example.org/x"]
     assert draft.claims_to_verify == [Claim("ORR 88%", "high")]
-    assert draft.to_dict()["single_post"].startswith("ORR")
+    assert draft.all_posts() == draft.thread
+    assert "single_post" not in draft.to_dict()
+    assert draft.chart is not None and draft.table is None and draft.visual is draft.chart
+
+
+def test_output_schema_has_no_single_post():
+    from draft.schema import OUTPUT_JSON_SCHEMA
+
+    assert "single_post" not in OUTPUT_JSON_SCHEMA["properties"]
+    assert "single_post" not in OUTPUT_JSON_SCHEMA["required"]
+    with pytest.raises(SchemaError, match="unexpected keys"):
+        validate_output(good_output(single_post="x"))
+
+
+def test_visual_is_required():
+    with pytest.raises(SchemaError, match="every draft needs a visual"):
+        validate_output(good_output(chart=None))
 
 
 def test_missing_key():

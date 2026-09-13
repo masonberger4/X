@@ -6,7 +6,7 @@ import pytest
 
 from draft import chart as chartmod
 from draft.chart import Chart, ChartError, alt_text, format_value, render_chart, validate_chart
-from draft.drafter import drop_unverified_chart, verify_chart
+from draft.drafter import DraftRejected, chart_problems, verify_chart
 from draft.schema import SchemaError, validate_output
 from tests.test_draft_drafter import ABSTRACT, URL, fake_call, good_json, run
 
@@ -42,14 +42,23 @@ def test_validate_chart_accepts_null_and_rejects_shape():
         validate_chart("a waterfall plot")
 
 
-def test_validate_output_with_and_without_chart():
-    assert validate_output(good_json()).chart is None
-    assert validate_output(good_json(chart=None)).chart is None
+def test_validate_output_requires_exactly_one_visual():
     d = validate_output(good_json(chart=CHART))
     assert isinstance(d.chart, Chart) and d.chart.title == "Phase 2 outcomes"
     assert d.to_dict()["chart"]["values"] == [88.0, 4.1]
     with pytest.raises(SchemaError):
         validate_output(good_json(chart={"title": "x"}))
+    # no visual at all is a schema error, whether the key is null or absent
+    with pytest.raises(SchemaError, match="every draft needs a visual"):
+        validate_output(good_json(chart=None))
+    data = good_json()
+    del data["chart"]
+    with pytest.raises(SchemaError, match="every draft needs a visual"):
+        validate_output(data)
+    table = {"title": "t", "columns": ["Asset", "Phase"], "rows": [["a", "1"], ["b", "2"]]}
+    assert validate_output(good_json(chart=None, table=table)).table is not None
+    with pytest.raises(SchemaError, match="not both"):
+        validate_output(good_json(table=table))
 
 
 def test_chart_numbers_are_checked_against_the_source():
@@ -66,21 +75,28 @@ def test_chart_numbers_are_checked_against_the_source():
     assert verify_chart(bad2, ABSTRACT) == ["120"]
 
 
-def test_unverified_chart_is_dropped_and_flagged_but_draft_survives():
-    call = fake_call([good_json(chart={**CHART, "values": [88, 5.0]})])
+def test_unverified_chart_is_a_retry_reason_then_a_rejection():
+    bad = good_json(chart={**CHART, "values": [88, 5.0]})
+    d = validate_output(bad)
+    (problem,) = chart_problems(d, ABSTRACT)
+    assert problem.startswith("chart number(s) not in the source: 5%")
+    # the model is told and gets another go
+    call = fake_call([bad, good_json(chart=CHART)])
     result = run(call)
-    assert result.draft.chart is None
-    assert result.dropped_chart_numbers == ["5%"]
-    assert result.attempts == 1 and result.flagged_numbers == []
-    claims = [c.claim for c in result.draft.claims_to_verify]
-    assert any(c.startswith("Chart dropped") and "5%" in c for c in claims)
+    assert result.attempts == 2 and result.draft.chart is not None
+    assert "chart number(s) not in the source: 5%" in call.calls[1][1]
+    assert result.flagged_numbers == [] and result.draft.claims_to_verify == []
+    # never fixed: the draft is rejected, not stored without its picture
+    with pytest.raises(DraftRejected) as exc:
+        run(fake_call([bad, bad]), max_attempts=2)
+    assert any(r.startswith("chart number(s) not in the source") for r in exc.value.reasons)
 
 
 def test_verified_chart_survives_drafting():
     result = run(fake_call([good_json(chart=CHART)]))
-    assert result.draft.chart is not None and result.dropped_chart_numbers == []
+    assert result.draft.chart is not None and result.attempts == 1
     d = validate_output(good_json(chart=CHART))
-    assert drop_unverified_chart(d, ABSTRACT) == [] and d.chart is not None
+    assert chart_problems(d, ABSTRACT) == [] and d.chart is not None
 
 
 def test_alt_text_reads_every_bar_and_is_capped():

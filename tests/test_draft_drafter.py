@@ -21,18 +21,32 @@ ABSTRACT = (
 )
 
 
-def good_json(**overrides):
+# Every number here is verbatim in ABSTRACT, so the chart passes chart_problems.
+CHART = {
+    "title": "Phase 2 outcomes",
+    "labels": ["ORR", "Grade 3 CRS"],
+    "values": [88, 4.1],
+    "unit": "%",
+    "note": "n=97, single arm",
+}
+
+
+def good_json(lead=None, **overrides):
+    """A valid model output. `lead` replaces the first thread post (the one the preprint and
+    advice rules look at); the last post keeps the URL."""
     data = {
-        "single_post": f"ORR 88% in 97 patients, single-arm. Sequencing vs bispecifics? {URL}",
         "thread": [
             "Phase 2 CAR-T data in relapsed myeloma: ORR 88%, median PFS 14.6 months.",
             "Single-arm, so no comparator. The sequencing question is open.",
             f"Grade 3 CRS in 4 patients. Source: {URL}",
         ],
-        "suggested_visual": "waterfall plot",
+        "suggested_visual": "bar chart of ORR and CRS",
         "why_it_matters": "Sequencing vs bispecifics is the real question.",
         "claims_to_verify": [],
+        "chart": CHART,
     }
+    if lead is not None:
+        data["thread"] = [lead, *data["thread"][1:]]
     data.update(overrides)
     return data
 
@@ -100,9 +114,17 @@ def test_raises_last_api_error_when_never_succeeds():
 
 
 def test_retries_on_bad_json_and_schema_error():
-    call = fake_call(["not json", {"single_post": "x"}, good_json()])
+    call = fake_call(["not json", {"thread": ["x"]}, good_json()])
     result = run(call)
     assert result.attempts == 3
+
+
+def test_retries_when_the_visual_is_missing():
+    no_visual = good_json(chart=None)
+    call = fake_call([no_visual, good_json()])
+    result = run(call)
+    assert result.attempts == 2
+    assert "every draft needs a visual" in call.calls[1][1]
 
 
 # --- 280 rule --------------------------------------------------------------
@@ -111,12 +133,12 @@ def test_retries_on_bad_json_and_schema_error():
 def test_280_rule_counts_url_as_23():
     # 257 x + space + long URL: real length far over 280, t.co length exactly 280 -> OK
     ok = "x" * 256 + " " + URL
-    draft = validate_output(good_json(single_post=ok))
+    draft = validate_output(good_json(thread=["a", "b", ok]))
     assert check_hard_rules(draft, url=URL, source="pubmed") == []
     too_long = "x" * 257 + " " + URL
-    draft = validate_output(good_json(single_post=too_long))
+    draft = validate_output(good_json(thread=["a", "b", too_long]))
     problems = check_hard_rules(draft, url=URL, source="pubmed")
-    assert any("single_post is 281 chars" in p for p in problems)
+    assert any("thread[2] is 281 chars" in p for p in problems)
 
 
 def test_280_rule_applies_to_every_thread_post():
@@ -127,7 +149,7 @@ def test_280_rule_applies_to_every_thread_post():
 
 
 def test_over_280_draft_is_rejected_after_retries(caplog):
-    call = fake_call([good_json(single_post="z" * 300 + " " + URL)] * 2)
+    call = fake_call([good_json(thread=["a", "b", "z" * 300 + " " + URL])] * 2)
     with pytest.raises(DraftRejected) as exc:
         run(call, max_attempts=2)
     assert any("> 280" in r for r in exc.value.reasons)
@@ -137,13 +159,21 @@ def test_over_280_draft_is_rejected_after_retries(caplog):
 # --- URL rule --------------------------------------------------------------
 
 
-def test_missing_url_in_single_post_and_last_thread_post():
-    draft = validate_output(
-        good_json(single_post="no link here", thread=["a", "b", "c without url"])
-    )
+def test_missing_url_in_last_thread_post():
+    draft = validate_output(good_json(thread=["a", "b", "c without url"]))
     problems = check_hard_rules(draft, url=URL, source="pubmed")
-    assert "single_post is missing the primary source URL" in problems
     assert "last thread post is missing the primary source URL" in problems
+    # the URL in an earlier post does not count
+    draft = validate_output(good_json(thread=[f"a {URL}", "b", "c without url"]))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert "last thread post is missing the primary source URL" in problems
+
+
+def test_empty_thread_is_a_hard_rule_failure():
+    from draft.schema import Draft
+
+    problems = check_hard_rules(Draft([], "", ""), url=URL, source="pubmed")
+    assert problems == ["thread is empty"]
 
 
 # --- preprint rule ---------------------------------------------------------
@@ -153,13 +183,9 @@ def test_missing_url_in_single_post_and_last_thread_post():
 def test_preprint_must_be_labelled(source):
     draft = validate_output(good_json())
     problems = check_hard_rules(draft, url=URL, source=source)
-    assert "preprint not labelled in single_post" in problems
     assert "preprint not labelled in first thread post" in problems
 
-    labelled = good_json(
-        single_post=f"Preprint: ORR 88% in 97 patients. {URL}",
-        thread=[f"New preprint. {URL}", "b", f"c {URL}"],
-    )
+    labelled = good_json(thread=[f"New preprint. {URL}", "b", f"c {URL}"])
     assert check_hard_rules(validate_output(labelled), url=URL, source=source) == []
 
 
@@ -173,7 +199,7 @@ def test_preprint_label_not_required_for_pubmed():
 
 def test_medical_advice_is_rejected():
     draft = validate_output(
-        good_json(single_post=f"Patients should ask their oncologist about this CAR-T. {URL}")
+        good_json(lead=f"Patients should ask their oncologist about this CAR-T. {URL}")
     )
     problems = check_hard_rules(draft, url=URL, source="pubmed")
     assert any("medical advice" in p for p in problems)
@@ -195,7 +221,7 @@ def test_medical_advice_is_rejected():
     ],
 )
 def test_investment_advice_is_rejected(text):
-    draft = validate_output(good_json(single_post=f"{text} ORR 88%. {URL}"))
+    draft = validate_output(good_json(lead=f"{text} ORR 88%."))
     problems = check_hard_rules(draft, url=URL, source="pubmed")
     assert any("investment advice" in p for p in problems), text
 
@@ -211,7 +237,7 @@ def test_investment_advice_is_rejected(text):
     ],
 )
 def test_thesis_language_is_not_investment_advice(text):
-    draft = validate_output(good_json(single_post=f"{text} ORR 88%. {URL}"))
+    draft = validate_output(good_json(lead=f"{text} ORR 88%."))
     problems = check_hard_rules(draft, url=URL, source="pubmed")
     assert not any("investment advice" in p for p in problems), text
 
@@ -230,18 +256,18 @@ def test_numbers_in_extracts_and_ignores_urls():
 def test_verify_numbers_flags_numbers_absent_from_abstract():
     draft = validate_output(good_json())
     assert verify_numbers(draft, ABSTRACT) == []
-    draft = validate_output(good_json(single_post=f"ORR 88% and PFS 15 months, n=100. {URL}"))
+    draft = validate_output(good_json(lead="ORR 88% and PFS 15 months, n=100."))
     assert verify_numbers(draft, ABSTRACT) == ["15", "100"]
 
 
 def test_percent_must_be_percent_in_source():
     # '4' appears in the abstract but '4%' does not (it says 4.1%)
-    draft = validate_output(good_json(single_post=f"CRS in 4% of patients {URL}"))
+    draft = validate_output(good_json(lead="CRS in 4% of patients"))
     assert verify_numbers(draft, ABSTRACT) == ["4%"]
 
 
 def test_unverified_numbers_become_low_confidence_claims():
-    call = fake_call([good_json(single_post=f"ORR 88% and PFS 15 months. {URL}")])
+    call = fake_call([good_json(lead="ORR 88% and PFS 15 months.")])
     result = run(call)
     assert result.flagged_numbers == ["15"]
     claims = result.draft.claims_to_verify
@@ -271,7 +297,7 @@ def test_examples_block_reaches_system_prompt_only():
 
 
 def test_hard_rules_still_enforced_with_examples_present():
-    advice = good_json(single_post=f"Patients should ask their oncologist about this. {URL}")
+    advice = good_json(lead="Patients should ask their oncologist about this.")
     call = fake_call([advice, advice])
     with pytest.raises(DraftRejected) as exc:
         run(call, examples_block=EXAMPLES, max_attempts=2)
@@ -352,16 +378,22 @@ def test_draft_item_retries_with_the_violation_in_the_prompt():
         thread = [long if len(seen) == 1 else good, good, good]
         return json.dumps(
             {
-                "single_post": good,
                 "thread": thread,
                 "why_it_matters": "w",
                 "claims_to_verify": [],
-                "suggested_visual": "none",
+                "suggested_visual": "bars",
+                "chart": CHART,
             }
         )
 
     result = drafter.draft_item(
-        title="t", abstract="a", url=URL, source="rss", call=call, model="m", sleep=lambda s: None
+        title="t",
+        abstract=ABSTRACT,
+        url=URL,
+        source="rss",
+        call=call,
+        model="m",
+        sleep=lambda s: None,
     )
     assert result.attempts == 2
     assert "PREVIOUS ATTEMPT" not in seen[0]
@@ -379,10 +411,10 @@ def test_revise_item_sends_current_draft_and_instructions(monkeypatch):
     from draft.drafter import revise_item
     from draft.prompt import ClaimProblem
 
-    call = fake_call([good_json(single_post=f"Shorter. ORR 88%. {URL}")])
+    call = fake_call([good_json(lead="Shorter. ORR 88%.")])
     res = revise_item(
         current=_current(),
-        instructions="make the single post shorter",
+        instructions="make the first post shorter",
         claim_problems=[ClaimProblem("myeloma readout was in 2023", "contradicted", note="2024")],
         title="CAR-T in myeloma",
         abstract=ABSTRACT,
@@ -392,20 +424,20 @@ def test_revise_item_sends_current_draft_and_instructions(monkeypatch):
         call=call,
         sleep=lambda s: None,
     )
-    assert res.draft.single_post.startswith("Shorter.")
+    assert res.draft.thread[0].startswith("Shorter.")
     system, user, model = call.calls[0]
     assert model == "m"
     assert "HARD RULES" in system
-    assert "make the single post shorter" in user
+    assert "make the first post shorter" in user
     assert "myeloma readout was in 2023" in user
-    assert good_json()["single_post"] in user  # the current draft is shown
+    assert good_json()["thread"][0] in user  # the current draft is shown
     assert ABSTRACT in user
 
 
 def test_revise_item_still_enforces_hard_rules():
     from draft.drafter import revise_item
 
-    bad = good_json(single_post="Investors should buy the stock now. " + URL)
+    bad = good_json(lead="Investors should buy the stock now.")
     good = good_json()
     call = fake_call([bad, good])
     res = revise_item(
@@ -426,7 +458,7 @@ def test_revise_item_still_enforces_hard_rules():
 def test_revise_item_rejects_after_all_attempts_and_needs_something_to_do():
     from draft.drafter import revise_item
 
-    bad = good_json(single_post="Ask your doctor. " + URL)
+    bad = good_json(lead="Ask your doctor.")
     kw = dict(
         title="t", abstract=ABSTRACT, url=URL, source="pubmed", model="m", sleep=lambda s: None
     )
