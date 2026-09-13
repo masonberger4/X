@@ -59,6 +59,7 @@
 {% if d.draft.table %}
 <h2>Table cells</h2>
 <p class="meta">{{ table_checks|length }} of {{ d.draft.table.cells()|length }} cells checked. A supported cell from a trusted source keeps its text; anything else is blanked in the picture; one contradicted cell drops the table. "trust host" adds that site to the trusted list for good and redraws the picture from the verdicts already stored.</p>
+<form method="post" action="/drafts/{{ d.id }}/table">
 <div style="overflow-x:auto"><table class="cells">
   <thead><tr>{% for col in d.draft.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
   <tbody>
@@ -68,8 +69,8 @@
     {% for cell in row %}
       {% set k = table_checks.get((r, loop.index0)) %}
       <td class="cell {% if k %}{{ 'shown' if k.shown else k.verdict }}{% elif cell %}unchecked{% endif %}">
-        {{ cell or "" }}
-        {% if k %}<div class="meta">{{ k.label }}{% if k.source_url %} · <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">source</a>{% endif %}{% if k.trustable %} · <form method="post" action="/drafts/{{ d.id }}/trust" class="inline"><input type="hidden" name="host" value="{{ k.host }}"><button type="submit" class="link" title="Add {{ k.host }} to trusted_domains in verify/config.yaml and redraw the table">trust {{ k.host }}</button></form>{% endif %}</div>
+        {% if d.status == "pending" %}<input type="text" name="cell_{{ r }}_{{ loop.index0 }}" value="{{ cell or "" }}" maxlength="60" size="{{ [cell|length, 8]|max }}">{% else %}{{ cell or "" }}{% endif %}
+        {% if k %}<div class="meta">{{ k.label }}{% if k.model == "human" %} (typed in){% endif %}{% if k.source_url %} · <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">source</a>{% endif %}{% if k.trustable %} · <button type="submit" class="link" formaction="/drafts/{{ d.id }}/trust" name="host" value="{{ k.host }}" title="Add {{ k.host }} to trusted_domains in verify/config.yaml and redraw the table">trust {{ k.host }}</button>{% endif %}</div>
         {% elif cell %}<div class="meta">not checked yet</div>{% endif %}
       </td>
     {% endfor %}
@@ -77,6 +78,8 @@
   {% endfor %}
   </tbody>
 </table></div>
+{% if d.status == "pending" %}<p class="meta"><button type="submit">Save cells</button> Retype a cell to correct it or clear it to blank it. A cell you type counts as checked by you (no web call) and the picture is redrawn from the verdicts at once; headers, title and text stay as they are.</p>{% endif %}
+</form>
 {% if d.draft.table.note %}<p class="meta">{{ d.draft.table.note }}</p>{% endif %}
 {% endif %}
 

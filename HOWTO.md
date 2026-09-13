@@ -276,6 +276,13 @@ source only when it is due, and score only scores what is new.
    the text alone and records why, so a picture is never attached after you
    stopped looking. A Revise keeps the verdict of every cell whose row label,
    column and text did not change.
+   On a pending draft every cell is a text box: retype a cell to correct it,
+   clear it to blank it in the picture, then press "Save cells". A cell you
+   typed counts as checked by you (its verdict says "supported (typed in)",
+   no web call), every cell you left alone keeps its verdict, and the picture
+   is redrawn at once through the same render-or-drop step as the verifier.
+   Headers, title and the post text never change here; use Edit for the text.
+   The history logs the edit with the number of cells changed.
    Under "Claims to verify" each claim shows its verdict, the source link and
    the quoted sentence. Open the link and read the sentence before approving;
    the verdict is a lead, the link is the proof. A contradicted claim blocks

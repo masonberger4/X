@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from approval_queue import store as queue_store
 from verify.verifier import CONTRADICTED, SUPPORTED, ClaimCheck, host_of, is_trusted
 
+HUMAN_MODEL = "human"  # `model` of a cell verdict the reviewer entered by hand
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS claim_checks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -360,6 +362,35 @@ def pending_drafts_with_claims(conn: sqlite3.Connection) -> list[queue_store.Dra
 def unchecked_indexes(conn: sqlite3.Connection, draft: queue_store.DraftRow) -> list[int]:
     done = {c.claim_index for c in checks_for_draft(conn, draft.id)}
     return [i for i in range(len(draft.draft.claims_to_verify)) if i not in done]
+
+
+def mark_cells_human(conn: sqlite3.Connection, draft_id: int, table, positions) -> int:
+    """The reviewer typed these cells in by hand: record each non-empty one as a supported,
+    trusted verdict with model 'human' (replacing any verdict at that position), so the
+    picture can be drawn without a web call. An emptied cell gets no row (blank cells are
+    never checked). Returns the number recorded."""
+    ensure_schema(conn)
+    n = 0
+    for r, c in positions:
+        conn.execute(
+            "DELETE FROM table_checks WHERE draft_id = ? AND row = ? AND col = ?",
+            (draft_id, r, c),
+        )
+        cell = table.rows[r][c] if r < len(table.rows) else ""
+        if not cell.strip():
+            continue
+        insert_table_check(
+            conn,
+            draft_id,
+            r,
+            c,
+            cell,
+            ClaimCheck(0, cell, SUPPORTED, "", "", "typed in by the reviewer", True),
+            HUMAN_MODEL,
+        )
+        n += 1
+    conn.commit()
+    return n
 
 
 def mark_host_trusted(conn: sqlite3.Connection, host: str) -> int:
