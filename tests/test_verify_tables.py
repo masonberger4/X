@@ -136,9 +136,10 @@ def test_decide_pending_render_and_drop_rules():
         **kw,
     )
     assert d.status == tables.RENDER and d.blanked == {(1, 2), (2, 1)}
-    # a contradicted cell drops the table
+    # a contradicted cell holds the table back (kept, no picture) until it is fixed
     d = tables.decide(t, _verdicts(t, overrides={(0, 1): ("contradicted", True)}), **kw)
-    assert d.status == tables.DROP and "porustobart" in d.reason
+    assert d.status == tables.BLOCKED and "porustobart" in d.reason
+    assert d.contradicted == [(0, 1)]
     # too few supported fact cells drops it
     labels_ok = {(r, 0): ("supported", True) for r in range(3)}
     d = tables.decide(t, _verdicts(t, "unverified", False, overrides=labels_ok), **kw)
@@ -212,7 +213,7 @@ def test_run_verify_checks_cells_blanks_one_and_renders(conn, monkeypatch):
     assert calls == []
 
 
-def test_run_verify_drops_a_contradicted_table_on_the_record(conn, monkeypatch):
+def test_run_verify_keeps_a_contradicted_table_and_the_reviser_fixes_it(conn, monkeypatch):
     did = _seed(conn)
     _fake_verify(
         monkeypatch,
@@ -220,11 +221,98 @@ def test_run_verify_drops_a_contradicted_table_on_the_record(conn, monkeypatch):
             ("contradicted", "sec.gov") if "Agenus, Stage" in claim else ("supported", "sec.gov")
         ),
     )
-    run_verify.main([])
+    run_verify.main(["--no-auto-revise"])
     row = store.get_draft(conn, did)
-    assert row.draft.table is None and row.image_path is None
-    (dec,) = store.list_decisions(conn, did)
-    assert dec["action"] == "edit" and "contradicted" in dec["note"] and "Agenus" in dec["note"]
+    # kept, with its verdicts, and no picture
+    assert row.draft.table is not None and row.image_path is None
+    assert store.list_decisions(conn, did) == []
+    checks = {(k.row, k.col): k for k in vstore.table_checks_for_draft(conn, did)}
+    assert checks[(1, 2)].verdict == "contradicted"
+    # the queue flags it and hands it to the reviser with the fact-checker's note and quote
+    body = TestClient(app).get(f"/drafts/{did}").text
+    assert "1 table cell was contradicted" in body
+    seen = {}
+
+    def fake_revise(*, current, instructions, claim_problems, cell_problems, **kw):
+        seen["cells"] = cell_problems
+        fixed = validate_table(
+            {
+                **TABLE,
+                "rows": [list(r) for r in TABLE["rows"][:1]]
+                + [["Agenus", "botensilimab", "Phase 3 (ROBBIN)"]]
+                + [list(r) for r in TABLE["rows"][2:]],
+            }
+        )
+        return drafter.DraftResult(
+            draft=Draft(current.single_post, current.thread, "landscape", "w", table=fixed),
+            model="m2",
+            attempts=1,
+        )
+
+    monkeypatch.setattr(drafter, "revise_item", fake_revise)
+    r = TestClient(app, follow_redirects=False).post(f"/drafts/{did}/revise", data={})
+    assert r.status_code == 303 and "error" not in r.headers["location"]
+    (cell,) = seen["cells"]
+    assert cell.claim == "Agenus, Stage: Phase 3 planned" and cell.verdict == "contradicted"
+    assert cell.source_url == "https://sec.gov/x" and cell.quote == "q" and cell.note == "n"
+    # the fixed cell is unchecked, every other verdict was kept; the next run checks it
+    checks = {(k.row, k.col): k.verdict for k in vstore.table_checks_for_draft(conn, did)}
+    assert (1, 2) not in checks and len(checks) == 8
+    calls = _fake_verify(monkeypatch, lambda claim: ("supported", "sec.gov"))
+    run_verify.main(["--no-auto-revise"])
+    assert calls == ["Agenus, Stage: Phase 3 (ROBBIN)"]
+    assert store.get_draft(conn, did).image_path == f"draft_{did}.png"
+
+
+def test_auto_revise_round_fixes_a_contradicted_cell_in_the_same_run(conn, monkeypatch):
+    did = _seed(conn)
+    _fake_verify(
+        monkeypatch,
+        lambda claim: (
+            ("contradicted", "sec.gov")
+            if claim == "Agenus, Stage: Phase 3 planned"
+            else ("supported", "sec.gov")
+        ),
+    )
+    rounds = []
+
+    def fake_revise(*, current, instructions, claim_problems, cell_problems, **kw):
+        rounds.append([c.claim for c in cell_problems])
+        rows = [list(r) for r in current.table.rows]
+        rows[1][2] = "Phase 3 (ROBBIN)"
+        fixed = validate_table({**TABLE, "rows": rows})
+        return drafter.DraftResult(
+            draft=Draft(current.single_post, current.thread, "landscape", "w", table=fixed),
+            model="m2",
+            attempts=1,
+        )
+
+    monkeypatch.setattr(drafter, "revise_item", fake_revise)
+    run_verify.main(["--auto-revise"])
+    assert rounds == [["Agenus, Stage: Phase 3 planned"]]
+    row = store.get_draft(conn, did)
+    assert row.draft.table.rows[1][2] == "Phase 3 (ROBBIN)"
+    assert row.image_path == f"draft_{did}.png"  # new cell checked and drawn in the same run
+    notes = [d["note"] for d in store.list_decisions(conn, did)]
+    assert notes == ["auto: fix fact-check failures"]
+
+
+def test_approving_with_a_contradicted_cell_drops_the_table_and_says_why(client, conn):
+    did = _seed(conn)
+    vstore.insert_table_check(
+        conn,
+        did,
+        1,
+        2,
+        "Phase 3 planned",
+        ClaimCheck(0, "c", "contradicted", "https://sec.gov/x", "q", "n", True),
+        "m",
+    )
+    assert client.post(f"/drafts/{did}/approve", data={}).status_code == 303
+    row = store.get_draft(conn, did)
+    assert row.status == "approved" and row.draft.table is None
+    notes = [d["note"] for d in store.list_decisions(conn, did)]
+    assert any("1 contradicted cell(s) unfixed" in n for n in notes)
 
 
 def test_run_verify_survives_a_failed_cell_and_finishes_next_run(conn, monkeypatch):

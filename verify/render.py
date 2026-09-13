@@ -54,8 +54,10 @@ def reindex(table, blanked: frozenset[tuple[int, int]]) -> frozenset[tuple[int, 
 
 def finalize_table(conn, d, *, cfg: dict, hosts: set[str]) -> tables.TableDecision:
     """Decide and act: a table with every cell checked is drawn to the draft's picture
-    (unsupported cells blanked) or dropped on the record; one with an unchecked cell is
-    left alone. Returns the decision so the caller can log or display it."""
+    (unsupported cells blanked) or dropped on the record; one with an unchecked cell, or
+    a contradicted one, is left alone with its verdicts (a contradicted cell is handed to
+    the next revision, like a contradicted claim). Returns the decision so the caller can
+    log or display it."""
     table = d.draft.table
     assert table is not None
     tcfg = cfg["tables"]
@@ -64,6 +66,13 @@ def finalize_table(conn, d, *, cfg: dict, hosts: set[str]) -> tables.TableDecisi
     decision = decide(conn, d, table, ratio=ratio, max_cells=max_cells, hosts=hosts)
     if decision.status == tables.PENDING:
         log.info("draft %d: table still has %d unchecked cell(s)", d.id, len(decision.unchecked))
+    elif decision.status == tables.BLOCKED:
+        log.warning(
+            "draft %d: table kept without a picture, %d contradicted cell(s): %s",
+            d.id,
+            len(decision.contradicted),
+            decision.reason,
+        )
     elif decision.status == tables.DROP:
         log.warning("draft %d: table dropped: %s", d.id, decision.reason)
         queue_store.drop_table(conn, d.id, decision.reason)

@@ -20,7 +20,7 @@ still has a contradicted or unverified claim after the pass goes back through th
 with those claims, exactly as the queue's Revise button with an empty box does, its
 supported verdicts are kept, the new or changed claims are checked, and the round repeats
 until every claim is supported or `max_rounds` (per run) / `max_rounds_per_draft` (for
-life) is hit. See verify/autorevise.py. Tables are not part of the loop.
+life) is hit. See verify/autorevise.py. A table's contradicted cells join each round.
 
 A draft with a comparison table gets a second pass: every cell that is not verbatim in the
 source article is one more web call (table_checks); once every cell has a verdict the
@@ -117,8 +117,16 @@ def main(argv: list[str] | None = None) -> int:
         log.info("done: %d claims checked, %d errors", checked, errors)
         auto = cfg["auto_revise"]
         enabled = auto.get("enabled", False) if args.auto_revise is None else args.auto_revise
+        tables_on = cfg["tables"].get("enabled", True)
+        if tables_on:
+            # Before the loop, so a round sees this run's cell verdicts too.
+            verify_tables(conn, args, cfg=cfg, root_cfg=root_cfg, hosts=hosts)
         if enabled and not args.dry_run:
             drafts = store.pending_drafts_with_claims(conn)
+            if tables_on:
+                seen = {d.id for d in drafts}
+                drafts += [d for d in store.pending_drafts_with_tables(conn) if d.id not in seen]
+                drafts.sort(key=lambda d: d.id)
             if args.draft is not None:
                 drafts = [d for d in drafts if d.id == args.draft]
             if args.limit is not None:
@@ -133,9 +141,8 @@ def main(argv: list[str] | None = None) -> int:
                     cfg=cfg,
                     root_cfg=root_cfg,
                     hosts=hosts,
+                    tables_on=tables_on,
                 )
-        if cfg["tables"].get("enabled", True):
-            verify_tables(conn, args, cfg=cfg, root_cfg=root_cfg, hosts=hosts)
     finally:
         conn.close()
     return 0
@@ -189,10 +196,13 @@ def auto_revise(
     cfg: dict,
     root_cfg: dict,
     hosts: set[str],
+    tables_on: bool = True,
 ) -> int:
     """The verify-revise loop for one draft (verify/autorevise.py). Returns the number of
     revisions made. A claim left unchecked (a failed web call, or past max_claims) stops the
-    loop: the drafter is only ever handed verdicts, never guesses."""
+    loop: the drafter is only ever handed verdicts, never guesses. After a round the new
+    claims are checked and, with tables on, the table's new cells too, so the next round
+    sees them."""
     rounds = 0
     for _ in range(max_rounds):
         d = queue_store.get_draft(conn, draft_id)
@@ -221,8 +231,14 @@ def auto_revise(
         d = queue_store.get_draft(conn, draft_id)
         idxs = [i for i in store.unchecked_indexes(conn, d) if i < max_claims]
         check_claims(conn, d, idxs, dry_run=False, cfg=cfg, root_cfg=root_cfg, hosts=hosts)
+        if tables_on and d.draft.table is not None and not d.image_path:
+            verify_table(
+                conn, queue_store.get_draft(conn, draft_id), cfg=cfg, root_cfg=root_cfg, hosts=hosts
+            )
     d = queue_store.get_draft(conn, draft_id)
     left = autorevise.claim_problems(store.checks_for_draft(conn, draft_id)) if d else []
+    if d:
+        left += autorevise.cell_problems(d.draft.table, store.table_checks_for_draft(conn, d.id))
     if left:
         log.warning(
             "draft %d: %d claim problem(s) left after %d round(s) this run",
@@ -234,10 +250,7 @@ def auto_revise(
 
 
 def verify_tables(conn, args, *, cfg: dict, root_cfg: dict, hosts: set[str]) -> None:
-    """The table pass: fill in every cell verdict, then draw or drop each table."""
-    tcfg = cfg["tables"]
-    max_cells = int(tcfg.get("max_cells_per_draft", 30))
-    ratio = float(tcfg.get("min_supported_ratio", 0.6))
+    """The table pass: fill in every cell verdict, then draw, keep or drop each table."""
     drafts = store.pending_drafts_with_tables(conn)
     if args.draft is not None:
         drafts = [d for d in drafts if d.id == args.draft]
@@ -247,63 +260,73 @@ def verify_tables(conn, args, *, cfg: dict, root_cfg: dict, hosts: set[str]) -> 
         return
     log.info("%d pending draft(s) with an unrendered table", len(drafts))
     for d in drafts:
-        table = d.draft.table
-        assert table is not None
-        log.info("draft %d table: %s (%d cells)", d.id, table.title[:60], len(table.cells()))
         if args.redo and not args.dry_run:
             store.delete_table_checks(conn, d.id)
-        if not args.dry_run:
-            for r, c in tables.source_backed_cells(table, f"{d.title}\n{d.abstract}"):
-                if (r, c) in {(k.row, k.col) for k in store.table_checks_for_draft(conn, d.id)}:
-                    continue
-                store.insert_table_check(
-                    conn,
-                    d.id,
-                    r,
-                    c,
-                    table.rows[r][c],
-                    ClaimCheck(
-                        0,
-                        table.rows[r][c],
-                        "supported",
-                        d.url or "",
-                        table.rows[r][c],
-                        "verbatim in the source article",
-                        True,
-                    ),
-                    tables.SOURCE_MODEL,
-                )
-        decision = render.decide(conn, d, table, ratio=ratio, max_cells=max_cells, hosts=hosts)
-        for r, c in decision.unchecked:
-            claim = tables.cell_claim(table, r, c)
-            log.info("  cell (%d,%d): %s", r, c, claim[:100])
-            if args.dry_run:
+        verify_table(conn, d, cfg=cfg, root_cfg=root_cfg, hosts=hosts, dry_run=args.dry_run)
+
+
+def verify_table(conn, d, *, cfg: dict, root_cfg: dict, hosts: set[str], dry_run=False) -> None:
+    """One draft's table: source-backed cells, then a web call per unchecked cell, then
+    the render/keep/drop decision (verify/render.py). Also called after an auto-revise
+    round so a table's new cells are checked in the same run."""
+    tcfg = cfg["tables"]
+    max_cells = int(tcfg.get("max_cells_per_draft", 30))
+    ratio = float(tcfg.get("min_supported_ratio", 0.6))
+    table = d.draft.table
+    assert table is not None
+    log.info("draft %d table: %s (%d cells)", d.id, table.title[:60], len(table.cells()))
+    if not dry_run:
+        for r, c in tables.source_backed_cells(table, f"{d.title}\n{d.abstract}"):
+            if (r, c) in {(k.row, k.col) for k in store.table_checks_for_draft(conn, d.id)}:
                 continue
-            try:
-                check = verify_claim(
+            store.insert_table_check(
+                conn,
+                d.id,
+                r,
+                c,
+                table.rows[r][c],
+                ClaimCheck(
                     0,
-                    claim,
-                    title=d.title or "",
-                    url=d.url or "",
-                    single_post=d.draft.single_post,
-                    published_at=None,
-                    cfg=cfg,
-                    root_cfg=root_cfg,
-                    hosts=hosts,
-                )
-            except Exception as exc:  # one bad cell never stops the run
-                log.warning("  cell (%d,%d) failed: %s", r, c, exc)
-                continue
-            store.insert_table_check(conn, d.id, r, c, table.rows[r][c], check, str(cfg["model"]))
-            log.info(
-                "  -> %s%s %s",
-                check.verdict,
-                "" if check.trusted else " (untrusted)",
-                check.source_url,
+                    table.rows[r][c],
+                    "supported",
+                    d.url or "",
+                    table.rows[r][c],
+                    "verbatim in the source article",
+                    True,
+                ),
+                tables.SOURCE_MODEL,
             )
-        if args.dry_run:
+    decision = render.decide(conn, d, table, ratio=ratio, max_cells=max_cells, hosts=hosts)
+    for r, c in decision.unchecked:
+        claim = tables.cell_claim(table, r, c)
+        log.info("  cell (%d,%d): %s", r, c, claim[:100])
+        if dry_run:
             continue
-        render.finalize_table(conn, d, cfg=cfg, hosts=hosts)
+        try:
+            check = verify_claim(
+                0,
+                claim,
+                title=d.title or "",
+                url=d.url or "",
+                single_post=d.draft.single_post,
+                published_at=None,
+                cfg=cfg,
+                root_cfg=root_cfg,
+                hosts=hosts,
+            )
+        except Exception as exc:  # one bad cell never stops the run
+            log.warning("  cell (%d,%d) failed: %s", r, c, exc)
+            continue
+        store.insert_table_check(conn, d.id, r, c, table.rows[r][c], check, str(cfg["model"]))
+        log.info(
+            "  -> %s%s %s",
+            check.verdict,
+            "" if check.trusted else " (untrusted)",
+            check.source_url,
+        )
+    if dry_run:
+        return
+    render.finalize_table(conn, d, cfg=cfg, hosts=hosts)
 
 
 if __name__ == "__main__":
