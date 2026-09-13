@@ -7,9 +7,11 @@ Drafts that pass every hard rule are stored as pending. Drafts the model could n
 past the hard rules are stored as status=failed with the reason, so they are not retried
 on the next run and the reviewer can see why.
 
-A draft that came with a chart spec (every number verified against the source) gets the chart
-rendered to <db folder>/images/draft_<id>.png, unless images.enabled is false in
-draft/config.yaml or matplotlib is missing (then the draft is stored without an image).
+Every draft is a 3-6 post thread with exactly one visual, a chart or a table (the drafter
+retries a draft that has neither, or whose chart holds a number the source does not). A
+chart is rendered here to <db folder>/images/draft_<id>.png, unless images.enabled is false
+in draft/config.yaml or matplotlib is missing (then the draft is stored without a picture);
+a table waits for run_verify.py to check its cells before it is drawn.
 
 Step 7: unless --no-examples (or examples.enabled: false in draft/config.yaml), recent human
 edits and rejections from the approval queue are built ONCE per run into an examples block
@@ -173,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
                     item_id=c.item_id,
                     cluster_id=c.cluster_id,
                     model=exc.__class__.__name__,
-                    draft=Draft("", [], "", ""),
+                    draft=Draft([], "", ""),
                     status=store.STATUS_FAILED,
                     rejection_reason="; ".join(exc.reasons),
                 )
@@ -193,12 +195,6 @@ def main(argv: list[str] | None = None) -> int:
             drafted += 1
             if result.flagged_numbers:
                 log.warning("%s: numbers flagged for review: %s", c.item_id, result.flagged_numbers)
-            if result.dropped_chart_numbers:
-                log.warning(
-                    "%s: chart dropped, numbers not in source: %s",
-                    c.item_id,
-                    result.dropped_chart_numbers,
-                )
             if images.attach_chart(
                 conn, draft_id, result.draft.chart, source_url=c.url, cfg=draft_cfg
             ):

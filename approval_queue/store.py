@@ -2,7 +2,7 @@
 
 Owns two tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline DB):
 
-  drafts(id INTEGER PK, item_id TEXT UNIQUE, cluster_id, model, single_post, thread_json,
+  drafts(id INTEGER PK, item_id TEXT UNIQUE, cluster_id, model, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
          snoozed_until, created_at, updated_at,
          chart_json, image_path)   -- added by guarded migrations: the drafter's chart spec
@@ -82,7 +82,6 @@ CREATE TABLE IF NOT EXISTS drafts (
     item_id          TEXT NOT NULL UNIQUE,
     cluster_id       INTEGER,
     model            TEXT NOT NULL,
-    single_post      TEXT NOT NULL,
     thread_json      TEXT NOT NULL,
     suggested_visual TEXT NOT NULL DEFAULT '',
     why_it_matters   TEXT NOT NULL DEFAULT '',
@@ -159,6 +158,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for table, column, ddl in _MIGRATIONS:
         if column not in _columns(conn, table):
             conn.execute(ddl)
+    # Drafts are threads only: a database from before that carries the NOT NULL single_post
+    # column, which every insert would have to fill. Drop it (SQLite >= 3.35). Its text is
+    # not lost to the history: every decision row stored it in original_text.
+    if "single_post" in _columns(conn, "drafts"):
+        conn.execute("ALTER TABLE drafts DROP COLUMN single_post")
     conn.commit()
 
 
@@ -339,7 +343,6 @@ class DraftRow:
 def _row_to_draft(r: sqlite3.Row) -> DraftRow:
     keys = r.keys()
     draft = Draft(
-        single_post=r["single_post"],
         thread=json.loads(r["thread_json"]),
         suggested_visual=r["suggested_visual"],
         why_it_matters=r["why_it_matters"],
@@ -423,15 +426,14 @@ def insert_draft(
         raise ValueError(f"unknown status {status!r}")
     now = _now()
     cur = conn.execute(
-        """INSERT INTO drafts (item_id, cluster_id, model, single_post, thread_json,
+        """INSERT INTO drafts (item_id, cluster_id, model, thread_json,
                                suggested_visual, why_it_matters, claims_json, status,
                                rejection_reason, created_at, updated_at, chart_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             item_id,
             cluster_id,
             model,
-            draft.single_post,
             json.dumps(draft.thread),
             draft.suggested_visual,
             draft.why_it_matters,
@@ -588,7 +590,9 @@ def approve(conn: sqlite3.Connection, draft_id: int, note: str | None = None) ->
     """Mark approved. Nothing is published here; that is step 3."""
     row = _require(conn, draft_id)
     _set_status(conn, draft_id, STATUS_APPROVED)
-    did = _record_decision(conn, draft_id, ACTION_APPROVE, row.draft.single_post, None, note)
+    did = _record_decision(
+        conn, draft_id, ACTION_APPROVE, _serialise_text(row.draft.thread), None, note
+    )
     conn.commit()
     return did
 
@@ -597,7 +601,6 @@ def edit(
     conn: sqlite3.Connection,
     draft_id: int,
     *,
-    single_post: str,
     thread: list[str],
     note: str | None = None,
     approve_after: bool = True,
@@ -609,11 +612,11 @@ def edit(
     """
     category = validate_category(category)
     row = _require(conn, draft_id)
-    original = _serialise_text(row.draft.single_post, row.draft.thread)
-    edited = _serialise_text(single_post, thread)
+    original = _serialise_text(row.draft.thread)
+    edited = _serialise_text(thread)
     conn.execute(
-        "UPDATE drafts SET single_post = ?, thread_json = ?, updated_at = ? WHERE id = ?",
-        (single_post, json.dumps(thread), _now(), draft_id),
+        "UPDATE drafts SET thread_json = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(thread), _now(), draft_id),
     )
     if approve_after:
         _set_status(conn, draft_id, STATUS_APPROVED)
@@ -637,15 +640,14 @@ def revise(
     current status: a revision is never an approval."""
     category = validate_category(category)
     row = _require(conn, draft_id)
-    original = _serialise_text(row.draft.single_post, row.draft.thread)
-    revised = _serialise_text(draft.single_post, draft.thread)
+    original = _serialise_text(row.draft.thread)
+    revised = _serialise_text(draft.thread)
     conn.execute(
-        """UPDATE drafts SET single_post = ?, thread_json = ?, suggested_visual = ?,
+        """UPDATE drafts SET thread_json = ?, suggested_visual = ?,
                              why_it_matters = ?, claims_json = ?, model = ?, updated_at = ?,
                              chart_json = ?, image_path = NULL, image_alt = NULL
            WHERE id = ?""",
         (
-            draft.single_post,
             json.dumps(draft.thread),
             draft.suggested_visual,
             draft.why_it_matters,
@@ -776,7 +778,7 @@ def drop_image(conn: sqlite3.Connection, draft_id: int, note: str | None = None)
         "updated_at = ? WHERE id = ?",
         (_now(), draft_id),
     )
-    text = _serialise_text(row.draft.single_post, row.draft.thread)
+    text = _serialise_text(row.draft.thread)
     _record_decision(conn, draft_id, ACTION_EDIT, text, text, note or "image dropped", None)
     conn.commit()
     if path is not None:
@@ -828,7 +830,7 @@ def edit_table(
         "WHERE id = ?",
         (json.dumps(new.to_dict()), _now(), draft_id),
     )
-    text = _serialise_text(row.draft.single_post, row.draft.thread)
+    text = _serialise_text(row.draft.thread)
     _record_decision(
         conn,
         draft_id,
@@ -865,7 +867,7 @@ def reject(
     row = _require(conn, draft_id)
     _set_status(conn, draft_id, STATUS_REJECTED)
     did = _record_decision(
-        conn, draft_id, ACTION_REJECT, row.draft.single_post, None, note, category
+        conn, draft_id, ACTION_REJECT, _serialise_text(row.draft.thread), None, note, category
     )
     conn.commit()
     return did
@@ -878,7 +880,9 @@ def snooze(
     row = _require(conn, draft_id)
     until = (datetime.now(UTC) + timedelta(hours=hours)).replace(microsecond=0).isoformat()
     _set_status(conn, draft_id, STATUS_SNOOZED, snoozed_until=until)
-    did = _record_decision(conn, draft_id, ACTION_SNOOZE, row.draft.single_post, None, note)
+    did = _record_decision(
+        conn, draft_id, ACTION_SNOOZE, _serialise_text(row.draft.thread), None, note
+    )
     conn.commit()
     return did
 
@@ -891,9 +895,11 @@ def list_decisions(conn: sqlite3.Connection, draft_id: int | None = None) -> lis
     ).fetchall()
 
 
-def _serialise_text(single_post: str, thread: list[str]) -> str:
-    """Canonical text form of a draft for the decisions log: JSON so it round-trips."""
-    return json.dumps({"single_post": single_post, "thread": thread}, ensure_ascii=False)
+def _serialise_text(thread: list[str]) -> str:
+    """Canonical text form of a draft for the decisions log: JSON so it round-trips.
+    (Rows from before threads-only carry {"single_post", "thread"} or a bare post;
+    draft.examples.parse_decision_text reads every form.)"""
+    return json.dumps({"thread": list(thread)}, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------

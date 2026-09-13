@@ -19,7 +19,11 @@ def test_prompt_embeds_voice_guide_hard_rules_and_item():
     assert "VOICE GUIDE" in system
     assert HARD_RULES in system
     assert "No medical advice" in system
-    assert '"single_post"' in system  # JSON schema embedded
+    assert '"thread"' in system and '"chart"' in system  # JSON schema embedded
+    assert '"single_post"' not in system
+    assert "last thread post" in HARD_RULES and "first thread post" in HARD_RULES
+    assert "exactly one visual" in HARD_RULES
+    assert user.endswith("Draft the thread and its visual now. Output JSON only.")
     assert "A CAR-T trial" in user
     assert "ORR was 88%." in user
     assert "https://example.org/paper" in user
@@ -83,7 +87,7 @@ def test_examples_block_sits_after_voice_guide_and_before_hard_rules():
     assert block in system
     assert block not in user  # the block lives in the system prompt only
     assert system.index("=== END VOICE GUIDE ===") < system.index(block) < system.index(HARD_RULES)
-    assert system.index(HARD_RULES) < system.index('"single_post"')
+    assert system.index(HARD_RULES) < system.index('"thread"')
     # everything outside the block is unchanged
     assert system.replace(block + "\n\n", "") == _pre_step7_system_prompt()
 
@@ -94,7 +98,7 @@ def test_revision_prompt_carries_draft_instructions_and_claim_failures():
     base = build_user_prompt(title="T", abstract="ORR 88%", url="https://x/1", source="pubmed")
     user = build_revision_user_prompt(
         base_user_prompt=base,
-        current={"single_post": "old post", "thread": ["a", "b", "c"]},
+        current={"thread": ["old post", "b", "c"]},
         instructions="drop the hype",
         claim_problems=[
             ClaimProblem(
@@ -112,10 +116,10 @@ def test_revision_prompt_carries_draft_instructions_and_claim_failures():
             )
         ],
     )
-    assert "Draft the single_post and the thread now" not in user
+    assert "Draft the thread and its visual now" not in user
     assert "REVISING" in user
     assert "ABSTRACT:\nORR 88%" in user
-    assert '"single_post": "old post"' in user
+    assert '"old post"' in user
     assert "EDITOR INSTRUCTIONS" in user and "drop the hype" in user
     assert "FACT-CHECK FAILURES" in user and "Trial has 200 patients" in user
     assert "NOTE: it has 97" in user and 'SOURCE SAYS: "97 patients"' in user
@@ -130,6 +134,6 @@ def test_revision_prompt_without_claims_has_no_fact_check_sections():
     from draft.prompt import build_revision_user_prompt
 
     user = build_revision_user_prompt(
-        base_user_prompt="brief", current={"single_post": "p"}, instructions="shorter"
+        base_user_prompt="brief", current={"thread": ["p"]}, instructions="shorter"
     )
     assert "FACT-CHECK" not in user and "UNVERIFIED" not in user and "TABLE CELL" not in user

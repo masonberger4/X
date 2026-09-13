@@ -139,12 +139,10 @@ def seed_post(
 ):
     """Seed items/clusters/scores(/ratings)/drafts/decisions and one or more posts rows."""
     cid = seed_item(conn, item_id, source=source, total=total)
-    d = Draft(
-        single_post=f"Post {item_id}", thread=["a", "b"], suggested_visual="", why_it_matters=""
-    )
+    d = Draft(thread=[f"Post {item_id}", "a", "b"], suggested_visual="", why_it_matters="")
     did = qstore.insert_draft(conn, item_id=item_id, cluster_id=cid, model="m", draft=d)
     if edit:
-        qstore.edit(conn, did, single_post=f"Edited {item_id}", thread=["a", "b"])
+        qstore.edit(conn, did, thread=[f"Edited {item_id}", "a", "b"])
     else:
         qstore.approve(conn, did)
     if rating is not None:

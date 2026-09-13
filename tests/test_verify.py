@@ -92,7 +92,7 @@ def test_verify_claim_marks_trust_and_passes_context(monkeypatch):
         "the trial is phase 2",
         title="T",
         url=URL,
-        single_post="post",
+        draft_text="post",
         published_at=None,
         cfg=CFG,
         root_cfg=ROOT,
@@ -109,7 +109,7 @@ def test_verify_claim_marks_trust_and_passes_context(monkeypatch):
         "x",
         title="T",
         url=URL,
-        single_post="p",
+        draft_text="p",
         published_at=None,
         cfg=CFG,
         root_cfg=ROOT,
@@ -154,7 +154,6 @@ def test_shipped_verify_config_is_sane():
 def _draft_with_claims(conn, item_id="i1", n=2):
     seed_item(conn, item_id)
     d = Draft(
-        single_post=f"post {URL}",
         thread=["a", "b", f"c {URL}"],
         suggested_visual="",
         why_it_matters="w",
@@ -312,8 +311,7 @@ def _fake_reviser(revisions, *, fix=True):
                 for c in claims
             ]
         d = Draft(
-            single_post=current.single_post + " (rev)",
-            thread=current.thread,
+            thread=[current.thread[0] + " (rev)", *current.thread[1:]],
             suggested_visual="",
             why_it_matters="w",
             claims_to_verify=claims,
@@ -326,7 +324,6 @@ def _fake_reviser(revisions, *, fix=True):
 def _seed_problem_draft(conn, item_id="i1"):
     seed_item(conn, item_id)
     d = Draft(
-        single_post=f"post {URL}",
         thread=["a", "b", f"c {URL}"],
         suggested_visual="",
         why_it_matters="w",
@@ -350,7 +347,7 @@ def test_auto_revise_loops_until_every_claim_is_supported(conn, monkeypatch):
     assert calls == ["good one", "bad one", "meh", "fine one", "ok"]
     assert revisions == [(None, ["contradicted", "unverified"])]
     row = store.get_draft(conn, did)
-    assert row.status == "pending" and row.draft.single_post.endswith("(rev)")
+    assert row.status == "pending" and row.draft.thread[0].endswith("(rev)")
     checks = vstore.checks_for_draft(conn, did)
     assert [c.verdict for c in checks] == ["supported"] * 3
     assert not vstore.has_contradiction(conn, did)
@@ -415,7 +412,7 @@ def test_auto_revise_stops_when_the_drafter_changes_no_claim_and_at_the_caps(con
     checks = vstore.checks_for_draft(conn, did)
     assert [c.verdict for c in checks] == ["supported", "contradicted", "unverified"]
     assert vstore.has_contradiction(conn, did)
-    assert not store.get_draft(conn, did).draft.single_post.endswith("(rev)")
+    assert not store.get_draft(conn, did).draft.thread[0].endswith("(rev)")
     assert store.list_decisions(conn, did) == []
 
     # the lifetime cap: with one automatic revision on record and a cap of 1, no more
@@ -524,8 +521,7 @@ def test_mark_host_trusted_flips_stored_verdicts_from_that_host(conn):
 
     seed_item(conn, "i1")
     d = Draft(
-        single_post=f"post {URL}",
-        thread=[],
+        thread=[f"post {URL}"],
         suggested_visual="",
         why_it_matters="",
         claims_to_verify=[Claim("a", "low"), Claim("b", "low")],

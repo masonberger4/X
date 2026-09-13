@@ -21,9 +21,9 @@ HARD_RULES = f"""HARD RULES. A draft that breaks any of these is discarded autom
 1b. No investment advice. Never tell anyone to buy, sell, hold, short, or avoid a stock,
    never give a price target, never promise or predict a return. Describe what a result
    means for a company's thesis and the risks; the reader decides.
-2. The primary source URL must appear verbatim in single_post AND in the last thread post.
+2. The primary source URL must appear verbatim in the last thread post.
 3. If the source is a preprint (bioRxiv / medRxiv), the word "{PREPRINT_LABEL}" must appear in
-   single_post and in the first thread post.
+   the first thread post.
 4. Every number you write must appear verbatim in the source abstract or title. Do not
    round, convert units, compute differences or percentages, or infer sample sizes.
    If a number you want is not in the abstract, leave it out.
@@ -32,19 +32,21 @@ HARD_RULES = f"""HARD RULES. A draft that breaks any of these is discarded autom
 7. Every post must contain an interpretation, not just a restatement (see voice guide).
 8. Any claim that goes beyond what the abstract states goes into claims_to_verify with an
    honest confidence level.
-9. "chart" is an optional bar chart that code renders and attaches to the post: give it only
-   when the source states two or more comparable numbers (arms, endpoints, cohorts), copy
-   each value exactly as written, and set it to null otherwise. Every number in the chart
-   is checked against the source like rule 4; one miss and the chart is dropped.
-   "suggested_visual" stays a one-line description for the human reviewer.
-10. "table" is the alternative to a chart: a small comparison (2-8 rows, 2-5 columns; the
-   first column names the company, asset or trial) such as a competitor landscape, a set
-   of upcoming catalysts or the deal terms side by side. Unlike a chart its cells MAY come
-   from your own knowledge: every cell is fact-checked on the web before the table is drawn,
-   a cell that cannot be tied to a primary source is blanked, and one contradicted cell
-   drops the table. So keep cells short, factual and checkable (a phase, a date, a
-   mechanism, a ticker, a number), never an opinion, and give at most one of chart/table
-   (null for the other). Use "suggested_visual" to say what the table shows.
+9. Every draft carries exactly one visual, a "chart" or a "table" (null for the other);
+   a draft with neither is discarded. "chart" is a bar chart that code renders and
+   attaches to the first post: give it when the source states two or more comparable
+   numbers (arms, endpoints, cohorts) and copy each value exactly as written. Every
+   number in the chart is checked against the source like rule 4; one miss and the draft
+   is sent back to you. "suggested_visual" is a one-line description of the visual for
+   the human reviewer.
+10. "table" is the visual when the source has no numbers to chart: a small comparison
+   (2-8 rows, 2-5 columns; the first column names the company, asset or trial) such as a
+   competitor landscape, a set of upcoming catalysts or the deal terms side by side.
+   Unlike a chart its cells MAY come from your own knowledge: every cell is fact-checked
+   on the web before the table is drawn, a cell that cannot be tied to a primary source
+   is blanked, and one contradicted cell blocks the table. So keep cells short, factual
+   and checkable (a phase, a date, a mechanism, a ticker, a number), never an opinion.
+   Use "suggested_visual" to say what the table shows.
 """
 
 
@@ -108,7 +110,7 @@ def build_user_prompt(
     if suggested_angle:
         parts.append(f"SUGGESTED ANGLE: {suggested_angle}")
     parts.append("")
-    parts.append("Draft the single_post and the thread now. Output JSON only.")
+    parts.append("Draft the thread and its visual now. Output JSON only.")
     return "\n".join(parts)
 
 
@@ -138,7 +140,7 @@ def build_revision_user_prompt(
     written."""
     parts = [
         base_user_prompt.replace(
-            "Draft the single_post and the thread now. Output JSON only.",
+            "Draft the thread and its visual now. Output JSON only.",
             "This item was already drafted. You are now REVISING that draft.",
         ),
         "",

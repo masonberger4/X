@@ -57,7 +57,7 @@ class ClaimCheck:
 
 
 def build_user(
-    claim: str, *, title: str, url: str, single_post: str, published_at: str | None
+    claim: str, *, title: str, url: str, draft_text: str, published_at: str | None
 ) -> str:
     return "\n".join(
         [
@@ -68,7 +68,7 @@ def build_user(
             f"Story: {title}",
             f"Story source: {url}",
             f"Story date: {published_at or 'unknown'}",
-            f"Draft post: {single_post}",
+            f"Draft post: {draft_text}",
             "",
             "Find the primary source and reply with the JSON object only.",
         ]
@@ -186,7 +186,7 @@ def verify_claim(
     *,
     title: str,
     url: str,
-    single_post: str,
+    draft_text: str,
     published_at: str | None,
     cfg: dict[str, Any],
     root_cfg: dict[str, Any],
@@ -197,9 +197,7 @@ def verify_claim(
     if not model:
         raise ValueError("verify/config.yaml model is not set")
     effort = str(cfg.get("effort") or "").strip().lower() or None
-    user = build_user(
-        claim, title=title, url=url, single_post=single_post, published_at=published_at
-    )
+    user = build_user(claim, title=title, url=url, draft_text=draft_text, published_at=published_at)
     data = parse_reply(call(SYSTEM, user, model, effort, cfg, root_cfg))
     trusted = data["verdict"] != UNVERIFIED and is_trusted(data["source_url"], hosts)
     return ClaimCheck(

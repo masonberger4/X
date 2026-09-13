@@ -30,10 +30,11 @@ CFG = {
     "skip_categories": ["factual", "hard_rule"],
 }
 
-ORIG_SINGLE = f"A game-changing CAR-T result: ORR 88% in 97 patients. Exciting times. {URL}"
-ORIG_THREAD = ["ORR 88% in 97 patients.", "Single arm, no comparator.", f"Source: {URL}"]
-EDIT_SINGLE = f"ORR 88% in 97 patients, single-arm. Sequencing vs bispecifics is the question {URL}"
-EDIT_THREAD = ["ORR 88% in 97 patients.", "Single arm, no comparator.", f"Source: {URL}"]
+ORIG_LEAD = "A game-changing CAR-T result: ORR 88% in 97 patients. Exciting times."
+EDIT_LEAD = "ORR 88% in 97 patients, single-arm. Sequencing vs bispecifics is the question."
+REST = ["Single arm, no comparator.", f"Source: {URL}"]
+ORIG_THREAD = [ORIG_LEAD, *REST]
+EDIT_THREAD = [EDIT_LEAD, *REST]
 
 _ids = iter(range(1, 10_000))
 
@@ -41,8 +42,8 @@ _ids = iter(range(1, 10_000))
 def row(
     action="edit",
     *,
-    original=(ORIG_SINGLE, ORIG_THREAD),
-    edited=(EDIT_SINGLE, EDIT_THREAD),
+    original=ORIG_THREAD,
+    edited=EDIT_THREAD,
     note="less hype",
     category=None,
     days_ago=1,
@@ -52,12 +53,10 @@ def row(
     draft_id=7,
 ):
     """A dict shaped like a fetch_decisions_for_voice row."""
-    if action == "edit":
-        original_text = _serialise_text(*original)
-        edited_text = _serialise_text(*edited) if edited is not None else None
-    else:
-        original_text = original[0]
-        edited_text = None
+    original_text = _serialise_text(list(original))
+    edited_text = None
+    if action == "edit" and edited is not None:
+        edited_text = _serialise_text(list(edited))
     return {
         "id": decision_id if decision_id is not None else next(_ids),
         "draft_id": draft_id,
@@ -78,17 +77,25 @@ def row(
 
 
 def test_parse_decision_text_round_trips_serialise_text():
-    text = _serialise_text("single ✓", ["one", "two"])
-    assert parse_decision_text(text) == ("single ✓", ["one", "two"])
+    text = _serialise_text(["one ✓", "two"])
+    assert parse_decision_text(text) == ["one ✓", "two"]
 
 
 def test_parse_decision_text_accepts_bare_string_and_odd_json():
-    assert parse_decision_text("just a post " + URL) == ("just a post " + URL, [])
-    assert parse_decision_text("") == ("", [])
-    assert parse_decision_text(None) == ("", [])
-    assert parse_decision_text('{"other": 1}') == ('{"other": 1}', [])
-    assert parse_decision_text("{not json") == ("{not json", [])
-    assert parse_decision_text(json.dumps({"single_post": "s", "thread": None})) == ("s", [])
+    assert parse_decision_text("just a post " + URL) == ["just a post " + URL]
+    assert parse_decision_text("") == []
+    assert parse_decision_text(None) == []
+    assert parse_decision_text('{"other": 1}') == ['{"other": 1}']
+    assert parse_decision_text("{not json") == ["{not json"]
+    assert parse_decision_text(json.dumps({"thread": None})) == []
+
+
+def test_parse_decision_text_reads_legacy_single_post_rows():
+    """Rows written before threads-only: the single post leads, then the thread."""
+    legacy = json.dumps({"single_post": "s", "thread": ["one", "two"]})
+    assert parse_decision_text(legacy) == ["s", "one", "two"]
+    assert parse_decision_text(json.dumps({"single_post": "s", "thread": None})) == ["s"]
+    assert parse_decision_text(json.dumps({"single_post": "", "thread": ["a"]})) == ["a"]
 
 
 # --- select_edit_examples ------------------------------------------------------
@@ -99,7 +106,7 @@ def test_selects_a_real_edit_with_texts_and_reason():
     assert len(out) == 1
     e = out[0]
     assert isinstance(e, EditExample)
-    assert e.original_single == ORIG_SINGLE and e.edited_single == EDIT_SINGLE
+    assert e.original_lead == ORIG_LEAD and e.edited_lead == EDIT_LEAD
     assert e.original_thread == ORIG_THREAD and e.edited_thread == EDIT_THREAD
     assert e.category == "voice" and e.note == "less hype" and e.source == "pubmed"
     assert e.why == "less hype"
@@ -107,15 +114,14 @@ def test_selects_a_real_edit_with_texts_and_reason():
 
 
 def test_identical_edit_is_skipped():
-    same = (ORIG_SINGLE, ORIG_THREAD)
-    assert select_edit_examples([row(original=same, edited=same)], CFG, now=NOW) == []
+    assert select_edit_examples([row(original=ORIG_THREAD, edited=ORIG_THREAD)], CFG, now=NOW) == []
     assert select_edit_examples([row(edited=None)], CFG, now=NOW) == []
 
 
 def test_one_character_edit_is_skipped_by_min_change_ratio():
-    typo = (ORIG_SINGLE.replace("Exciting", "Excitng"), ORIG_THREAD)
-    r = row(original=typo, edited=(ORIG_SINGLE, ORIG_THREAD))
-    assert change_ratio(typo, (ORIG_SINGLE, ORIG_THREAD)) < 0.08
+    typo = [ORIG_LEAD.replace("Exciting", "Excitng"), *REST]
+    r = row(original=typo, edited=ORIG_THREAD)
+    assert change_ratio(typo, ORIG_THREAD) < 0.08
     assert select_edit_examples([r], CFG, now=NOW) == []
     # with the threshold lowered the same row qualifies
     assert len(select_edit_examples([r], {**CFG, "min_change_ratio": 0.0}, now=NOW)) == 1
@@ -145,8 +151,8 @@ def test_newest_first_and_capped_at_max_examples():
 
 
 def test_edited_text_that_breaks_a_hard_rule_is_never_taught(caplog):
-    advice = (f"Patients should ask their oncologist about this. {URL}", EDIT_THREAD)
-    no_url = ("Dropped the link entirely, oops.", ["a", "b", "c"])
+    advice = ["Patients should ask their oncologist about this.", *REST]
+    no_url = ["Dropped the link entirely, oops.", "a", "b"]
     with caplog.at_level(logging.WARNING, logger="draft.examples"):
         out = select_edit_examples([row(edited=advice), row(edited=no_url)], CFG, now=NOW)
     assert out == []
@@ -154,28 +160,35 @@ def test_edited_text_that_breaks_a_hard_rule_is_never_taught(caplog):
     assert "missing the primary source URL" in caplog.text
 
 
-def test_edited_text_dropping_the_thread_is_allowed_when_single_passes():
-    out = select_edit_examples([row(edited=(EDIT_SINGLE, []))], CFG, now=NOW)
-    assert len(out) == 1 and out[0].edited_thread == [] and out[0].thread_changed
+def test_edited_text_emptying_the_thread_is_never_taught(caplog):
+    with caplog.at_level(logging.WARNING, logger="draft.examples"):
+        assert select_edit_examples([row(edited=[])], CFG, now=NOW) == []
+    assert "thread is empty" in caplog.text
+
+
+def test_edited_text_cutting_the_thread_is_allowed_when_url_survives():
+    out = select_edit_examples([row(edited=[f"{EDIT_LEAD} {URL}"])], CFG, now=NOW)
+    assert len(out) == 1 and out[0].edited_thread == [f"{EDIT_LEAD} {URL}"]
+    assert out[0].thread_changed
 
 
 def test_preprint_edit_must_keep_label():
-    unlabelled = row(source="biorxiv", edited=(EDIT_SINGLE, EDIT_THREAD))
+    unlabelled = row(source="biorxiv", edited=EDIT_THREAD)
     assert select_edit_examples([unlabelled], CFG, now=NOW) == []
-    labelled = row(
-        source="biorxiv",
-        edited=(f"Preprint: {EDIT_SINGLE}", [f"Preprint. {EDIT_THREAD[0]}", "b", f"c {URL}"]),
-    )
+    labelled = row(source="biorxiv", edited=[f"Preprint: {EDIT_LEAD}", *REST])
     assert len(select_edit_examples([labelled], CFG, now=NOW)) == 1
+    # the label in a later post does not count
+    late = row(source="biorxiv", edited=[EDIT_LEAD, "Preprint.", f"c {URL}"])
+    assert select_edit_examples([late], CFG, now=NOW) == []
 
 
 def test_long_posts_are_truncated_with_visible_marker():
-    long_single = "y" * 700 + " " + URL
-    r = row(original=(long_single, ORIG_THREAD), edited=(EDIT_SINGLE, EDIT_THREAD))
+    long_lead = "y" * 700
+    r = row(original=[long_lead, *REST], edited=EDIT_THREAD)
     out = select_edit_examples([r], {**CFG, "max_chars_per_post": 100}, now=NOW)
     assert len(out) == 1
-    assert out[0].original_single.endswith(TRUNCATION_MARK)
-    assert len(out[0].original_single) <= 100 + len(TRUNCATION_MARK) + 1
+    assert out[0].original_lead.endswith(TRUNCATION_MARK)
+    assert len(out[0].original_lead) <= 100 + len(TRUNCATION_MARK) + 1
 
 
 def test_rows_work_with_sqlite_row_objects(tmp_path):
@@ -212,7 +225,7 @@ def test_rejections_need_a_reason_and_are_capped_newest_first():
     out = select_rejections(rows, {**CFG, "max_rejections": 2}, now=NOW)
     assert [r.decision_id for r in out] == [202, 203]
     assert isinstance(out[0], RejectionExample)
-    assert out[0].single_post == ORIG_SINGLE and out[0].why == "too hypey"
+    assert out[0].thread == ORIG_THREAD and out[0].why == "too hypey"
     assert out[1].why == "hard_rule"
     assert [r.decision_id for r in select_rejections(rows, CFG, now=NOW)] == [202, 203, 204]
 
@@ -231,10 +244,12 @@ def test_block_is_deterministic_and_has_before_after_why():
     block = format_examples_block(edits, rejections)
     assert block == format_examples_block(edits, rejections)
     assert block.startswith(EDITS_HEADER)
-    assert "BEFORE (model):\n" + ORIG_SINGLE in block
-    assert "AFTER (human):\n" + EDIT_SINGLE in block
+    assert "BEFORE (model):\n" + ORIG_LEAD in block
+    assert "AFTER (human):\n" + EDIT_LEAD in block
     assert "WHY: less hype" in block
     assert REJECTIONS_HEADER in block
+    for post in ORIG_THREAD:
+        assert post in block.split(REJECTIONS_HEADER)[1]
     assert "REASON: not newsworthy" in block
     assert block.endswith(CLOSING_LINE)
     assert block.index(EDITS_HEADER) < block.index(REJECTIONS_HEADER) < block.index(CLOSING_LINE)
@@ -243,12 +258,13 @@ def test_block_is_deterministic_and_has_before_after_why():
 def test_unchanged_thread_is_omitted_and_changed_thread_is_shown():
     same = select_edit_examples([row()], CFG, now=NOW)
     block = format_examples_block(same, [])
-    assert "thread" not in block.lower().split("why:")[0]
+    assert "rest of thread" not in block.split("WHY:")[0]
     changed = select_edit_examples(
-        [row(edited=(EDIT_SINGLE, ["Shorter.", "Two.", f"Source: {URL}"]))], CFG, now=NOW
+        [row(edited=[EDIT_LEAD, "Shorter.", f"Source: {URL}"])], CFG, now=NOW
     )
     block = format_examples_block(changed, [])
-    assert "BEFORE thread (model):" in block and "AFTER thread (human):" in block
+    assert "BEFORE rest of thread (model):" in block
+    assert "AFTER rest of thread (human):" in block
     assert "  1. Shorter." in block
 
 

@@ -63,7 +63,6 @@ def seeded(conn, db_file, monkeypatch):
     cid = seed_item(conn, "a", hours_ago=1)
     seed_item(conn, "b", hours_ago=2)
     draft = Draft(
-        single_post="p https://doi.org/10.1000/x",
         thread=["one", "two", "three"],
         suggested_visual="",
         why_it_matters="",

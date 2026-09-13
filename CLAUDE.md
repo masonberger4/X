@@ -112,12 +112,16 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
   after generation (plus 280 chars/post with URLs as 23, source URL placement,
   and verbatim-number verification); drafts that fail are stored as `failed`.
-- **Draft images** (`draft/chart.py`): the drafter's optional `chart` is a bar-chart
+- **Drafts are threads only** (3-6 posts, `Draft.thread`; there is no single post and
+  step 3 always posts the thread) and **every draft carries exactly one visual**:
+  `validate_output` rejects an output with neither `chart` nor `table`, and the drafter
+  retries like on a hard-rule failure.
+- **Draft images** (`draft/chart.py`): the drafter's `chart` is a bar-chart
   SPEC (title, labels, values, unit, note), never a picture; `suggested_visual` stays a
   text hint for the reviewer. `drafter.verify_chart` checks every number in it verbatim
-  against the source and `drop_unverified_chart` drops the chart (text untouched, a
-  low-confidence claim says why) on one miss. `run_draft.py` and the queue's revise
-  route render the survivor through `approval_queue/images.py:attach_chart` (matplotlib,
+  against the source and `drafter.chart_problems` turns one miss into a retry reason
+  (never a silent drop; a draft that never gets it right is stored `failed`).
+  `run_draft.py` and the queue's revise route render the chart through `approval_queue/images.py:attach_chart` (matplotlib,
   the `images` extra, imported inside `render_chart`; fail-soft: no image, never no
   draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
   and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
@@ -203,7 +207,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `cell_problems` live there and the queue app imports them. The queue blocks approve (409) on a contradicted claim
   unless `override=1`.
 - Step 3 reads step 2's tables only through `publish/store.py:fetch_approved`
-  (edited_text from `decisions` wins over `single_post`; it also resolves the draft's
+  (edited_text from `decisions` wins over `thread_json`; it also resolves the draft's
   image path and alt text). Its own tables are
   `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
   settings live in `publish/config.yaml`, not the root config. Posting is

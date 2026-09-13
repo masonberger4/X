@@ -57,17 +57,16 @@ def decision_row(
     draft_id,
     action="edit",
     *,
-    original=(f"A game-changer for CAR-T: ORR 88%. Exciting stuff. {URL}", ["t1", f"t2 {URL}"]),
-    edited=(f"ORR 88%, single arm. Sequencing is the open question. {URL}", ["t1", f"t2 {URL}"]),
+    original=("A game-changer for CAR-T: ORR 88%. Exciting stuff.", "t1", f"t2 {URL}"),
+    edited=("ORR 88%, single arm. Sequencing is the open question.", "t1", f"t2 {URL}"),
     note=None,
     category=None,
     days_ago=1,
     source="pubmed",
 ):
-    if action == "edit":
-        original_text, edited_text = _serialise_text(*original), _serialise_text(*edited)
-    else:
-        original_text, edited_text = original[0], None
+    """original/edited are threads (tuples of posts); the first post is the lead."""
+    original_text = _serialise_text(list(original))
+    edited_text = _serialise_text(list(edited)) if action == "edit" else None
     return {
         "id": next(_ids),
         "draft_id": draft_id,
@@ -156,16 +155,16 @@ def test_status_counts_edit_rate_and_by_source():
 def test_banned_phrase_hits_found_in_original_text():
     decisions = [
         decision_row(1, "edit"),  # original says "game-changer"
-        decision_row(2, "reject", original=(f"Breakthrough! Truly. {URL}", []), note="hype"),
-        decision_row(3, "approve", original=(f"Nothing banned here. {URL}", [])),
+        decision_row(2, "reject", original=(f"Breakthrough! Truly. {URL}",), note="hype"),
+        decision_row(3, "approve", original=(f"Nothing banned here. {URL}",)),
     ]
     r = report([draft_row(i) for i in (1, 2, 3)], decisions)
     assert r.banned_phrase_hits == [("breakthrough", 1), ("game-changer", 1)]
 
 
 def test_deleted_and_added_words_exclude_stopwords_numbers_and_urls():
-    original = (f"The result is exciting and huge for the 97 patients {URL}", [])
-    edited = (f"The result is modest for the 97 patients https://other.example/x {URL}", [])
+    original = (f"The result is exciting and huge for the 97 patients {URL}",)
+    edited = (f"The result is modest for the 97 patients https://other.example/x {URL}",)
     r = report([draft_row(1)], [decision_row(1, original=original, edited=edited)])
     deleted = dict(r.deleted_words)
     added = dict(r.added_words)
@@ -177,13 +176,14 @@ def test_deleted_and_added_words_exclude_stopwords_numbers_and_urls():
 
 
 def test_length_delta_median_and_thread_dropped_rate():
-    long = "x" * 200 + " " + URL
-    short = "x" * 140 + " " + URL
+    long = "x" * 200
+    short = "x" * 140
     decisions = [
-        decision_row(1, original=(long, ["a", "b", f"c {URL}"]), edited=(short, [f"c {URL}"])),
-        decision_row(2, original=(long, ["a", f"b {URL}"]), edited=(short, ["a", f"b {URL}"])),
+        decision_row(1, original=(long, "a", "b", f"c {URL}"), edited=(short, f"c {URL}")),
+        decision_row(2, original=(long, "a", f"b {URL}"), edited=(short, "a", f"b {URL}")),
     ]
     r = report([draft_row(1), draft_row(2)], decisions)
+    # the length delta is over the first post only; later posts do not count
     assert r.length_delta_median == -60
     assert r.thread_dropped_rate == 0.5
 
@@ -195,8 +195,8 @@ def _phrase_edits(n, phrase="paradigm shift"):
     return [
         decision_row(
             i,
-            original=(f"A {phrase} in myeloma care, honestly. Result {i}. {URL}", []),
-            edited=(f"A real change in myeloma care, honestly. Result {i}. {URL}", []),
+            original=(f"A {phrase} in myeloma care, honestly. Result {i}. {URL}",),
+            edited=(f"A real change in myeloma care, honestly. Result {i}. {URL}",),
         )
         for i in range(1, n + 1)
     ]
@@ -225,7 +225,7 @@ def test_already_banned_phrase_is_not_proposed_again():
 def test_length_proposal_from_median_delta_minus_60():
     long = "y" * 220 + " " + URL
     short = "y" * 160 + " " + URL
-    decisions = [decision_row(i, original=(long, []), edited=(short, [])) for i in (1, 2, 3)]
+    decisions = [decision_row(i, original=(long,), edited=(short,)) for i in (1, 2, 3)]
     r = report([draft_row(i) for i in (1, 2, 3)], decisions)
     assert r.length_delta_median == -60
     lp = [p for p in r.proposals if p.kind == KIND_LENGTH]
@@ -234,31 +234,30 @@ def test_length_proposal_from_median_delta_minus_60():
 
     # a -20 median does not
     shorter = "y" * 200 + " " + URL
-    decisions = [decision_row(i, original=(long, []), edited=(shorter, [])) for i in (1, 2, 3)]
+    decisions = [decision_row(i, original=(long,), edited=(shorter,)) for i in (1, 2, 3)]
     r = report([draft_row(i) for i in (1, 2, 3)], decisions)
     assert not [p for p in r.proposals if p.kind == KIND_LENGTH]
 
 
 def test_thread_proposal_when_threads_are_usually_cut():
-    thread = ["a", "b", f"c {URL}"]
     decisions = [
         decision_row(
             i,
-            original=(f"Original wording of the post {i}. {URL}", thread),
-            edited=(f"Edited wording of the post {i}. {URL}", [f"c {URL}"]),
+            original=(f"Original wording of the post {i}.", "a", "b", f"c {URL}"),
+            edited=(f"Edited wording of the post {i}.", f"c {URL}"),
         )
         for i in (1, 2, 3)
     ]
     r = report([draft_row(i) for i in (1, 2, 3)], decisions)
     assert r.thread_dropped_rate == 1.0
     tp = [p for p in r.proposals if p.kind == KIND_THREAD]
-    assert len(tp) == 1 and "lead with the single post" in tp[0].text
+    assert len(tp) == 1 and "lead with the story" in tp[0].text
 
 
 def test_tone_proposal_from_recurring_note_word():
     decisions = [
         decision_row(1, note="too much hype"),
-        decision_row(2, "reject", note="Hype again", original=(f"x {URL}", [])),
+        decision_row(2, "reject", note="Hype again", original=(f"x {URL}",)),
         decision_row(3, note="hype, and jargon"),
         decision_row(4, note="jargon"),
     ]
@@ -291,13 +290,14 @@ def test_markdown_with_data_contains_pairs_and_proposals():
     long = "y" * 220 + " " + URL
     short = "y" * 160 + " " + URL
     decisions = [
-        decision_row(i, original=(long, []), edited=(short, []), note="tighten") for i in (1, 2, 3)
+        decision_row(i, original=(long,), edited=(short,), note="tighten") for i in (1, 2, 3)
     ]
     r = report([draft_row(i) for i in (1, 2, 3)], decisions)
     md = render_markdown(r)
     for heading in SECTION_HEADINGS:
         assert heading in md
     assert "**length**" in md and "> " + short in md and "tighten" in md
+    assert "Median first-post length change: -60 chars" in md
     assert "| pubmed | 3 | 3 | 0 |" in md
     assert "Edit rate" in md and "100%" in md
 
@@ -322,17 +322,15 @@ def test_cli_json_and_markdown_and_examples(db_file, capsys, tmp_path):
         conn,
         item_id="i1",
         model="m",
-        draft=Draft(f"Huge, exciting CAR-T news today {URL}", ["a", f"b {URL}"], "", ""),
+        draft=Draft([f"Huge, exciting CAR-T news today {URL}", "a", f"b {URL}"], "", ""),
     )
-    store.edit(
-        conn, did, single_post=f"CAR-T data {URL}", thread=["a", f"b {URL}"], note="less hype"
-    )
+    store.edit(conn, did, thread=[f"CAR-T data {URL}", "a", f"b {URL}"], note="less hype")
     conn.close()
 
     assert main(["--json", "--weeks", "2"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["drafts_total"] == 1 and data["edited"] == 1
-    assert data["top_pairs"][0]["edited_single"] == f"CAR-T data {URL}"
+    assert data["top_pairs"][0]["edited_thread"][0] == f"CAR-T data {URL}"
 
     out = tmp_path / "voice.md"
     assert main(["--out", str(out)]) == 0

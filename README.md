@@ -187,17 +187,18 @@ snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
 
 ## Draft images (charts)
 
-The drafter's `suggested_visual` is a one-line idea for the reviewer. The
+The drafter's `suggested_visual` is a one-line description for the reviewer. The
 image that actually ships is a **chart the model specifies and code renders**
-(`draft/chart.py`): the output JSON has an optional `chart` (title, labels,
-values, unit, note; `null` when the source has no comparable numbers). The
-Anthropic API draws nothing, and a picture the pipeline cannot audit would
-break "never fabricate numbers", so:
+(`draft/chart.py`) or a table (below): the output JSON must carry exactly one of
+`chart` (title, labels, values, unit, note) and `table`; an output with neither
+fails the schema check and the drafter retries, so every draft comes with a
+visual. The Anthropic API draws nothing, and a picture the pipeline cannot audit
+would break "never fabricate numbers", so:
 
 - every number in the chart (values, title, labels, note) is checked verbatim
-  against the source like the post text (`drafter.verify_chart`); one miss and
-  the chart is dropped and a low-confidence claim says which number
-  (`drop_unverified_chart`). The text is unaffected;
+  against the source like the post text (`drafter.verify_chart`); one miss is a
+  retry reason like a hard-rule violation (`drafter.chart_problems`), and a draft
+  that never gets it right is stored as `failed` with the missing numbers;
 - `run_draft.py` renders the surviving spec with matplotlib (`pip install -e
   ".[images]"`; without it, or with `images: enabled: false` in
   `draft/config.yaml`, drafts are stored without an image) to
@@ -291,7 +292,7 @@ Safety gates, all of which must hold before a single tweet is sent:
   before the API call, so two overlapping cron runs cannot post it twice and a
   draft is never retried after a failure.
 - Every text is re-checked in code right before posting (<= 280 chars with
-  URLs as 23, source URL in the single post / last thread post). Failures are
+  URLs as 23, source URL in the last thread post). Failures are
   logged as refusals and go back to the approval queue; nothing is auto-fixed.
 - Breaking items (`fda*` sources, `company_*` PRs whose title mentions an
   approval) may post outside slots but still respect the daily cap and gap.
@@ -344,7 +345,7 @@ and never produce a suggestion.
 The report **proposes** changes and applies none. A human edits
 `score/rubric.py` (weights in `compute_total`, few-shot anchors; then bump
 `PROMPT_VERSION` so `run_score.py` re-scores), `config.yaml` (prefilter
-keywords, source cadences), `publish/config.yaml` (slots, `post_format`) or
+keywords, source cadences), `publish/config.yaml` (slots) or
 `draft/voice.md`, as each suggestion names.
 
 ## Operations (step 5)
@@ -483,8 +484,8 @@ output is still checked in code: examples can never relax a rule. Table
 The report **proposes** and applies nothing. Each proposal names the
 `draft/voice.md` section to paste into: a phrase you deleted
 `propose_banned_after` times becomes a proposed banned phrase, a median
-single-post length change below -40 chars means posts run long, a thread cut
-in more than half of the edits means lead with the single post, and a note
+first-post length change below -40 chars means posts run long, a thread cut
+in more than half of the edits means lead with the story, and a note
 word such as "hype" or "jargon" recurring three times is a tone proposal. Edit
 `voice.md` by hand; the next run picks it up.
 

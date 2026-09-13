@@ -22,8 +22,7 @@ def client(db_file):
 def draft_id(conn):
     seed_item(conn, "i1", source="biorxiv")
     d = Draft(
-        single_post=f"Preprint: ORR 88%. {URL}",
-        thread=["Preprint. one", "two", f"three {URL}"],
+        thread=["Preprint: ORR 88%. one", "two", f"three {URL}"],
         suggested_visual="plot",
         why_it_matters="matters",
         claims_to_verify=[Claim("Number '15' does not appear in the source abstract", "low")],
@@ -43,8 +42,8 @@ def test_detail_shows_post_thread_claims_and_lengths(client, draft_id):
     r = client.get(f"/drafts/{draft_id}")
     assert r.status_code == 200
     body = r.text
-    assert "Preprint: ORR 88%." in body
-    assert "1/3 Preprint. one" in body and "3/3 three" in body
+    assert "1/3 Preprint: ORR 88%. one" in body and "3/3 three" in body
+    assert "Single post" not in body
     assert "[low]" in body and "does not appear" in body
     assert "/280" in body
     assert client.get("/drafts/999").status_code == 404
@@ -65,16 +64,14 @@ def test_edit_action_saves_original_and_edited(client, conn, draft_id):
     r = client.post(
         f"/drafts/{draft_id}/edit",
         data={
-            "single_post": f"Preprint, edited. {URL}",
-            "thread": f"Preprint. first\n---\nsecond\n---\nlast {URL}",
+            "thread": f"Preprint, edited. first\n---\nsecond\n---\nlast {URL}",
             "note": "tightened",
         },
     )
     assert r.status_code == 303
     row = store.get_draft(conn, draft_id)
     assert row.status == "approved"
-    assert row.draft.single_post == f"Preprint, edited. {URL}"
-    assert row.draft.thread == ["Preprint. first", "second", f"last {URL}"]
+    assert row.draft.thread == ["Preprint, edited. first", "second", f"last {URL}"]
     dec = store.list_decisions(conn, draft_id)[0]
     assert dec["action"] == "edit"
     assert "ORR 88%" in dec["original_text"]
@@ -85,21 +82,21 @@ def test_edit_action_saves_original_and_edited(client, conn, draft_id):
 def test_edit_keep_pending(client, conn, draft_id):
     r = client.post(
         f"/drafts/{draft_id}/edit",
-        data={"single_post": "s", "thread": "a\n---\nb\n---\nc", "keep_pending": "1"},
+        data={"thread": "a\n---\nb\n---\nc", "keep_pending": "1"},
     )
     assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}"
     assert store.get_draft(conn, draft_id).status == "pending"
 
 
 def test_edit_rejects_over_280_and_empty(client, conn, draft_id):
-    r = client.post(f"/drafts/{draft_id}/edit", data={"single_post": "x" * 281, "thread": ""})
+    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": "x" * 281 + "\n---\nb"})
     assert r.status_code == 400 and "280" in r.text
     # The refusal is the detail page itself, error on top and the typed text kept, with a
     # way back; never FastAPI's bare JSON page.
-    assert "Not saved" in r.text and "single post is 281 characters" in r.text
+    assert "Not saved" in r.text and "post 1 is 281 characters" in r.text
     assert "x" * 281 in r.text and 'href="/queue"' in r.text
     assert "<details open>" in r.text
-    r = client.post(f"/drafts/{draft_id}/edit", data={"single_post": "", "thread": "a"})
+    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": ""})
     assert r.status_code == 400 and "cannot be empty" in r.text
     assert store.get_draft(conn, draft_id).status == "pending"
     assert store.list_decisions(conn, draft_id) == []
@@ -125,9 +122,7 @@ def test_snooze_action_hides_for_24h(client, conn, draft_id):
 def test_actions_on_missing_draft_404(client):
     for action in ("approve", "reject", "snooze"):
         assert client.post(f"/drafts/999/{action}").status_code == 404
-    assert (
-        client.post("/drafts/999/edit", data={"single_post": "s", "thread": ""}).status_code == 404
-    )
+    assert client.post("/drafts/999/edit", data={"thread": "s"}).status_code == 404
     assert client.get("/status/bogus").status_code == 404
 
 
@@ -135,7 +130,7 @@ def test_actions_on_missing_draft_404(client):
 
 
 def test_edit_form_accepts_category_and_rejects_unknown(client, conn, draft_id):
-    data = {"single_post": f"Preprint, edited. {URL}", "thread": f"Preprint. a\n---\nb {URL}"}
+    data = {"thread": f"Preprint, edited. a\n---\nb {URL}"}
     assert (
         client.post(f"/drafts/{draft_id}/edit", data={**data, "category": "x"}).status_code == 400
     )
@@ -152,14 +147,24 @@ def test_voice_route_exists(client, draft_id):
 # --- revise (AI rewrite on the human's note) ----------------------------------------
 
 
-def _revision_json(single_post):
+# Numbers verbatim in the seeded abstract (tests.conftest.ABSTRACT); every draft needs a visual.
+CHART = {
+    "title": "Phase 2 outcomes",
+    "labels": ["ORR", "Median PFS"],
+    "values": [88, 14.6],
+    "unit": "",
+    "note": "n=97",
+}
+
+
+def _revision_json(lead):
     return json.dumps(
         {
-            "single_post": single_post,
-            "thread": ["Preprint. r1", "r2", f"r3 {URL}"],
+            "thread": [lead, "r2", f"r3 {URL}"],
             "suggested_visual": "",
             "why_it_matters": "revised",
             "claims_to_verify": [{"claim": "new claim", "confidence": "medium"}],
+            "chart": CHART,
         }
     )
 
@@ -189,19 +194,19 @@ def test_revise_rewrites_draft_from_instructions_and_keeps_pending(
     assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}?revised=1"
     row = store.get_draft(conn, draft_id)
     assert row.status == "pending"
-    assert row.draft.single_post.startswith("Preprint: tighter.")
-    assert row.draft.thread[0] == "Preprint. r1"
+    assert row.draft.thread[0].startswith("Preprint: tighter.")
+    assert row.draft.thread[1] == "r2" and row.draft.chart is not None
     assert [c.claim for c in row.draft.claims_to_verify] == ["new claim"]
     assert row.model == "stub-model"
     (dec,) = store.list_decisions(conn, draft_id)
     assert dec["action"] == "revise" and dec["note"] == "tighter opening"
     assert dec["category"] == "voice"
     system, user, model = calls[0]
-    assert "tighter opening" in user and "Preprint: ORR 88%." in user
+    assert "tighter opening" in user and "Preprint: ORR 88%. one" in user
     assert model == "stub-model"
     body = client.get(f"/drafts/{draft_id}?revised=1").text
     assert "Revised." in body and "revise" in body
-    assert "- single: Preprint: ORR 88%." in body  # diff of the AI rewrite is shown
+    assert "- post 1: Preprint: ORR 88%. one" in body  # diff of the AI rewrite is shown
 
 
 def test_revise_with_empty_box_fixes_failed_claims_and_resets_checks(
@@ -262,7 +267,7 @@ def test_revise_with_nothing_to_do_or_failed_model_leaves_draft_alone(
 ):
     r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": ""})
     assert r.status_code == 303 and "error=" in r.headers["location"]
-    _stub_call(monkeypatch, [json.dumps({"single_post": "no url"})] * drafter.MAX_ATTEMPTS)
+    _stub_call(monkeypatch, [json.dumps({"thread": ["no url"]})] * drafter.MAX_ATTEMPTS)
     r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
     assert r.status_code == 303 and "error=" in r.headers["location"]
     _stub_call(monkeypatch, [RuntimeError("api down")] * drafter.MAX_ATTEMPTS)
@@ -270,7 +275,7 @@ def test_revise_with_nothing_to_do_or_failed_model_leaves_draft_alone(
     r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
     assert r.status_code == 303 and "api%20down" in r.headers["location"]
     row = store.get_draft(conn, draft_id)
-    assert row.draft.single_post == f"Preprint: ORR 88%. {URL}"
+    assert row.draft.thread[0] == "Preprint: ORR 88%. one"
     assert store.list_decisions(conn, draft_id) == []
     assert client.post("/drafts/999/revise", data={"instructions": "x"}).status_code == 404
     body = client.get(f"/drafts/{draft_id}?error=api%20down").text
@@ -293,7 +298,7 @@ def _publish_draft(conn, draft_id, *, status="posted", tweet_id="555", error=Non
         conn,
         draft_id=draft_id,
         text="one",
-        kind="single",
+        kind="thread",
         position=1,
         slot="08:30",
         tweet_id=tweet_id,
@@ -310,7 +315,7 @@ def test_approved_page_hides_posted_drafts_and_links_the_tweet(client, conn, dra
         conn,
         item_id="i2",
         model="m",
-        draft=Draft(single_post=f"Second {URL}", thread=[], suggested_visual="", why_it_matters=""),
+        draft=Draft(thread=[f"Second {URL}"], suggested_visual="", why_it_matters=""),
     )
     store.approve(conn, other)
     # before any publish run: both listed as waiting, no tables yet

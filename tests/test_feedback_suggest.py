@@ -119,13 +119,14 @@ def test_format_slot_topic_and_evidence_suggestions():
     kinds = {s.kind for s in out}
     assert kinds == {sg.KIND_FORMAT, sg.KIND_SLOT, sg.KIND_PREFILTER, sg.KIND_RUBRIC}
     targets = {s.target for s in out}
-    assert "publish/config.yaml: post_format" in targets
+    # every draft is a thread now: the single-vs-thread split proposes no setting
+    assert not any("post_format" in t for t in targets)
     assert "draft/voice.md" in targets
     assert "publish/config.yaml: slots" in targets
     assert "config.yaml: prefilter.allow_keywords (approval)" in targets
     assert "score/rubric.py: compute_total / evidence_level=preprint" in targets
-    fmt = next(s for s in out if s.target == "publish/config.yaml: post_format")
-    assert "post_format: thread" in fmt.rationale
+    fmt = [s for s in out if s.kind == sg.KIND_FORMAT]
+    assert len(fmt) == 1 and "Human-edited posts" in fmt[0].rationale
 
 
 def test_off_slot_group_targets_breaking_rules():

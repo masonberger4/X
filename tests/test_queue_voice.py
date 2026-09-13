@@ -17,8 +17,11 @@ def client(db_file):
 def _draft(conn, item_id="i1", source="pubmed"):
     seed_item(conn, item_id, source=source)
     d = Draft(
-        single_post=f"A game-changer: ORR 88% in 97 patients. Exciting. {URL}",
-        thread=["ORR 88% in 97 patients.", "Single-arm.", f"Source: {URL}"],
+        thread=[
+            "A game-changer: ORR 88% in 97 patients. Exciting.",
+            "Single-arm.",
+            f"Source: {URL}",
+        ],
         suggested_visual="plot",
         why_it_matters="matters",
     )
@@ -58,8 +61,10 @@ def test_edit_form_with_category_persists_and_detail_shows_diff(client, conn):
     r = client.post(
         f"/drafts/{did}/edit",
         data={
-            "single_post": f"ORR 88% in 97 patients, single-arm. Sequencing is the question. {URL}",
-            "thread": f"ORR 88% in 97 patients.\n---\nSingle-arm.\n---\nSource: {URL}",
+            "thread": (
+                "ORR 88% in 97 patients, single-arm. Sequencing is the question."
+                f"\n---\nSingle-arm.\n---\nSource: {URL}"
+            ),
             "note": "less hype",
             "category": "voice",
         },
@@ -69,20 +74,20 @@ def test_edit_form_with_category_persists_and_detail_shows_diff(client, conn):
     assert dec["category"] == "voice"
     body = client.get(f"/drafts/{did}").text
     assert '<pre class="diff">' in body
-    assert '<span class="del">- single: A game-changer' in body
-    assert '<span class="add">+ single: ORR 88% in 97 patients, single-arm.' in body
-    assert '<span class="same">  thread 1: ORR 88%' in body
+    assert '<span class="del">- post 1: A game-changer' in body
+    assert '<span class="add">+ post 1: ORR 88% in 97 patients, single-arm.' in body
+    assert '<span class="same">  post 2: Single-arm.' in body
     assert "<td>voice</td>" in body and "less hype" in body
 
 
 def test_decision_diff_marks_removed_and_added_lines():
     diff = decision_diff(
-        store._serialise_text("old post", ["a", "b"]), store._serialise_text("new post", ["a"])
+        store._serialise_text(["old post", "a", "b"]), store._serialise_text(["new post", "a"])
     )
-    assert ("del", "single: old post") in diff
-    assert ("add", "single: new post") in diff
-    assert ("", "thread 1: a") in diff
-    assert ("del", "thread 2: b") in diff
+    assert ("del", "post 1: old post") in diff
+    assert ("add", "post 1: new post") in diff
+    assert ("", "post 2: a") in diff
+    assert ("del", "post 3: b") in diff
     assert not any(line.startswith("?") for _, line in diff)
 
 
@@ -108,8 +113,10 @@ def test_voice_page_with_data(client, conn):
     client.post(
         f"/drafts/{did}/edit",
         data={
-            "single_post": f"Preprint: ORR 88% in 97 patients, single-arm, sequencing open. {URL}",
-            "thread": f"Preprint. ORR 88%.\n---\nSingle-arm.\n---\nSource: {URL}",
+            "thread": (
+                "Preprint: ORR 88% in 97 patients, single-arm, sequencing open."
+                f"\n---\nSingle-arm.\n---\nSource: {URL}"
+            ),
             "note": "less hype",
             "category": "voice",
         },
