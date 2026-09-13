@@ -118,7 +118,7 @@ def test_attach_table_brands_from_root_config(conn, monkeypatch, tmp_path):
         conn,
         item_id="i1",
         model="m",
-        draft=Draft(f"x {URL}", ["a", "b", f"c {URL}"], "v", "w", table=t),
+        draft=Draft([f"x {URL}", "b", f"c {URL}"], "v", "w", table=t),
     )
     seen = {}
     real = images.render_table

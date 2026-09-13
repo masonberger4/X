@@ -13,7 +13,7 @@ from feedback.suggest import Suggestion
 GROUP_TITLES = {
     "source": "By source",
     "evidence_level": "By evidence level",
-    "kind": "By format (single vs thread)",
+    "kind": "By format (thread; 'single' rows are from before threads-only)",
     "slot": "By publishing slot",
     "edited": "Edited vs unedited",
     "topic": "By topic (title keywords from feedback/config.yaml)",
@@ -163,7 +163,7 @@ def suggestions_section(suggestions: Sequence[Suggestion], min_posts: int) -> st
         "",
         "Nothing above has been applied. Rubric changes go in score/rubric.py with a "
         "PROMPT_VERSION bump (run_score.py then re-scores); prefilter and cadence changes go "
-        "in config.yaml; slots and post_format in publish/config.yaml; voice in draft/voice.md.",
+        "in config.yaml; slots in publish/config.yaml; voice in draft/voice.md.",
         "",
     ]
     return "\n".join(lines)

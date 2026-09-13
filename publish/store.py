@@ -9,7 +9,8 @@ Owns two tables, created with CREATE TABLE IF NOT EXISTS in the shared pipeline 
       both post the same draft. `position` (guarded migration) is the human's publishing
       order from the control panel's approved page: an unclaimed 'pending' row with a
       position is published before anything else, lowest position first (`set_order`).
-  posts(id PK, draft_id, tweet_id, text, kind 'single'|'thread', position, posted_at, slot,
+  posts(id PK, draft_id, tweet_id, text, kind 'thread' ('single' on rows from before
+        threads-only), position, posted_at, slot,
         status 'posted'|'failed', error)
       One row per tweet attempted. A thread that failed at post k has rows 1..k-1 with
       tweet_ids and row k with status='failed' and the error; schedule.status is 'partial'.
@@ -18,13 +19,13 @@ Never modifies drafts, decisions, items, clusters or scores.
 
 STEP 2 SCHEMA (approval_queue/store.py, as merged on main; the kickoff prompt assumed a
 simpler shape with source/url columns on drafts, which is reconciled here):
-  drafts(id PK, item_id UNIQUE, cluster_id, model, single_post, thread_json,
+  drafts(id PK, item_id UNIQUE, cluster_id, model, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
          snoozed_until, created_at, updated_at)
   decisions(id PK, draft_id FK, action 'approve'|'edit'|'reject'|'snooze'|'revise',
             original_text, edited_text, note, created_at)
-      edited_text is JSON {"single_post": ..., "thread": [...]} (a plain string is also
-      accepted here as a single_post edit).
+      edited_text is JSON {"thread": [...]}; older rows ({"single_post", "thread"}, or a
+      plain string) are read too.
 STEP 1 SCHEMA (db.py): items(id, source, url, title, cluster_id, ...),
   scores(cluster_id, total, ...). Used only to fill source/url/title/score.
 """
@@ -42,8 +43,7 @@ from draft.chart import IMAGES_DIRNAME, alt_text, visual_from_json
 
 DEFAULT_DB_PATH = "./pipeline.db"
 
-KIND_SINGLE = "single"
-KIND_THREAD = "thread"
+KIND_THREAD = "thread"  # every post row is part of a thread
 
 SCHED_PENDING = "pending"
 SCHED_CLAIMED = "claimed"
@@ -123,7 +123,6 @@ class Approved:
     source: str
     url: str
     title: str
-    single_post: str
     thread: list[str] = field(default_factory=list)
     score: float | None = None
     approved_at: str | None = None
@@ -167,20 +166,19 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
     return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
-def _apply_edit(edited_text: str | None, single_post: str, thread: list[str]):
-    """Prefer the human's edited text. Returns (single_post, thread, edited?)."""
+def _apply_edit(edited_text: str | None, thread: list[str]) -> tuple[list[str], bool]:
+    """Prefer the human's edited thread. Returns (thread, edited?)."""
     if not edited_text:
-        return single_post, thread, False
+        return thread, False
     try:
         data = json.loads(edited_text)
     except json.JSONDecodeError:
-        return edited_text, thread, True
+        return [edited_text], True
     if isinstance(data, dict):
-        sp = data.get("single_post") or single_post
         th = data.get("thread")
         th = th if isinstance(th, list) and all(isinstance(p, str) for p in th) else thread
-        return sp, th, True
-    return edited_text, thread, True
+        return th, True
+    return [edited_text], True
 
 
 def fetch_approved(
@@ -231,7 +229,7 @@ def fetch_approved(
         params.append(limit)
         rows = conn.execute(
             f"""
-            SELECT d.id, d.item_id, d.cluster_id, d.single_post, d.thread_json, d.updated_at,
+            SELECT d.id, d.item_id, d.cluster_id, d.thread_json, d.updated_at,
                    (SELECT edited_text FROM decisions WHERE draft_id = d.id
                       AND action IN ('edit', 'revise') AND edited_text IS NOT NULL
                       ORDER BY id DESC LIMIT 1) AS edited_text,
@@ -258,7 +256,7 @@ def fetch_approved(
             thread = json.loads(r["thread_json"] or "[]")
         except json.JSONDecodeError:
             thread = []
-        single_post, thread, edited = _apply_edit(r["edited_text"], r["single_post"], thread)
+        thread, edited = _apply_edit(r["edited_text"], thread)
         image_path, image_alt = _image_for(
             conn_path, r["image_path"], r["chart_json"], r["url"] or "", r["image_alt"]
         )
@@ -270,7 +268,6 @@ def fetch_approved(
                 source=r["source"] or "",
                 url=r["url"] or "",
                 title=r["title"] or "",
-                single_post=single_post,
                 thread=thread,
                 score=float(r["total"]) if r["total"] is not None else None,
                 approved_at=r["approved_at"] or r["updated_at"],

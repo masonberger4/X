@@ -55,7 +55,7 @@
         {% endif %}</td>
       <td>
         <a href="/drafts/{{ d.id }}"><strong>{{ d.title or d.item_id }}</strong></a>
-        <div class="meta">{{ d.draft.single_post }}</div>
+        <div class="meta">{{ d.draft.thread[0] if d.draft.thread else "" }}</div>
         {% if d.rejection_reason %}<div class="meta over">{{ d.rejection_reason }}</div>{% endif %}
         {% set k = checks.get(d.id) %}
         {% if k %}<div class="meta">claims:

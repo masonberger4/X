@@ -196,17 +196,10 @@ def _rubric_suggestions(a: Analysis, min_posts: int, min_abs_rho: float) -> list
 
 
 def _format_suggestions(a: Analysis, min_posts: int, effect_ratio: float) -> list[Suggestion]:
+    # Every draft is a thread now, so the single-vs-thread comparison is history only: the
+    # "kind" group still shows in the report for posts from before threads-only, but no
+    # setting is proposed for it.
     out = []
-    for g, direction, ev in _clear_effects(
-        a.rows, "kind", ["thread", "single"], a.kpi, min_posts, effect_ratio
-    ):
-        if direction != "above":
-            continue  # the winning kind is reported once, from its own side
-        rationale = (
-            f"'{g}' posts earn far more {a.kpi} than the other format. Consider setting "
-            f"post_format: {g} so approved drafts publish in that format by default."
-        )
-        out.append(Suggestion(KIND_FORMAT, "publish/config.yaml: post_format", rationale, ev))
     for g, direction, ev in _clear_effects(
         a.rows, "edited", ["edited", "unedited"], a.kpi, min_posts, effect_ratio
     ):

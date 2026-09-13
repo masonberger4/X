@@ -18,7 +18,7 @@ STEP 3 SCHEMA (publish/store.py, as merged on main). The kickoff prompt assumed 
   Metric-eligible: status='posted' AND tweet_id IS NOT NULL AND error IS NULL. The head of a
   thread is its lowest position.
 STEP 2 SCHEMA (approval_queue/store.py):
-  drafts(id PK, item_id UNIQUE, cluster_id, model, single_post, thread_json, ...,
+  drafts(id PK, item_id UNIQUE, cluster_id, model, thread_json, ...,
          status, ..., created_at, updated_at)   -- no source/url: come from items
   decisions(id PK, draft_id, action, original_text, edited_text, note, created_at)
   A draft "was edited" if any decisions row has edited_text differing from original_text.
@@ -177,7 +177,7 @@ def fetch_posted(
             post_id=int(r["id"]),
             draft_id=int(r["draft_id"]),
             tweet_id=str(r["tweet_id"]),
-            kind=r["kind"] or "single",
+            kind=r["kind"] or "thread",
             position=int(r["position"] or 1),
             posted_at=_parse(r["posted_at"]),
             slot=r["slot"],

@@ -36,7 +36,7 @@ TABLE = {
 
 
 def _draft(table=None):
-    return Draft(f"ORR 88% {URL}", ["a", "b", f"c {URL}"], "landscape", "w", table=table)
+    return Draft([f"ORR 88% {URL}", "b", f"c {URL}"], "landscape", "w", table=table)
 
 
 def _seed(conn, item_id="i1", table=TABLE):
@@ -68,7 +68,6 @@ def test_validate_table_shape_and_round_trip():
 
 def test_schema_accepts_a_table_but_not_both_visuals():
     out = {
-        "single_post": "p",
         "thread": ["a", "b", "c"],
         "suggested_visual": "",
         "why_it_matters": "",
@@ -244,7 +243,7 @@ def test_run_verify_keeps_a_contradicted_table_and_the_reviser_fixes_it(conn, mo
             }
         )
         return drafter.DraftResult(
-            draft=Draft(current.single_post, current.thread, "landscape", "w", table=fixed),
+            draft=Draft(current.thread, "landscape", "w", table=fixed),
             model="m2",
             attempts=1,
         )
@@ -282,7 +281,7 @@ def test_auto_revise_round_fixes_a_contradicted_cell_in_the_same_run(conn, monke
         rows[1][2] = "Phase 3 (ROBBIN)"
         fixed = validate_table({**TABLE, "rows": rows})
         return drafter.DraftResult(
-            draft=Draft(current.single_post, current.thread, "landscape", "w", table=fixed),
+            draft=Draft(current.thread, "landscape", "w", table=fixed),
             model="m2",
             attempts=1,
         )
@@ -388,8 +387,7 @@ def test_revise_keeps_cell_verdicts_for_unchanged_cells(client, conn, monkeypatc
             "m",
         )
     out = {
-        "single_post": f"ORR 88% {URL}",
-        "thread": ["a", "b", f"c {URL}"],
+        "thread": [f"ORR 88% {URL}", "b", f"c {URL}"],
         "suggested_visual": "landscape",
         "why_it_matters": "w",
         "claims_to_verify": [],
@@ -407,8 +405,15 @@ def test_revise_keeps_cell_verdicts_for_unchanged_cells(client, conn, monkeypatc
     assert client.post(f"/drafts/{did}/revise", data={"instructions": "reorder"}).status_code == 303
     checks = {(k.row, k.col): k.verdict for k in vstore.table_checks_for_draft(conn, did)}
     assert checks == {(0, 2): "supported", (1, 1): "supported"}
-    # a revision without a table forgets the cell verdicts
+    # a revision that swaps the table for a chart forgets the cell verdicts
     out["table"] = None
+    out["chart"] = {
+        "title": "Outcomes",
+        "labels": ["ORR %", "PFS mo"],
+        "values": [88, 14.6],
+        "unit": "",
+        "note": "",
+    }
     client.post(f"/drafts/{did}/revise", data={"instructions": "drop it"})
     assert vstore.table_checks_for_draft(conn, did) == []
 
@@ -538,7 +543,7 @@ def test_reviewer_edits_cells_keeps_verdicts_and_redraws(client, conn):
     assert r.status_code == 303 and "error" not in r.headers["location"]
     row = store.get_draft(conn, did)
     assert row.draft.table.rows == rows
-    assert row.draft.single_post.startswith("ORR 88%")  # text untouched
+    assert row.draft.thread[0].startswith("ORR 88%")  # text untouched
     checks = {(k.row, k.col): k for k in vstore.table_checks_for_draft(conn, did)}
     assert checks[(1, 2)].verdict == "supported" and checks[(1, 2)].model == "human"
     assert checks[(1, 2)].trusted and (2, 2) not in checks

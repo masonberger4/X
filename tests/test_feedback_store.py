@@ -148,12 +148,10 @@ def test_fetch_posted_without_posts_table(db_file):
 
 def seed_draft(conn, item_id, *, source="pubmed", edit_to=None, rating=None, total=40):
     cid = seed_item(conn, item_id, source=source, total=total)
-    d = Draft(
-        single_post=f"Post {item_id}", thread=["one", "two"], suggested_visual="", why_it_matters=""
-    )
+    d = Draft(thread=[f"Post {item_id}", "one", "two"], suggested_visual="", why_it_matters="")
     did = qstore.insert_draft(conn, item_id=item_id, cluster_id=cid, model="m", draft=d)
     if edit_to:
-        qstore.edit(conn, did, single_post=edit_to, thread=["one", "two"])
+        qstore.edit(conn, did, thread=[edit_to, "one", "two"])
     else:
         qstore.approve(conn, did)
     if rating is not None:

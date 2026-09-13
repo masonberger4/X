@@ -3,15 +3,19 @@ import json
 from approval_queue import store
 from tests.conftest import URL, seed_item
 
+# Only numbers that tests.conftest.ABSTRACT contains.
+CHART = {"title": "Outcomes", "labels": ["ORR", "PFS"], "values": [88, 14.6], "unit": ""}
 
-def good_json(single_post=f"ORR 88% in 97 patients. {URL}"):
+
+def good_json(last=f"ORR 88% in 97 patients. {URL}"):
+    """A valid model output; `last` is the final thread post (the one that must carry the URL)."""
     return json.dumps(
         {
-            "single_post": single_post,
-            "thread": ["a", "b", f"c {URL}"],
+            "thread": ["a", "b", last],
             "suggested_visual": "v",
             "why_it_matters": "w",
             "claims_to_verify": [],
+            "chart": CHART,
         }
     )
 
@@ -26,7 +30,7 @@ def test_run_draft_drafts_only_undrafted_candidates(conn, monkeypatch):
         conn,
         item_id="done",
         model="m",
-        draft=store.Draft("x", ["a", "b", "c"], "", ""),
+        draft=store.Draft(["x", "b", "c"], "", ""),
     )
     calls = []
 
@@ -70,6 +74,7 @@ def test_run_draft_stores_hard_rule_failures_as_failed(conn, monkeypatch):
     run_draft.main(["--min-score", "7"])
     failed = store.list_drafts(conn, store.STATUS_FAILED)
     assert len(failed) == 1 and "missing the primary source URL" in failed[0].rejection_reason
+    assert failed[0].draft.thread == [] and failed[0].draft.visual is None
     assert store.list_drafts(conn) == []
 
 
@@ -125,15 +130,14 @@ def test_run_draft_feeds_recent_edits_into_the_prompt_and_records_them(conn, mon
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft(f"A game-changer! ORR 88%. {URL}", ["a", "b", f"c {URL}"], "", ""),
+        draft=store.Draft([f"A game-changer! ORR 88%. {URL}", "b", f"c {URL}"], "", ""),
     )
     before = f"A game-changer! ORR 88%. {URL}"
     after = f"ORR 88% in a single-arm study. The sequencing question is open. {URL}"
     edit_id = store.edit(
         conn,
         old,
-        single_post=after,
-        thread=["a", "b", f"c {URL}"],
+        thread=[after, "b", f"c {URL}"],
         note="less hype",
         category="voice",
     )
@@ -141,7 +145,7 @@ def test_run_draft_feeds_recent_edits_into_the_prompt_and_records_them(conn, mon
         conn,
         item_id="rej",
         model="m",
-        draft=store.Draft(f"Meh {URL}", ["a", "b", f"c {URL}"], "", ""),
+        draft=store.Draft([f"Meh {URL}", "b", f"c {URL}"], "", ""),
     )
     reject_id = store.reject(conn, reject_target, note="not news")
     seed_item(conn, "new", total=9.0)
@@ -176,13 +180,12 @@ def test_run_draft_no_examples_flag_sends_plain_prompt(conn, monkeypatch, caplog
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft(f"A game-changer! ORR 88%. {URL}", ["a", "b", f"c {URL}"], "", ""),
+        draft=store.Draft([f"A game-changer! ORR 88%. {URL}", "b", f"c {URL}"], "", ""),
     )
     store.edit(
         conn,
         old,
-        single_post=f"ORR 88% in a single-arm study. Sequencing is open. {URL}",
-        thread=["a", "b", f"c {URL}"],
+        thread=[f"ORR 88% in a single-arm study. Sequencing is open. {URL}", "b", f"c {URL}"],
         note="less hype",
     )
     seed_item(conn, "new", total=9.0)
@@ -230,13 +233,12 @@ def test_run_draft_records_examples_for_failed_drafts_too(conn, monkeypatch):
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft(f"A game-changer! ORR 88%. {URL}", ["a", "b", f"c {URL}"], "", ""),
+        draft=store.Draft([f"A game-changer! ORR 88%. {URL}", "b", f"c {URL}"], "", ""),
     )
     edit_id = store.edit(
         conn,
         old,
-        single_post=f"ORR 88% in a single-arm study. Sequencing is open. {URL}",
-        thread=["a", "b", f"c {URL}"],
+        thread=[f"ORR 88% in a single-arm study. Sequencing is open. {URL}", "b", f"c {URL}"],
     )
     seed_item(conn, "bad", total=9.0)
     monkeypatch.setattr(

@@ -18,7 +18,7 @@ CHART = Chart("Phase 2 outcomes", ["ORR", "Median PFS"], [88.0, 14.6], "", "n=97
 
 
 def _draft(chart=None):
-    return Draft(f"ORR 88% {URL}", ["a", "b", f"c {URL}"], "v", "w", chart=chart)
+    return Draft([f"ORR 88% {URL}", "b", f"c {URL}"], "v", "w", chart=chart)
 
 
 def _cfg(**grader_cfg):

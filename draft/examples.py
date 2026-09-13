@@ -53,10 +53,17 @@ class EditExample:
     category: str | None
     note: str | None
     created_at: str
-    original_single: str
     original_thread: list[str] = field(default_factory=list)
-    edited_single: str = ""
     edited_thread: list[str] = field(default_factory=list)
+
+    @property
+    def original_lead(self) -> str:
+        """The first post of the model's thread: the one that carries the story."""
+        return self.original_thread[0] if self.original_thread else ""
+
+    @property
+    def edited_lead(self) -> str:
+        return self.edited_thread[0] if self.edited_thread else ""
 
     @property
     def why(self) -> str:
@@ -64,7 +71,8 @@ class EditExample:
 
     @property
     def thread_changed(self) -> bool:
-        return self.original_thread != self.edited_thread
+        """Whether the edit went beyond the first post."""
+        return self.original_thread[1:] != self.edited_thread[1:]
 
 
 @dataclass
@@ -75,7 +83,7 @@ class RejectionExample:
     category: str | None
     note: str | None
     created_at: str
-    single_post: str
+    thread: list[str]
 
     @property
     def why(self) -> str:
@@ -116,37 +124,38 @@ def parse_timestamp(value: str | None) -> datetime | None:
     return dt.astimezone(UTC)
 
 
-def parse_decision_text(text: str | None) -> tuple[str, list[str]]:
-    """Inverse of approval_queue.store._serialise_text.
+def parse_decision_text(text: str | None) -> list[str]:
+    """Inverse of approval_queue.store._serialise_text: the thread a decision row stored.
 
-    Edit rows store JSON {"single_post", "thread"}; approve/reject/snooze rows store the bare
-    single post, which parses as (text, []).
+    Current rows store JSON {"thread": [...]}. Rows from before threads-only stored
+    {"single_post", "thread"} (the single post leads, then the thread) or a bare post; both
+    still parse, so the voice loop keeps reading the old history.
     """
     if text is None:
-        return "", []
+        return []
     stripped = text.strip()
     if stripped.startswith("{"):
         try:
             data = json.loads(stripped)
         except json.JSONDecodeError:
             data = None
-        if isinstance(data, dict) and "single_post" in data:
-            single = data.get("single_post")
+        if isinstance(data, dict) and ("thread" in data or "single_post" in data):
             thread = data.get("thread")
-            return (
-                str(single) if single is not None else "",
-                [str(p) for p in thread] if isinstance(thread, list) else [],
-            )
-    return text, []
+            posts = [str(p) for p in thread] if isinstance(thread, list) else []
+            single = data.get("single_post")
+            if single:
+                posts.insert(0, str(single))
+            return posts
+    return [text] if text else []
 
 
-def _joined(single: str, thread: list[str]) -> str:
-    return "\n".join([single, *thread])
+def _joined(thread: list[str]) -> str:
+    return "\n".join(thread)
 
 
-def change_ratio(original: tuple[str, list[str]], edited: tuple[str, list[str]]) -> float:
-    """1 - difflib similarity over single post + thread. 0.0 means identical."""
-    a, b = _joined(*original), _joined(*edited)
+def change_ratio(original: list[str], edited: list[str]) -> float:
+    """1 - difflib similarity over the whole thread. 0.0 means identical."""
+    a, b = _joined(original), _joined(edited)
     if a == b:
         return 0.0
     return 1.0 - difflib.SequenceMatcher(None, a, b).ratio()
@@ -175,18 +184,9 @@ def _within_lookback(row: Any, now: datetime, days: float) -> bool:
     return created >= now - timedelta(days=days)
 
 
-def edited_text_problems(single: str, thread: list[str], *, url: str, source: str) -> list[str]:
-    """Hard-rule violations in a human-edited text (empty list = passes).
-
-    The reviewer may drop the thread entirely; check_hard_rules needs at least one thread post,
-    so the single post stands in for it (the thread rules then reduce to the single-post ones).
-    """
-    draft = Draft(
-        single_post=single,
-        thread=list(thread) if thread else [single],
-        suggested_visual="",
-        why_it_matters="",
-    )
+def edited_text_problems(thread: list[str], *, url: str, source: str) -> list[str]:
+    """Hard-rule violations in a human-edited thread (empty list = passes)."""
+    draft = Draft(thread=list(thread), suggested_visual="", why_it_matters="")
     return check_hard_rules(draft, url=url, source=source)
 
 
@@ -236,8 +236,7 @@ def select_edit_examples(
             )
             continue
         problems = edited_text_problems(
-            edited[0],
-            edited[1],
+            edited,
             url=str(_field(row, "url", "") or ""),
             source=str(_field(row, "source", "") or ""),
         )
@@ -258,10 +257,8 @@ def select_edit_examples(
                 category=category,
                 note=_field(row, "note"),
                 created_at=str(_field(row, "created_at", "")),
-                original_single=truncate_post(original[0], max_chars),
-                original_thread=[truncate_post(p, max_chars) for p in original[1]],
-                edited_single=truncate_post(edited[0], max_chars),
-                edited_thread=[truncate_post(p, max_chars) for p in edited[1]],
+                original_thread=[truncate_post(p, max_chars) for p in original],
+                edited_thread=[truncate_post(p, max_chars) for p in edited],
             )
         )
         if len(out) >= int(c["max_examples"]):
@@ -291,8 +288,8 @@ def select_rejections(
             continue
         if not _within_lookback(row, now, float(c["lookback_days"])):
             continue
-        single, _ = parse_decision_text(_field(row, "original_text", ""))
-        if not single.strip():
+        thread = parse_decision_text(_field(row, "original_text", ""))
+        if not any(p.strip() for p in thread):
             continue
         out.append(
             RejectionExample(
@@ -302,7 +299,7 @@ def select_rejections(
                 category=category,
                 note=note,
                 created_at=str(_field(row, "created_at", "")),
-                single_post=truncate_post(single, max_chars),
+                thread=[truncate_post(p, max_chars) for p in thread],
             )
         )
         if len(out) >= int(c["max_rejections"]):
@@ -344,12 +341,12 @@ def format_examples_block(
             lines.append("")
             lines.append(f"--- Edit {i} ---")
             lines.append("BEFORE (model):")
-            lines.append(e.original_single)
+            lines.append(e.original_lead)
             lines.append("AFTER (human):")
-            lines.append(e.edited_single)
+            lines.append(e.edited_lead)
             if e.thread_changed:
-                lines.extend(_thread_lines("BEFORE thread (model):", e.original_thread))
-                lines.extend(_thread_lines("AFTER thread (human):", e.edited_thread))
+                lines.extend(_thread_lines("BEFORE rest of thread (model):", e.original_thread[1:]))
+                lines.extend(_thread_lines("AFTER rest of thread (human):", e.edited_thread[1:]))
             lines.append(f"WHY: {e.why}")
     if rejections:
         if lines:
@@ -359,7 +356,7 @@ def format_examples_block(
         for i, r in enumerate(rejections, 1):
             lines.append("")
             lines.append(f"--- Rejected {i} ---")
-            lines.append(r.single_post)
+            lines.extend(r.thread)
             lines.append(f"REASON: {r.why}")
     lines.append("")
     lines.append(CLOSING_LINE)

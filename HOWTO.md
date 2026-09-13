@@ -101,7 +101,7 @@ source only when it is due, and score only scores what is new.
    ```
    python run_draft.py
    ```
-   Writes one draft (a single post plus a 3 to 6 post thread) for up to 10
+   Writes one draft (a 3 to 6 post thread with a chart or a table) for up to 10
    stories from the last 48 hours scoring at or above the digest threshold
    (30 of 50, from `config.yaml`). Drafts that break a hard rule (advice,
    made-up numbers, missing source link, too long) are stored as failed, not
@@ -265,7 +265,7 @@ source only when it is due, and score only scores what is new.
    says why. Pick a reason (voice, factual, not newsworthy, hard rule, other)
    when you revise or reject; your notes feed the voice report. "Edit by hand"
    is still there, folded away, for a one-word fix. A save that breaks a rule (a post
-   over 280 characters, URLs counting as 23, or an empty single post) is refused on the
+   over 280 characters, URLs counting as 23, or an empty thread) is refused on the
    same page: the reason sits at the top, your text stays in the boxes, and nothing is
    saved or approved. The same goes for Approve while a claim is contradicted.
    If the draft has a chart it is shown under "Image" with the exact text a
@@ -357,12 +357,9 @@ source only when it is due, and score only scores what is new.
    python run_publish.py --live --now        # ignore slots, post the top candidate once
    python run_publish.py --live --breaking   # only FDA / company-approval items
    python run_publish.py --live --limit 1    # at most one post this run
-   python run_publish.py --live --format single   # this run only: the single post, not the thread
    python run_publish.py --live --now --draft 17  # post draft 17 now (what the panel's "Publish now" runs)
    ```
-   Each draft carries a single post and a thread; `post_format` in
-   `publish\config.yaml` picks which one goes out (`thread` by default) and
-   `--format` overrides it for one run. When several drafts wait for one
+   Every draft is a thread and is posted as one. When several drafts wait for one
    slot, the order you set on the panel's approved page (part 8) goes first;
    drafts you did not number follow it by the policy in `publish\config.yaml`.
    A draft is posted at most once even if the command runs twice. A thread

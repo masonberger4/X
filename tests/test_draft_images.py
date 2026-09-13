@@ -24,8 +24,11 @@ CHART = {
 }
 
 
+TABLE = {"title": "Landscape", "columns": ["Asset", "Phase"], "rows": [["a", "1"], ["b", "2"]]}
+
+
 def _draft(chart=None):
-    return Draft(f"ORR 88% {URL}", ["a", "b", f"c {URL}"], "v", "w", chart=chart)
+    return Draft([f"ORR 88% {URL}", "b", f"c {URL}"], "v", "w", chart=chart)
 
 
 def test_store_round_trips_chart_and_image(conn, tmp_path):
@@ -48,7 +51,7 @@ def test_store_round_trips_chart_and_image(conn, tmp_path):
     assert row.draft.chart is None and row.image_path is None and not path.exists()
     dec = store.list_decisions(conn, did)
     assert dec[-1]["action"] == "edit" and dec[-1]["note"] == "wrong arm"
-    assert row.draft.single_post == f"ORR 88% {URL}"  # text untouched
+    assert row.draft.thread[0] == f"ORR 88% {URL}"  # text untouched
 
 
 def test_attach_chart_respects_config_and_fails_soft(conn, monkeypatch, caplog):
@@ -73,8 +76,7 @@ def test_run_draft_renders_the_chart(conn, monkeypatch, tmp_path):
 
     seed_item(conn, "new", total=9.0)
     out = {
-        "single_post": f"ORR 88% in 97 patients. {URL}",
-        "thread": ["a", "b", f"c {URL}"],
+        "thread": [f"ORR 88% in 97 patients. {URL}", "b", f"c {URL}"],
         "suggested_visual": "v",
         "why_it_matters": "w",
         "claims_to_verify": [],
@@ -124,8 +126,7 @@ def test_revise_replaces_the_image(client, conn, monkeypatch):
     old = images.attach_chart(conn, did, chart, source_url=URL)
     old_bytes = old.read_bytes()
     out = {
-        "single_post": f"ORR 88% in 97 patients. {URL}",
-        "thread": ["a", "b", f"c {URL}"],
+        "thread": [f"ORR 88% in 97 patients. {URL}", "b", f"c {URL}"],
         "suggested_visual": "v",
         "why_it_matters": "w",
         "claims_to_verify": [],
@@ -137,11 +138,15 @@ def test_revise_replaces_the_image(client, conn, monkeypatch):
     row = store.get_draft(conn, did)
     assert row.draft.chart.title == "New title" and row.image_path == f"draft_{did}.png"
     assert old.read_bytes() != old_bytes
-    # a revision without a chart leaves the draft text-only
+    # a revision that swaps the chart for a table drops the picture (a table is only drawn
+    # by step 2b once its cells are verified)
     out["chart"] = None
-    client.post(f"/drafts/{did}/revise", data={"instructions": "drop chart"})
+    out["table"] = TABLE
+    r = client.post(f"/drafts/{did}/revise", data={"instructions": "use a table"})
+    assert r.status_code == 303
     row = store.get_draft(conn, did)
     assert row.draft.chart is None and row.image_path is None
+    assert row.draft.table is not None and row.draft.table.title == "Landscape"
 
 
 def test_redraw_button_remakes_a_chart(conn, db_file):

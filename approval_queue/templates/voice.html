@@ -51,7 +51,7 @@
   <p class="meta">No edits yet.</p>
 {% else %}
   <ul>
-    <li>Median single-post length change: {{ "%+.0f"|format(r.length_delta_median) }} chars (negative = the reviewer shortens).</li>
+    <li>Median first-post length change: {{ "%+.0f"|format(r.length_delta_median) }} chars (negative = the reviewer shortens).</li>
     <li>Edits that shortened the thread: {{ "%.0f%%"|format(r.thread_dropped_rate * 100) if r.thread_dropped_rate is not none else "n/a" }}.</li>
   </ul>
 {% endif %}
@@ -80,8 +80,8 @@
     <tr>
       <td class="meta"><a href="/drafts/{{ e.draft_id }}">{{ e.created_at[:10] }}</a></td>
       <td>{{ e.source or "?" }}</td>
-      <td><div class="post">{{ e.original_single }}</div></td>
-      <td><div class="post">{{ e.edited_single }}</div>{% if e.thread_changed %}<div class="meta">thread: {{ e.original_thread|length }} posts before, {{ e.edited_thread|length }} after</div>{% endif %}</td>
+      <td><div class="post">{{ e.original_lead }}</div></td>
+      <td><div class="post">{{ e.edited_lead }}</div>{% if e.thread_changed %}<div class="meta">thread: {{ e.original_thread|length }} posts before, {{ e.edited_thread|length }} after</div>{% endif %}</td>
       <td class="meta">{{ e.why }}</td>
     </tr>
   {% endfor %}
