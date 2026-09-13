@@ -28,8 +28,7 @@ def approved(draft_id=1, source="pubmed", title="A paper", score=30.0, approved_
         source=source,
         url="https://doi.org/10.1/x",
         title=title,
-        single_post="p https://doi.org/10.1/x",
-        thread=[],
+        thread=["p https://doi.org/10.1/x"],
         score=score,
         approved_at=approved_at,
     )
@@ -118,7 +117,7 @@ def test_rank_puts_the_human_order_before_breaking_and_score():
     def a(i, **kw):
         base = dict(draft_id=i, item_id=f"i{i}", cluster_id=i, source="pubmed", url="", title="")
         base.update(kw)
-        return Approved(single_post="x", **base)
+        return Approved(thread=["x"], **base)
 
     fda = a(1, source="fda_oce", score=10.0)
     high = a(2, score=50.0)

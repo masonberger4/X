@@ -23,15 +23,17 @@ SLOT_TIME = datetime(2026, 6, 1, 8, 35, tzinfo=NY)  # inside the 08:30 slot wind
 OFF_SLOT = datetime(2026, 6, 1, 10, 0, tzinfo=NY)
 
 
+THREAD3 = [f"one {URL}", "two", f"three {URL}"]
+
+
 def seed_draft(conn, item_id, *, source="pubmed", approve=True, thread=None, edit_to=None):
+    """A draft whose thread is one post by default; `thread=THREAD3` gives a three-post one."""
     cid = seed_item(conn, item_id, source=source)
-    thread = thread or [f"one {URL}", "two", f"three {URL}"]
-    d = Draft(
-        single_post=f"Post {item_id} {URL}", thread=thread, suggested_visual="", why_it_matters=""
-    )
+    thread = thread or [f"Post {item_id} {URL}"]
+    d = Draft(thread=thread, suggested_visual="", why_it_matters="")
     did = qstore.insert_draft(conn, item_id=item_id, cluster_id=cid, model="m", draft=d)
     if edit_to:
-        qstore.edit(conn, did, single_post=edit_to, thread=thread)
+        qstore.edit(conn, did, thread=[edit_to])
     elif approve:
         qstore.approve(conn, did)
     return did
@@ -105,7 +107,7 @@ def test_fetch_approved_uses_real_schema_and_prefers_edit(conn):
     got = store.fetch_approved(10, conn=conn)
     assert [a.item_id for a in got] == ["b", "c"]
     assert got[0].source == "pubmed" and got[0].url == URL and got[0].score == 8.5
-    assert got[1].single_post == f"Edited c {URL}" and got[1].edited
+    assert got[1].thread == [f"Edited c {URL}"] and got[1].edited
     assert got[1].source == "fda_press"
 
 
@@ -119,10 +121,10 @@ def test_dry_run_default_never_posts(conn, fake_x, capsys):
 
 def test_live_without_env_gate_stays_dry(conn, fake_x, monkeypatch):
     seed_draft(conn, "a")
-    assert run_publish.main(["--live", "--format", "single"], now=SLOT_TIME) == 0
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert fake_x.calls == []
     monkeypatch.setenv("PUBLISH_ENABLED", "0")
-    assert run_publish.main(["--live", "--format", "single"], now=SLOT_TIME) == 0
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert fake_x.calls == []
     # env alone (no --live) is not enough either
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
@@ -130,16 +132,16 @@ def test_live_without_env_gate_stays_dry(conn, fake_x, monkeypatch):
     assert fake_x.calls == []
 
 
-def test_live_posts_single_and_is_idempotent(conn, fake_x, monkeypatch):
+def test_live_posts_one_post_thread_and_is_idempotent(conn, fake_x, monkeypatch):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     seed_draft(conn, "a")
-    assert run_publish.main(["--live", "--format", "single"], now=SLOT_TIME) == 0
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert len(fake_x.calls) == 1 and fake_x.calls[0] == (f"Post a {URL}", None)
     rows = store.list_posts(conn, 1)
     assert rows[0]["tweet_id"] == "tw1" and rows[0]["slot"] == "2026-06-01 08:30"
     assert store.get_schedule(conn, 1)["status"] == "posted"
     # cron fires again in the same slot window: same draft is never re-posted
-    assert run_publish.main(["--live", "--format", "single"], now=SLOT_TIME) == 0
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert len(fake_x.calls) == 1
 
 
@@ -155,7 +157,7 @@ def test_no_open_slot_posts_nothing(conn, fake_x, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     seed_draft(conn, "a")
-    assert run_publish.main(["--live", "--format", "single"], now=OFF_SLOT) == 0
+    assert run_publish.main(["--live"], now=OFF_SLOT) == 0
     assert fake_x.calls == []
     assert "next slot 2026-06-01 12:15" in caplog.text
 
@@ -163,7 +165,7 @@ def test_no_open_slot_posts_nothing(conn, fake_x, monkeypatch, caplog):
 def test_now_flag_ignores_slots(conn, fake_x, monkeypatch):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     seed_draft(conn, "a")
-    assert run_publish.main(["--live", "--now", "--format", "single"], now=OFF_SLOT) == 0
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
     assert len(fake_x.calls) == 1
 
 
@@ -171,11 +173,11 @@ def test_breaking_posts_outside_slots_but_respects_gap(conn, fake_x, monkeypatch
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     seed_draft(conn, "a")  # regular
     seed_draft(conn, "b", source="fda_oce_approvals")
-    assert run_publish.main(["--live", "--breaking", "--format", "single"], now=OFF_SLOT) == 0
+    assert run_publish.main(["--live", "--breaking"], now=OFF_SLOT) == 0
     assert fake_x.calls == [(f"Post b {URL}", None)]
     # a second breaking item minutes later is blocked by min_gap
     seed_draft(conn, "c", source="fda_press")
-    assert run_publish.main(["--live", "--format", "single"], now=OFF_SLOT) == 0
+    assert run_publish.main(["--live"], now=OFF_SLOT) == 0
     assert len(fake_x.calls) == 1
     assert store.get_schedule(conn, 3) is None
 
@@ -186,14 +188,14 @@ def test_daily_cap(conn, fake_x, monkeypatch):
         seed_draft(conn, f"d{i}", source="fda_press")
     times = [datetime(2026, 6, 1, h, 0, tzinfo=NY) for h in (6, 9, 12, 15, 18)]
     for t in times:
-        run_publish.main(["--live", "--format", "single"], now=t)
+        run_publish.main(["--live"], now=t)
     assert len(fake_x.calls) == 3  # max_posts_per_day
 
 
 def test_thread_posts_in_order_with_reply_chain(conn, fake_x, monkeypatch):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
-    seed_draft(conn, "a")
-    assert run_publish.main(["--live", "--format", "thread"], now=SLOT_TIME) == 0
+    seed_draft(conn, "a", thread=THREAD3)
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert [c[1] for c in fake_x.calls] == [None, "tw1", "tw2"]
     assert fake_x.calls[0][0].endswith("(1/3)") and URL in fake_x.calls[2][0]
     rows = store.list_posts(conn, 1)
@@ -206,8 +208,8 @@ def test_partial_thread_failure_is_recorded_and_not_retried(conn, monkeypatch, c
     monkeypatch.setattr(client, "post_tweet", fx)
     monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
-    seed_draft(conn, "a")
-    assert run_publish.main(["--live", "--format", "thread"], now=SLOT_TIME) == 2
+    seed_draft(conn, "a", thread=THREAD3)
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 2
     assert len(fx.calls) == 2
     rows = store.list_posts(conn, 1)
     assert [(r["position"], r["tweet_id"], r["status"]) for r in rows] == [
@@ -218,14 +220,14 @@ def test_partial_thread_failure_is_recorded_and_not_retried(conn, monkeypatch, c
     assert store.get_schedule(conn, 1)["status"] == "partial"
     assert "THREAD PARTIAL" in caplog.text
     # next run: the draft is claimed, so it is not retried
-    assert run_publish.main(["--live", "--format", "thread"], now=SLOT_TIME) == 0
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert len(fx.calls) == 2
 
 
 def test_refuses_content_that_fails_hard_check(conn, fake_x, monkeypatch, caplog):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     seed_draft(conn, "a", edit_to="edited without the link")
-    assert run_publish.main(["--live", "--format", "single"], now=SLOT_TIME) == 0
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert fake_x.calls == []
     assert store.get_schedule(conn, 1)["status"] == "refused"
     assert "missing source URL" in caplog.text
@@ -440,11 +442,8 @@ def test_missing_keys_raise_without_network(monkeypatch):
 
 def test_fetch_approved_uses_ai_revision_over_older_human_edit(conn):
     seed_draft(conn, "a", approve=False)
-    qstore.edit(
-        conn, 1, single_post=f"Human edit {URL}", thread=["1", "2", f"3 {URL}"], approve_after=False
-    )
+    qstore.edit(conn, 1, thread=["1", "2", f"3 {URL}"], approve_after=False)
     revised = Draft(
-        single_post=f"Revised {URL}",
         thread=["r1", "r2", f"r3 {URL}"],
         suggested_visual="",
         why_it_matters="w",
@@ -453,7 +452,7 @@ def test_fetch_approved_uses_ai_revision_over_older_human_edit(conn):
     qstore.revise(conn, 1, draft=revised, model="m", note="tighter")
     qstore.approve(conn, 1)
     (got,) = store.fetch_approved(10, conn=conn)
-    assert got.single_post == f"Revised {URL}" and got.thread == ["r1", "r2", f"r3 {URL}"]
+    assert got.thread == ["r1", "r2", f"r3 {URL}"]
 
 
 # --- images ------------------------------------------------------------------
@@ -473,9 +472,9 @@ def test_fetch_approved_carries_image_and_alt_text(conn):
 
 def test_live_attaches_image_to_first_post_only(conn, fake_x, monkeypatch):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
-    did = seed_draft(conn, "a")
+    did = seed_draft(conn, "a", thread=THREAD3)
     path = seed_image(conn, did)
-    assert run_publish.main(["--live", "--format", "thread"], now=SLOT_TIME) == 0
+    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert fake_x.uploads == [
         (
             str(path),
@@ -515,7 +514,7 @@ def test_upload_failure_posts_nothing(conn, monkeypatch, caplog, keep_failed):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     did = seed_draft(conn, "a")
     seed_image(conn, did)
-    assert run_publish.main(["--live", "--format", "single", *keep_failed], now=SLOT_TIME) == 2
+    assert run_publish.main(["--live", *keep_failed], now=SLOT_TIME) == 2
     assert fx.calls == []
     assert store.get_schedule(conn, did)["status"] == "failed"
     assert "media_upload" in store.get_schedule(conn, did)["error"]
@@ -529,11 +528,11 @@ def test_release_failed_reopens_failed_and_refused_only(
     monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     failed = seed_draft(conn, "a")
-    args = ["--live", "--now", "--format", "single", *keep_failed]
+    args = ["--live", "--now", *keep_failed]
     assert run_publish.main(args, now=OFF_SLOT) == 2
     assert store.get_schedule(conn, failed)["status"] == "failed"
     refused = seed_draft(conn, "b", edit_to="edited without the link")
-    assert run_publish.main(["--live", "--now", "--format", "single"], now=OFF_SLOT) == 0
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
     assert store.get_schedule(conn, refused)["status"] == "refused"
     # neither is a candidate while claimed
     assert [a.draft_id for a in store.fetch_approved(10, conn=conn)] == []
@@ -556,19 +555,14 @@ def test_release_failed_by_id_and_never_partial_or_posted(conn, monkeypatch, cap
     # partial thread: post 2 of a's thread fails
     fx = FakeX(fail_at=2)
     monkeypatch.setattr(client, "post_tweet", fx)
-    partial = seed_draft(conn, "a")
-    assert run_publish.main(["--live", "--now", "--format", "thread"], now=OFF_SLOT) == 2
+    partial = seed_draft(conn, "a", thread=THREAD3)
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 2
     assert store.get_schedule(conn, partial)["status"] == "partial"
-    # posted single
+    # posted one-post thread
     fx2 = FakeX()
     monkeypatch.setattr(client, "post_tweet", fx2)
     posted = seed_draft(conn, "b")
-    assert (
-        run_publish.main(
-            ["--live", "--now", "--format", "single"], now=OFF_SLOT + timedelta(hours=3)
-        )
-        == 0
-    )
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT + timedelta(hours=3)) == 0
     assert store.get_schedule(conn, posted)["status"] == "posted"
     # two failed
     fx3 = FakeX(fail_at=1)
@@ -576,7 +570,7 @@ def test_release_failed_by_id_and_never_partial_or_posted(conn, monkeypatch, cap
     f1 = seed_draft(conn, "c")
     assert (
         run_publish.main(
-            ["--live", "--now", "--format", "single", *keep_failed],
+            ["--live", "--now", *keep_failed],
             now=OFF_SLOT + timedelta(hours=6),
         )
         == 2
@@ -586,7 +580,7 @@ def test_release_failed_by_id_and_never_partial_or_posted(conn, monkeypatch, cap
     f2 = seed_draft(conn, "d")
     assert (
         run_publish.main(
-            ["--live", "--now", "--format", "single", *keep_failed],
+            ["--live", "--now", *keep_failed],
             now=OFF_SLOT + timedelta(hours=9),
         )
         == 2
@@ -648,7 +642,7 @@ def test_failed_attempt_is_released_automatically_until_the_cap(conn, monkeypatc
     for attempt in (1, 2):
         fx = FakeX(fail_at=1)
         monkeypatch.setattr(client, "post_tweet", fx)
-        assert run_publish.main(["--live", "--now", "--format", "single"], now=OFF_SLOT) == 2
+        assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 2
         # released: no claim row, approved again, the failed attempt logged
         assert store.get_schedule(conn, did) is None
         assert [a.draft_id for a in store.fetch_approved(10, conn=conn)] == [did]
@@ -657,7 +651,7 @@ def test_failed_attempt_is_released_automatically_until_the_cap(conn, monkeypatc
     # third failure hits max_attempts: stays failed for a human
     fx = FakeX(fail_at=1)
     monkeypatch.setattr(client, "post_tweet", fx)
-    assert run_publish.main(["--live", "--now", "--format", "single"], now=OFF_SLOT) == 2
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 2
     assert store.get_schedule(conn, did)["status"] == "failed"
     assert store.fetch_approved(10, conn=conn) == []
     assert "3 failed attempts, staying failed" in caplog.text
@@ -665,7 +659,7 @@ def test_failed_attempt_is_released_automatically_until_the_cap(conn, monkeypatc
     assert run_publish.main(["--release-failed", str(did)]) == 0
     ok = FakeX()
     monkeypatch.setattr(client, "post_tweet", ok)
-    assert run_publish.main(["--live", "--now", "--format", "single"], now=OFF_SLOT) == 0
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
     assert store.get_schedule(conn, did)["status"] == "posted"
 
 
@@ -674,12 +668,12 @@ def test_partial_and_refused_are_not_released_automatically(conn, monkeypatch):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     fx = FakeX(fail_at=2)
     monkeypatch.setattr(client, "post_tweet", fx)
-    partial = seed_draft(conn, "a")
-    assert run_publish.main(["--live", "--now", "--format", "thread"], now=OFF_SLOT) == 2
+    partial = seed_draft(conn, "a", thread=THREAD3)
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 2
     assert store.get_schedule(conn, partial)["status"] == "partial"
     refused = seed_draft(conn, "b", edit_to="edited without the link")
     later = OFF_SLOT + timedelta(hours=3)
-    assert run_publish.main(["--live", "--now", "--format", "single"], now=later) == 0
+    assert run_publish.main(["--live", "--now"], now=later) == 0
     assert store.get_schedule(conn, refused)["status"] == "refused"
     assert store.fetch_approved(10, conn=conn) == []
 
@@ -692,7 +686,7 @@ def test_auto_release_can_be_turned_off(conn, monkeypatch, tmp_path):
     fx = FakeX(fail_at=1)
     monkeypatch.setattr(client, "post_tweet", fx)
     did = seed_draft(conn, "a")
-    args = ["--live", "--now", "--format", "single", "--config", str(cfg)]
+    args = ["--live", "--now", "--config", str(cfg)]
     assert run_publish.main(args, now=OFF_SLOT) == 2
     assert store.get_schedule(conn, did)["status"] == "failed"
     assert store.fetch_approved(10, conn=conn) == []
@@ -725,7 +719,7 @@ def test_draft_flag_posts_only_that_draft_and_reports_a_missing_one(
     conn, fake_x, monkeypatch, caplog
 ):
     a = seed_draft(conn, "a")
-    b = seed_draft(conn, "b")
+    b = seed_draft(conn, "b", thread=THREAD3)
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     assert run_publish.main(["--live", "--now", "--draft", str(b)], now=OFF_SLOT) == 0
     assert store.get_schedule(conn, b)["status"] == "posted"
