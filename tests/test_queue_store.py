@@ -9,8 +9,7 @@ from tests.conftest import URL, seed_item
 
 def make_draft(**kw):
     d = Draft(
-        single_post=f"ORR 88%. {URL}",
-        thread=["a", "b", f"c {URL}"],
+        thread=["ORR 88%.", "a", "b", f"c {URL}"],
         suggested_visual="plot",
         why_it_matters="because",
         claims_to_verify=[Claim("ORR 88%", "high")],
@@ -125,7 +124,7 @@ def test_approve_records_decision_and_does_not_publish(conn):
     decs = store.list_decisions(conn, did)
     assert len(decs) == 1
     assert decs[0]["action"] == "approve"
-    assert decs[0]["original_text"] == make_draft().single_post
+    assert decs[0]["original_text"] == store._serialise_text(make_draft().thread)
     assert decs[0]["edited_text"] is None and decs[0]["note"] == "ok"
     assert store.list_drafts(conn) == []
     assert [r.id for r in store.list_drafts(conn, store.STATUS_APPROVED)] == [did]
@@ -134,10 +133,10 @@ def test_approve_records_decision_and_does_not_publish(conn):
 def test_edit_saves_original_and_edited_text(conn):
     seed_item(conn, "i1")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.edit(conn, did, single_post=f"Better. {URL}", thread=["x", "y", f"z {URL}"])
+    store.edit(conn, did, thread=["Better.", "x", "y", f"z {URL}"])
     row = store.get_draft(conn, did)
     assert row.status == store.STATUS_APPROVED
-    assert row.draft.single_post == f"Better. {URL}" and row.draft.thread == ["x", "y", f"z {URL}"]
+    assert row.draft.thread == ["Better.", "x", "y", f"z {URL}"]
     dec = store.list_decisions(conn, did)[0]
     assert dec["action"] == "edit"
     assert "ORR 88%" in dec["original_text"] and '"a"' in dec["original_text"]
@@ -147,7 +146,7 @@ def test_edit_saves_original_and_edited_text(conn):
 def test_edit_without_approve_stays_pending(conn):
     seed_item(conn, "i1")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.edit(conn, did, single_post="s", thread=["1", "2", "3"], approve_after=False)
+    store.edit(conn, did, thread=["1", "2", "3"], approve_after=False)
     assert store.get_draft(conn, did).status == store.STATUS_PENDING
 
 
@@ -181,7 +180,7 @@ def test_actions_on_missing_draft_raise(conn):
         with pytest.raises(KeyError):
             fn(conn, 42)
     with pytest.raises(KeyError):
-        store.edit(conn, 42, single_post="s", thread=[])
+        store.edit(conn, 42, thread=[])
 
 
 def test_list_pending_newest_first(conn):
@@ -233,6 +232,7 @@ def test_connect_migrates_old_decisions_schema_and_keeps_rows(tmp_path):
 
     conn = store.connect(path)
     assert "category" in _columns(conn, "decisions")
+    assert "single_post" not in _columns(conn, "drafts")  # threads only
     assert "draft_examples" in {
         r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
@@ -245,6 +245,28 @@ def test_connect_migrates_old_decisions_schema_and_keeps_rows(tmp_path):
     conn = store.connect(path)
     assert _columns(conn, "decisions").count("category") == 1
     conn.close()
+
+
+def test_connect_drops_a_not_null_single_post_column_and_inserts_still_work(tmp_path):
+    path = tmp_path / "old.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(OLD_DECISIONS_SCHEMA)
+    raw.execute(
+        "INSERT INTO drafts (item_id, model, single_post, thread_json, created_at, updated_at)"
+        " VALUES ('i', 'm', 's', '[\"a\"]', '2026-01-01T00:00:00+00:00',"
+        " '2026-01-01T00:00:00+00:00')"
+    )
+    raw.commit()
+    assert "single_post" in _columns(raw, "drafts")
+    raw.close()
+
+    conn = store.connect(path)
+    assert "single_post" not in _columns(conn, "drafts")
+    assert store.get_draft(conn, 1).draft.thread == ["a"]  # the old row survives
+    did = store.insert_draft(conn, item_id="new", model="m", draft=make_draft())
+    assert store.get_draft(conn, did).draft == make_draft()
+    conn.close()
+    store.connect(path).close()  # idempotent
 
 
 def test_connect_is_idempotent_on_new_database(tmp_path):
@@ -276,16 +298,14 @@ def test_reject_with_category_stores_it_and_invalid_raises(conn):
 def test_edit_with_category_and_blank_category_is_none(conn):
     seed_item(conn, "i1")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.edit(
-        conn, did, single_post=f"s {URL}", thread=["1", "2", f"3 {URL}"], category="Factual "
-    )
+    store.edit(conn, did, thread=["1", "2", f"3 {URL}"], category="Factual ")
     assert store.list_decisions(conn, did)[0]["category"] == "factual"
     seed_item(conn, "i2")
     did2 = store.insert_draft(conn, item_id="i2", model="m", draft=make_draft())
-    store.edit(conn, did2, single_post="s", thread=[], category="")
+    store.edit(conn, did2, thread=[], category="")
     assert store.list_decisions(conn, did2)[0]["category"] is None
     with pytest.raises(ValueError):
-        store.edit(conn, did2, single_post="s", thread=[], category="nope")
+        store.edit(conn, did2, thread=[], category="nope")
 
 
 def test_actions_without_category_still_work(conn):
@@ -301,7 +321,7 @@ def test_record_examples_writes_rows_per_kind(conn):
     seed_item(conn, "old")
     seed_item(conn, "new")
     old = store.insert_draft(conn, item_id="old", model="m", draft=make_draft())
-    e_id = store.edit(conn, old, single_post=f"edited {URL}", thread=["a", "b", f"c {URL}"])
+    e_id = store.edit(conn, old, thread=["edited", "a", "b", f"c {URL}"])
     r_id = store.reject(conn, old, note="meh")
     new = store.insert_draft(conn, item_id="new", model="m", draft=make_draft())
     assert store.record_examples(conn, new, [e_id], [r_id]) == 2
@@ -315,14 +335,14 @@ def test_record_examples_writes_rows_per_kind(conn):
 def test_fetch_decisions_for_voice_joins_items_source_and_url(conn):
     seed_item(conn, "i1", source="biorxiv")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.edit(conn, did, single_post=f"e {URL}", thread=["1", "2", f"3 {URL}"], category="voice")
+    store.edit(conn, did, thread=["e ", "1", "2", f"3 {URL}"], category="voice")
     store.reject(conn, did, note="later")
     rows = store.fetch_decisions_for_voice(conn, "2000-01-01T00:00:00+00:00")
     assert [r["action"] for r in rows] == ["edit", "reject"]  # oldest first
     r = rows[0]
     assert r["source"] == "biorxiv" and r["url"] == URL and r["draft_id"] == did
     assert r["category"] == "voice" and r["draft_status"] == "rejected"
-    assert '"single_post"' in r["original_text"] and "e " in r["edited_text"]
+    assert '"thread"' in r["original_text"] and "e " in r["edited_text"]
     assert r["draft_created_at"] and r["item_id"] == "i1"
     # since in the future -> nothing; datetime accepted too
     from datetime import UTC, datetime, timedelta
@@ -362,16 +382,14 @@ def test_fetch_draft_stats(conn):
 def test_revise_replaces_whole_draft_keeps_status_and_logs_decision(conn):
     seed_item(conn, "i1")
     d = Draft(
-        single_post=f"old {URL}",
-        thread=["a", "b", f"c {URL}"],
+        thread=["old", "a", "b", f"c {URL}"],
         suggested_visual="v",
         why_it_matters="w",
         claims_to_verify=[Claim("old claim", "low")],
     )
     did = store.insert_draft(conn, item_id="i1", model="m1", draft=d)
     new = Draft(
-        single_post=f"new {URL}",
-        thread=["x", "y", f"z {URL}"],
+        thread=["new", "x", "y", f"z {URL}"],
         suggested_visual="v2",
         why_it_matters="w2",
         claims_to_verify=[Claim("new claim", "medium")],
@@ -380,8 +398,7 @@ def test_revise_replaces_whole_draft_keeps_status_and_logs_decision(conn):
     row = store.get_draft(conn, did)
     assert row.status == "pending"
     assert row.model == "m2"
-    assert row.draft.single_post == f"new {URL}"
-    assert row.draft.thread == ["x", "y", f"z {URL}"]
+    assert row.draft.thread == ["new", "x", "y", f"z {URL}"]
     assert row.draft.why_it_matters == "w2" and row.draft.suggested_visual == "v2"
     assert [c.claim for c in row.draft.claims_to_verify] == ["new claim"]
     (dec,) = store.list_decisions(conn, did)

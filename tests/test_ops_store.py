@@ -119,7 +119,6 @@ def test_fetch_stage_activity(conn):
     from approval_queue import store as qstore
 
     draft = Draft(
-        single_post="p https://doi.org/10.1000/x",
         thread=["a", "b", "c"],
         suggested_visual="",
         why_it_matters="",
