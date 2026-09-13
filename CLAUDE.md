@@ -192,9 +192,15 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   round repeats until every claim is supported or `max_rounds` (per run) /
   `max_rounds_per_draft` (per draft, counted from `revise` decisions with that note;
   0, the shipped value, means no lifetime cap) is
-  hit. A revision whose claim set is unchanged is discarded; a draft with an unchecked
-  claim is never revised. Tables are outside the loop. `claim_problems` lives there and
-  the queue app imports it. The queue blocks approve (409) on a contradicted claim
+  hit. A revision whose claim set and table rows are unchanged is discarded; a draft with
+  an unchecked claim is never revised. A table's contradicted cells join the round as
+  `cell_problems` (`autorevise.cell_problems`, claims worded by `tables.cell_claim`, a
+  "TABLE CELL FAILURES" section in `build_revision_user_prompt`), so `run_verify.py` runs
+  the table pass before the loop and `verify_table` again after each round; blanked cells
+  never do. A contradicted cell no longer drops a table: `tables.decide` returns `BLOCKED`,
+  `finalize_table` keeps the table and its verdicts without a picture, and the queue's
+  approve route drops it then with the count in the note. `claim_problems` and
+  `cell_problems` live there and the queue app imports them. The queue blocks approve (409) on a contradicted claim
   unless `override=1`.
 - Step 3 reads step 2's tables only through `publish/store.py:fetch_approved`
   (edited_text from `decisions` wins over `single_post`; it also resolves the draft's

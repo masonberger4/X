@@ -23,6 +23,7 @@ from verify.verifier import CONTRADICTED, SUPPORTED
 PENDING = "pending"
 RENDER = "render"
 DROP = "drop"
+BLOCKED = "blocked"  # a contradicted cell: table kept, verdicts kept, no picture until fixed
 
 SOURCE_MODEL = "source"  # `model` of a check backed by the source article, not the web
 
@@ -37,10 +38,12 @@ class CellVerdict:
 
 @dataclass
 class TableDecision:
-    status: str  # PENDING (cells unchecked), RENDER (with blanked cells), DROP (with reason)
+    status: str  # PENDING (cells unchecked), RENDER (with blanked cells), DROP (with reason),
+    # BLOCKED (contradicted cells, listed in `contradicted`)
     blanked: frozenset[tuple[int, int]] = frozenset()
     reason: str = ""
     unchecked: list[tuple[int, int]] = field(default_factory=list)
+    contradicted: list[tuple[int, int]] = field(default_factory=list)
 
 
 def _norm(text: str) -> str:
@@ -90,10 +93,16 @@ def decide(
     unchecked = [(r, c) for r, c, _ in cells if (r, c) not in by_pos]
     if unchecked:
         return TableDecision(PENDING, unchecked=unchecked)
-    contradicted = [v for v in verdicts if v.verdict == CONTRADICTED]
+    contradicted = [(v.row, v.col) for v in verdicts if v.verdict == CONTRADICTED]
     if contradicted:
-        v = contradicted[0]
-        return TableDecision(DROP, reason=f"cell contradicted: {cell_claim(table, v.row, v.col)}")
+        # Not dropped: like a contradicted claim, the cell waits for a fix (the reviser is
+        # handed it, the reviewer can retype it) and approving early drops the table.
+        r, c = contradicted[0]
+        return TableDecision(
+            BLOCKED,
+            reason=f"cell contradicted: {cell_claim(table, r, c)}",
+            contradicted=contradicted,
+        )
     blanked = {(v.row, v.col) for v in verdicts if not (v.verdict == SUPPORTED and v.trusted)}
     rows_left = [r for r in range(len(table.rows)) if (r, 0) not in blanked]
     if len(rows_left) < TABLE_MIN_ROWS:

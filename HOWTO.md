@@ -198,9 +198,12 @@ source only when it is due, and score only scores what is new.
    its own). Once every cell has a verdict the table is drawn to
    `images\draft_<id>.png` with a blank where a cell could not be tied to a
    trusted primary source (the footer says so), or dropped, on the draft's
-   record, when a cell was contradicted, fewer than `min_supported_ratio` of
-   the fact cells passed, fewer than two rows kept a verified label, or the
-   table had more than `max_cells_per_draft` cells. `tables:` in
+   record, when fewer than `min_supported_ratio` of the fact cells passed,
+   fewer than two rows kept a verified label, or the table had more than
+   `max_cells_per_draft` cells. A contradicted cell does not drop the table:
+   it is kept, with its verdicts and without a picture, until the cell is
+   fixed (by a Revise, the verify-revise loop or your own retyping); approving
+   it as is posts the text alone and records why. `tables:` in
    `verify\config.yaml` holds those knobs and `enabled: false` skips tables
    altogether (they then stay unrendered and are dropped at approval).
    To take yourself out of the run-verify, press-Revise, run-verify loop, turn
@@ -223,9 +226,12 @@ source only when it is due, and score only scores what is new.
    stops, so the verdicts you see are always real ones. The queue shows
    "auto-revised N×" on each draft, with "needs you" when the loop gave up
    and a claim problem remains; those are the only ones to open with the
-   Revise box. Comparison tables are not part of the loop (their cells are
-   blanked or the table dropped instead). Each round costs one drafter call
-   plus one web call per new claim.
+   Revise box. A comparison table's contradicted cells go to the drafter in
+   the same round, worded as the checker saw them ("Agenus, Stage: Phase 3
+   planned") with the note, the quote and the source, and the cells the round
+   changed are checked before the next one; blanked cells are left alone.
+   The table pass therefore runs before the loop. Each round costs one drafter
+   call plus one web call per new claim or changed cell.
    About one to two minutes per claim. Verdicts are only "verified" when
    the source is on a trusted site (`verify\config.yaml`, plus every company
    site in `config.yaml`); anything else is shown as a lead with a
@@ -272,7 +278,10 @@ source only when it is due, and score only scores what is new.
    No web call, no text change, and the table is kept (unlike "Drop image").
    A table shows under "Table cells" with each cell's verdict and source link
    (green: kept; amber: blanked in the picture; red: contradicted). The
-   picture appears once every cell is checked. Approving before that posts
+   picture appears once every cell is checked and none is contradicted; a
+   contradicted cell is shown to the drafter on the next Revise (empty box
+   is enough) with the fact-checker's note, quote and source, exactly like a
+   contradicted claim. Approving before that posts
    the text alone and records why, so a picture is never attached after you
    stopped looking. A Revise keeps the verdict of every cell whose row label,
    column and text did not change.

@@ -102,6 +102,15 @@ def test_revision_prompt_carries_draft_instructions_and_claim_failures():
             ),
             ClaimProblem("Readout in Q4", "unverified"),
         ],
+        cell_problems=[
+            ClaimProblem(
+                "Agenus, Stage: Phase 3 planned",
+                "contradicted",
+                note="phase 3 started",
+                quote="ROBBIN enrolled",
+                source_url="https://sec.gov/x",
+            )
+        ],
     )
     assert "Draft the single_post and the thread now" not in user
     assert "REVISING" in user
@@ -112,6 +121,9 @@ def test_revision_prompt_carries_draft_instructions_and_claim_failures():
     assert "NOTE: it has 97" in user and 'SOURCE SAYS: "97 patients"' in user
     assert "UNVERIFIED CLAIMS" in user and "Readout in Q4" in user
     assert user.index("FACT-CHECK FAILURES") < user.index("UNVERIFIED CLAIMS")
+    assert "TABLE CELL FAILURES" in user and "Agenus, Stage: Phase 3 planned" in user
+    assert 'SOURCE SAYS: "ROBBIN enrolled"' in user and "SOURCE URL: https://sec.gov/x" in user
+    assert user.index("UNVERIFIED CLAIMS") < user.index("TABLE CELL FAILURES")
 
 
 def test_revision_prompt_without_claims_has_no_fact_check_sections():
@@ -120,4 +132,4 @@ def test_revision_prompt_without_claims_has_no_fact_check_sections():
     user = build_revision_user_prompt(
         base_user_prompt="brief", current={"single_post": "p"}, instructions="shorter"
     )
-    assert "FACT-CHECK" not in user and "UNVERIFIED" not in user
+    assert "FACT-CHECK" not in user and "UNVERIFIED" not in user and "TABLE CELL" not in user

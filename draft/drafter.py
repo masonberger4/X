@@ -366,6 +366,7 @@ def revise_item(
     current: Draft,
     instructions: str | None,
     claim_problems: list[ClaimProblem] | None = None,
+    cell_problems: list[ClaimProblem] | None = None,
     title: str,
     abstract: str,
     url: str,
@@ -380,11 +381,12 @@ def revise_item(
     sleep: Callable[[float], None] = time.sleep,
 ) -> DraftResult:
     """Revise an existing draft: the model gets the same brief as draft_item plus the draft as
-    it stands, the editor's instructions and the claims the fact-checker (step 2b) contradicted,
-    and is asked to change only what those require. Raises ValueError when there is nothing to
-    revise (no instructions and no claim problems). Everything after the call is identical to
+    it stands, the editor's instructions, the claims the fact-checker (step 2b) contradicted
+    and the table cells it contradicted (`cell_problems`), and is asked to change only what
+    those require. Raises ValueError when there is nothing to revise (no instructions, no
+    claim problem, no cell problem). Everything after the call is identical to
     draft_item: schema check, hard rules in code, retries, number flagging."""
-    if not (instructions or "").strip() and not claim_problems:
+    if not (instructions or "").strip() and not claim_problems and not cell_problems:
         raise ValueError("nothing to revise: give instructions or at least one claim problem")
     model = model or model_name()
     system, base_user = build_prompt(
@@ -402,6 +404,7 @@ def revise_item(
         current=current.to_dict(),
         instructions=(instructions or "").strip() or None,
         claim_problems=claim_problems,
+        cell_problems=cell_problems,
     )
     return _generate(
         system,

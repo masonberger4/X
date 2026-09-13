@@ -129,10 +129,13 @@ def build_revision_user_prompt(
     current: dict[str, Any],
     instructions: str | None,
     claim_problems: list[ClaimProblem] | None = None,
+    cell_problems: list[ClaimProblem] | None = None,
 ) -> str:
     """The user prompt for a revision round: the original brief, then the draft as it stands,
-    the editor's instructions and any claims the fact-checker contradicted. The model is told
-    to change only what those ask for and to keep everything else as written."""
+    the editor's instructions, any claims the fact-checker contradicted and any table cells
+    it contradicted (`cell_problems`, each claim worded as `verify/tables.py:cell_claim`).
+    The model is told to change only what those ask for and to keep everything else as
+    written."""
     parts = [
         base_user_prompt.replace(
             "Draft the single_post and the thread now. Output JSON only.",
@@ -166,6 +169,18 @@ def build_revision_user_prompt(
             "abstract supports them; otherwise soften them to what the abstract says or drop them:"
         )
         parts += [_format_claim_problem(c) for c in unverified]
+        parts.append("")
+    if cell_problems:
+        parts.append(
+            "TABLE CELL FAILURES. The fact-checker searched the web and found these cells of "
+            "the draft's table to be WRONG (each is given as 'row label, column: cell'). Fix "
+            "each one in the table: correct the cell using only the facts in the "
+            "fact-checker's note and quote, or clear it to an empty string, or remove its "
+            "row; do not replace it with another guess. Keep every other cell, header and "
+            "the title exactly as they are (a cell's verdict is kept only when its row "
+            "label, column and text are unchanged):"
+        )
+        parts += [_format_claim_problem(c) for c in cell_problems]
         parts.append("")
     parts.append(
         "Rewrite the draft applying the instructions and fixes above. Keep everything the "

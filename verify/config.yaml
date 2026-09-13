@@ -9,8 +9,8 @@ timeout_seconds: 240          # per claim, claude_code backend
 # Comparison tables (draft/chart.py:Table). The drafter may propose a table whose cells go
 # beyond the source article; run_verify.py checks every cell that is not verbatim in the
 # article with one web-search call each, blanks the cells it cannot tie to a trusted
-# primary source, drops the table on a contradicted cell or when too few cells pass, and
-# only then draws the picture. enabled: false leaves tables unverified and unrendered.
+# primary source, drops the table when too few cells pass, holds a table with a
+# contradicted cell back until a revision fixes it, and only then draws the picture. enabled: false leaves tables unverified and unrendered.
 tables:
   enabled: true
   max_cells_per_draft: 50     # bigger tables are dropped before any call

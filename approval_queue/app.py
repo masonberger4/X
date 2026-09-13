@@ -47,7 +47,11 @@ from draft.voice_report import build_report
 from verify import render as verify_render
 from verify import settings as verify_settings
 from verify import store as verify_store
-from verify.autorevise import auto_rounds_used, claim_problems  # noqa: F401  (re-exported)
+from verify.autorevise import (  # noqa: F401  (re-exported)
+    auto_rounds_used,
+    cell_problems,
+    claim_problems,
+)
 from verify.verifier import trusted_hosts
 
 log = logging.getLogger(__name__)
@@ -247,6 +251,7 @@ def _render_detail(
     checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
     has_image = store.resolve_image(row.image_path) is not None
     table_checks = {(k.row, k.col): k for k in verify_store.table_checks_for_draft(conn, draft_id)}
+    cells_contradicted = len(cell_problems(row.draft.table, table_checks.values()))
     image_grades = store.list_image_grades(conn, draft_id)
     edit_form = edit_form or {}
     return templates.TemplateResponse(
@@ -269,7 +274,8 @@ def _render_detail(
             "edit_open": bool(edit_form),
             "checks": checks,
             "contradicted": any(c.verdict == "contradicted" for c in checks.values()),
-            "claim_problems": len(claim_problems(checks.values())),
+            "cells_contradicted": cells_contradicted,
+            "claim_problems": len(claim_problems(checks.values())) + cells_contradicted,
             "auto_rounds": auto_rounds_used(conn, draft_id),
             "error": error,
             "revised": revised,
@@ -319,9 +325,16 @@ async def approve(draft_id: int, request: Request, conn: Conn):
     if row is None:
         raise HTTPException(404, "no such draft")
     if row.draft.table is not None and store.resolve_image(row.image_path) is None:
-        # The table's cells were never all verified, so its picture must never be attached
-        # after the human has stopped looking: the post goes out text-only, on the record.
-        store.drop_table(conn, draft_id, "not verified when the draft was approved")
+        # The table's cells were never all verified (or one was contradicted and never
+        # fixed), so its picture must never be attached after the human has stopped looking:
+        # the post goes out text-only, on the record.
+        bad = cell_problems(row.draft.table, verify_store.table_checks_for_draft(conn, draft_id))
+        why = (
+            f"{len(bad)} contradicted cell(s) unfixed when the draft was approved"
+            if bad
+            else "not verified when the draft was approved"
+        )
+        store.drop_table(conn, draft_id, why)
         log.info("draft %d: unverified table dropped at approval", draft_id)
     store.approve(conn, draft_id, note=_note(form))
     log.info("draft %d approved%s", draft_id, " (override)" if form.get("override") else "")
@@ -387,7 +400,8 @@ async def edit(draft_id: int, request: Request, conn: Conn):
 @app.post("/drafts/{draft_id}/revise")
 async def revise(draft_id: int, request: Request, conn: Conn):
     """Send the draft back through the drafter with the human's instructions. Claims that
-    step 2b contradicted (or could not verify) are always included, so a draft can be
+    step 2b contradicted (or could not verify), and every table cell it contradicted, are
+    always included, so a draft can be
     revised with an empty instruction box just to fix its fact-check failures. On success
     the draft is replaced, stays pending, and its claim checks are dropped, except a
     supported verdict whose claim text is unchanged, which is carried over so run_verify
@@ -399,7 +413,8 @@ async def revise(draft_id: int, request: Request, conn: Conn):
         raise HTTPException(404, "no such draft")
     instructions = form.get("instructions", "").strip() or None
     problems = claim_problems(verify_store.checks_for_draft(conn, draft_id))
-    if not instructions and not problems:
+    cells = cell_problems(row.draft.table, verify_store.table_checks_for_draft(conn, draft_id))
+    if not instructions and not problems and not cells:
         return _detail_redirect(
             draft_id, error="say what should change, or run the claim check first"
         )
@@ -409,6 +424,7 @@ async def revise(draft_id: int, request: Request, conn: Conn):
             current=row.draft,
             instructions=instructions,
             claim_problems=problems,
+            cell_problems=cells,
             title=row.title,
             abstract=row.abstract,
             url=row.url,

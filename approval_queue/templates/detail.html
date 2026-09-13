@@ -58,7 +58,8 @@
 
 {% if d.draft.table %}
 <h2>Table cells</h2>
-<p class="meta">{{ table_checks|length }} of {{ d.draft.table.cells()|length }} cells checked. A supported cell from a trusted source keeps its text; anything else is blanked in the picture; one contradicted cell drops the table. "trust host" adds that site to the trusted list for good and redraws the picture from the verdicts already stored.</p>
+{% if cells_contradicted %}<p class="flash over">{{ cells_contradicted }} table cell{{ "s were" if cells_contradicted != 1 else " was" }} contradicted by the fact-checker. Press Revise below (the drafter is shown the cell, the note and the quote), retype the cell here, or approve to post the text alone.</p>{% endif %}
+<p class="meta">{{ table_checks|length }} of {{ d.draft.table.cells()|length }} cells checked. A supported cell from a trusted source keeps its text; anything else is blanked in the picture; a contradicted cell holds the picture back until it is fixed (Revise hands it to the drafter with the fact-checker's note, or retype it below; approving as is posts the text alone). "trust host" adds that site to the trusted list for good and redraws the picture from the verdicts already stored.</p>
 <form method="post" action="/drafts/{{ d.id }}/table">
 <div style="overflow-x:auto"><table class="cells">
   <thead><tr>{% for col in d.draft.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
