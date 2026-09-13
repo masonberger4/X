@@ -50,7 +50,7 @@ advance. Log every score for later tuning.
 ### 3. Draft (stronger model, claude-sonnet / claude-opus)
 Inputs: source text, voice guide (tone, sample posts, banned phrases), and the
 originality rule (interpretation required).
-Output JSON: single_post, thread (3–6 posts), suggested_visual,
+Output JSON: thread (3–6 posts), exactly one of chart / table, suggested_visual,
 why_it_matters, claims_to_verify (confidence flags).
 Hard rules in prompt: no medical advice, link primary source, label preprints,
 no fabricated numbers.

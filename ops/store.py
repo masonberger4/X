@@ -214,7 +214,7 @@ def fetch_stage_activity(conn: sqlite3.Connection, now: datetime | None = None) 
             cluster_id, raw_json)
       clusters(id, ..., created_at, prefilter_status 'pass'|'drop'|NULL, prefilter_reason)
       scores(id, cluster_id, model, prompt_version, ..., total, scored_at)
-      drafts(id, item_id, cluster_id, model, single_post, thread_json, ..., status
+      drafts(id, item_id, cluster_id, model, thread_json, ..., status
              'pending'|'approved'|'rejected'|'snoozed'|'failed', ..., snoozed_until,
              created_at, updated_at)
       decisions(id, draft_id, action, original_text, edited_text, note, created_at)

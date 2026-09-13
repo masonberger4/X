@@ -41,16 +41,16 @@ class Claim:
 
 @dataclass
 class Draft:
-    single_post: str
     thread: list[str]
     suggested_visual: str
     why_it_matters: str
     claims_to_verify: list[Claim] = field(default_factory=list)
-    # Optional chart spec (draft/chart.py). None: no image. Never required, so an older
-    # model output without the key still validates.
+    # The visual (draft/chart.py). validate_output requires exactly one of chart/table, so a
+    # draft always comes with a picture spec; the dataclass keeps both optional for the
+    # stand-ins the queue and the voice loop build (a human-edited text, a failed draft).
     chart: Chart | None = None
-    # Optional comparison table (draft/chart.py:Table), the alternative to a chart. Its cells
-    # are web-verified by step 2b before anything is rendered.
+    # Comparison table (draft/chart.py:Table), the alternative to a chart. Its cells are
+    # web-verified by step 2b before anything is rendered.
     table: Table | None = None
 
     @property
@@ -61,24 +61,19 @@ class Draft:
         return asdict(self)
 
     def all_posts(self) -> list[str]:
-        return [self.single_post, *self.thread]
+        return list(self.thread)
 
 
 OUTPUT_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": [
-        "single_post",
         "thread",
         "suggested_visual",
         "why_it_matters",
         "claims_to_verify",
     ],
     "properties": {
-        "single_post": {
-            "type": "string",
-            "description": "One standalone post, <= 280 chars counting URLs as 23.",
-        },
         "thread": {
             "type": "array",
             "minItems": THREAD_MIN,
@@ -88,7 +83,7 @@ OUTPUT_JSON_SCHEMA: dict[str, Any] = {
         },
         "suggested_visual": {
             "type": "string",
-            "description": "Short description of a chart, figure or image to attach.",
+            "description": "One line for the reviewer saying what the chart or table shows.",
         },
         "why_it_matters": {
             "type": "string",
@@ -129,8 +124,9 @@ def _require_str(data: dict[str, Any], key: str) -> str:
 def validate_output(data: Any) -> Draft:
     """Validate raw JSON (already parsed) and return a Draft.
 
-    Checks structure and types only. Content rules (280 chars, URL present,
-    preprint label, number verification) live in draft.drafter.check_hard_rules.
+    Checks structure and types only, plus that exactly one of chart/table is given. Content
+    rules (280 chars, URL present, preprint label, number verification) live in
+    draft.drafter.check_hard_rules.
     """
     if not isinstance(data, dict):
         raise SchemaError("output must be a JSON object")
@@ -140,10 +136,6 @@ def validate_output(data: Any) -> Draft:
     extra = set(data) - set(OUTPUT_JSON_SCHEMA["properties"])
     if extra:
         raise SchemaError(f"unexpected keys: {', '.join(sorted(extra))}")
-
-    single_post = _require_str(data, "single_post")
-    if not single_post:
-        raise SchemaError("'single_post' is empty")
 
     thread = data["thread"]
     if not isinstance(thread, list) or not all(isinstance(p, str) for p in thread):
@@ -161,6 +153,8 @@ def validate_output(data: Any) -> Draft:
         raise SchemaError(str(exc)) from exc
     if chart is not None and table is not None:
         raise SchemaError("give a chart or a table, not both")
+    if chart is None and table is None:
+        raise SchemaError("every draft needs a visual: give a chart or a table")
 
     claims_raw = data["claims_to_verify"]
     if not isinstance(claims_raw, list):
@@ -180,7 +174,6 @@ def validate_output(data: Any) -> Draft:
         claims.append(Claim(claim=claim.strip(), confidence=conf))
 
     return Draft(
-        single_post=single_post,
         thread=thread,
         suggested_visual=_require_str(data, "suggested_visual"),
         why_it_matters=_require_str(data, "why_it_matters"),

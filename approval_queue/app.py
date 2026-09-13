@@ -2,7 +2,7 @@
 
 Routes:
   GET  /queue                 pending drafts (source, score, rationale); / redirects here
-  GET  /drafts/{id}           detail: single_post, thread, claims_to_verify (+ step 2b
+  GET  /drafts/{id}           detail: thread, visual, claims_to_verify (+ step 2b
                               verdicts with source links), edit form
   POST /drafts/{id}/approve   refused with 409 while a claim is contradicted, unless the
                               form carries override=1
@@ -109,11 +109,8 @@ def _category(form: dict[str, str]) -> str | None:
 
 
 def _post_lines(text: str | None) -> list[str]:
-    """A decision text (JSON or bare post) as display lines: single post, then thread posts."""
-    single, thread = parse_decision_text(text)
-    lines = [f"single: {single}"]
-    lines.extend(f"thread {i}: {p}" for i, p in enumerate(thread, 1))
-    return lines
+    """A decision text (JSON or bare post) as display lines, one per thread post."""
+    return [f"post {i}: {p}" for i, p in enumerate(parse_decision_text(text), 1)]
 
 
 def decision_diff(original_text: str | None, edited_text: str | None) -> list[tuple[str, str]]:
@@ -267,7 +264,6 @@ def _render_detail(
             "image_alt": row.image_alt
             or (alt_text(row.draft.visual, row.url) if row.draft.visual else ""),
             "decisions": decisions,
-            "single_post_text": edit_form.get("single_post", row.draft.single_post),
             "thread_text": edit_form.get("thread", "\n---\n".join(row.draft.thread)),
             "edit_note": edit_form.get("note", ""),
             "edit_category": edit_form.get("category", ""),
@@ -341,15 +337,13 @@ async def approve(draft_id: int, request: Request, conn: Conn):
     return _redirect_home()
 
 
-def _edit_problem(single_post: str, thread: list[str]) -> str | None:
+def _edit_problem(thread: list[str]) -> str | None:
     """Why an edited text cannot be saved, naming the post and its length (URLs count as 23),
     or None when every post fits."""
-    if not single_post:
-        return "the single post cannot be empty"
+    if not thread:
+        return "the thread cannot be empty"
     over = []
-    for label, text in [("single post", single_post)] + [
-        (f"thread post {i}", p) for i, p in enumerate(thread, 1)
-    ]:
+    for label, text in [(f"post {i}", p) for i, p in enumerate(thread, 1)]:
         n = tweet_length(text)
         if n > MAX_POST_CHARS:
             over.append(f"{label} is {n} characters")
@@ -361,9 +355,8 @@ def _edit_problem(single_post: str, thread: list[str]) -> str | None:
 @app.post("/drafts/{draft_id}/edit")
 async def edit(draft_id: int, request: Request, conn: Conn):
     form = await read_form(request)
-    single_post = form.get("single_post", "").strip()
     thread = _split_thread(form.get("thread", ""))
-    problem = _edit_problem(single_post, thread)
+    problem = _edit_problem(thread)
     if problem is None:
         try:
             category = store.validate_category(form.get("category"))
@@ -376,14 +369,13 @@ async def edit(draft_id: int, request: Request, conn: Conn):
             conn,
             draft_id,
             error=f"Not saved: {problem}",
-            edit_form={k: form.get(k, "") for k in ("single_post", "thread", "note", "category")},
+            edit_form={k: form.get(k, "") for k in ("thread", "note", "category")},
             status_code=400,
         )
     try:
         store.edit(
             conn,
             draft_id,
-            single_post=single_post,
             thread=thread,
             note=_note(form),
             approve_after="keep_pending" not in form,

@@ -94,7 +94,6 @@ class DraftResult:
     model: str
     attempts: int
     flagged_numbers: list[str] = field(default_factory=list)
-    dropped_chart_numbers: list[str] = field(default_factory=list)
 
 
 def model_name() -> str:
@@ -226,27 +225,26 @@ def verify_chart(draft: Draft, source_text: str) -> list[str]:
     return missing
 
 
-def drop_unverified_chart(draft: Draft, source_text: str) -> list[str]:
-    """A chart with a number the source does not contain is dropped (chart=None) and the
-    reviewer told why through a low-confidence claim. A chart is a picture of numbers, so one
-    unverifiable number makes the whole picture unusable; the post text is unaffected."""
+def chart_problems(draft: Draft, source_text: str) -> list[str]:
+    """Hard-rule style violations for the chart: every number in it that the source does not
+    contain, worded for the retry prompt. A chart is a picture of numbers, so one
+    unverifiable number makes the whole picture unusable, and every draft must carry a
+    usable visual, so the attempt is retried rather than the chart dropped."""
     missing = verify_chart(draft, source_text)
-    if missing:
-        draft.chart = None
-        draft.claims_to_verify.append(
-            Claim(
-                claim="Chart dropped: number(s) not in the source: " + ", ".join(missing),
-                confidence="low",
-            )
-        )
-    return missing
+    if not missing:
+        return []
+    return [
+        "chart number(s) not in the source: "
+        + ", ".join(missing)
+        + " (use only values written verbatim in the abstract or title, or give a table instead)"
+    ]
 
 
 def check_hard_rules(draft: Draft, *, url: str, source: str) -> list[str]:
     """Violations that make a draft unusable. Empty list means the draft passes."""
     problems: list[str] = []
     for i, post in enumerate(draft.all_posts()):
-        label = "single_post" if i == 0 else f"thread[{i - 1}]"
+        label = f"thread[{i}]"
         n = tweet_length(post)
         if n > MAX_POST_CHARS:
             problems.append(f"{label} is {n} chars (> {MAX_POST_CHARS})")
@@ -264,13 +262,12 @@ def check_hard_rules(draft: Draft, *, url: str, source: str) -> list[str]:
                 problems.append(f"table reads as medical advice: {text!r}")
             elif _INVEST_RE.search(text):
                 problems.append(f"table reads as investment advice: {text!r}")
-    if not _url_in(draft.single_post, url):
-        problems.append("single_post is missing the primary source URL")
+    if not draft.thread:
+        problems.append("thread is empty")
+        return problems
     if not _url_in(draft.thread[-1], url):
         problems.append("last thread post is missing the primary source URL")
     if is_preprint(source):
-        if PREPRINT_LABEL not in draft.single_post.lower():
-            problems.append("preprint not labelled in single_post")
         if PREPRINT_LABEL not in draft.thread[0].lower():
             problems.append("preprint not labelled in first thread post")
     return problems
@@ -449,7 +446,9 @@ def _generate(
             last_reasons = [f"invalid output: {exc}"]
             log.warning("attempt %d: %s", attempt, last_reasons[0])
             continue
-        problems = check_hard_rules(draft, url=url, source=source)
+        problems = check_hard_rules(draft, url=url, source=source) + chart_problems(
+            draft, source_text
+        )
         if problems:
             last_reasons = problems
             log.warning("attempt %d: hard-rule violations: %s", attempt, "; ".join(problems))
@@ -457,16 +456,7 @@ def _generate(
         flagged = flag_unverified_numbers(draft, source_text)
         if flagged:
             log.info("numbers not found in source, flagged for review: %s", flagged)
-        dropped = drop_unverified_chart(draft, source_text)
-        if dropped:
-            log.warning("chart dropped, numbers not found in source: %s", dropped)
-        return DraftResult(
-            draft=draft,
-            model=model,
-            attempts=attempt,
-            flagged_numbers=flagged,
-            dropped_chart_numbers=dropped,
-        )
+        return DraftResult(draft=draft, model=model, attempts=attempt, flagged_numbers=flagged)
     if last_reasons:
         log.error("draft rejected for %r after %d attempts: %s", url, max_attempts, last_reasons)
         raise DraftRejected(last_reasons)

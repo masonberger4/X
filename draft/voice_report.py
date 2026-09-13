@@ -45,7 +45,7 @@ KIND_LENGTH = "length"
 KIND_THREAD = "thread"
 KIND_TONE = "tone"
 
-LENGTH_DELTA_THRESHOLD = -40  # median chars removed from the single post -> "running long"
+LENGTH_DELTA_THRESHOLD = -40  # median chars removed from the first post -> "running long"
 THREAD_DROPPED_THRESHOLD = 0.5
 TONE_REPEATS = 3
 TOP_WORDS = 15
@@ -167,8 +167,12 @@ def _ngrams(words: list[str], n: int) -> list[str]:
     return [" ".join(words[i : i + n]) for i in range(len(words) - n + 1)]
 
 
-def _texts(single: str, thread: list[str]) -> str:
-    return "\n".join([single, *thread])
+def _texts(thread: list[str]) -> str:
+    return "\n".join(thread)
+
+
+def _lead_len(thread: list[str]) -> int:
+    return len(thread[0]) if thread else 0
 
 
 def _rate(num: int, den: int) -> float | None:
@@ -187,8 +191,8 @@ def _top(counter: Counter[str], n: int) -> list[tuple[str, int]]:
 @dataclass
 class _Edit:
     row: Any
-    original: tuple[str, list[str]]
-    edited: tuple[str, list[str]]
+    original: list[str]
+    edited: list[str]
 
 
 def _edits(decisions_rows: Iterable[Any]) -> list[_Edit]:
@@ -211,8 +215,8 @@ def _deleted_phrases(edits: list[_Edit], stopwords: set[str]) -> Counter[str]:
     """Net count of 1-3 word phrases removed by the reviewer across all edits."""
     counts: Counter[str] = Counter()
     for e in edits:
-        before = words_of(_texts(*e.original))
-        after = words_of(_texts(*e.edited))
+        before = words_of(_texts(e.original))
+        after = words_of(_texts(e.edited))
         for n in range(1, MAX_PHRASE_WORDS + 1):
             gone = Counter(_ngrams(before, n)) - Counter(_ngrams(after, n))
             for phrase, k in gone.items():
@@ -226,8 +230,8 @@ def _word_deltas(edits: list[_Edit], stopwords: set[str]) -> tuple[Counter[str],
     deleted: Counter[str] = Counter()
     added: Counter[str] = Counter()
     for e in edits:
-        before = Counter(words_of(_texts(*e.original)))
-        after = Counter(words_of(_texts(*e.edited)))
+        before = Counter(words_of(_texts(e.original)))
+        after = Counter(words_of(_texts(e.edited)))
         for w, k in (before - after).items():
             if w not in stopwords:
                 deleted[w] += k
@@ -272,7 +276,7 @@ def _proposals(
                 KIND_LENGTH,
                 'Posts are running long. Under "## Tone" in draft/voice.md add: '
                 '"- Aim for well under the limit; cut the second idea, not the interpretation."',
-                f"median single-post length change across {edits_n} edits was "
+                f"median first-post length change across {edits_n} edits was "
                 f"{length_delta_median:+.0f} chars",
             )
         )
@@ -280,9 +284,9 @@ def _proposals(
         out.append(
             Proposal(
                 KIND_THREAD,
-                'Threads are being cut; lead with the single post. Under "## Tone" in '
-                'draft/voice.md add: "- The single post carries the story; the thread only '
-                'adds detail that does not fit, never restates it."',
+                'Threads are being cut; lead with the story. Under "## Tone" in '
+                'draft/voice.md add: "- The first post carries the story; the rest of the '
+                'thread only adds detail that does not fit, never restates it."',
                 f"the reviewer shortened the thread in {thread_dropped_rate:.0%} of "
                 f"{edits_n} edits",
             )
@@ -367,15 +371,15 @@ def build_report(
     )
     by_category = _top(categories, len(categories))
 
-    deltas = [len(e.edited[0]) - len(e.original[0]) for e in edits]
+    deltas = [_lead_len(e.edited) - _lead_len(e.original) for e in edits]
     length_delta_median = statistics.median(deltas) if deltas else None
     thread_dropped_rate = _rate(
-        sum(1 for e in edits if len(e.edited[1]) < len(e.original[1])), len(edits)
+        sum(1 for e in edits if len(e.edited) < len(e.original)), len(edits)
     )
 
     banned = parse_banned_phrases(voice_md)
     hits: Counter[str] = Counter()
-    originals = [_texts(*parse_decision_text(_field(r, "original_text", ""))) for r in decisions]
+    originals = [_texts(parse_decision_text(_field(r, "original_text", ""))) for r in decisions]
     for phrase in banned:
         pat = _phrase_pattern(phrase)
         n = sum(1 for text in originals if pat.search(text))
@@ -510,7 +514,7 @@ def render_markdown(report: VoiceReport) -> str:
         lines.append("_No edits yet._")
     else:
         lines.append(
-            f"- Median single-post length change: {r.length_delta_median:+.0f} chars "
+            f"- Median first-post length change: {r.length_delta_median:+.0f} chars "
             f"(negative = the reviewer shortens)."
         )
         lines.append(f"- Edits that shortened the thread: {_pct(r.thread_dropped_rate)}.")
@@ -535,11 +539,11 @@ def render_markdown(report: VoiceReport) -> str:
             lines.append("")
             lines.append("Before:")
             lines.append("")
-            lines.append("> " + e.original_single.replace("\n", "\n> "))
+            lines.append("> " + e.original_lead.replace("\n", "\n> "))
             lines.append("")
             lines.append("After:")
             lines.append("")
-            lines.append("> " + e.edited_single.replace("\n", "\n> "))
+            lines.append("> " + e.edited_lead.replace("\n", "\n> "))
             if e.thread_changed:
                 lines.append("")
                 lines.append(

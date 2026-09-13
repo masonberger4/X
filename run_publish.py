@@ -1,7 +1,7 @@
 """CLI: publish approved drafts to X on a slot schedule. Safe by default.
 
 Usage: python run_publish.py [--dry-run | --live] [--now] [--breaking] [--limit N]
-                             [--format single|thread] [--draft DRAFT_ID] [-v]
+                             [--draft DRAFT_ID] [-v]
        python run_publish.py --release-failed [DRAFT_ID ...]
 
 Default is --dry-run: prints what WOULD be posted and when, posts nothing. --live posts
@@ -46,7 +46,7 @@ from publish.scheduler import (
     slot_label,
 )
 from publish.store import Approved
-from publish.thread import ThreadError, check_post, split_thread
+from publish.thread import ThreadError, split_thread
 
 log = logging.getLogger("run_publish")
 
@@ -80,14 +80,11 @@ def build_policy(conn, cfg: dict, now: datetime) -> Policy:
     )
 
 
-def texts_for(approved: Approved, fmt: str) -> tuple[str, list[str]]:
+def texts_for(approved: Approved) -> tuple[str, list[str]]:
     """(kind, ordered texts). Raises ThreadError if the content fails a hard check."""
-    if fmt == store.KIND_THREAD and approved.thread:
-        return store.KIND_THREAD, split_thread(approved.thread, url=approved.url)
-    problems = check_post(approved.single_post, url=approved.url or None)
-    if problems:
-        raise ThreadError("single_post: " + "; ".join(problems))
-    return store.KIND_SINGLE, [approved.single_post]
+    if not approved.thread:
+        raise ThreadError("draft has no thread")
+    return store.KIND_THREAD, split_thread(approved.thread, url=approved.url)
 
 
 def choose(
@@ -248,7 +245,6 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     ap.add_argument("--now", action="store_true", help="ignore slots; post the top candidate")
     ap.add_argument("--breaking", action="store_true", help="post only breaking items")
     ap.add_argument("--limit", type=int, default=10, help="max approved drafts to consider")
-    ap.add_argument("--format", choices=("single", "thread"), default=None)
     ap.add_argument("--config", default=None, help="path to publish/config.yaml override")
     ap.add_argument(
         "--draft",
@@ -279,7 +275,6 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
 
     live = live_enabled(args)
     cfg = load_publish_config(args.config)
-    fmt = args.format or cfg["post_format"]
     now = now or datetime.now(UTC)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
@@ -305,7 +300,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
             return 0
         assert slot is not None
         try:
-            kind, texts = texts_for(cand, fmt)
+            kind, texts = texts_for(cand)
         except ThreadError as exc:
             log.warning("draft %d refused, fix it in the approval queue: %s", cand.draft_id, exc)
             if live and store.claim(conn, cand.draft_id, slot):

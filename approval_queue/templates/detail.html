@@ -84,11 +84,6 @@
 {% if d.draft.table.note %}<p class="meta">{{ d.draft.table.note }}</p>{% endif %}
 {% endif %}
 
-<h2>Single post</h2>
-{% set n = d.draft.single_post|tweet_length %}
-<div class="post">{{ d.draft.single_post }}</div>
-<div class="meta {% if n > MAX_POST_CHARS %}over{% endif %}">{{ n }}/{{ MAX_POST_CHARS }}</div>
-
 <h2>Thread</h2>
 {% for p in d.draft.thread %}
   {% set n = p|tweet_length %}
@@ -163,7 +158,6 @@
 <details{% if edit_open %} open{% endif %}>
 <summary>Edit by hand</summary>
 <form method="post" action="/drafts/{{ d.id }}/edit">
-  <label>Single post<br><textarea name="single_post" rows="4">{{ single_post_text }}</textarea></label>
   <p class="meta">Thread: separate posts with a line containing only <code>---</code>.</p>
   <label>Thread<br><textarea name="thread" rows="10">{{ thread_text }}</textarea></label>
   <label>Note<br><input name="note" placeholder="what you changed and why (optional)" value="{{ edit_note }}"></label>

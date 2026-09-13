@@ -27,7 +27,6 @@ def load_publish_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg.setdefault("grace_minutes", 20)
     cfg.setdefault("max_posts_per_day", 3)
     cfg.setdefault("min_gap_minutes", 90)
-    cfg.setdefault("post_format", "single")
     cfg.setdefault("breaking", {})
     cfg["breaking"].setdefault("source_prefixes", ["fda", "company_"])
     cfg["breaking"].setdefault("company_title_keywords", ["approv"])
