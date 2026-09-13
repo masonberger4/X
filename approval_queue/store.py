@@ -205,8 +205,10 @@ def _chart_json(draft: Draft) -> str | None:
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
     """Open the shared pipeline DB and make sure our tables exist."""
     # check_same_thread=False: FastAPI opens the connection in a worker thread and uses it
-    # on the event loop; each request uses its connection sequentially, so this is safe.
-    conn = sqlite3.connect(str(path or db_path()), check_same_thread=False)
+    # on the event loop (or in the threadpool a slow route hands its work to); each request
+    # uses its connection sequentially, so this is safe. timeout=30: a CLI run (run_verify,
+    # run_draft) writing the same file makes us wait, not fail, as the other stores do.
+    conn = sqlite3.connect(str(path or db_path()), check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)

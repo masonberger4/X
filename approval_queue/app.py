@@ -35,6 +35,7 @@ from urllib.parse import parse_qs, quote
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from approval_queue import images, store
 from draft import drafter
@@ -408,61 +409,65 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     only checks the claims that are new or changed; on failure nothing changes and the
     detail page shows why."""
     form = await read_form(request)
-    row = store.get_draft(conn, draft_id)
-    if row is None:
-        raise HTTPException(404, "no such draft")
-    instructions = form.get("instructions", "").strip() or None
-    problems = claim_problems(verify_store.checks_for_draft(conn, draft_id))
-    cells = cell_problems(row.draft.table, verify_store.table_checks_for_draft(conn, draft_id))
-    if not instructions and not problems and not cells:
-        return _detail_redirect(
-            draft_id, error="say what should change, or run the claim check first"
+
+    def work():
+        row = store.get_draft(conn, draft_id)
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        instructions = form.get("instructions", "").strip() or None
+        problems = claim_problems(verify_store.checks_for_draft(conn, draft_id))
+        cells = cell_problems(row.draft.table, verify_store.table_checks_for_draft(conn, draft_id))
+        if not instructions and not problems and not cells:
+            return _detail_redirect(
+                draft_id, error="say what should change, or run the claim check first"
+            )
+        category = _category(form)
+        try:
+            result = drafter.revise_item(
+                current=row.draft,
+                instructions=instructions,
+                claim_problems=problems,
+                cell_problems=cells,
+                title=row.title,
+                abstract=row.abstract,
+                url=row.url,
+                source=row.source,
+                suggested_angle=row.suggested_angle or None,
+                rationale=row.rationale or None,
+                # Looked up at call time so tests can monkeypatch draft.drafter.call_anthropic.
+                call=drafter.call_anthropic,
+            )
+        except drafter.DraftRejected as exc:
+            log.warning("draft %d: revision broke a hard rule: %s", draft_id, exc)
+            return _detail_redirect(draft_id, error=f"the revision broke a hard rule: {exc}")
+        except Exception as exc:  # API / network errors: keep the draft as it was
+            log.error("draft %d: revision failed: %s", draft_id, exc)
+            return _detail_redirect(draft_id, error=f"revision failed: {exc}")
+        note = instructions
+        if problems and not note:
+            note = "fix fact-check failures"
+        store.revise(
+            conn, draft_id, draft=result.draft, model=result.model, note=note, category=category
         )
-    category = _category(form)
-    try:
-        result = drafter.revise_item(
-            current=row.draft,
-            instructions=instructions,
-            claim_problems=problems,
-            cell_problems=cells,
-            title=row.title,
-            abstract=row.abstract,
-            url=row.url,
-            source=row.source,
-            suggested_angle=row.suggested_angle or None,
-            rationale=row.rationale or None,
-            # Looked up at call time so tests can monkeypatch draft.drafter.call_anthropic.
-            call=drafter.call_anthropic,
+        kept = verify_store.carry_over_checks(
+            conn, draft_id, [c.claim for c in result.draft.claims_to_verify]
         )
-    except drafter.DraftRejected as exc:
-        log.warning("draft %d: revision broke a hard rule: %s", draft_id, exc)
-        return _detail_redirect(draft_id, error=f"the revision broke a hard rule: {exc}")
-    except Exception as exc:  # API / network errors: keep the draft as it was
-        log.error("draft %d: revision failed: %s", draft_id, exc)
-        return _detail_redirect(draft_id, error=f"revision failed: {exc}")
-    note = instructions
-    if problems and not note:
-        note = "fix fact-check failures"
-    store.revise(
-        conn, draft_id, draft=result.draft, model=result.model, note=note, category=category
-    )
-    kept = verify_store.carry_over_checks(
-        conn, draft_id, [c.claim for c in result.draft.claims_to_verify]
-    )
-    kept_cells = verify_store.carry_over_table_checks(
-        conn, draft_id, row.draft.table, result.draft.table
-    )
-    images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)
-    log.info(
-        "draft %d revised (%d attempt(s), %d claim problem(s), %d verdict(s) and %d table "
-        "cell(s) kept)",
-        draft_id,
-        result.attempts,
-        len(problems),
-        kept,
-        kept_cells,
-    )
-    return _detail_redirect(draft_id, revised=True)
+        kept_cells = verify_store.carry_over_table_checks(
+            conn, draft_id, row.draft.table, result.draft.table
+        )
+        images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)
+        log.info(
+            "draft %d revised (%d attempt(s), %d claim problem(s), %d verdict(s) and %d table "
+            "cell(s) kept)",
+            draft_id,
+            result.attempts,
+            len(problems),
+            kept,
+            kept_cells,
+        )
+        return _detail_redirect(draft_id, revised=True)
+
+    return await run_in_threadpool(work)
 
 
 def _detail_redirect(draft_id: int, *, error: str = "", revised: bool = False) -> RedirectResponse:
@@ -504,22 +509,26 @@ async def redraw_image(draft_id: int, conn: Conn):
     through the render-grade loop, a table is redrawn from the cell verdicts already
     stored (verify/render.py:finalize_table). The spec, the verdicts and the text are
     untouched and no web call is made; only the PNG and its grades are replaced."""
-    row = store.get_draft(conn, draft_id)
-    if row is None:
-        raise HTTPException(404, "no such draft")
-    if row.draft.visual is None:
-        return _detail_redirect(draft_id, error="this draft has no chart or table to redraw")
-    if row.draft.table is not None:
-        cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
-        hosts = trusted_hosts(cfg, verify_render.root_config())
-        decision = verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
-        log.info("draft %d: table redrawn by the reviewer (%s)", draft_id, decision.status)
-    else:
-        path = images.attach_chart(conn, draft_id, row.draft.chart, source_url=row.url)
-        log.info("draft %d: chart redrawn by the reviewer -> %s", draft_id, path)
-        if path is None:
-            return _detail_redirect(draft_id, error="the chart could not be rendered")
-    return _detail_redirect(draft_id)
+
+    def work():
+        row = store.get_draft(conn, draft_id)
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        if row.draft.visual is None:
+            return _detail_redirect(draft_id, error="this draft has no chart or table to redraw")
+        if row.draft.table is not None:
+            cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
+            hosts = trusted_hosts(cfg, verify_render.root_config())
+            decision = verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
+            log.info("draft %d: table redrawn by the reviewer (%s)", draft_id, decision.status)
+        else:
+            path = images.attach_chart(conn, draft_id, row.draft.chart, source_url=row.url)
+            log.info("draft %d: chart redrawn by the reviewer -> %s", draft_id, path)
+            if path is None:
+                return _detail_redirect(draft_id, error="the chart could not be rendered")
+        return _detail_redirect(draft_id)
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/drafts/{draft_id}/trust")
@@ -529,27 +538,31 @@ async def trust_source(draft_id: int, request: Request, conn: Conn):
     every stored verdict from that host to trusted, and redraw this draft's table from the
     verdicts it already has. No web call is made and no text changes."""
     form = await read_form(request)
-    row = store.get_draft(conn, draft_id)
-    if row is None:
-        raise HTTPException(404, "no such draft")
-    try:
-        host = verify_settings.normalize_host(form.get("host", ""))
-    except ValueError as exc:
-        return _detail_redirect(draft_id, error=str(exc))
-    added = verify_settings.add_trusted_domain(host)
-    changed = verify_store.mark_host_trusted(conn, host)
-    log.info(
-        "draft %d: host %s %s, %d verdict(s) now trusted",
-        draft_id,
-        host,
-        "added to trusted_domains" if added else "already trusted",
-        changed,
-    )
-    if row.draft.table is not None and row.status == "pending":
-        cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
-        hosts = trusted_hosts(cfg, verify_render.root_config()) | {host}
-        verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
-    return _detail_redirect(draft_id)
+
+    def work():
+        row = store.get_draft(conn, draft_id)
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        try:
+            host = verify_settings.normalize_host(form.get("host", ""))
+        except ValueError as exc:
+            return _detail_redirect(draft_id, error=str(exc))
+        added = verify_settings.add_trusted_domain(host)
+        changed = verify_store.mark_host_trusted(conn, host)
+        log.info(
+            "draft %d: host %s %s, %d verdict(s) now trusted",
+            draft_id,
+            host,
+            "added to trusted_domains" if added else "already trusted",
+            changed,
+        )
+        if row.draft.table is not None and row.status == "pending":
+            cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
+            hosts = trusted_hosts(cfg, verify_render.root_config()) | {host}
+            verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
+        return _detail_redirect(draft_id)
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/drafts/{draft_id}/table")
@@ -561,44 +574,48 @@ async def edit_table(draft_id: int, request: Request, conn: Conn):
     have, and the picture is redrawn from those verdicts through the same render/drop step
     as run_verify. No web call is made."""
     form = await read_form(request)
-    row = store.get_draft(conn, draft_id)
-    if row is None:
-        raise HTTPException(404, "no such draft")
-    if row.draft.table is None:
-        return _detail_redirect(draft_id, error="this draft has no table")
-    if row.status != store.STATUS_PENDING:
-        return _detail_redirect(draft_id, error="only a pending draft's table can be edited")
-    old = row.draft.table
-    rows = [
-        [form.get(f"cell_{r}_{c}", "") for c in range(len(old.columns))]
-        for r in range(len(old.rows))
-    ]
-    try:
-        new = validate_table(
-            {"title": old.title, "columns": old.columns, "rows": rows, "note": old.note}
+
+    def work():
+        row = store.get_draft(conn, draft_id)
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        if row.draft.table is None:
+            return _detail_redirect(draft_id, error="this draft has no table")
+        if row.status != store.STATUS_PENDING:
+            return _detail_redirect(draft_id, error="only a pending draft's table can be edited")
+        old = row.draft.table
+        rows = [
+            [form.get(f"cell_{r}_{c}", "") for c in range(len(old.columns))]
+            for r in range(len(old.rows))
+        ]
+        try:
+            new = validate_table(
+                {"title": old.title, "columns": old.columns, "rows": rows, "note": old.note}
+            )
+        except ChartError as exc:
+            return _detail_redirect(draft_id, error=str(exc))
+        probe = replace(row.draft, table=new)
+        found = drafter.check_hard_rules(probe, url=row.url, source=row.source)
+        problems = [p for p in found if p.startswith("table")]
+        if problems:
+            return _detail_redirect(draft_id, error="; ".join(problems))
+        _, new, changed = store.edit_table(conn, draft_id, rows)
+        verify_store.carry_over_table_checks(conn, draft_id, old, new)
+        recorded = verify_store.mark_cells_human(conn, draft_id, new, changed)
+        log.info(
+            "draft %d: %d table cell(s) edited by the reviewer, %d recorded as human-supported",
+            draft_id,
+            len(changed),
+            recorded,
         )
-    except ChartError as exc:
-        return _detail_redirect(draft_id, error=str(exc))
-    probe = replace(row.draft, table=new)
-    found = drafter.check_hard_rules(probe, url=row.url, source=row.source)
-    problems = [p for p in found if p.startswith("table")]
-    if problems:
-        return _detail_redirect(draft_id, error="; ".join(problems))
-    _, new, changed = store.edit_table(conn, draft_id, rows)
-    verify_store.carry_over_table_checks(conn, draft_id, old, new)
-    recorded = verify_store.mark_cells_human(conn, draft_id, new, changed)
-    log.info(
-        "draft %d: %d table cell(s) edited by the reviewer, %d recorded as human-supported",
-        draft_id,
-        len(changed),
-        recorded,
-    )
-    fresh = store.get_draft(conn, draft_id)
-    cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
-    hosts = trusted_hosts(cfg, verify_render.root_config())
-    decision = verify_render.finalize_table(conn, fresh, cfg=cfg, hosts=hosts)
-    log.info("draft %d: table %s after the edit", draft_id, decision.status)
-    return _detail_redirect(draft_id)
+        fresh = store.get_draft(conn, draft_id)
+        cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
+        hosts = trusted_hosts(cfg, verify_render.root_config())
+        decision = verify_render.finalize_table(conn, fresh, cfg=cfg, hosts=hosts)
+        log.info("draft %d: table %s after the edit", draft_id, decision.status)
+        return _detail_redirect(draft_id)
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/drafts/{draft_id}/reject")
