@@ -63,6 +63,35 @@ def attach_chart(
     )
 
 
+def attach_extra_charts(
+    conn: sqlite3.Connection,
+    draft_id: int,
+    charts: list[Chart],
+    *,
+    source_url: str = "",
+    cfg: dict | None = None,
+    style: Style | None = None,
+) -> list[Path]:
+    """Phase four: render every chart beyond the first visual to draft_<id>_<k>.png through
+    the same render-grade loop, recorded at index k in drafts.images_json. Fail-soft per
+    picture. Returns the paths that were rendered."""
+    out: list[Path] = []
+    for k, chart in enumerate(charts, start=1):
+        path = _render(
+            conn,
+            draft_id,
+            chart,
+            lambda path, style, c=chart: render_chart(c, path, source_url=source_url, style=style),
+            alt_text(chart, source_url),
+            cfg,
+            style,
+            index=k,
+        )
+        if path is not None:
+            out.append(path)
+    return out
+
+
 def attach_table(
     conn: sqlite3.Connection,
     draft_id: int,
@@ -111,11 +140,12 @@ def _render(
     alt: str,
     cfg: dict | None,
     style: Style | None = None,
+    index: int = 0,
 ) -> Path | None:
     if not images_enabled(cfg):
         log.info("draft %d: visual kept as spec only (images disabled in draft/config)", draft_id)
         return None
-    path = store.image_file(draft_id)
+    path = store.image_file(draft_id, index)
     style = style or Style()
     try:
         draw(path, style)
@@ -129,8 +159,9 @@ def _render(
     except Exception:  # a drawing or disk error must not lose the draft
         log.exception("draft %d: chart rendering failed", draft_id)
         return None
-    store.set_image(conn, draft_id, path, alt)
-    store.clear_image_grades(conn, draft_id)  # a revise re-renders: earlier grades are stale
+    store.set_image(conn, draft_id, path, alt, index=index)
+    if index == 0:
+        store.clear_image_grades(conn, draft_id)  # a revise re-renders: earlier grades are stale
     log.info("draft %d: chart rendered to %s", draft_id, path)
     _grade_loop(conn, draft_id, visual, draw, path, style, cfg)
     return path

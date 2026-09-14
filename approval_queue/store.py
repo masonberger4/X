@@ -147,6 +147,9 @@ _MIGRATIONS = (
         "criteria_json",
         "ALTER TABLE image_grades ADD COLUMN criteria_json TEXT NOT NULL DEFAULT '{}'",
     ),
+    # Step 9 phase four: the draft's shape, its extra visuals and every rendered picture.
+    ("drafts", "format_json", "ALTER TABLE drafts ADD COLUMN format_json TEXT"),
+    ("drafts", "images_json", "ALTER TABLE drafts ADD COLUMN images_json TEXT"),
 )
 
 
@@ -185,8 +188,10 @@ def image_dir() -> Path:
     return db_path().resolve().parent / IMAGES_DIRNAME
 
 
-def image_file(draft_id: int) -> Path:
-    return image_dir() / f"draft_{draft_id}.png"
+def image_file(draft_id: int, index: int = 0) -> Path:
+    """The PNG for a draft's visual: draft_<id>.png for the first, draft_<id>_<k>.png after."""
+    suffix = f"_{index + 1}" if index else ""
+    return image_dir() / f"draft_{draft_id}{suffix}.png"
 
 
 def resolve_image(image_path: str | None) -> Path | None:
@@ -204,6 +209,46 @@ def _now() -> str:
 def _chart_json(draft: Draft) -> str | None:
     """The draft's visual (chart or table) as stored in drafts.chart_json."""
     return json.dumps(draft.visual.to_dict()) if draft.visual is not None else None
+
+
+def _format_json(draft: Draft) -> str:
+    """drafts.format_json: the shape, anchors, limit and wanted visual count (phase four)
+    plus any extra charts beyond the first visual."""
+    d = draft.format_dict()
+    d["extra_visuals"] = [c.to_dict() for c in draft.extra_visuals]
+    return json.dumps(d, ensure_ascii=False)
+
+
+def _apply_format_json(draft: Draft, text: str | None) -> None:
+    if not text:
+        return
+    try:
+        d = json.loads(text)
+    except ValueError:
+        return
+    if not isinstance(d, dict):
+        return
+    draft.apply_format_dict(d)
+    extras = []
+    for raw in d.get("extra_visuals") or []:
+        c = chart_from_json(json.dumps(raw)) if isinstance(raw, dict) else None
+        if c is not None:
+            extras.append(c)
+    draft.extra_visuals = extras
+
+
+def _images_list(text: str | None) -> list[dict]:
+    """drafts.images_json parsed: [{index, path, alt, anchor}] sorted by index."""
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return []
+    if not isinstance(data, list):
+        return []
+    out = [d for d in data if isinstance(d, dict) and d.get("path")]
+    return sorted(out, key=lambda d: int(d.get("index", 0)))
 
 
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
@@ -340,6 +385,9 @@ class DraftRow:
     suggested_angle: str = ""
     image_path: str | None = None  # relative to image_dir(); None: no image
     image_alt: str = ""  # alt text of the rendered picture (set with image_path)
+    # Phase four: every rendered picture, [{index, path, alt, anchor}]; the first is the
+    # same picture as image_path.
+    images: list[dict] = field(default_factory=list)
 
 
 def _row_to_draft(r: sqlite3.Row) -> DraftRow:
@@ -352,6 +400,8 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
         chart=chart_from_json(r["chart_json"]) if "chart_json" in keys else None,
         table=table_from_json(r["chart_json"]) if "chart_json" in keys else None,
     )
+    if "format_json" in keys:
+        _apply_format_json(draft, r["format_json"])
     return DraftRow(
         id=r["id"],
         item_id=r["item_id"],
@@ -372,6 +422,7 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
         suggested_angle=(r["suggested_angle"] or "") if "suggested_angle" in keys else "",
         image_path=(r["image_path"] or None) if "image_path" in keys else None,
         image_alt=(r["image_alt"] or "") if "image_alt" in keys else "",
+        images=_images_list(r["images_json"]) if "images_json" in keys else [],
     )
 
 
@@ -430,8 +481,9 @@ def insert_draft(
     cur = conn.execute(
         """INSERT INTO drafts (item_id, cluster_id, model, thread_json,
                                suggested_visual, why_it_matters, claims_json, status,
-                               rejection_reason, created_at, updated_at, chart_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               rejection_reason, created_at, updated_at, chart_json,
+                               format_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             item_id,
             cluster_id,
@@ -445,6 +497,7 @@ def insert_draft(
             now,
             now,
             _chart_json(draft),
+            _format_json(draft),
         ),
     )
     conn.commit()
@@ -647,7 +700,8 @@ def revise(
     conn.execute(
         """UPDATE drafts SET thread_json = ?, suggested_visual = ?,
                              why_it_matters = ?, claims_json = ?, model = ?, updated_at = ?,
-                             chart_json = ?, image_path = NULL, image_alt = NULL
+                             chart_json = ?, image_path = NULL, image_alt = NULL,
+                             format_json = ?, images_json = NULL
            WHERE id = ?""",
         (
             json.dumps(draft.thread),
@@ -657,6 +711,7 @@ def revise(
             model,
             _now(),
             _chart_json(draft),
+            _format_json(draft),
             draft_id,
         ),
     )
@@ -665,20 +720,41 @@ def revise(
     return did
 
 
-def set_image(conn: sqlite3.Connection, draft_id: int, path: Path | None, alt: str = "") -> None:
-    """Record the rendered PNG for a draft (stored relative to image_dir()) and its alt
-    text, or clear both."""
-    _require(conn, draft_id)
+def set_image(
+    conn: sqlite3.Connection,
+    draft_id: int,
+    path: Path | None,
+    alt: str = "",
+    index: int = 0,
+) -> None:
+    """Record the rendered PNG for a draft's visual `index` (stored relative to image_dir())
+    and its alt text, or clear it. Index 0 also keeps drafts.image_path / image_alt (the
+    first picture, what every pre-phase-four reader uses); every picture goes into
+    drafts.images_json with the post it is anchored to."""
+    row = _require(conn, draft_id)
     rel = None
     if path is not None:
         try:
             rel = Path(path).resolve().relative_to(image_dir()).as_posix()
         except ValueError:
             rel = Path(path).name
-    conn.execute(
-        "UPDATE drafts SET image_path = ?, image_alt = ?, updated_at = ? WHERE id = ?",
-        (rel, alt if rel else "", _now(), draft_id),
-    )
+    anchors = row.draft.anchors or [1]
+    anchor = anchors[index] if index < len(anchors) else 1
+    images = [d for d in row.images if int(d.get("index", 0)) != index]
+    if rel:
+        images.append({"index": index, "path": rel, "alt": alt, "anchor": anchor})
+    images.sort(key=lambda d: int(d.get("index", 0)))
+    if index == 0:
+        conn.execute(
+            "UPDATE drafts SET image_path = ?, image_alt = ?, images_json = ?, updated_at = ? "
+            "WHERE id = ?",
+            (rel, alt if rel else "", json.dumps(images), _now(), draft_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE drafts SET images_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(images), _now(), draft_id),
+        )
     conn.commit()
 
 
@@ -774,16 +850,18 @@ def drop_image(conn: sqlite3.Connection, draft_id: int, note: str | None = None)
     image, delete the file, and log an 'edit' decision with the text unchanged so the history
     shows it. Nothing else about the draft changes."""
     row = _require(conn, draft_id)
-    path = resolve_image(row.image_path)
+    paths = [resolve_image(row.image_path)] + [resolve_image(d["path"]) for d in row.images]
+    draft = row.draft
+    draft.extra_visuals = []
     conn.execute(
         "UPDATE drafts SET chart_json = NULL, image_path = NULL, image_alt = NULL, "
-        "updated_at = ? WHERE id = ?",
-        (_now(), draft_id),
+        "images_json = NULL, format_json = ?, updated_at = ? WHERE id = ?",
+        (_format_json(draft), _now(), draft_id),
     )
     text = _serialise_text(row.draft.thread)
     _record_decision(conn, draft_id, ACTION_EDIT, text, text, note or "image dropped", None)
     conn.commit()
-    if path is not None:
+    for path in {p for p in paths if p is not None}:
         try:
             path.unlink()
         except OSError:

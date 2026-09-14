@@ -169,3 +169,18 @@ def test_swarm_page_renders_and_is_linked(db_file, conn):
     assert 'href="/swarm"' in client.get("/").text
     for path in ("/swarm", "/runs", "/feedback"):
         assert "--live" not in client.get(path).text
+
+
+def test_formats_appear_in_the_population_and_on_the_page(db_file, conn):
+    _seed(conn)
+    pop = {p["name"]: p for p in ops_store.fetch_swarm_population(conn)}
+    assert pop["long-1"]["kind"] == "format" and pop["long-1"]["shape"] == "long"
+    assert pop["thread-2-ends"]["anchors"] == ["first", "last"]
+    rows = views.swarm_rows(list(pop.values()), NOW)
+    by_name = {r["name"]: r for r in rows["format"]}
+    assert by_name["thread-2-ends"]["summary"] == "thread, 3-6 posts, 2 pictures on first, last"
+    assert by_name["single-1"]["summary"] == "single, one post, 1 picture on first"
+    assert by_name["thread-0"]["summary"] == "thread, 3-6 posts, 0 pictures"
+    client = TestClient(panel_app.app, follow_redirects=False)
+    body = client.get("/swarm").text
+    assert "Formats" in body and "<strong>long-1</strong>" in body

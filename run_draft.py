@@ -23,6 +23,8 @@ written by the swarm (many cheap calls, one post per slot, see swarm/) and, when
 control.enabled, by the single strong drafter as before; a jury of cheap judges picks the
 winner, which is stored as the ordinary pending draft. swarm_runs / swarm_variants record
 both versions and the verdict. A swarm that fails its hard rules loses to the control.
+Phase four: each story also draws a FORMAT genome (thread, single or long post; how many
+pictures and on which posts), which both the swarm and the control write to.
 """
 
 from __future__ import annotations
@@ -102,12 +104,24 @@ def draft_with_swarm(
     )
     genome = swarm_store.next_genome(conn)
     designer = swarm_store.next_designer(conn)
-    log_rows: dict = {}
+    format_genome = swarm_store.next_format(conn)
+    long_max = int((swarm_cfg.get("formats") or {}).get("long_max_chars", 4000))
+    fmt = format_genome.to_format(long_max)
+    log.info(
+        "%s: format %s (%s, %d visual(s)), genome %s, designer %s",
+        c.item_id,
+        format_genome.name,
+        fmt.shape,
+        fmt.visuals,
+        genome.name,
+        designer.name,
+    )
+    log_rows: dict = {"format": fmt.to_dict()}
     swarm_result = None
     swarm_problem: str | None = None
     try:
         swarm_result = swarm_engine.run_swarm(
-            brief, genome, swarm_cfg, examples_block=examples_block
+            brief, genome, swarm_cfg, examples_block=examples_block, fmt=fmt
         )
         log_rows["swarm"] = swarm_result.log
     except swarm_engine.SwarmFailed as exc:
@@ -130,6 +144,7 @@ def draft_with_swarm(
                 suggested_angle=c.suggested_angle,
                 rationale=c.rationale,
                 examples_block=examples_block,
+                fmt=fmt,
             )
         except DraftRejected as exc:
             control_problem = exc.reasons
@@ -160,6 +175,7 @@ def draft_with_swarm(
         calls=calls,
         log=log_rows,
         designer_id=designer.id,
+        format_id=format_genome.id,
     )
     swarm_store.record_variant(
         conn,
@@ -366,15 +382,20 @@ def main(argv: list[str] | None = None) -> int:
             drafted += 1
             if result.flagged_numbers:
                 log.warning("%s: numbers flagged for review: %s", c.item_id, result.flagged_numbers)
+            style = designer_style_for(conn, run_id)
             if images.attach_chart(
-                conn,
-                draft_id,
-                result.draft.chart,
-                source_url=c.url,
-                cfg=draft_cfg,
-                style=designer_style_for(conn, run_id),
+                conn, draft_id, result.draft.chart, source_url=c.url, cfg=draft_cfg, style=style
             ):
                 charts += 1
+            if result.draft.extra_visuals:
+                images.attach_extra_charts(
+                    conn,
+                    draft_id,
+                    result.draft.extra_visuals,
+                    source_url=c.url,
+                    cfg=draft_cfg,
+                    style=style,
+                )
         log.info(
             "done: %d drafted (%d with a chart), %d failed hard rules", drafted, charts, failed
         )

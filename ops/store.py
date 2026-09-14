@@ -436,7 +436,8 @@ def fetch_swarm_population(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     run with a `relative` score, credited to genome_id for writers and designer_id for
     designers). Read-only; [] when swarm_genomes is absent. One dict per genome:
     id, name, kind, parent_id, parent_name, created_at, retired_at, retired_reason, notes,
-    posts (scored), median_relative, fan_out, layers, style (designers)."""
+    posts (scored), median_relative, fan_out, layers, slots (writers), style (designers),
+    shape, visuals, anchors, min_posts, max_posts (formats)."""
     present = tables(conn)
     if "swarm_genomes" not in present:
         return []
@@ -452,8 +453,10 @@ def fetch_swarm_population(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     if "swarm_fitness" in present:
         fcols = {r[1] for r in conn.execute("PRAGMA table_info(swarm_fitness)").fetchall()}
         dcol = "designer_id" if "designer_id" in fcols else "NULL AS designer_id"
+        fcol = "format_id" if "format_id" in fcols else "NULL AS format_id"
         for f in conn.execute(
-            f"SELECT genome_id, {dcol}, relative FROM swarm_fitness WHERE relative IS NOT NULL"
+            f"SELECT genome_id, {dcol}, {fcol}, relative FROM swarm_fitness "
+            "WHERE relative IS NOT NULL"
         ).fetchall():
             if f["genome_id"] is not None:
                 rel.setdefault(("writer", int(f["genome_id"])), []).append(float(f["relative"]))
@@ -488,6 +491,11 @@ def fetch_swarm_population(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 "layers": g.get("layers"),
                 "slots": [s.get("name") for s in g.get("slots", []) if isinstance(s, dict)],
                 "style": g.get("style") or {},
+                "shape": g.get("shape"),
+                "visuals": g.get("visuals"),
+                "anchors": g.get("anchors") or [],
+                "min_posts": g.get("min_posts"),
+                "max_posts": g.get("max_posts"),
             }
         )
     return out

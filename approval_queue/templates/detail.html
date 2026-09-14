@@ -24,12 +24,15 @@
 <p><strong>Why it matters:</strong> {{ d.draft.why_it_matters }}</p>
 {% if d.draft.suggested_visual %}<p><strong>Suggested visual:</strong> {{ d.draft.suggested_visual }}</p>{% endif %}
 
+{% if d.draft.shape != 'thread' or d.draft.wanted_visuals == 0 or d.draft.wanted_visuals == 2 %}
+<p class="meta">Format: <strong>{{ 'single post' if d.draft.shape == 'single' else ('long post (up to ' ~ d.draft.max_chars ~ ' chars)' if d.draft.shape == 'long' else 'thread') }}</strong>{% if d.draft.wanted_visuals is not none %}, {{ d.draft.wanted_visuals }} picture{{ 's' if d.draft.wanted_visuals != 1 else '' }}{% endif %} (a step 9 format genome).</p>
+{% endif %}
 {% if image_url %}
 <h2>Image</h2>
 {% if d.draft.table %}
-<p class="meta">Attached to the first post when published. Drawn by code from the table below after every cell was fact-checked; a blank cell is one the checker could not tie to a primary source.</p>
+<p class="meta">Attached to post {{ first_anchor }} when published. Drawn by code from the table below after every cell was fact-checked; a blank cell is one the checker could not tie to a primary source.</p>
 {% else %}
-<p class="meta">Attached to the first post when published. Rendered by code from the numbers below; check every bar against the source.</p>
+<p class="meta">Attached to post {{ first_anchor }} when published. Rendered by code from the numbers below; check every bar against the source.</p>
 {% endif %}
 <p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid #ccc"></p>
 <p class="meta">{{ image_alt }}</p>
@@ -41,9 +44,14 @@
   {% endfor %}
 </details>
 {% endif %}
+{% for im in extra_images %}
+<p class="meta">Second picture, attached to post {{ im.anchor }} when published.</p>
+<p><img src="{{ im.url }}" alt="{{ im.alt }}" style="max-width:100%;border:1px solid #ccc"></p>
+<p class="meta">{{ im.alt }}</p>
+{% endfor %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/drop">
   <input name="note" placeholder="why (optional)">
-  <button>Drop image</button> <span class="meta">the post goes out text-only</span>
+  <button>Drop image{{ 's' if extra_images else '' }}</button> <span class="meta">the post goes out text-only</span>
 </form>
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/redraw">
   <button>Redraw</button> <span class="meta">remake the picture from the same {{ 'table and its verdicts' if d.draft.table else 'numbers' }}; nothing else changes</span>

@@ -19,6 +19,14 @@ max_similarity: 0.85  # difflib ratio at or above which a later candidate is a n
 control:
   enabled: true     # also run the single strong drafter (draft_item) and let the jury pick
 
+# Phase four: the format is a gene (swarm/genome.py SEED_FORMATS: thread with one picture,
+# thread with two, thread with none, single post, long post), drafted round-robin like the
+# writers and designers. Both the swarm and the control write to the same format on a story.
+formats:
+  long_max_chars: 4000      # a long post's limit at draft time (X allows 25000 on Premium;
+                            #   the API rejects a long post from a non-Premium account)
+  long_section_chars: 700   # each swarm cell of a long post (sections joined by blank lines)
+
 # Phase two (run_evolve.py): fitness from X and pruning. No network; reads step 3's posts
 # and step 4's tweet_metrics (run_feedback.py snapshot fills those).
 evolve:
@@ -28,6 +36,8 @@ evolve:
   min_baseline_posts: 3     # fewer earlier posts in the window -> no relative score yet
   min_posts: 5              # a genome is judged only after this many scored posts
   min_alive: 2              # pruning never leaves fewer live genomes than this
+  format_min_posts: 8       # a format is a coarse gene: judged only after this many posts
+  format_population_size: 5 # how many live formats breed keeps
   # Phase three (run_evolve.py breed): keep this many live writer genomes and this many
   # live designers; each gap after pruning is filled by one child of a top scorer.
   population_size: 3

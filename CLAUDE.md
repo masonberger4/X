@@ -18,7 +18,8 @@ the whole workflow), 9 swarm drafting (phase one: many cheap cells + layers + ju
 against the single strong drafter; phase two: X fitness, round-robin seed genomes and
 pruning via `run_evolve.py`; phase three: breeding of writer genomes by one strong call
 and of designer genomes, the picture's starting `Style`, by a random knob step, and the
-panel's `/swarm` page). The kickoff prompt that built
+panel's `/swarm` page; phase four: the format itself, thread or single or long post and how
+many pictures on which posts, is a third bred population). The kickoff prompt that built
 each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 `PUBLISH_ENABLED=1` **and** `--live`.
 
@@ -120,10 +121,19 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
   after generation (plus 280 chars/post with URLs as 23, source URL placement,
   and verbatim-number verification); drafts that fail are stored as `failed`.
-- **Drafts are threads only** (3-6 posts, `Draft.thread`; there is no single post and
-  step 3 always posts the thread) and **every draft carries exactly one visual**:
-  `validate_output` rejects an output with neither `chart` nor `table`, and the drafter
-  retries like on a hard-rule failure.
+- **The shape of a draft is a gene, not a constant** (step 9 phase four). `Draft.thread`
+  is always the list of posts; `draft/schema.py:Format` (shape `thread` | `single` |
+  `long`, `min_posts`/`max_posts`, `visuals` 0-2, one anchor word per visual, `max_chars`)
+  says what `validate_output(data, fmt)` and `check_hard_rules(..., fmt)` require, and
+  with `fmt=None` they require the phase-one physics: a 3-6 post thread with exactly one
+  of `chart`/`table`. A single post is a one-element thread of 280 chars; a long post is
+  one element of up to `formats.long_max_chars` (`swarm/config.yaml`, a Premium long-form
+  post) written as sections. The first visual may be a chart or a table; a further one
+  (`visuals` in the output, `Draft.extra_visuals`) must be a chart. `Draft.shape`,
+  `anchors` (1-based post per visual), `max_chars` and `wanted_visuals` are stored in
+  `drafts.format_json` (guarded migration; `drafter.format_of` rebuilds the Format for a
+  revision) and every rendered picture in `drafts.images_json` (`store.set_image(...,
+  index=k)`, `image_file(id, k)`; `image_path`/`image_alt` stay the first picture).
 - **Draft images** (`draft/chart.py`): the drafter's `chart` is a bar-chart
   SPEC (title, labels, values, unit, note), never a picture; `suggested_visual` stays a
   text hint for the reviewer. `drafter.verify_chart` checks every number in it verbatim
@@ -134,10 +144,14 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
   and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
   turns rendering off. The queue serves it at `/drafts/{id}/image` and `store.drop_image`
-  is the only way a human removes it. Step 3 attaches it to the FIRST post
-  (`publish/client.py:upload_media`, v2 media/upload + media/metadata, then POST /2/tweets with
-  `media_ids`); `media.attach_images` in `publish/config.yaml` turns that off, and an upload
-  failure posts nothing and marks the draft `failed`.
+  is the only way a human removes it (every picture at once). Step 3 attaches each picture
+  to the post it is anchored to, the first post before phase four (`publish/store.py`
+  reads `format_json`/`images_json` into `Approved.shape`, `max_chars`, `images`;
+  `run_publish.images_for` / `publish_one(images=)`; `publish/thread.py` checks each post
+  against the draft's `max_chars`; `publish/client.py:upload_media`, v2 media/upload +
+  media/metadata, then POST /2/tweets with `media_ids`); `media.attach_images` in
+  `publish/config.yaml` turns that off, an upload failure before post 1 posts nothing and
+  marks the draft `failed`, a later one leaves a partial thread.
 - **Draft tables** (`draft/chart.py:Table`, the alternative to a chart; `Draft.visual` is
   whichever is set, both stored in `chart_json` with `kind: table` for a table): cells may
   go beyond the source, so `attach_chart` never renders one. `run_verify.py`'s table pass
@@ -312,8 +326,18 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   guarded migrations. The panel's `/swarm` page reads through
   `ops/store.py:fetch_swarm_population` / `fetch_swarm_bet` (read-only, empty when
   missing) and renders `panel/views.py:swarm_rows` / `bet_summary_row` (pure); it never
-  breeds or retires. `tests/conftest.py` turns the swarm off for every test that does
-  not opt in.
+  breeds or retires. **Phase four**: `swarm/genome.py:FormatGenome` (kind `format`,
+  `SEED_FORMATS`: thread with one picture, with two, with none, single post, long post) is
+  drafted round-robin (`next_format`, `swarm_runs.format_id`, `swarm_fitness.format_id`,
+  guarded); `run_draft.py` turns it into a `Format` with `formats.long_max_chars` and
+  hands the same one to the swarm and the control. The engine runs ONE cell
+  (`prompts.SINGLE_SLOT`) for a single post and the genome's slots as sections of
+  `formats.long_section_chars` for a long post (`cells.cell_problems(max_chars=,
+  needs_url=, needs_preprint=)`), and `assemble_prompt(..., fmt)` says the shape. Formats
+  are pruned with `evolve.format_min_posts` (a coarse gene needs more posts) and bred by
+  pure code (`mutate.breed_format`: one field stepped to a neighbour, named by
+  `format_name`); `evolve.format_population_size` is their population.
+  `tests/conftest.py` turns the swarm off for every test that does not opt in.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -332,7 +356,7 @@ score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories
           rater.py (second-opinion yes/no rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
-draft/    schema.py, chart.py (chart + table specs, verification, PNG rendering, Style
+draft/    schema.py (Draft, Format, validate_output), chart.py (chart + table specs, verification, PNG rendering, Style
           knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,
           grade_image, call_grader), branding.py (tickers + logos for company cells),
           logos.py (site icon discovery + PNG normalisation for run_logos.py), prompt.py,
@@ -352,8 +376,9 @@ swarm/    config.yaml, settings.py, genome.py (Slot, Genome, DEFAULT_GENOME), pr
           (Brief, cell/judge/assembly prompts, parse_winner), cells.py (cell_problems,
           dedupe, tournament), engine.py (run_swarm, compare, SwarmFailed),
           fitness.py (score, genome_scores, bet_summary, prune), mutate.py (Parent,
-          breed_writer, validate_child, breed_designer), store.py (swarm_genomes with
-          kind, swarm_runs, swarm_variants, swarm_fitness, next_genome, next_designer,
+          breed_writer, validate_child, breed_designer, breed_format, format_neighbours),
+          store.py (swarm_genomes with kind writer|designer|format, swarm_runs,
+          swarm_variants, swarm_fitness, next_genome, next_designer, next_format,
           fetch_head_metrics, fetch_winning_threads)
 verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck,
           verify_claim, call_model), store.py (claim_checks, table_checks,

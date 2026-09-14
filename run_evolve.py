@@ -14,16 +14,19 @@ score   Every posted swarm run gets the head tweet's KPI, the median KPI of the 
         trailing `baseline_days` before it (the baseline) and value / baseline (relative),
         stored in swarm_fitness. Fewer than `min_baseline_posts` earlier posts: no relative
         score yet.
-prune   A live genome with at least `min_posts` scored posts whose median relative KPI is
-        below the median of every such genome is retired (swarm_genomes.retired_at and
-        retired_reason), never below `min_alive` live genomes. --dry-run prints and keeps.
-breed   Phase three. While fewer than `population_size` writer genomes (or designers) are
-        live, breed one child per gap: a writer child by ONE strong-model call
-        (`evolve.mutation_model`, blank = the drafting model) that reads the top genomes
-        and their best posts and varies exactly one thing (code checks that it did); a
-        designer child by stepping one Style knob at random. Parents are the best-scoring
-        live rows, round-robin. Without any scored genome nothing is bred unless --force
-        (then the parents are simply the live rows). --dry-run prints and stores nothing.
+prune   A live genome with at least `min_posts` (`format_min_posts` for a format) scored
+        posts whose median relative KPI is below the median of every such genome is retired
+        (swarm_genomes.retired_at and retired_reason), never below `min_alive` live genomes.
+        --dry-run prints and keeps.
+breed   Phase three. While fewer than `population_size` writer genomes (or designers;
+        formats use `format_population_size`) are live, breed one child per gap: a writer
+        child by ONE strong-model call (`evolve.mutation_model`, blank = the drafting model)
+        that reads the top genomes and their best posts and varies exactly one thing (code
+        checks that it did); a designer child by stepping one Style knob at random; a
+        format child (phase four) by stepping one field (shape, visual count, an anchor,
+        the post range). Parents are the best-scoring live rows, round-robin. Without any
+        scored genome nothing is bred unless --force (then the parents are simply the live
+        rows). --dry-run prints and stores nothing.
 report  Per-genome and per-designer tables, the family tree, and the swarm-vs-control
         measurement: median relative KPI of the posts the jury gave to the swarm against
         those it gave to the control.
@@ -42,7 +45,7 @@ from approval_queue import store as queue_store
 from draft.drafter import model_name as drafting_model
 from swarm import fitness, mutate
 from swarm import store as swarm_store
-from swarm.genome import Designer, Genome
+from swarm.genome import Designer, FormatGenome, Genome
 from swarm.settings import load_swarm_config
 
 log = logging.getLogger("run_evolve")
@@ -61,6 +64,7 @@ def observations(conn) -> list[fitness.Observation]:
             baseline=r.baseline,
             relative=r.relative,
             designer_id=r.designer_id,
+            format_id=r.format_id,
         )
         for r in swarm_store.list_fitness(conn)
     ]
@@ -80,6 +84,7 @@ def cmd_score(conn, cfg: dict) -> list[fitness.Observation]:
             posted_at=fitness.parse_when(h.posted_at),
             value=float(h.metrics[kpi]),
             designer_id=h.designer_id,
+            format_id=h.format_id,
         )
         for h in heads
     ]
@@ -102,6 +107,7 @@ def cmd_score(conn, cfg: dict) -> list[fitness.Observation]:
             baseline=o.baseline,
             relative=o.relative,
             designer_id=o.designer_id,
+            format_id=o.format_id,
         )
     n_rel = sum(o.relative is not None for o in scored)
     log.info(
@@ -110,7 +116,20 @@ def cmd_score(conn, cfg: dict) -> list[fitness.Observation]:
     return scored
 
 
-_KEY = {"writer": "genome_id", "designer": "designer_id"}
+_KEY = {"writer": "genome_id", "designer": "designer_id", "format": "format_id"}
+
+
+def _min_posts(cfg: dict, kind: str) -> int:
+    """Formats are coarse genes and get their own, higher bar."""
+    if kind == "format":
+        return int(cfg.get("format_min_posts", cfg["min_posts"]))
+    return int(cfg["min_posts"])
+
+
+def _population_size(cfg: dict, kind: str) -> int:
+    if kind == "format":
+        return int(cfg.get("format_population_size", cfg.get("population_size", 3)))
+    return int(cfg.get("population_size", 3))
 
 
 def cmd_prune(conn, cfg: dict, obs: list[fitness.Observation], *, dry_run: bool) -> list[int]:
@@ -122,7 +141,7 @@ def cmd_prune(conn, cfg: dict, obs: list[fitness.Observation], *, dry_run: bool)
         decision = fitness.prune(
             fitness.genome_scores(obs, key),
             live,
-            min_posts=int(cfg["min_posts"]),
+            min_posts=_min_posts(cfg, kind),
             min_alive=int(cfg["min_alive"]),
         )
         if not decision.retire:
@@ -168,13 +187,14 @@ def cmd_breed(
     force: bool,
     call=None,
     rng: random.Random | None = None,
-) -> list[Genome | Designer]:
-    """Fill the population back up to `population_size` per kind, one child per gap."""
+) -> list[Genome | Designer | FormatGenome]:
+    """Fill the population back up to `population_size` per kind (`format_population_size`
+    for formats), one child per gap."""
     rng = rng or random.Random()
-    size = int(cfg.get("population_size", 3))
     model = str(cfg.get("mutation_model") or "").strip() or drafting_model()
-    born: list[Genome | Designer] = []
+    born: list[Genome | Designer | FormatGenome] = []
     for kind in _KEY:
+        size = _population_size(cfg, kind)
         parents = _ranked(conn, cfg, obs, kind)
         gap = size - len(parents)
         if gap <= 0:
@@ -195,6 +215,8 @@ def cmd_breed(
                 if kind == "writer":
                     kwargs = {"call": call} if call is not None else {}
                     child = mutate.breed_writer(parents, target, taken, model=model, **kwargs)
+                elif kind == "format":
+                    child = mutate.breed_format(target.genome, taken, rng)
                 else:
                     child = mutate.breed_designer(target.genome, taken, rng)
             except Exception:  # an invalid child or an API error: the gap stays for next run
@@ -239,6 +261,8 @@ def render_report(conn, cfg: dict, obs: list[fitness.Observation]) -> str:
     lines += _table(conn, obs, "writer")
     lines.append("")
     lines += _table(conn, obs, "designer")
+    lines.append("")
+    lines += _table(conn, obs, "format")
     b = fitness.bet_summary(obs)
     lines.append("")
     lines.append("Swarm vs control (posts by who won the jury):")

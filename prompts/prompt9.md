@@ -184,3 +184,80 @@ Boundaries for this session:
 - Do NOT edit any other step's package, table, or settings file; no new
   dependency; never a `claude-*` ID in code.
 - Commit after each working module.
+
+PHASE FOUR, the format is heritable (written after phases one to three merged):
+
+  Phases one to three evolved inside fixed physics: every draft a thread of
+  3-6 posts, exactly one visual, attached to the first post. Those three
+  constraints are opinions, not physics, and the account has no evidence
+  for them. Phase four turns them into a third population, FORMAT genomes,
+  drafted round-robin like writers and designers, credited with the same
+  relative KPI, pruned and bred the same way, with their own, higher
+  `format_min_posts` because a format is a coarse gene and five noisy posts
+  must not kill a shape.
+
+  What stays physics: the per-post character limit for the shape (280, or
+  `long_max_chars` for a long post), the advice bans, verbatim numbers, the
+  source URL in the last post, the preprint label in the first, chart
+  numbers verbatim, table cells web-checked.
+
+  A Format (draft/schema.py, pure, so steps 2 and 3 can read it without
+  importing swarm/):
+    shape      thread | single | long
+               thread: `min_posts`..`max_posts` posts of <= 280 chars
+               single: one post of <= 280 chars
+               long:   one Premium long-form post of <= `max_chars` (the
+                       `long_max_chars` in swarm/config.yaml at draft time,
+                       shipped 4000; X allows 25000 for Premium, the API
+                       accepts it for a Premium account and rejects it with
+                       code 111 otherwise); sections joined by blank lines
+    visuals    0 | 1 | 2   how many pictures the draft carries
+    anchors    one 1-based post index per visual (single/long: always 1);
+               `first`, `last`, `middle` in the genome, resolved against the
+               thread length at assembly
+  Rules: the FIRST visual may be a chart or a table (tables keep the step 2b
+  verification path unchanged); any further visual must be a chart (numbers
+  verbatim, no web check needed). `validate_output(data, fmt=None)` and
+  `check_hard_rules(..., fmt=None)` with fmt None behave byte-for-byte as
+  before (thread 3-6, exactly one visual), so every existing test passes; a
+  fmt makes them read the gene. The output schema gains an optional
+  `visuals` list for the second picture. The Draft gains `shape`, `anchors`,
+  `max_chars` and `extra_visuals`; drafts.format_json and drafts.images_json
+  are guarded migrations (`images_json`: every rendered picture with its
+  index, path, alt and anchor; `image_path`/`image_alt` stay the first
+  picture for older readers).
+
+  swarm/genome.py: FormatGenome(name, shape, min_posts, max_posts, visuals,
+  anchors (list of first|last|middle), parent_id, id, notes) stored in
+  swarm_genomes with kind 'format'; SEED_FORMATS: thread-1-first (the phase
+  one physics, as the control), thread-2-ends (two charts, first and last),
+  thread-0 (no picture: tests the "every post needs a graphic" belief),
+  single-1, long-1. swarm_runs.format_id / swarm_fitness.format_id (guarded).
+  The engine reads the format: a single post runs ONE slot (the genome's
+  hook rule, whole story, <= 280); a long post runs the genome's slots as
+  sections with `long_section_chars` each and the assembler joins them; a
+  thread is as today. cells.cell_problems takes `max_chars`. The assembly
+  prompt states the shape, the post count and how many visuals to give.
+  Breeding a format is pure code (`mutate.breed_format`): step one field to
+  a neighbour (shape, visuals +-1, one anchor, min/max posts +-1) inside the
+  bounds. The panel's /swarm page gets a Formats table.
+
+  Step 3 reads `format_json` and `images_json` in fetch_approved
+  (Approved.shape, max_chars, images: list of (path, alt, anchor)),
+  `publish/thread.py` checks each post against the shape's limit (never
+  edits), and publish_one uploads each picture just before the post it is
+  anchored to (an upload failure before post 1 posts nothing; a later one
+  leaves a PARTIAL thread as today). `media.attach_images` still turns all
+  of it off. The queue's detail page shows every picture with its anchor;
+  drop and redraw act on the first (tables) and all charts respectively.
+
+  Bounds: thread 2..6 posts (min <= max), visuals 0..2, anchors within
+  the thread, long_max_chars from config, sections <= long_section_chars.
+  Cost is unchanged: the same cells, one more chart render at most.
+
+  Boundaries for this session: swarm/, draft/schema.py, draft/prompt.py,
+  draft/drafter.py (additive, fmt=None defaults), approval_queue/store.py
+  (guarded migrations, images_json), approval_queue/images.py,
+  approval_queue/templates/detail.html, publish/store.py, publish/thread.py,
+  run_publish.py, run_draft.py, run_evolve.py, ops/store.py, panel/,
+  tests, docs. No new dependency. Every existing test passes unchanged.

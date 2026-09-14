@@ -152,4 +152,9 @@ same hard rules. The human keeps one job: when a post goes out.
   bred by stepping one knob. The panel's /swarm page shows the family tree.
   Selection acts on the topology, so a single strong call can win back if
   that is what X rewards.
+- Phase four (built): the format is a gene. Thread, single post or Premium
+  long post; zero, one or two pictures and which post each goes on, as a
+  third population with its own, higher pruning bar. The drafter, the
+  checks, the queue and publishing read the draft's own format; a draft
+  from before phase four keeps the old physics.
 Full specification: `prompts/prompt9.md`.

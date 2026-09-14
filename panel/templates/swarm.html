@@ -23,11 +23,11 @@ with the swarm on (<code>swarm/config.yaml</code>).</p>
 the 30 days before it: 1.00 is average. Under a few scored posts a side, read nothing into it.</p>
 {% endif %}
 
-{% for kind, title in [("writer", "Writer genomes"), ("designer", "Designers")] %}
+{% for kind, title in [("writer", "Writer genomes"), ("designer", "Designers"), ("format", "Formats")] %}
 {% if rows[kind] %}
 <h2>{{ title }}</h2>
 <table>
-  <tr><th>Name</th><th>State</th><th>Posts</th><th>Median score</th><th>Parent</th><th>{{ 'Topology and slots' if kind == 'writer' else 'Style' }}</th><th>Age</th></tr>
+  <tr><th>Name</th><th>State</th><th>Posts</th><th>Median score</th><th>Parent</th><th>{{ 'Topology and slots' if kind == 'writer' else ('Shape and pictures' if kind == 'format' else 'Style') }}</th><th>Age</th></tr>
   {% for r in rows[kind] %}
   <tr>
     <td style="padding-left:{{ 0.6 + r.depth * 1.2 }}em"><strong>{{ r.name }}</strong>

@@ -130,6 +130,11 @@ class Approved:
     image_path: str | None = None  # absolute path of the rendered chart PNG, if still on disk
     image_alt: str = ""
     position: int | None = None  # the human's publishing order (set_order), 1 = first
+    # Phase four: the draft's shape, its per-post limit and every picture with the post it
+    # goes on ([(absolute path, alt, anchor)]; the first is image_path).
+    shape: str = "thread"
+    max_chars: int = 280
+    images: list[tuple[str, str, int]] = field(default_factory=list)
 
 
 def _db_file(conn: sqlite3.Connection) -> Path | None:
@@ -160,6 +165,48 @@ def _image_for(
         return str(path), image_alt
     visual = visual_from_json(chart_json)
     return str(path), (alt_text(visual, url) if visual else "")
+
+
+def _images_for(
+    db_file: Path | None,
+    images_json: str | None,
+    first: tuple[str | None, str],
+) -> list[tuple[str, str, int]]:
+    """Every rendered picture of an approved draft, (absolute path, alt, anchor), from
+    drafts.images_json (phase four); a row without it has at most the first picture on
+    post 1."""
+    out: list[tuple[str, str, int]] = []
+    if images_json and db_file is not None:
+        try:
+            data = json.loads(images_json)
+        except json.JSONDecodeError:
+            data = []
+        for d in sorted(
+            (x for x in data if isinstance(x, dict)), key=lambda x: int(x.get("index", 0))
+        ):
+            path = db_file.resolve().parent / IMAGES_DIRNAME / str(d.get("path") or "")
+            if d.get("path") and path.is_file():
+                out.append((str(path), str(d.get("alt") or ""), int(d.get("anchor") or 1)))
+    if not out and first[0]:
+        out.append((first[0], first[1], 1))
+    elif out and first[0]:
+        # the first picture is what image_path names; a stored alt text wins, an empty one
+        # falls back to the alt text of the chart spec (as image_path/image_alt do)
+        out[0] = (first[0], out[0][1] or first[1], out[0][2])
+    return out
+
+
+def _format_for(format_json: str | None) -> tuple[str, int]:
+    """(shape, max_chars) from drafts.format_json; a thread of 280 without it."""
+    if not format_json:
+        return "thread", 280
+    try:
+        d = json.loads(format_json)
+    except json.JSONDecodeError:
+        return "thread", 280
+    if not isinstance(d, dict):
+        return "thread", 280
+    return str(d.get("shape") or "thread"), int(d.get("max_chars") or 280)
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -207,6 +254,8 @@ def fetch_approved(
             else ", NULL AS chart_json, NULL AS image_path"
         )
         image_cols += ", d.image_alt" if "image_alt" in draft_cols else ", NULL AS image_alt"
+        image_cols += ", d.format_json" if "format_json" in draft_cols else ", NULL AS format_json"
+        image_cols += ", d.images_json" if "images_json" in draft_cols else ", NULL AS images_json"
         meta = (
             ", i.source, i.url, i.title, s.total"
             if has_step1
@@ -260,6 +309,8 @@ def fetch_approved(
         image_path, image_alt = _image_for(
             conn_path, r["image_path"], r["chart_json"], r["url"] or "", r["image_alt"]
         )
+        shape, max_chars = _format_for(r["format_json"])
+        images = _images_for(conn_path, r["images_json"], (image_path, image_alt))
         out.append(
             Approved(
                 draft_id=int(r["id"]),
@@ -275,6 +326,9 @@ def fetch_approved(
                 image_path=image_path,
                 image_alt=image_alt,
                 position=int(r["position"]) if r["position"] is not None else None,
+                shape=shape,
+                max_chars=max_chars,
+                images=images,
             )
         )
     return out

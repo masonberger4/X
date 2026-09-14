@@ -179,6 +179,100 @@ class Designer:
         )
 
 
+@dataclass
+class FormatGenome:
+    """A format genome (phase four): the shape of the draft, how many pictures and where.
+    `to_format(long_max_chars)` is the draft.schema.Format the drafter and the checks read."""
+
+    name: str
+    shape: str = "thread"
+    min_posts: int = 3
+    max_posts: int = 6
+    visuals: int = 1
+    anchors: list[str] = None  # type: ignore[assignment]  # one of first|last|middle per visual
+    parent_id: int | None = None
+    id: int | None = None
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        if self.anchors is None:
+            self.anchors = ["first"] * self.visuals
+
+    def to_json(self) -> str:
+        d = asdict(self)
+        d.pop("id", None)
+        return json.dumps(d, ensure_ascii=False)
+
+    @classmethod
+    def from_json(cls, text: str, *, id: int | None = None) -> FormatGenome:
+        d = json.loads(text)
+        return cls(
+            name=str(d["name"]),
+            shape=str(d.get("shape", "thread")),
+            min_posts=int(d.get("min_posts", 3)),
+            max_posts=int(d.get("max_posts", 6)),
+            visuals=int(d.get("visuals", 1)),
+            anchors=list(d.get("anchors") or []),
+            parent_id=d.get("parent_id"),
+            id=id,
+            notes=str(d.get("notes", "")),
+        )
+
+    def to_format(self, long_max_chars: int) -> Any:
+        from draft.schema import MAX_POST_CHARS, Format
+
+        if self.shape == "thread":
+            return Format(
+                shape="thread",
+                min_posts=self.min_posts,
+                max_posts=self.max_posts,
+                visuals=self.visuals,
+                anchors=tuple(self.anchors),
+            )
+        return Format(
+            shape=self.shape,
+            min_posts=1,
+            max_posts=1,
+            visuals=self.visuals,
+            anchors=tuple("first" for _ in range(self.visuals)),
+            max_chars=MAX_POST_CHARS if self.shape == "single" else int(long_max_chars),
+        )
+
+
+SEED_FORMATS: list[FormatGenome] = [
+    FormatGenome(
+        "thread-1-first",
+        notes="The phase-one physics: a 3-6 post thread, one picture on the first post.",
+    ),
+    FormatGenome(
+        "thread-2-ends",
+        visuals=2,
+        anchors=["first", "last"],
+        notes="Two pictures: one on the first post, one on the last.",
+    ),
+    FormatGenome(
+        "thread-0",
+        visuals=0,
+        anchors=[],
+        notes="No picture: tests the belief that every post needs a graphic.",
+    ),
+    FormatGenome(
+        "single-1",
+        shape="single",
+        min_posts=1,
+        max_posts=1,
+        notes="One 280-character post with a picture.",
+    ),
+    FormatGenome(
+        "long-1",
+        shape="long",
+        min_posts=1,
+        max_posts=1,
+        notes="One Premium long-form post with a picture.",
+    ),
+]
+
+
 SEED_DESIGNERS: list[Designer] = [
     Designer("house", {}, notes="Phase-three seed: the house style as shipped."),
     Designer(

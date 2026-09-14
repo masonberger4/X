@@ -185,7 +185,7 @@ def series_growth(series: list[dict]) -> dict:
 
 
 def swarm_rows(population: list[dict], now: datetime) -> dict[str, list[dict]]:
-    """The swarm page's two tables (writers, designers), live rows first then retired,
+    """The swarm page's tables (writers, designers, formats), live rows first then retired,
     each with a display-ready score, its parent's name, its topology or style summary and
     a depth for the family tree indent (0 for a seed)."""
     by_id = {p["id"]: p for p in population}
@@ -198,12 +198,22 @@ def swarm_rows(population: list[dict], now: datetime) -> dict[str, list[dict]]:
             d += 1
         return d
 
-    out: dict[str, list[dict]] = {"writer": [], "designer": []}
+    out: dict[str, list[dict]] = {"writer": [], "designer": [], "format": []}
     for p in population:
         med = p.get("median_relative")
         if p["kind"] == "designer":
             summary = ", ".join(f"{k} {v}" for k, v in sorted(p.get("style", {}).items()))
             summary = summary or "house style"
+        elif p["kind"] == "format":
+            shape = p.get("shape") or "thread"
+            posts = (
+                f"{p.get('min_posts')}-{p.get('max_posts')} posts"
+                if shape == "thread"
+                else "one post"
+            )
+            n = p.get("visuals") or 0
+            where = f" on {', '.join(p.get('anchors') or [])}" if n else ""
+            summary = f"{shape}, {posts}, {n} picture{'s' if n != 1 else ''}{where}"
         else:
             slots = " · ".join(p.get("slots") or [])
             summary = f"fan-out {p.get('fan_out')}, layers {p.get('layers')}; {slots}"

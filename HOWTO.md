@@ -466,8 +466,14 @@ source only when it is due, and score only scores what is new.
    the posts the AI jury gave to the swarm did better on X than the ones it
    gave to the single strong drafter. `breed` replaces each retired recipe
    with a child of a winner that changes one thing (one strong-model call per
-   writer child; a designer child, the picture style, needs no model). The
+   writer child; a designer child, the picture style, and a format child,
+   thread or single or long post and how many pictures on which posts, need
+   no model). Formats are judged only after `format_min_posts` posts. The
    control panel's **Swarm** page shows the family tree and every score.
+   A long post needs X Premium on the account: without it X refuses the post
+   and the draft shows as failed on the approved page; lower
+   `formats: long_max_chars` in `swarm\config.yaml` or retire `long-1` on the
+   Swarm page's table by asking me to.
 
 ---
 
@@ -524,9 +530,11 @@ to stop it. Four pages:
   minimum gap between posts in minutes, are the only settings the panel
   edits ("Save limits" writes them into `publish\config.yaml`, and the next
   publish run uses them).
-- **Swarm** (`/swarm`) — step 9's recipes (writer genomes and designers):
-  live or retired, posts scored, median score, parent, and the swarm-vs-control
-  line. A view only; `run_evolve.py` does the breeding and retiring.
+- **Swarm** (`/swarm`) — step 9's recipes (writer genomes, designers and
+  formats): live or retired, posts scored, median score, parent, and the
+  swarm-vs-control line. A view only; `run_evolve.py` does the breeding and
+  retiring. A draft's page says its format and shows every picture with the
+  post it goes on.
 - **Feedback** (`/feedback`) — followers over time, your posts ranked by
   impressions, and the suggestions from the latest weekly report. The
   suggestions are proposals only; applying one means editing a settings file.

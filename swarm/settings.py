@@ -18,6 +18,7 @@ DEFAULTS: dict[str, Any] = {
     "judge_votes": 3,
     "max_similarity": 0.85,
     "control": {"enabled": True},
+    "formats": {"long_max_chars": 4000, "long_section_chars": 700},
     "evolve": {
         "kpi": "impressions",
         "baseline_days": 30,
@@ -26,6 +27,8 @@ DEFAULTS: dict[str, Any] = {
         "min_alive": 2,
         "population_size": 3,
         "mutation_model": "",
+        "format_min_posts": 8,
+        "format_population_size": 5,
     },
 }
 
@@ -37,4 +40,5 @@ def load_swarm_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg = {**DEFAULTS, **raw}
     cfg["control"] = {**DEFAULTS["control"], **(raw.get("control") or {})}
     cfg["evolve"] = {**DEFAULTS["evolve"], **(raw.get("evolve") or {})}
+    cfg["formats"] = {**DEFAULTS["formats"], **(raw.get("formats") or {})}
     return cfg

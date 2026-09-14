@@ -23,6 +23,7 @@ class Observation:
     baseline: float | None = None
     relative: float | None = None
     designer_id: int | None = None
+    format_id: int | None = None
 
 
 def parse_when(text: str) -> datetime:

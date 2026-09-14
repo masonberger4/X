@@ -16,7 +16,7 @@ from typing import Any
 
 from draft.drafter import CallFn, DraftRejected, DraftResult, call_anthropic, generate
 from draft.prompt import build_system_prompt
-from draft.schema import Draft
+from draft.schema import MAX_POST_CHARS, SHAPE_LONG, SHAPE_SINGLE, Draft, Format
 from swarm import prompts
 from swarm.cells import cell_problems, dedupe, similarity, tournament
 from swarm.genome import Genome, Slot
@@ -63,10 +63,14 @@ def _candidates_for_slot(
     call: CallFn,
     counter: list[int],
     log_rows: list[dict],
+    max_chars: int = MAX_POST_CHARS,
+    single: bool = False,
 ) -> list[str]:
     """Layer 1 proposals, then `layers - 1` synthesis rounds that each see every earlier
-    round (Mixture-of-Agents). Cells that fail the per-post rules are dropped as they land."""
-    system = prompts.cell_system_prompt()
+    round (Mixture-of-Agents). Cells that fail the per-post rules are dropped as they land.
+    `max_chars` is the cell's limit; `single` means this one cell is the whole post and
+    must carry the URL (and the preprint label)."""
+    system = prompts.cell_system_prompt(max_chars)
     all_rounds: list[str] = []
     survivors: list[str] = []
     for layer in range(1, layers + 1):
@@ -88,6 +92,9 @@ def _candidates_for_slot(
                 url=brief.url,
                 slot=slot.name,
                 is_preprint=brief.preprint,
+                max_chars=max_chars,
+                needs_url=True if single else None,
+                needs_preprint=(brief.preprint if single else None),
             )
             log_rows.append({"slot": slot.name, "layer": layer, "text": text, "problems": problems})
             if problems:
@@ -108,9 +115,12 @@ def run_swarm(
     examples_block: str | None = None,
     rng: random.Random | None = None,
     sleep: Callable[[float], None] | None = None,
+    fmt: Format | None = None,
 ) -> SwarmResult:
     """Build one draft with the swarm. Raises SwarmFailed when a slot has no usable
-    candidate or the assembly fails every hard rule."""
+    candidate or the assembly fails every hard rule. `fmt` (phase four): a single post runs
+    ONE cell that is the whole post; a long post runs the genome's slots as sections of
+    `formats.long_section_chars` each; a thread is the genome's slots as posts."""
     model = _swarm_model(cfg)
     assembler_model = str(cfg.get("assembler_model") or "").strip() or model
     # The genome owns its topology; the config values are the fallback for a genome row
@@ -122,8 +132,14 @@ def run_swarm(
     log_rows: list[dict] = []
     chosen: dict[str, str] = {}
     judge_system = prompts.JUDGE_SYSTEM
+    shape = fmt.shape if fmt is not None else "thread"
+    single = shape == SHAPE_SINGLE
+    cell_chars = MAX_POST_CHARS
+    if shape == SHAPE_LONG:
+        cell_chars = int((cfg.get("formats") or {}).get("long_section_chars", 700))
+    slots = [prompts.SINGLE_SLOT] if single else list(genome.slots)
 
-    for slot in genome.slots:
+    for slot in slots:
         cands = _candidates_for_slot(
             brief,
             slot,
@@ -134,6 +150,8 @@ def run_swarm(
             call=call,
             counter=counter,
             log_rows=log_rows,
+            max_chars=cell_chars,
+            single=single,
         )
         cands = dedupe(cands, max_sim)
         if not cands:
@@ -155,8 +173,8 @@ def run_swarm(
         chosen[slot.name] = winner
         log.info("slot %s: %d candidates, chose %r", slot.name, len(cands), winner[:60])
 
-    system = build_system_prompt(examples_block)
-    user = prompts.assemble_prompt(brief, genome, chosen)
+    system = build_system_prompt(examples_block, fmt)
+    user = prompts.assemble_prompt(brief, genome, chosen, fmt)
     kwargs: dict[str, Any] = {}
     if sleep is not None:
         kwargs["sleep"] = sleep
@@ -169,6 +187,7 @@ def run_swarm(
             source=brief.source,
             source_text=brief.source_text,
             call=call,
+            fmt=fmt,
             **kwargs,
         )
     except DraftRejected as exc:
