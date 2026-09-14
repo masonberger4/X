@@ -35,6 +35,7 @@ from datetime import UTC, datetime, timedelta
 from dotenv import load_dotenv
 
 from approval_queue import images, store
+from draft.chart import Style
 from draft.drafter import DraftRejected, draft_item
 from draft.examples import (
     EditExample,
@@ -88,7 +89,8 @@ def draft_with_swarm(
 
     The control is draft_item exactly as the pre-step-9 path; the swarm is
     swarm.engine.run_swarm. Both variants are recorded; the run row gets its draft_id once
-    the winner is stored."""
+    the winner is stored. The run also picks the designer (phase three) whose Style the
+    winner's picture starts from; `designer_style_for(conn, run_id)` returns it."""
     brief = Brief(
         title=c.title,
         abstract=c.abstract,
@@ -99,6 +101,7 @@ def draft_with_swarm(
         rationale=c.rationale,
     )
     genome = swarm_store.next_genome(conn)
+    designer = swarm_store.next_designer(conn)
     log_rows: dict = {}
     swarm_result = None
     swarm_problem: str | None = None
@@ -156,6 +159,7 @@ def draft_with_swarm(
         winner=winner,
         calls=calls,
         log=log_rows,
+        designer_id=designer.id,
     )
     swarm_store.record_variant(
         conn,
@@ -190,6 +194,19 @@ def draft_with_swarm(
     if swarm_problem:
         reasons.append(f"swarm: {swarm_problem}")
     return DraftRejected(reasons or ["no variant produced a draft"]), run_id
+
+
+def designer_style_for(conn: store.sqlite3.Connection, run_id: int | None) -> Style | None:
+    """The Style preset of the designer recorded on a swarm run; None without one."""
+    if run_id is None:
+        return None
+    row = conn.execute("SELECT designer_id FROM swarm_runs WHERE id = ?", (run_id,)).fetchone()
+    if not row or row[0] is None:
+        return None
+    designer = swarm_store.get_genome(conn, int(row[0]))
+    if designer is None or not hasattr(designer, "style"):
+        return None
+    return Style().apply(designer.style)
 
 
 def _default_min_score() -> float:
@@ -350,7 +367,12 @@ def main(argv: list[str] | None = None) -> int:
             if result.flagged_numbers:
                 log.warning("%s: numbers flagged for review: %s", c.item_id, result.flagged_numbers)
             if images.attach_chart(
-                conn, draft_id, result.draft.chart, source_url=c.url, cfg=draft_cfg
+                conn,
+                draft_id,
+                result.draft.chart,
+                source_url=c.url,
+                cfg=draft_cfg,
+                style=designer_style_for(conn, run_id),
             ):
                 charts += 1
         log.info(

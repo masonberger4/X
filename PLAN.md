@@ -145,9 +145,11 @@ same hard rules. The human keeps one job: when a post goes out.
   to the run; relative KPI (post / trailing 30-day median); the jury's
   swarm-vs-control verdicts measured against reality; three seed genomes
   drafted round-robin; below-median genomes retired.
-- Phase three: mutation. One strong call writes a child genome that varies
-  ONE thing (a slot rule, fan-out, layers, a split); designer genomes own a
-  chart Style and go through the image grader with the same accounting.
+- Phase three (built, `run_evolve.py breed`, `swarm/mutate.py`): mutation.
+  One strong call writes a child genome that varies ONE thing (a slot rule,
+  a split or merge, fan-out, layers), checked in code; designer genomes own
+  a chart Style, are drawn round-robin, scored and pruned the same way, and
+  bred by stepping one knob. The panel's /swarm page shows the family tree.
   Selection acts on the topology, so a single strong call can win back if
   that is what X rewards.
 Full specification: `prompts/prompt9.md`.

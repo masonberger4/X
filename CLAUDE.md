@@ -16,8 +16,9 @@ digest, 2 draft + human approval queue, 3 publish to X, 4 feedback loop,
 KOL X list + HTTP retry, 7 voice learning loop, 8 control panel (one web app over
 the whole workflow), 9 swarm drafting (phase one: many cheap cells + layers + jury
 against the single strong drafter; phase two: X fitness, round-robin seed genomes and
-pruning via `run_evolve.py`; phase three, genome mutation, is specified in
-`prompts/prompt9.md` and not built yet). The kickoff prompt that built
+pruning via `run_evolve.py`; phase three: breeding of writer genomes by one strong call
+and of designer genomes, the picture's starting `Style`, by a random knob step, and the
+panel's `/swarm` page). The kickoff prompt that built
 each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 `PUBLISH_ENABLED=1` **and** `--live`.
 
@@ -41,8 +42,9 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`;
   `--draft ID` targets one approved draft),
   `python run_feedback.py snapshot|report|followers`,
-  `python run_evolve.py [score|prune|report] [--dry-run]` (step 9 phase two: swarm fitness
-  from X, no network),
+  `python run_evolve.py [score|prune|breed|report] [--dry-run] [--force]` (step 9: swarm
+  fitness from X and pruning, no network; `breed` makes the one strong-model call per
+  writer child),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -296,11 +298,22 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `swarm_fitness`; its one read of another step's tables is `fetch_head_metrics`
   (step 3 `posts` + step 4 `tweet_metrics`, read-only, empty when missing).
   `run_draft.py` drafts the live genomes round-robin (`next_genome`; the seeds are
-  `swarm/genome.py:SEED_GENOMES`). `swarm/fitness.py` is pure (relative KPI against
-  the trailing median, per-genome scores, `bet_summary`, `prune`); `run_evolve.py`
-  writes only `swarm_fitness` and `swarm_genomes.retired_at`/`retired_reason` and is
-  the disabled `evolve` step in `ops/config.yaml`. `tests/conftest.py` turns the
-  swarm off for every test that does not opt in.
+  `swarm/genome.py:SEED_GENOMES`) and picks a designer the same way (`next_designer`,
+  `swarm_runs.designer_id`; `images.attach_chart(style=)` is the Style the first render
+  starts from). **A genome owns its topology**: `swarm/config.yaml` `fan_out`/`layers`
+  are only the fallback for a row without them. `swarm/fitness.py` is pure (relative
+  KPI against the trailing median, per-genome scores keyed by `genome_id` or
+  `designer_id`, `bet_summary`, `prune`). `swarm/mutate.py` breeds: `breed_writer` is
+  the one strong-model call (through `call_anthropic`) and `validate_child` /
+  `diff_count` enforce exactly one change inside the bounds in `swarm/genome.py`;
+  `breed_designer` is pure code (one Style knob stepped). `run_evolve.py` writes only
+  `swarm_fitness` and `swarm_genomes` and is the `evolve` step in `ops/config.yaml`.
+  `swarm_genomes.kind`, `swarm_runs.designer_id` and `swarm_fitness.designer_id` are
+  guarded migrations. The panel's `/swarm` page reads through
+  `ops/store.py:fetch_swarm_population` / `fetch_swarm_bet` (read-only, empty when
+  missing) and renders `panel/views.py:swarm_rows` / `bet_summary_row` (pure); it never
+  breeds or retires. `tests/conftest.py` turns the swarm off for every test that does
+  not opt in.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -334,12 +347,14 @@ approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
           ratings), jobs.py (JobManager, background step runs), frozen.py (data dir,
           step interpreter and bundle manifest for the desktop build),
-          app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback), templates/
+          app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback, /swarm), templates/
 swarm/    config.yaml, settings.py, genome.py (Slot, Genome, DEFAULT_GENOME), prompts.py
           (Brief, cell/judge/assembly prompts, parse_winner), cells.py (cell_problems,
           dedupe, tournament), engine.py (run_swarm, compare, SwarmFailed),
-          fitness.py (score, genome_scores, bet_summary, prune), store.py (swarm_genomes,
-          swarm_runs, swarm_variants, swarm_fitness, next_genome, fetch_head_metrics)
+          fitness.py (score, genome_scores, bet_summary, prune), mutate.py (Parent,
+          breed_writer, validate_child, breed_designer), store.py (swarm_genomes with
+          kind, swarm_runs, swarm_variants, swarm_fitness, next_genome, next_designer,
+          fetch_head_metrics, fetch_winning_threads)
 verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck,
           verify_claim, call_model), store.py (claim_checks, table_checks,
           mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop

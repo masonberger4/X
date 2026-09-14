@@ -2,14 +2,18 @@
 
 import json
 import random
+from dataclasses import replace
 
 import pytest
 
 from draft.drafter import check_hard_rules
 from swarm import engine
-from swarm.genome import DEFAULT_GENOME
+from swarm.genome import DEFAULT_GENOME as _DEFAULT
 from swarm.prompts import JUDGE_SYSTEM, THREAD_JUDGE_SYSTEM, Brief
 from tests.conftest import ABSTRACT, URL
+
+# the genome owns its topology: three proposals per slot, one synthesis layer
+DEFAULT_GENOME = replace(_DEFAULT, fan_out=3, layers=2)
 
 BRIEF = Brief(title="Title t1", abstract=ABSTRACT, url=URL, source="pubmed")
 CFG = {

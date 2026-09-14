@@ -84,15 +84,20 @@ def test_swarm_wins_and_is_stored_as_the_pending_draft(conn, monkeypatch):
     drafts = store.list_drafts(conn)
     assert len(drafts) == 1 and drafts[0].status == "pending"
     assert drafts[0].model == "swarm:cheap"
-    assert drafts[0].draft.thread[0].startswith("hook prop")
+    assert drafts[0].draft.thread[0].startswith("hook ")
     runs = swarm_store.list_runs(conn)
     assert len(runs) == 1 and runs[0].winner == "swarm" and runs[0].draft_id == drafts[0].id
     assert runs[0].calls == len(jury.calls)
     variants = swarm_store.list_variants(conn, runs[0].id)
     assert [v["role"] for v in variants] == ["swarm", "control"]
     assert all(v["ok"] == 1 for v in variants)
-    assert sum(c[0] == JUDGE_SYSTEM for c in jury.calls) == 6  # one match per slot (2 cands)
+    # the genome owns its topology (default-6: fan_out 6, layers 2); the tournament runs
+    # over the final layer's 6 candidates, 5 matches per slot. The config's fan_out and
+    # layers are only a fallback for a genome row without them.
+    assert sum(c[0] == JUDGE_SYSTEM for c in jury.calls) == 6 * 5
     assert sum(c[0] == THREAD_JUDGE_SYSTEM for c in jury.calls) == 3
+    run_row = conn.execute("SELECT designer_id FROM swarm_runs").fetchone()
+    assert run_row[0] is not None  # a designer was picked for the picture
 
 
 def test_control_wins_keeps_the_strong_drafters_text(conn, monkeypatch):

@@ -1,11 +1,14 @@
-"""CLI (step 9, phase two): score the swarm's posted drafts against X and prune genomes.
+"""CLI (step 9, phases two and three): score the swarm's posted drafts against X, prune
+genomes, breed replacements.
 
-Usage: python run_evolve.py [score|prune|report] [--kpi impressions] [--baseline-days 30]
-                            [--min-posts 5] [--dry-run] [-v]
+Usage: python run_evolve.py [score|prune|breed|report] [--kpi impressions]
+                            [--baseline-days 30] [--min-posts 5] [--dry-run] [--force] [-v]
 
-No sub-command runs score, then prune, then report. No network: reads step 3's `posts` and
-step 4's `tweet_metrics` (fill them with `run_feedback.py snapshot`) through
-swarm.store.fetch_head_metrics, writes only swarm_fitness and swarm_genomes.retired_at.
+No sub-command runs score, prune, breed, then report. Reads step 3's `posts` and step 4's
+`tweet_metrics` (fill them with `run_feedback.py snapshot`) through
+swarm.store.fetch_head_metrics; writes only swarm_fitness and swarm_genomes. The one
+network call is `breed` for a writer child (swarm/mutate.py, through
+draft.drafter.call_anthropic); everything else is offline.
 
 score   Every posted swarm run gets the head tweet's KPI, the median KPI of the posts in the
         trailing `baseline_days` before it (the baseline) and value / baseline (relative),
@@ -14,21 +17,32 @@ score   Every posted swarm run gets the head tweet's KPI, the median KPI of the 
 prune   A live genome with at least `min_posts` scored posts whose median relative KPI is
         below the median of every such genome is retired (swarm_genomes.retired_at and
         retired_reason), never below `min_alive` live genomes. --dry-run prints and keeps.
-report  Per-genome table and the swarm-vs-control measurement: median relative KPI of the
-        posts the jury gave to the swarm against those it gave to the control.
+breed   Phase three. While fewer than `population_size` writer genomes (or designers) are
+        live, breed one child per gap: a writer child by ONE strong-model call
+        (`evolve.mutation_model`, blank = the drafting model) that reads the top genomes
+        and their best posts and varies exactly one thing (code checks that it did); a
+        designer child by stepping one Style knob at random. Parents are the best-scoring
+        live rows, round-robin. Without any scored genome nothing is bred unless --force
+        (then the parents are simply the live rows). --dry-run prints and stores nothing.
+report  Per-genome and per-designer tables, the family tree, and the swarm-vs-control
+        measurement: median relative KPI of the posts the jury gave to the swarm against
+        those it gave to the control.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import random
 import sys
 
 from dotenv import load_dotenv
 
 from approval_queue import store as queue_store
-from swarm import fitness
+from draft.drafter import model_name as drafting_model
+from swarm import fitness, mutate
 from swarm import store as swarm_store
+from swarm.genome import Designer, Genome
 from swarm.settings import load_swarm_config
 
 log = logging.getLogger("run_evolve")
@@ -46,6 +60,7 @@ def observations(conn) -> list[fitness.Observation]:
             value=r.value,
             baseline=r.baseline,
             relative=r.relative,
+            designer_id=r.designer_id,
         )
         for r in swarm_store.list_fitness(conn)
     ]
@@ -64,6 +79,7 @@ def cmd_score(conn, cfg: dict) -> list[fitness.Observation]:
             winner=h.winner,
             posted_at=fitness.parse_when(h.posted_at),
             value=float(h.metrics[kpi]),
+            designer_id=h.designer_id,
         )
         for h in heads
     ]
@@ -85,6 +101,7 @@ def cmd_score(conn, cfg: dict) -> list[fitness.Observation]:
             value=o.value,
             baseline=o.baseline,
             relative=o.relative,
+            designer_id=o.designer_id,
         )
     n_rel = sum(o.relative is not None for o in scored)
     log.info(
@@ -93,43 +110,135 @@ def cmd_score(conn, cfg: dict) -> list[fitness.Observation]:
     return scored
 
 
+_KEY = {"writer": "genome_id", "designer": "designer_id"}
+
+
 def cmd_prune(conn, cfg: dict, obs: list[fitness.Observation], *, dry_run: bool) -> list[int]:
-    live = [g.id for g in swarm_store.live_genomes(conn)]
-    decision = fitness.prune(
-        fitness.genome_scores(obs),
-        live,
-        min_posts=int(cfg["min_posts"]),
-        min_alive=int(cfg["min_alive"]),
-    )
+    """Prune writers and designers alike; returns every retired id."""
     names = swarm_store.genome_names(conn)
-    if not decision.retire:
-        log.info("prune: nothing to retire (%d live genomes)", len(live))
-        return []
-    for gid in decision.retire:
-        reason = decision.reason[gid]
-        if dry_run:
-            log.info("dry run: would retire genome %d %s: %s", gid, names.get(gid, "?"), reason)
-        else:
-            swarm_store.retire_genome(conn, gid, reason)
-            log.info("retired genome %d %s: %s", gid, names.get(gid, "?"), reason)
-    return decision.retire
+    retired: list[int] = []
+    for kind, key in _KEY.items():
+        live = [g.id for g in swarm_store.live_genomes(conn, kind)]
+        decision = fitness.prune(
+            fitness.genome_scores(obs, key),
+            live,
+            min_posts=int(cfg["min_posts"]),
+            min_alive=int(cfg["min_alive"]),
+        )
+        if not decision.retire:
+            log.info("prune: no %s to retire (%d live)", kind, len(live))
+            continue
+        for gid in decision.retire:
+            reason = decision.reason[gid]
+            label = f"{kind} {gid} {names.get(gid, '?')}"
+            if dry_run:
+                log.info("dry run: would retire %s: %s", label, reason)
+            else:
+                swarm_store.retire_genome(conn, gid, reason)
+                log.info("retired %s: %s", label, reason)
+        retired += decision.retire
+    return retired
+
+
+def _ranked(conn, cfg: dict, obs: list[fitness.Observation], kind: str) -> list[mutate.Parent]:
+    """Live rows of `kind`, best median relative first (unscored last), as Parents."""
+    scores = {s.genome_id: s for s in fitness.genome_scores(obs, _KEY[kind])}
+    parents = []
+    for g in swarm_store.live_genomes(conn, kind):
+        s = scores.get(g.id)
+        threads = swarm_store.fetch_winning_threads(conn, g.id) if kind == "writer" else []
+        parents.append(
+            mutate.Parent(
+                genome=g,
+                median_relative=s.median_relative if s else None,
+                n=s.n if s else 0,
+                threads=threads,
+            )
+        )
+    parents.sort(key=lambda p: (p.median_relative is None, -(p.median_relative or 0.0)))
+    return parents
+
+
+def cmd_breed(
+    conn,
+    cfg: dict,
+    obs: list[fitness.Observation],
+    *,
+    dry_run: bool,
+    force: bool,
+    call=None,
+    rng: random.Random | None = None,
+) -> list[Genome | Designer]:
+    """Fill the population back up to `population_size` per kind, one child per gap."""
+    rng = rng or random.Random()
+    size = int(cfg.get("population_size", 3))
+    model = str(cfg.get("mutation_model") or "").strip() or drafting_model()
+    born: list[Genome | Designer] = []
+    for kind in _KEY:
+        parents = _ranked(conn, cfg, obs, kind)
+        gap = size - len(parents)
+        if gap <= 0:
+            log.info("breed: %d live %ss, population is full", len(parents), kind)
+            continue
+        if not parents:
+            log.warning("breed: no live %s to breed from", kind)
+            continue
+        scored = [p for p in parents if p.median_relative is not None]
+        if not scored and not force:
+            log.info("breed: no scored %s yet; nothing bred (use --force to breed anyway)", kind)
+            continue
+        pool = scored or parents
+        taken = swarm_store.all_names(conn, kind)
+        for i in range(gap):
+            target = pool[i % len(pool)]
+            try:
+                if kind == "writer":
+                    kwargs = {"call": call} if call is not None else {}
+                    child = mutate.breed_writer(parents, target, taken, model=model, **kwargs)
+                else:
+                    child = mutate.breed_designer(target.genome, taken, rng)
+            except Exception:  # an invalid child or an API error: the gap stays for next run
+                log.exception("breed: %s child of %s failed", kind, target.genome.name)
+                continue
+            taken.add(child.name)
+            log.info(
+                "%s %s child %r of %r: %s",
+                "dry run:" if dry_run else "bred",
+                kind,
+                child.name,
+                target.genome.name,
+                child.notes,
+            )
+            if not dry_run:
+                swarm_store.insert_genome(conn, child, kind=kind)
+            born.append(child)
+    return born
+
+
+def _table(conn, obs: list[fitness.Observation], kind: str) -> list[str]:
+    names = swarm_store.genome_names(conn)
+    rows = swarm_store.list_genomes(conn)
+    parents = {int(r["id"]): r["parent_id"] for r in rows}
+    of_kind = {int(r["id"]) for r in rows if r["kind"] == kind}
+    live = {g.id for g in swarm_store.live_genomes(conn, kind)}
+    lines = [f"{kind + 's':<10} {'name':<22} {'state':<8} {'posts':>5} {'median rel':>10}  parent"]
+    scores = {s.genome_id: s for s in fitness.genome_scores(obs, _KEY[kind])}
+    for gid in sorted(of_kind):
+        s = scores.get(gid)
+        n = s.n if s else 0
+        med = f"{s.median_relative:.2f}" if s and s.median_relative is not None else "-"
+        state = "live" if gid in live else "retired"
+        parent = names.get(parents[gid], "-") if parents.get(gid) else "-"
+        lines.append(f"{'':<10} {names.get(gid, '?'):<22} {state:<8} {n:>5} {med:>10}  {parent}")
+    return lines
 
 
 def render_report(conn, cfg: dict, obs: list[fitness.Observation]) -> str:
-    names = swarm_store.genome_names(conn)
-    live = {g.id for g in swarm_store.live_genomes(conn)}
     head = f"Swarm fitness on {cfg['kpi']}"
-    lines = [f"{head} (relative to the trailing {cfg['baseline_days']}-day median)"]
+    lines = [f"{head} (relative to the trailing {cfg['baseline_days']}-day median)", ""]
+    lines += _table(conn, obs, "writer")
     lines.append("")
-    lines.append(f"{'genome':<12} {'state':<8} {'posts':>5} {'median rel':>10}")
-    for s in fitness.genome_scores(obs):
-        name = names.get(s.genome_id, "?") if s.genome_id is not None else "-"
-        state = "live" if s.genome_id in live else "retired"
-        med = f"{s.median_relative:.2f}" if s.median_relative is not None else "-"
-        lines.append(f"{name:<12} {state:<8} {s.n:>5} {med:>10}")
-    for gid in sorted(live):
-        if all(s.genome_id != gid for s in fitness.genome_scores(obs)):
-            lines.append(f"{names.get(gid, '?'):<12} {'live':<8} {0:>5} {'-':>10}")
+    lines += _table(conn, obs, "designer")
     b = fitness.bet_summary(obs)
     lines.append("")
     lines.append("Swarm vs control (posts by who won the jury):")
@@ -145,11 +254,18 @@ def render_report(conn, cfg: dict, obs: list[fitness.Observation]) -> str:
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", nargs="?", choices=["score", "prune", "report"], default=None)
+    ap.add_argument(
+        "command", nargs="?", choices=["score", "prune", "breed", "report"], default=None
+    )
     ap.add_argument("--kpi", default=None, help="override evolve.kpi in swarm/config.yaml")
     ap.add_argument("--baseline-days", type=float, default=None)
     ap.add_argument("--min-posts", type=int, default=None)
-    ap.add_argument("--dry-run", action="store_true", help="prune: print, retire nothing")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="prune/breed: print, retire and store nothing"
+    )
+    ap.add_argument(
+        "--force", action="store_true", help="breed even when no genome has a score yet"
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(
@@ -174,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
             obs = observations(conn)
         if args.command in (None, "prune"):
             cmd_prune(conn, cfg, obs, dry_run=args.dry_run)
+        if args.command in (None, "breed"):
+            cmd_breed(conn, cfg, obs, dry_run=args.dry_run, force=args.force)
         if args.command in (None, "report"):
             print(render_report(conn, cfg, obs))
     finally:

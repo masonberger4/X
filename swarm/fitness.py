@@ -22,6 +22,7 @@ class Observation:
     value: float
     baseline: float | None = None
     relative: float | None = None
+    designer_id: int | None = None
 
 
 def parse_when(text: str) -> datetime:
@@ -58,17 +59,19 @@ class GenomeScore:
     values: list[float] = field(default_factory=list)
 
 
-def genome_scores(obs: Iterable[Observation]) -> list[GenomeScore]:
-    """Per genome: how many scored posts and their median relative KPI. Genomes with no
-    scored post appear with n=0 so the report can show them."""
+def genome_scores(obs: Iterable[Observation], key: str = "genome_id") -> list[GenomeScore]:
+    """Per genome (or per designer with key='designer_id'): how many scored posts and their
+    median relative KPI. Genomes with no scored post appear with n=0 so the report can show
+    them."""
     by: dict[int | None, list[float]] = {}
     seen: list[int | None] = []
     for o in obs:
-        if o.genome_id not in by:
-            by[o.genome_id] = []
-            seen.append(o.genome_id)
+        gid = getattr(o, key)
+        if gid not in by:
+            by[gid] = []
+            seen.append(gid)
         if o.relative is not None:
-            by[o.genome_id].append(o.relative)
+            by[gid].append(o.relative)
     return [
         GenomeScore(g, len(by[g]), float(median(by[g])) if by[g] else None, by[g]) for g in seen
     ]

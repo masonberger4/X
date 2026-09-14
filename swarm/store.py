@@ -7,10 +7,15 @@ swarm_runs      one row per story the swarm was tried on: which genome, which va
 swarm_variants  the swarm and control drafts of a run as JSON, whether each passed the hard
                 rules, so phase two can score the jury against X
 swarm_fitness   phase two: one row per posted run, the head tweet's KPI, the trailing
-                baseline and the relative score (run_evolve.py)
+                baseline and the relative score (run_evolve.py); phase three adds the
+                designer credited alongside the writer genome
+swarm_genomes.kind (phase three, guarded migration) is 'writer' or 'designer'; a designer
+row's genome_json is swarm.genome.Designer. swarm_runs.designer_id records which one drew
+the picture.
 
-fetch_head_metrics is the ONE place step 9 reads another step's tables (step 3's posts
-and step 4's tweet_metrics), read-only, empty when either table is missing.
+The two places step 9 reads another step's tables, both read-only and empty when a table is
+missing: fetch_head_metrics (step 3's posts + step 4's tweet_metrics) and
+fetch_winning_threads (step 2's drafts.thread_json, for the mutation prompt).
 """
 
 from __future__ import annotations
@@ -21,9 +26,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from draft.schema import Draft
-from swarm.genome import SEED_GENOMES, Genome
+from swarm.genome import SEED_DESIGNERS, SEED_GENOMES, Designer, Genome
 
 ROLES = ("swarm", "control")
+KINDS = ("writer", "designer")
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -87,26 +93,48 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    if "retired_reason" not in _columns(conn, "swarm_genomes"):  # guarded migration
+    # guarded migrations (phase two and three columns on phase-one tables)
+    if "retired_reason" not in _columns(conn, "swarm_genomes"):
         conn.execute("ALTER TABLE swarm_genomes ADD COLUMN retired_reason TEXT")
+    if "kind" not in _columns(conn, "swarm_genomes"):
+        conn.execute("ALTER TABLE swarm_genomes ADD COLUMN kind TEXT NOT NULL DEFAULT 'writer'")
+    if "designer_id" not in _columns(conn, "swarm_runs"):
+        conn.execute("ALTER TABLE swarm_runs ADD COLUMN designer_id INTEGER")
+    if "designer_id" not in _columns(conn, "swarm_fitness"):
+        conn.execute("ALTER TABLE swarm_fitness ADD COLUMN designer_id INTEGER")
     conn.commit()
+
+
+def insert_genome(
+    conn: sqlite3.Connection, obj: Genome | Designer, *, kind: str | None = None
+) -> int:
+    """Store a writer genome or a designer; returns its id and sets obj.id."""
+    kind = kind or ("designer" if isinstance(obj, Designer) else "writer")
+    if kind not in KINDS:
+        raise ValueError(f"unknown kind {kind!r}")
+    cur = conn.execute(
+        "INSERT INTO swarm_genomes (name, genome_json, parent_id, created_at, kind) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (obj.name, obj.to_json(), obj.parent_id, _now(), kind),
+    )
+    conn.commit()
+    obj.id = int(cur.lastrowid)
+    return obj.id
 
 
 def seed_default(conn: sqlite3.Connection) -> int:
-    """Insert every SEED_GENOME whose name is not yet in the table (a retired seed is not
-    re-added). Returns the id of the first seed (the default genome)."""
-    names = {r[0]: int(r[1]) for r in conn.execute("SELECT name, id FROM swarm_genomes")}
+    """Insert every seed writer genome and designer whose name is not yet in the table (a
+    retired seed is not re-added). Returns the id of the default writer genome."""
+    names = {
+        (r[0], r[2]): int(r[1]) for r in conn.execute("SELECT name, id, kind FROM swarm_genomes")
+    }
     for g in SEED_GENOMES:
-        if g.name in names:
-            continue
-        cur = conn.execute(
-            "INSERT INTO swarm_genomes (name, genome_json, parent_id, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (g.name, g.to_json(), None, _now()),
-        )
-        names[g.name] = int(cur.lastrowid)
-    conn.commit()
-    return names[SEED_GENOMES[0].name]
+        if (g.name, "writer") not in names:
+            names[(g.name, "writer")] = insert_genome(conn, g, kind="writer")
+    for d in SEED_DESIGNERS:
+        if (d.name, "designer") not in names:
+            names[(d.name, "designer")] = insert_genome(conn, d, kind="designer")
+    return names[(SEED_GENOMES[0].name, "writer")]
 
 
 def _genome_row(row: sqlite3.Row | tuple) -> Genome:
@@ -118,31 +146,57 @@ def active_genome(conn: sqlite3.Connection) -> Genome:
     seed_default(conn)
     row = conn.execute(
         "SELECT id, genome_json FROM swarm_genomes WHERE retired_at IS NULL "
-        "ORDER BY id DESC LIMIT 1"
+        "AND kind = 'writer' ORDER BY id DESC LIMIT 1"
     ).fetchone()
     return _genome_row(row)
+
+
+def _next_row(conn: sqlite3.Connection, kind: str, run_column: str) -> sqlite3.Row | tuple:
+    seed_default(conn)
+    row = conn.execute(
+        f"""SELECT g.id, g.genome_json,
+                   (SELECT COUNT(*) FROM swarm_runs r WHERE r.{run_column} = g.id) AS n
+            FROM swarm_genomes g WHERE g.retired_at IS NULL AND g.kind = ?
+            ORDER BY n ASC, g.id ASC LIMIT 1""",
+        (kind,),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"every swarm {kind} is retired; add one or un-retire (swarm_genomes)")
+    return row
 
 
 def next_genome(conn: sqlite3.Connection) -> Genome:
-    """Round-robin: the unretired genome with the fewest swarm runs (lowest id on a tie), so
-    every live genome collects observations at the same rate. Seeds the table if empty."""
-    seed_default(conn)
+    """Round-robin: the unretired writer genome with the fewest swarm runs (lowest id on a
+    tie), so every live genome collects observations at the same rate. Seeds if empty."""
+    return _genome_row(_next_row(conn, "writer", "genome_id"))
+
+
+def next_designer(conn: sqlite3.Connection) -> Designer:
+    """Round-robin over the live designers, by runs they drew the picture for."""
+    row = _next_row(conn, "designer", "designer_id")
+    return Designer.from_json(row[1], id=int(row[0]))
+
+
+def live_genomes(conn: sqlite3.Connection, kind: str = "writer") -> list[Genome | Designer]:
+    rows = conn.execute(
+        "SELECT id, genome_json FROM swarm_genomes WHERE retired_at IS NULL AND kind = ? "
+        "ORDER BY id",
+        (kind,),
+    ).fetchall()
+    if kind == "designer":
+        return [Designer.from_json(r[1], id=int(r[0])) for r in rows]
+    return [_genome_row(r) for r in rows]
+
+
+def get_genome(conn: sqlite3.Connection, genome_id: int) -> Genome | Designer | None:
     row = conn.execute(
-        """SELECT g.id, g.genome_json,
-                  (SELECT COUNT(*) FROM swarm_runs r WHERE r.genome_id = g.id) AS n
-           FROM swarm_genomes g WHERE g.retired_at IS NULL
-           ORDER BY n ASC, g.id ASC LIMIT 1"""
+        "SELECT id, genome_json, kind FROM swarm_genomes WHERE id = ?", (genome_id,)
     ).fetchone()
     if row is None:
-        raise RuntimeError("every swarm genome is retired; add one or un-retire (swarm_genomes)")
+        return None
+    if row[2] == "designer":
+        return Designer.from_json(row[1], id=int(row[0]))
     return _genome_row(row)
-
-
-def live_genomes(conn: sqlite3.Connection) -> list[Genome]:
-    rows = conn.execute(
-        "SELECT id, genome_json FROM swarm_genomes WHERE retired_at IS NULL ORDER BY id"
-    ).fetchall()
-    return [_genome_row(r) for r in rows]
 
 
 def retire_genome(conn: sqlite3.Connection, genome_id: int, reason: str) -> None:
@@ -169,11 +223,12 @@ def record_run(
     calls: int,
     log: list[dict] | dict | None,
     draft_id: int | None = None,
+    designer_id: int | None = None,
 ) -> int:
     cur = conn.execute(
         """INSERT INTO swarm_runs (draft_id, item_id, cluster_id, genome_id, winner, calls,
-                                   log_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                   log_json, created_at, designer_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             draft_id,
             item_id,
@@ -183,6 +238,7 @@ def record_run(
             calls,
             json.dumps(log, ensure_ascii=False) if log is not None else None,
             _now(),
+            designer_id,
         ),
     )
     conn.commit()
@@ -267,6 +323,7 @@ class HeadMetric:
     posted_at: str
     captured_on: str
     metrics: dict[str, int]
+    designer_id: int | None = None
 
 
 def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
@@ -279,7 +336,7 @@ def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
         """SELECT r.id AS run_id, r.draft_id, r.genome_id, r.winner,
                   p.tweet_id, p.posted_at,
                   m.captured_on, m.impressions, m.likes, m.reposts, m.replies, m.quotes,
-                  m.bookmarks
+                  m.bookmarks, r.designer_id
            FROM swarm_runs r
            JOIN posts p ON p.draft_id = r.draft_id AND p.position = 1
                         AND p.status = 'posted' AND p.tweet_id IS NOT NULL
@@ -303,8 +360,34 @@ def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
                 posted_at=str(r[5]),
                 captured_on=str(r[6]),
                 metrics={k: int(v or 0) for k, v in zip(KPIS, r[7:13], strict=True)},
+                designer_id=int(r[13]) if r[13] is not None else None,
             )
         )
+    return out
+
+
+def fetch_winning_threads(
+    conn: sqlite3.Connection, genome_id: int, limit: int = 3
+) -> list[tuple[float, list[str]]]:
+    """The genome's best-scoring posted threads, (relative, thread) best first, from step 2's
+    drafts.thread_json. Read-only; [] when drafts is missing or nothing is scored yet."""
+    if "drafts" not in _tables(conn):
+        return []
+    rows = conn.execute(
+        """SELECT f.relative, d.thread_json FROM swarm_fitness f
+           JOIN drafts d ON d.id = f.draft_id
+           WHERE f.genome_id = ? AND f.relative IS NOT NULL
+           ORDER BY f.relative DESC, f.run_id DESC LIMIT ?""",
+        (genome_id, limit),
+    ).fetchall()
+    out = []
+    for rel, thread_json in rows:
+        try:
+            thread = json.loads(thread_json or "[]")
+        except ValueError:
+            continue
+        if isinstance(thread, list) and thread:
+            out.append((float(rel), [str(p) for p in thread]))
     return out
 
 
@@ -321,16 +404,18 @@ def upsert_fitness(
     value: float,
     baseline: float | None,
     relative: float | None,
+    designer_id: int | None = None,
 ) -> None:
     conn.execute(
         """INSERT INTO swarm_fitness (run_id, draft_id, genome_id, winner, tweet_id, posted_at,
-                                      kpi, value, baseline, relative, computed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      kpi, value, baseline, relative, computed_at, designer_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(run_id) DO UPDATE SET
                genome_id = excluded.genome_id, winner = excluded.winner,
                tweet_id = excluded.tweet_id, posted_at = excluded.posted_at,
                kpi = excluded.kpi, value = excluded.value, baseline = excluded.baseline,
-               relative = excluded.relative, computed_at = excluded.computed_at""",
+               relative = excluded.relative, computed_at = excluded.computed_at,
+               designer_id = excluded.designer_id""",
         (
             run_id,
             draft_id,
@@ -343,6 +428,7 @@ def upsert_fitness(
             baseline,
             relative,
             _now(),
+            designer_id,
         ),
     )
     conn.commit()
@@ -359,15 +445,21 @@ class FitnessRow:
     value: float
     baseline: float | None
     relative: float | None
+    designer_id: int | None = None
 
 
 def list_fitness(conn: sqlite3.Connection) -> list[FitnessRow]:
     rows = conn.execute(
-        "SELECT run_id, draft_id, genome_id, winner, posted_at, kpi, value, baseline, relative "
-        "FROM swarm_fitness ORDER BY posted_at, run_id"
+        "SELECT run_id, draft_id, genome_id, winner, posted_at, kpi, value, baseline, relative, "
+        "designer_id FROM swarm_fitness ORDER BY posted_at, run_id"
     ).fetchall()
     return [FitnessRow(*r) for r in rows]
 
 
 def genome_names(conn: sqlite3.Connection) -> dict[int, str]:
     return {int(r[0]): str(r[1]) for r in conn.execute("SELECT id, name FROM swarm_genomes")}
+
+
+def all_names(conn: sqlite3.Connection, kind: str) -> set[str]:
+    rows = conn.execute("SELECT name FROM swarm_genomes WHERE kind = ?", (kind,))
+    return {str(r[0]) for r in rows}

@@ -24,6 +24,8 @@ DEFAULTS: dict[str, Any] = {
         "min_baseline_posts": 3,
         "min_posts": 5,
         "min_alive": 2,
+        "population_size": 3,
+        "mutation_model": "",
     },
 }
 
