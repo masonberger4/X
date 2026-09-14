@@ -104,8 +104,23 @@ source only when it is due, and score only scores what is new.
    Writes one draft (a 3 to 6 post thread with a chart or a table) for up to 10
    stories from the last 48 hours scoring at or above the digest threshold
    (30 of 50, from `config.yaml`). Drafts that break a hard rule (advice,
-   made-up numbers, missing source link, too long) are stored as failed, not
-   shown.
+   made-up numbers, missing source link, too long, a missing @handle or #tag)
+   are stored as failed, not shown.
+
+   Posts tag what X can link. A journal, society, regulator or company the
+   pipeline knows the X account of is written as its @handle when a post names
+   it (`@JCO_ASCO`, `@Merck`), and every formal drug name and named trial is a
+   hashtag as the source spells it (`#Trastuzumab Deruxtecan`, `#cilta-cel`,
+   `#DESTINY-Lung02`, `#KEYNOTE-189`); nothing else is a hashtag. Handles come
+   from `config.yaml` only: `x: Merck` on a company's line under
+   `companies: feeds:` or `branding: companies:`, and the `mentions:` list for
+   journals, societies and regulators (`name`, `handle`, `aliases`, `domains`
+   for the URL hosts that identify it, and `match_names: false` for a journal
+   named after an ordinary word such as Blood, which is then recognised by its
+   host only). The drafter is only shown the handles of accounts the story
+   names or that own the source URL's host, and never invents one: a company
+   without `x:` is written by name. Verify each handle on x.com before adding
+   it; a wrong handle mentions a stranger.
    ```
    python run_draft.py --dry-run                 # show what would be drafted
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
@@ -239,7 +254,9 @@ source only when it is due, and score only scores what is new.
    learn.astct.org, say) adds that host to `trusted_domains` in
    `verify\config.yaml` for good, flips every stored verdict from that host
    to trusted, and redraws this draft's table from the verdicts it already
-   has: no new web call, no text change. Doing it by hand is the same: add
+   has: no new web call, no text change. A status bar at the top of the page
+   says so while it runs (redrawing and grading the picture can take up to a
+   minute) and the page reloads when it is done. Doing it by hand is the same: add
    the host to the list and rerun `run_verify.py --draft <id>`. Once the
    scheduler in part 6 is running, this happens automatically after every
    drafting run, so by the time you open the queue the evidence is already
@@ -271,7 +288,11 @@ source only when it is due, and score only scores what is new.
    If the draft has a chart it is shown under "Image" with the exact text a
    screen reader will get (the alt text), and it is attached to the first
    post when published. Check every bar against the source like any other
-   number. "Drop image" posts the text alone; a Revise redraws the chart from
+   number. "Drop image" posts the text alone; when the draft carries two
+   pictures (a step 9 format genome) the button reads "Drop both images" and
+   each picture also has its own "Drop this picture" beside it
+   (`POST /drafts/{id}/image/{index}/drop`), which removes that one and the
+   spec behind it and leaves the other in place. A Revise redraws the chart from
    the new draft (or removes it if the new draft has none). "Redraw" remakes
    the picture from the same spec: a chart is rendered again through the
    grader loop, a table is redrawn from the cell verdicts already stored.
@@ -343,6 +364,11 @@ source only when it is due, and score only scores what is new.
    python run_publish.py
    ```
    Run this a few times over a couple of days until the plan looks right.
+   The shipped `slots: []` is continuous mode: each run posts the top approved
+   draft as soon as `min_gap_minutes` has passed since the last post and the
+   daily cap allows, so a cron every 15 minutes drains the queue one draft per
+   gap, day and night. List times under `slots:` (e.g. `"08:30"`, `"12:15"`) to
+   post only inside those windows instead.
 2. Go live. Two things are required, so nothing posts by accident: in `.env`
    ```
    PUBLISH_ENABLED=1
@@ -529,9 +555,19 @@ to stop it. Four pages:
   kept on the draft (shown as #1, #2) until it posts.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
-  halfway is never retried for you). Posting happens from the approved page
-  or on the schedule; the two limits at the top, posts per day and the
-  minimum gap between posts in minutes, are the only settings the panel
+  halfway is never retried for you). Posting happens from the approved page,
+  on the schedule, or automatically: the "Automatic publishing" switch runs
+  the publisher every N minutes (15 by default) for as long as this app is
+  open, the same run cron would make, so approved drafts go out one per run
+  under the limits and the slots in `publish\config.yaml` with no button
+  pressed. It needs `PUBLISH_ENABLED=1` in `.env` (part 5) like everything
+  else; switched on without it the page says "on, but not live" and nothing
+  runs. The switch and the interval are kept in `publish\config.yaml`
+  (`auto_publish_enabled`, `auto_publish_interval_minutes`), so the app
+  comes back up the way you left it; the approved page shows when the next
+  run is due. Runs that found nothing to post leave no row on the runs page.
+  The two limits at the top, posts per day and the
+  minimum gap between posts in minutes, are the other settings the panel
   edits ("Save limits" writes them into `publish\config.yaml`, and the next
   publish run uses them).
 - **Swarm** (`/swarm`) — step 9's recipes (writer genomes, designers and
@@ -705,7 +741,8 @@ before scoring, `enabled: false` turns it off),
 skips the chart), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules; `media: attach_images`
-attaches or skips the chart), `feedback\config.yaml`,
+attaches or skips the chart; `auto_publish_enabled` and
+`auto_publish_interval_minutes` are the panel's automatic-publishing switch), `feedback\config.yaml`,
 `swarm\config.yaml` (step 9: the cheap model, how many cells per post, how many
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by

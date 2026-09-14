@@ -121,6 +121,19 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
   after generation (plus 280 chars/post with URLs as 23, source URL placement,
   and verbatim-number verification); drafts that fail are stored as `failed`.
+- **Mentions and hashtags are a hard rule** (rule 11 in `draft/prompt.py:hard_rules`,
+  mirrored by `draft/tags.py:tag_problems`, called from `check_hard_rules` per post and
+  from `swarm/cells.py:cell_problems` per cell): an account whose X handle the story is
+  given (`config.yaml`: `x:` on a `companies.feeds` / `branding.companies` entry, and the
+  `mentions:` list of journals, societies and regulators with `domains:` and
+  `match_names:`) must be written as @handle when a post names it, and a formal drug name
+  (INN stem regex, `-cel` short names) or trial name (`KEYNOTE-189` shape) must be a
+  hashtag. Handles are never guessed: `drafter.story_handles` (`tags.load_handles` +
+  `relevant_handles`: named in the source text, owning the URL host, or the
+  `company_<key>` source) is the only list the model sees (`X HANDLES` in the user prompt,
+  `Brief.handles` for the swarm) and the only one enforced. `numbers_in` ignores
+  `@`/`#` tokens so a trial name's digits are not a number to verify. Publish's re-check
+  and human-approved texts are untouched.
 - **The shape of a draft is a gene, not a constant** (step 9 phase four). `Draft.thread`
   is always the list of posts; `draft/schema.py:Format` (shape `thread` | `single` |
   `long`, `min_posts`/`max_posts`, `visuals` 0-2, one anchor word per visual, `max_chars`)
@@ -274,17 +287,28 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   renders them from the `current_run` / `publish_live` template globals the panel installs
   on both template envs, so the standalone queue shows none). The one argv the panel builds
   itself is `JobManager.start_publish_now(draft_id)` (`POST /publishing/now` from the
-  approved page): `run_publish.py --live --now --draft ID` as its own run, the single
-  exception to `FORBIDDEN_ARGS`, still gated by `PUBLISH_ENABLED=1` inside run_publish.py.
+  approved page): `run_publish.py --live --now --draft ID` as its own run, still gated by
+  `PUBLISH_ENABLED=1` inside run_publish.py. The other is **automatic publishing**
+  (`panel/autopublish.py:AutoPublisher`, started and stopped by the app's lifespan so a
+  test client never runs it): while `auto_publish_enabled` in `publish/config.yaml` is on
+  and `PUBLISH_ENABLED=1`, `tick(now)` (pure decision, clock as a parameter) starts
+  `JobManager.start_publish_auto()`, `run_publish.py --live` with no other flag, every
+  `auto_publish_interval_minutes`, retrying on the next 30 s poll when a run is in
+  progress. Those two are the only argvs that carry the flag (`_launch_publish`), and
+  `FORBIDDEN_ARGS` still refuses it in any configured step. An automatic run whose log
+  says "nothing to post" is `Job.quiet`: kept out of the runs page and `pipeline_runs`.
+  `POST /publishing/auto` writes the switch and interval through
+  `publish/scheduler.py:save_auto_publish` (same line edit as `save_caps`).
   "Set schedule" on the approved page (`POST /publishing/order`, `panel/publishing.py`)
   writes the human's order to step 3's `schedule.position` (guarded migration in
   `publish/store.py`, `set_order`, unclaimed rows only); `scheduler.rank` puts ordered drafts
   first, then breaking, then policy; `store.publish_states` reads it back for the pill. The
   panel never writes `config.yaml`, `draft/voice.md` or a draft's text. The one settings
-  file it edits itself is `publish/config.yaml`, two keys only (the included queue routes
+  file it edits itself is `publish/config.yaml`, four keys only (the included queue routes
   add `trusted_domains` in `verify/config.yaml`, above): `POST /publishing/caps` calls
   `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
-  comments kept). It has
+  comments kept) and `POST /publishing/auto` calls `save_auto_publish` (the two
+  `auto_publish_*` keys). It has
   no authentication: `run_app.py` binds localhost by default. `/publishing` and
   `/feedback` are otherwise views: no post button, and a report's suggestions are rendered,
   never applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
@@ -360,7 +384,8 @@ draft/    schema.py (Draft, Format, validate_output), chart.py (chart + table sp
           knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,
           grade_image, call_grader), branding.py (tickers + logos for company cells),
           logos.py (site icon discovery + PNG normalisation for run_logos.py), prompt.py,
-          voice.md, drafter.py, config.yaml, settings.py,
+          voice.md, drafter.py, config.yaml, settings.py, tags.py (Handle, load_handles,
+          relevant_handles, trial_names, drug_names, tag_problems),
           examples.py (EditExample, select_edit_examples, format_examples_block),
           voice_report.py (VoiceReport, build_report, render_markdown, CLI)
 approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
@@ -369,7 +394,8 @@ approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
           render-grade loop), app.py (/voice,
           /drafts/{id}/image), templates/
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
-          ratings), jobs.py (JobManager, background step runs), frozen.py (data dir,
+          ratings), jobs.py (JobManager, background step runs), autopublish.py
+          (AutoPublisher: the timed publish loop), frozen.py (data dir,
           step interpreter and bundle manifest for the desktop build),
           app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback, /swarm), templates/
 swarm/    config.yaml, settings.py, genome.py (Slot, Genome, DEFAULT_GENOME), prompts.py

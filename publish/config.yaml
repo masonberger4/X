@@ -3,11 +3,19 @@ timezone: America/New_York
 
 # Daily posting slots, local time (HH:MM). run_publish.py is meant to run from cron every
 # 15 minutes; a slot is "open" from its start until grace_minutes later, and it is used at
-# most once per day.
-slots:
-  - "08:30"
-  - "12:15"
+# most once per day. An EMPTY list (`slots: []`) turns slots off: every run then posts the
+# top approved draft as soon as min_gap_minutes has passed since the last post and the
+# daily cap is not reached, so the queue drains at one draft per gap, around the clock.
+slots: []
 grace_minutes: 20
+
+# Automatic publishing from the control panel (run_app.py / the desktop app). While the
+# app is open and this is on, it runs `run_publish.py --live` every interval (the same
+# run cron would make), so approved drafts post on their own under the caps below and the
+# slots above. Still nothing posts without PUBLISH_ENABLED=1 in .env. The panel's
+# publishing page edits these two keys ("Automatic publishing"); cron users leave them.
+auto_publish_enabled: false
+auto_publish_interval_minutes: 15
 
 # Hard limits that apply to every post, breaking news included.
 max_posts_per_day: 16

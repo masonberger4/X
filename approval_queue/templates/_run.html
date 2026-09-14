@@ -18,5 +18,12 @@
   </form>
   {% endfor %}
   {% if not run and buttons %}<span class="meta">logs on <a href="/runs">the runs page</a></span>{% endif %}
+  {% if auto_publish is defined %}{% set auto = auto_publish() %}
+  {% if auto.enabled %}
+  <span class="meta">· automatic publishing
+    {% if auto.active %}<span class="pill ok">on</span> next run {{ auto.next_due }}
+    {% else %}<span class="pill warn">on, but not live</span>{% endif %}
+    (<a href="/publishing">settings</a>)</span>
+  {% endif %}{% endif %}
 </div>
 {% endif %}

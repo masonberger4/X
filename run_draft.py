@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 
 from approval_queue import images, store
 from draft.chart import Style
-from draft.drafter import DraftRejected, draft_item
+from draft.drafter import DraftRejected, draft_item, story_handles
 from draft.examples import (
     EditExample,
     RejectionExample,
@@ -93,6 +93,7 @@ def draft_with_swarm(
     swarm.engine.run_swarm. Both variants are recorded; the run row gets its draft_id once
     the winner is stored. The run also picks the designer (phase three) whose Style the
     winner's picture starts from; `designer_style_for(conn, run_id)` returns it."""
+    handles = story_handles(source_text=f"{c.title}\n{c.abstract}", url=c.url, source=c.source)
     brief = Brief(
         title=c.title,
         abstract=c.abstract,
@@ -101,6 +102,7 @@ def draft_with_swarm(
         published_at=c.published_at,
         suggested_angle=c.suggested_angle,
         rationale=c.rationale,
+        handles=tuple(handles),
     )
     genome = swarm_store.next_genome(conn)
     designer = swarm_store.next_designer(conn)
@@ -145,6 +147,7 @@ def draft_with_swarm(
                 rationale=c.rationale,
                 examples_block=examples_block,
                 fmt=fmt,
+                handles=handles,
             )
         except DraftRejected as exc:
             control_problem = exc.reasons
