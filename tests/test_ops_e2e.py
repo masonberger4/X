@@ -272,5 +272,5 @@ def test_default_config_dry_run_lists_real_clis(capsys):
         name, reason = line.split()[:2]
         if name in ("ingest", "score", "draft"):
             assert reason == "dry" and sys.executable in line
-        if name == "feedback":
-            assert reason in ("disabled", "not")  # not merged on this checkout, or disabled
+        if name in ("feedback", "evolve"):
+            assert reason == "dry" and sys.executable in line  # on, and the CLI exists
