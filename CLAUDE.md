@@ -157,7 +157,13 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   the `images` extra, imported inside `render_chart`; fail-soft: no image, never no
   draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
   and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
-  turns rendering off. The queue serves it at `/drafts/{id}/image` and `store.drop_image`
+  turns rendering off. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
+  the named palettes and `Style.palette` / `Style.multi_colour` pick one, so the designer
+  genome and the image grader (`draft/grader.py`, whose knob list and checklist name them;
+  `distinctiveness` replaced the old house-style row) both vary it; `Style.apply` ignores an
+  unknown palette. Company bars in a chart are branded like table cells
+  (`branding.brand_chart` from `images.attach_chart`: ticker in the label, logo in the
+  gutter, `render_chart(logos=)`); `brand_table` also tries the row-label column. The queue serves it at `/drafts/{id}/image` and `store.drop_image`
   is the only way a human removes it (every picture at once). Step 3 attaches each picture
   to the post it is anchored to, the first post before phase four (`publish/store.py`
   reads `format_json`/`images_json` into `Approved.shape`, `max_chars`, `images`;
@@ -345,7 +351,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `designer_id`, `bet_summary`, `prune`). `swarm/mutate.py` breeds: `breed_writer` is
   the one strong-model call (through `call_anthropic`) and `validate_child` /
   `diff_count` enforce exactly one change inside the bounds in `swarm/genome.py`;
-  `breed_designer` is pure code (one Style knob stepped). `run_evolve.py` writes only
+  `breed_designer` is pure code (one Style knob stepped, a flag flipped or the palette
+  swapped; `evolve.designer_population_size` is their population). `run_evolve.py` writes only
   `swarm_fitness` and `swarm_genomes` and is the `evolve` step in `ops/config.yaml`.
   `swarm_genomes.kind`, `swarm_runs.designer_id` and `swarm_fitness.designer_id` are
   guarded migrations. The panel's `/swarm` page reads through

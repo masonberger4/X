@@ -1,6 +1,7 @@
 """Phase three: breeding. A writer child is written by ONE strong-model call that reads the
 top genomes and their best posts and varies exactly one thing; code checks that it did. A
-designer child needs no model: one Style knob is stepped at random inside its range.
+designer child needs no model: one Style knob is stepped at random inside its range, a flag
+flipped, or the palette swapped for another one.
 
 `call` defaults to draft.drafter.call_anthropic, the same single network call every other
 swarm step uses; tests pass a fake."""
@@ -206,19 +207,28 @@ _STEP = {
     "label_wrap": 6,
     "table_row_height": 0.015,
 }
-_FLAGS = ("highlight_first", "gridlines", "track")
+_FLAGS = ("highlight_first", "gridlines", "track", "multi_colour")
 
 
 def breed_designer(parent: Designer, taken_names: set[str], rng: random.Random) -> Designer:
     """A child that differs from its parent in exactly one Style knob, stepped up or down
-    within Style.RANGES (or one flag flipped)."""
+    within Style.RANGES, one flag flipped, or one choice (the palette) swapped. Colour
+    knobs are drawn as often as the layout ones together, so palettes drift quickly."""
     base = Style().apply(parent.style)
     knobs = list(_STEP) + list(_FLAGS)
+    colour = ["palette", "multi_colour"]
     rng.shuffle(knobs)
+    if rng.random() < 0.5:
+        knobs = colour + knobs
     for knob in knobs:
         current = getattr(base, knob)
-        if knob in _FLAGS:
-            new: Any = not current
+        if knob in Style.CHOICES:
+            options = [c for c in Style.CHOICES[knob] if c != current]
+            if not options:
+                continue
+            new: Any = rng.choice(options)
+        elif knob in _FLAGS:
+            new = not current
         else:
             lo, hi = Style.RANGES[knob]
             direction = rng.choice((-1, 1))

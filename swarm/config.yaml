@@ -38,9 +38,13 @@ evolve:
   min_alive: 2              # pruning never leaves fewer live genomes than this
   format_min_posts: 8       # a format is a coarse gene: judged only after this many posts
   format_population_size: 5 # how many live formats breed keeps
-  # Phase three (run_evolve.py breed): keep this many live writer genomes and this many
-  # live designers; each gap after pruning is filled by one child of a top scorer.
+  # Phase three (run_evolve.py breed): keep this many live writer genomes; each gap after
+  # pruning is filled by one child of a top scorer.
   population_size: 3
+  # Live designers (a draft.chart.Style preset: palette, one hue per bar, layout knobs).
+  # Colour is cheap to vary, so more of them stay alive than writers and the pictures
+  # keep changing from card to card.
+  designer_population_size: 6
   # The one strong model in the loop: writes a writer child that varies exactly one thing
   # (a slot rule, a split or merge, fan_out, layers). Blank = the drafting model
   # (DRAFT_MODEL / models.drafter / draft/config.yaml). Designer children need no model.

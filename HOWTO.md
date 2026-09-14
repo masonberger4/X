@@ -142,21 +142,30 @@ source only when it is due, and score only scores what is new.
    on the draft page is still just the model's one-line idea for you; the
    chart is what actually gets attached. `images: enabled: false` in
    `draft\config.yaml` turns the drawing off. Every picture (chart or table)
-   uses one house style: a 16:9 card with a navy rule and an
-   "IMMUNO-ONCOLOGY · DATA BRIEF" eyebrow, the title, horizontal bars in one
-   blue with a light track showing the full scale and the verified value at
-   each tip (tables get a navy header row and zebra rows), and a footer with
-   the note on the left and the source host on the right. The colours, the
-   eyebrow text and the font list are constants at the top of the rendering
-   section of `draft\chart.py`.
+   shares one card layout: 16:9, an accent rule and an
+   "IMMUNO-ONCOLOGY · DATA BRIEF" eyebrow, the title, horizontal bars with a
+   light track showing the full scale and the verified value at each tip
+   (tables get a rounded header row and zebra rows), and a footer with the
+   note on the left and the source host on the right. The colours are NOT
+   fixed: `draft\chart.py` ships eight named palettes (navy, teal, crimson,
+   forest, amber, plum, slate and midnight, a dark card), and a picture's
+   palette and whether each bar gets its own hue (`multi_colour`) are layout
+   knobs like text size, so the designer genome a draft starts from and the
+   image grader both choose them. The eyebrow text and the font list are
+   constants at the top of the rendering section of `draft\chart.py`; the
+   palettes sit just below them and a new one is a new entry in `PALETTES`.
 
    Every picture is then graded. A second model looks at the PNG and scores
    it 1 to 10 on three things: easy to read, good use of colour and graphics,
    little empty space. It also lists the flaws it saw and a fix for each.
    A score of 8 or more is done. Below that the code applies the grader's
-   layout changes (text size, bar thickness, row spacing, a highlighted first
-   bar, gridlines, the scale track) and draws the picture again, up to four
-   times, and keeps the best-scoring version. A low score always costs another
+   layout and colour changes (text size, bar thickness, row spacing, a
+   highlighted first bar, gridlines, the scale track, the palette, one hue
+   per bar) and draws the picture again, up to four
+   times, and keeps the best-scoring version. The grader is told that the
+   same navy card every time is a flaw and to try another palette when a
+   picture is merely competent; a bold try costs nothing because the best
+   render is what stays. A low score always costs another
    render: if the grader names no layout change, the code steps the text size and
    row spacing up itself. The grader can only move layout;
    it can never add or change a number, a label or a title. Each draft page in
@@ -169,11 +178,16 @@ source only when it is due, and score only scores what is new.
    drawn and the log says so. Besides the overall score the grader rates a
    checklist of professional touches (readable at thumbnail size, clear
    hierarchy, aligned columns, a rounded 3D header, logos and tickers in
-   company cells, consistent numbers, a quiet source line, house style), and
+   company cells, consistent numbers, a quiet source line, and whether the
+   card would stand out from the account's other cards), and
    those per-item scores show next to each render on the draft page.
 
-   Company cells in a table get a stock ticker and a logo automatically when
-   the company is configured. Add `ticker: AMGN` to the company's line under
+   Company cells in a table, and chart bars labelled with a company, get a
+   stock ticker and a logo automatically when
+   the company is configured. In a table that means the row-label column and
+   every column headed company, sponsor, developer, partner, owner or
+   acquirer; only an exact configured name matches, so a trial or drug name
+   in the first column is left alone. Add `ticker: AMGN` to the company's line under
    `companies: feeds:` in `config.yaml`, or list a company that has no feed
    under `branding: companies:` (with `aliases:` for other spellings, e.g.
    J&J). That `domain:` also makes the company's own press releases a trusted
@@ -182,7 +196,8 @@ source only when it is due, and score only scores what is new.
 
        python run_logos.py
 
-   once: for every configured company it opens the company's own website
+   once (the shipped repo has no logo files, so until you do every card shows
+   tickers only): for every configured company it opens the company's own website
    (`domain:` on the config line, or the feed's host with `ir.` / `investors.`
    / `www.` removed) and saves the icon that site advertises (its
    apple-touch-icon, else the largest favicon) as `assets\logos\<key>.png`.

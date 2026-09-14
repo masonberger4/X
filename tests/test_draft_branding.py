@@ -139,3 +139,26 @@ def test_attach_table_brands_from_root_config(conn, monkeypatch, tmp_path):
     assert seen["rows"][0][1] == "Amgen ($AMGN)" and seen["rows"][1][1] == "Unknown Co"
     assert "Amgen ($AMGN)" in store.get_draft(conn, did).image_alt
     assert store.get_draft(conn, did).draft.table.rows[0][1] == "Amgen"  # spec untouched
+
+
+def test_brand_chart_labels_bars_that_name_a_company(tmp_path):
+    from draft.chart import Chart
+
+    (tmp_path / "logos").mkdir()
+    (tmp_path / "logos" / "amgen.png").write_bytes(b"\x89PNG")
+    b = branding.load_branding(CFG, tmp_path)
+    chart = Chart("Deal sizes", ["Amgen", "Merck KGaA", "Boehringer Ingelheim"], [1.0, 2.0, 3.0])
+    branded, logos = branding.brand_chart(chart, b)
+    assert branded.labels == ["Amgen ($AMGN)", "Merck KGaA", "Boehringer Ingelheim"]
+    assert branded.values == chart.values and branded.title == chart.title
+    assert logos == {0: tmp_path / "logos" / "amgen.png"}
+    assert chart.labels[0] == "Amgen"  # the input chart is untouched
+    plain = Chart("ORR", ["Arm A", "Arm B"], [1.0, 2.0])
+    assert branding.brand_chart(plain, b) == (plain, {})
+
+
+def test_brand_table_tries_the_row_label_column(tmp_path):
+    b = branding.load_branding(CFG, tmp_path)
+    t = Table("t", ["Asset", "Target"], [["Amgen", "x"], ["KEYNOTE-189", "y"]])
+    branded, logos = branding.brand_table(t, b)
+    assert [r[0] for r in branded.rows] == ["Amgen ($AMGN)", "KEYNOTE-189"] and logos == {}

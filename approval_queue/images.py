@@ -52,12 +52,15 @@ def attach_chart(
     if isinstance(chart, Table):
         log.info("draft %d: table awaits cell verification (run_verify.py)", draft_id)
         return None
+    drawn, logos = _brand_chart(chart)
     return _render(
         conn,
         draft_id,
-        chart,
-        lambda path, style: render_chart(chart, path, source_url=source_url, style=style),
-        alt_text(chart, source_url),
+        drawn,
+        lambda path, style: render_chart(
+            drawn, path, source_url=source_url, style=style, logos=logos
+        ),
+        alt_text(drawn, source_url),
         cfg,
         style,
     )
@@ -77,12 +80,15 @@ def attach_extra_charts(
     picture. Returns the paths that were rendered."""
     out: list[Path] = []
     for k, chart in enumerate(charts, start=1):
+        drawn, logos = _brand_chart(chart)
         path = _render(
             conn,
             draft_id,
-            chart,
-            lambda path, style, c=chart: render_chart(c, path, source_url=source_url, style=style),
-            alt_text(chart, source_url),
+            drawn,
+            lambda path, style, c=drawn, lg=logos: render_chart(
+                c, path, source_url=source_url, style=style, logos=lg
+            ),
+            alt_text(drawn, source_url),
             cfg,
             style,
             index=k,
@@ -103,8 +109,9 @@ def attach_table(
     style: Style | None = None,
 ) -> Path | None:
     """Render a table whose cells step 2b has checked; `blanked` cells are drawn as blanks.
-    Company cells get their configured ticker and logo first (draft/branding.py); the alt
-    text describes the branded table so it matches the picture."""
+    Company cells get their configured ticker and logo first (draft/branding.py, as bar
+    labels do in attach_chart); the alt text describes the branded table so it matches the
+    picture."""
     drawn, logos = _brand(table)
     return _render(
         conn,
@@ -119,17 +126,30 @@ def attach_table(
     )
 
 
+def _branding() -> branding.Branding:
+    import config as root_config
+    from panel.frozen import data_dir
+
+    return branding.load_branding(root_config.load_config(), data_dir())
+
+
 def _brand(table: Table) -> tuple[Table, dict]:
     """Tickers and logos from the root config; any failure means the table as it is."""
     try:
-        import config as root_config
-        from panel.frozen import data_dir
-
-        root = root_config.load_config()
-        return branding.brand_table(table, branding.load_branding(root, data_dir()))
+        return branding.brand_table(table, _branding())
     except Exception:
         log.exception("table branding skipped")
         return table, {}
+
+
+def _brand_chart(chart: Chart) -> tuple[Chart, dict[int, Path]]:
+    """Tickers and logos on bar labels that name a configured company; any failure means
+    the chart as it is."""
+    try:
+        return branding.brand_chart(chart, _branding())
+    except Exception:
+        log.exception("chart branding skipped")
+        return chart, {}
 
 
 def _render(

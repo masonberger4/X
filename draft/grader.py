@@ -9,10 +9,11 @@ draws again, up to `images.grader.max_iterations` renders in total. The best-sco
 render is what the draft keeps. Every grade is stored in `image_grades`
 (approval_queue/store.py) so the queue can show it.
 
-The grader only ever changes LAYOUT. It cannot add, remove or edit a number, a label or a
-title: those come from the verified spec, and the knobs it may turn are clamped by
-`Style.apply`. `call_grader` is this module's single network call (the Anthropic API with
-an image block, or the Claude Code CLI reading the file with its Read tool when
+The grader only ever changes LAYOUT and COLOUR. It cannot add, remove or edit a number,
+a label or a title: those come from the verified spec, and the knobs it may turn are
+clamped by `Style.apply` (a palette name outside `draft.chart.PALETTES` is ignored).
+`call_grader` is this module's single network call (the Anthropic API with an image block,
+or the Claude Code CLI reading the file with its Read tool when
 `models.backend: claude_code`). Settings: `images.grader` in draft/config.yaml.
 """
 
@@ -27,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import claude_cli
-from draft.chart import Chart, Style, Table
+from draft.chart import PALETTES, Chart, Style, Table
 from draft.drafter import parse_json_response
 from draft.settings import load_draft_config
 
@@ -50,8 +51,9 @@ CRITERIA = (
 CHECKLIST: dict[str, str] = {
     "readability": "easy to read at timeline size (a 600 px wide thumbnail): text large "
     "enough, strong contrast, nothing clipped or overlapping",
-    "colour_graphics": "colour and graphics used well: one accent hue, neutral ink, "
-    "recessive rules, emphasis on the key row or bar",
+    "colour_graphics": "colour and graphics used well: a palette that suits the story, "
+    "strong contrast, recessive rules, emphasis on the key row or bar, no muddy or "
+    "clashing hues",
     "negative_space": "limited negative space: the card is filled, no empty band larger than a row",
     "hierarchy": "typographic hierarchy: eyebrow, title, headers, body and footer each "
     "clearly one level, title dominant",
@@ -64,8 +66,9 @@ CHECKLIST: dict[str, str] = {
     "number_format": "numbers and units are consistently formatted (same decimals, unit "
     "shown once, thousands separated) and value labels sit clear of the bar ends",
     "source_footer": "the source and note are legible but recessive, on one footer line",
-    "consistency": "consistent with the house style: same eyebrow, accent colour, fonts "
-    "and layout as other cards from this account",
+    "distinctiveness": "the card would stand out in a feed of this account's other cards: "
+    "the palette and emphasis feel chosen for this story rather than the same navy card "
+    "every time, while the layout, eyebrow and fonts stay the house style",
 }
 
 
@@ -120,6 +123,7 @@ def grader_settings(cfg: dict | None = None) -> GraderSettings:
 
 
 _CHECKLIST_TEXT = "\n".join(f"- {name}: {text}" for name, text in CHECKLIST.items())
+_PALETTE_NAMES = ", ".join(PALETTES)
 
 SYSTEM_PROMPT = f"""You are a strict graphic-design grader for data graphics attached to X posts
 by a biotech investing account. You are shown one rendered PNG (1600x900) and its spec.
@@ -144,10 +148,18 @@ You steer the next render only through these layout knobs (omit any you would ke
 - bar_height (0.3-0.8): bar thickness as a fraction of the row pitch (chart only)
 - row_pitch (0.06-0.16): vertical space per bar; larger fills the card (chart only)
 - label_wrap (16-60): characters per line before a bar label wraps (chart only)
-- highlight_first (true/false): first bar in navy, the rest in a lighter tint
+- highlight_first (true/false): first bar in the accent, the rest in a lighter tint
 - gridlines (true/false)
 - track (true/false): the light bar behind each bar showing the full scale
 - table_row_height (0.06-0.16): vertical space per table row (table only)
+- palette (one of: {_PALETTE_NAMES}): the card's colours; midnight is a dark card. Pick
+  the one that reads best for this story; the same navy on every card is a flaw.
+- multi_colour (true/false): one distinct hue per bar instead of one series colour; good
+  when the bars are different things (arms, companies), poor when they are one measure
+
+Experiment: when the picture is merely competent, ask for a different palette or
+multi_colour and see whether the next render reads better; the best-scoring render is
+the one kept, so a bold try costs nothing.
 
 Whenever the score is below 8, "adjustments" MUST name at least one knob change that
 addresses the biggest flaw (for example a table that leaves the bottom of the card empty

@@ -312,21 +312,188 @@ def matplotlib_available() -> bool:
     return True
 
 
-# --- rendering: one house style for every picture -----------------------------------------
-# A 16:9 card: off-white surface, an accent rule and an eyebrow line at the top, a bold
-# title, the data in one deep blue, a hairline footer with the source and note. Every
+# --- rendering: one card layout, many palettes ----------------------------------------------
+# A 16:9 card: a surface, an accent rule and an eyebrow line at the top, a bold title, the
+# data in the palette's series colour, a hairline footer with the source and note. Every
 # number a reader sees is still the verified `format_value` text; the style changes nothing
-# the fact checks look at.
+# the fact checks look at. Which palette a card uses is a Style knob (`Style.palette`), so a
+# designer genome and the image grader can both choose it: the layout is the house style,
+# the colours are meant to vary from card to card.
 
-SURFACE = "#fbfaf7"
-INK = "#101418"
-INK_2 = "#525a63"
-INK_3 = "#8a929b"
-RULE = "#dcdad3"
-ACCENT = "#123f6b"  # the series colour; one hue, magnitude only
-ACCENT_SOFT = "#c9d6e4"  # the track behind each bar
-HEADER_FILL = "#123f6b"
-ZEBRA = "#e9edf2"  # visibly cooler than the surface
+
+@dataclass(frozen=True)
+class Palette:
+    """The colours of one card. `series` is the categorical run used when
+    `Style.multi_colour` is on (one hue per bar); `accent` is the single series colour,
+    `tint` the comparators when the first bar is highlighted, `soft` the track."""
+
+    surface: str
+    ink: str
+    ink_2: str
+    ink_3: str
+    rule: str
+    accent: str
+    soft: str
+    tint: str
+    zebra: str
+    series: tuple[str, ...]
+    header: str = ""  # table header fill; the accent when empty
+    shadow: str = "#08213d"
+
+    @property
+    def header_fill(self) -> str:
+        return self.header or self.accent
+
+
+_LIGHT = dict(surface="#fbfaf7", ink="#101418", ink_2="#525a63", ink_3="#8a929b", rule="#dcdad3")
+_DARK = dict(surface="#141a22", ink="#f2f4f6", ink_2="#b7bec7", ink_3="#7d8791", rule="#2c3540")
+_SERIES = ("#123f6b", "#c2410c", "#0f766e", "#6d28d9", "#b45309", "#be123c", "#3f6212", "#0e7490")
+
+PALETTES: dict[str, Palette] = {
+    "navy": Palette(
+        **_LIGHT, accent="#123f6b", soft="#c9d6e4", tint="#7f9bbd", zebra="#e9edf2", series=_SERIES
+    ),
+    "teal": Palette(
+        **_LIGHT,
+        accent="#0f766e",
+        soft="#c6e4df",
+        tint="#7cbcb4",
+        zebra="#e6f1ef",
+        series=(
+            "#0f766e",
+            "#c2410c",
+            "#123f6b",
+            "#6d28d9",
+            "#b45309",
+            "#be123c",
+            "#3f6212",
+            "#0e7490",
+        ),
+        shadow="#093f3a",
+    ),
+    "crimson": Palette(
+        **_LIGHT,
+        accent="#9f1239",
+        soft="#f0d3db",
+        tint="#d07d94",
+        zebra="#f6eaee",
+        series=(
+            "#9f1239",
+            "#123f6b",
+            "#0f766e",
+            "#b45309",
+            "#6d28d9",
+            "#3f6212",
+            "#0e7490",
+            "#c2410c",
+        ),
+        shadow="#4c0519",
+    ),
+    "forest": Palette(
+        **_LIGHT,
+        accent="#166534",
+        soft="#cfe4d6",
+        tint="#7fb894",
+        zebra="#e8f1eb",
+        series=(
+            "#166534",
+            "#c2410c",
+            "#123f6b",
+            "#b45309",
+            "#6d28d9",
+            "#be123c",
+            "#0e7490",
+            "#3f6212",
+        ),
+        shadow="#052e16",
+    ),
+    "amber": Palette(
+        **_LIGHT,
+        accent="#b45309",
+        soft="#f3e1c8",
+        tint="#dda36b",
+        zebra="#f7efe4",
+        series=(
+            "#b45309",
+            "#123f6b",
+            "#0f766e",
+            "#9f1239",
+            "#6d28d9",
+            "#3f6212",
+            "#0e7490",
+            "#c2410c",
+        ),
+        shadow="#451a03",
+    ),
+    "plum": Palette(
+        **_LIGHT,
+        accent="#6d28d9",
+        soft="#e0d6f5",
+        tint="#ac8fe6",
+        zebra="#efeaf8",
+        series=(
+            "#6d28d9",
+            "#0f766e",
+            "#c2410c",
+            "#123f6b",
+            "#b45309",
+            "#be123c",
+            "#3f6212",
+            "#0e7490",
+        ),
+        shadow="#2e1065",
+    ),
+    "slate": Palette(
+        **_LIGHT,
+        accent="#334155",
+        soft="#d9dee6",
+        tint="#8e9bad",
+        zebra="#eaedf1",
+        series=(
+            "#334155",
+            "#c2410c",
+            "#0f766e",
+            "#6d28d9",
+            "#b45309",
+            "#be123c",
+            "#123f6b",
+            "#0e7490",
+        ),
+        shadow="#0f172a",
+    ),
+    "midnight": Palette(  # the one dark card: pale ink on a near-black surface
+        **_DARK,
+        accent="#60a5fa",
+        soft="#243244",
+        tint="#3b6ea5",
+        zebra="#1b232e",
+        series=(
+            "#60a5fa",
+            "#fb923c",
+            "#2dd4bf",
+            "#c084fc",
+            "#fbbf24",
+            "#fb7185",
+            "#a3e635",
+            "#22d3ee",
+        ),
+        header="#1d4ed8",
+        shadow="#000000",
+    ),
+}
+DEFAULT_PALETTE = "navy"
+
+# The house (navy) values, kept as module constants for callers and tests that read them.
+SURFACE = PALETTES[DEFAULT_PALETTE].surface
+INK = PALETTES[DEFAULT_PALETTE].ink
+INK_2 = PALETTES[DEFAULT_PALETTE].ink_2
+INK_3 = PALETTES[DEFAULT_PALETTE].ink_3
+RULE = PALETTES[DEFAULT_PALETTE].rule
+ACCENT = PALETTES[DEFAULT_PALETTE].accent
+ACCENT_SOFT = PALETTES[DEFAULT_PALETTE].soft
+HEADER_FILL = PALETTES[DEFAULT_PALETTE].header_fill
+ZEBRA = PALETTES[DEFAULT_PALETTE].zebra
+ACCENT_TINT = PALETTES[DEFAULT_PALETTE].tint
 EYEBROW = "IMMUNO-ONCOLOGY  ·  DATA BRIEF"
 FONT_FAMILIES = [
     "Inter",
@@ -334,8 +501,6 @@ FONT_FAMILIES = [
     "Liberation Sans",
     "DejaVu Sans",
 ]  # first installed wins
-
-ACCENT_TINT = "#7f9bbd"  # comparators when the first bar is highlighted
 
 
 @dataclass
@@ -353,6 +518,8 @@ class Style:
     gridlines: bool = True
     track: bool = True  # light bar behind each bar showing the full scale
     table_row_height: float = 0.105  # figure fraction per table row (0.06-0.16)
+    palette: str = DEFAULT_PALETTE  # one of PALETTES: the card's colours
+    multi_colour: bool = False  # one hue per bar from the palette's series (chart only)
 
     RANGES = {
         "font_scale": (0.7, 1.6),
@@ -362,13 +529,19 @@ class Style:
         "label_wrap": (16, 60),
         "table_row_height": (0.06, 0.16),
     }
+    CHOICES = {"palette": tuple(PALETTES)}
+
+    @property
+    def colours(self) -> Palette:
+        return PALETTES.get(self.palette, PALETTES[DEFAULT_PALETTE])
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     def apply(self, changes: dict[str, Any] | None) -> Style:
         """A copy with `changes` applied: unknown keys and None values are ignored, numbers
-        are clamped to their range, flags are coerced to bool."""
+        are clamped to their range, a choice outside its options is ignored, flags are
+        coerced to bool."""
         from dataclasses import replace
 
         clean: dict[str, Any] = {}
@@ -383,6 +556,10 @@ class Style:
                     continue
                 num = min(max(num, lo), hi)
                 clean[key] = int(round(num)) if key == "label_wrap" else num
+            elif key in self.CHOICES:
+                name = str(value).strip().lower()
+                if name in self.CHOICES[key]:
+                    clean[key] = name
             else:
                 clean[key] = bool(value)
         return replace(self, **clean)
@@ -396,8 +573,10 @@ _PLOT_TOP = 0.74
 _PLOT_BOTTOM = 0.16
 
 
-def _setup():
-    """Import matplotlib for drawing (raises ImportError without it) and return pyplot."""
+def _setup(pal: Palette | None = None):
+    """Import matplotlib for drawing (raises ImportError without it) and return pyplot,
+    with the text and axis colours of `pal` (the house palette by default)."""
+    pal = pal or PALETTES[DEFAULT_PALETTE]
     import matplotlib
 
     matplotlib.use("Agg")
@@ -409,11 +588,11 @@ def _setup():
     plt.rcParams.update(
         {
             "font.family": family,
-            "text.color": INK,
-            "axes.edgecolor": RULE,
-            "axes.labelcolor": INK_2,
-            "xtick.color": INK_2,
-            "ytick.color": INK_2,
+            "text.color": pal.ink,
+            "axes.edgecolor": pal.rule,
+            "axes.labelcolor": pal.ink_2,
+            "xtick.color": pal.ink_2,
+            "ytick.color": pal.ink_2,
             "svg.fonttype": "none",
         }
     )
@@ -434,16 +613,19 @@ def _frame(
     from matplotlib.patches import Rectangle
 
     st = style or Style()
+    pal = st.colours
     fs, ts = st.font_scale, st.title_scale
-    fig.patch.set_facecolor(SURFACE)
+    fig.patch.set_facecolor(pal.surface)
     # accent rule across the top
-    fig.add_artist(Rectangle((0, 0.985), 1, 0.015, transform=fig.transFigure, color=ACCENT, lw=0))
+    fig.add_artist(
+        Rectangle((0, 0.985), 1, 0.015, transform=fig.transFigure, color=pal.accent, lw=0)
+    )
     fig.text(
         _MARGIN_X,
         0.925,
         EYEBROW,
         fontsize=6.2 * fs,
-        color=INK_3,
+        color=pal.ink_3,
         fontweight="bold",
         ha="left",
         va="center",
@@ -454,7 +636,7 @@ def _frame(
         _wrap(title, max(20, int(62 / ts))),
         fontsize=12.5 * ts,
         fontweight="bold",
-        color=INK,
+        color=pal.ink,
         ha="left",
         va="center",
         linespacing=1.15,
@@ -465,7 +647,7 @@ def _frame(
             _PLOT_TOP + 0.035,
             _wrap(subtitle, 120),
             fontsize=6.8 * fs,
-            color=INK_2,
+            color=pal.ink_2,
             ha="left",
             va="center",
         )
@@ -474,7 +656,7 @@ def _frame(
             [_MARGIN_X, 1 - _MARGIN_X],
             [_FOOTER_Y + 0.035] * 2,
             transform=fig.transFigure,
-            color=RULE,
+            color=pal.rule,
             lw=0.6,
         )
     )
@@ -485,7 +667,7 @@ def _frame(
             _FOOTER_Y,
             _wrap(left, 110),
             fontsize=6 * fs,
-            color=INK_2,
+            color=pal.ink_2,
             ha="left",
             va="center",
         )
@@ -495,7 +677,7 @@ def _frame(
                 _FOOTER_Y,
                 "   ·   ".join(right),
                 fontsize=6 * fs,
-                color=INK_3,
+                color=pal.ink_3,
                 ha="right",
                 va="center",
             )
@@ -506,17 +688,65 @@ def _source_label(source_url: str) -> str:
     return f"Source: {host.group(1)}" if host else ""
 
 
+def bar_colours(style: Style, n: int) -> list[str]:
+    """The fill of each of `n` bars: one hue per bar when `multi_colour` is on, the accent
+    then a tint when `highlight_first` is on, else the accent throughout."""
+    pal = style.colours
+    if style.multi_colour:
+        return [pal.series[i % len(pal.series)] for i in range(n)]
+    if style.highlight_first:
+        return [pal.accent] + [pal.tint] * (n - 1)
+    return [pal.accent] * n
+
+
+_CHART_LOGO_W = 0.05  # figure fraction added to the label gutter when a bar carries a logo
+
+
+def _draw_chart_logo(fig, ax, yi: float, logo: Path) -> None:
+    """A logo PNG at the left edge of the card, on the bar's row, scaled to ~70% of the
+    row pitch. An unreadable file is skipped: the ticker in the label still carries it."""
+    from matplotlib.image import imread
+    from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+
+    try:
+        img = imread(str(logo))
+    except Exception:
+        return
+    ax_h_px = ax.get_window_extent().height
+    rows = max(ax.get_ylim()[1] - ax.get_ylim()[0], 1.0)
+    target_px = ax_h_px / rows * 0.7
+    zoom = target_px / max(img.shape[0], 1) * (72.0 / fig.dpi)
+    box = AnnotationBbox(
+        OffsetImage(img, zoom=zoom),
+        (_MARGIN_X + _CHART_LOGO_W / 2, yi),
+        xycoords=("figure fraction", "data"),
+        frameon=False,
+        box_alignment=(0.5, 0.5),
+        zorder=6,
+    )
+    ax.add_artist(box)
+
+
 def render_chart(
-    chart: Chart, path: str | Path, *, source_url: str = "", style: Style | None = None
+    chart: Chart,
+    path: str | Path,
+    *,
+    source_url: str = "",
+    style: Style | None = None,
+    logos: dict[int, Path] | None = None,
 ) -> Path:
     """Draw the chart as a PNG at `path` (parent dirs created). Raises ImportError without
     matplotlib, which the callers turn into 'no image' rather than 'no draft'.
 
-    Horizontal bars (arm and endpoint names are long), one hue, a light track showing the
-    full scale behind each bar, the verified value at every bar's tip."""
+    Horizontal bars (arm and endpoint names are long), the palette's series colour (or one
+    hue per bar with `multi_colour`), a light track showing the full scale behind each bar,
+    the verified value at every bar's tip. `logos` maps a bar index to a PNG drawn in the
+    label gutter (draft/branding.py:brand_chart)."""
     st = style or Style()
+    pal = st.colours
     fs = st.font_scale
-    plt = _setup()
+    logos = logos or {}
+    plt = _setup(pal)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig = plt.figure(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
@@ -533,31 +763,35 @@ def render_chart(
     wrap_at = st.label_wrap if n <= 5 else max(st.label_wrap, 44)  # dense charts wrap less
     longest = max(len(line) for lab in chart.labels for line in _wrap(lab, wrap_at).split("\n"))
     label_w = min(max(0.05 + 0.0072 * longest * fs, 0.12), 0.36)  # gutter for the bar labels
+    if logos:
+        label_w = min(label_w + _CHART_LOGO_W, 0.42)
     avail = _PLOT_TOP - _PLOT_BOTTOM
     span = min(avail, st.row_pitch * n + 0.06)  # rows keep a fixed height, centred
     bottom = _PLOT_BOTTOM + (avail - span) / 2
     ax = fig.add_axes((_MARGIN_X + label_w, bottom, 1 - 2 * _MARGIN_X - label_w - 0.06, span))
-    ax.set_facecolor(SURFACE)
+    ax.set_facecolor(pal.surface)
     top = max(chart.values + [0.0]) or 1.0
     scale = 100.0 if chart.unit.strip() == "%" and top <= 100 else top
     y = list(range(n))[::-1]  # first label at the top
     height = st.bar_height
     if st.track:
-        ax.barh(y, [scale] * n, height=height, color=ACCENT_SOFT, alpha=0.55, lw=0)
-    colors = [ACCENT] + [ACCENT_TINT] * (n - 1) if st.highlight_first else [ACCENT] * n
-    ax.barh(y, chart.values, height=height, color=colors, lw=0)
+        ax.barh(y, [scale] * n, height=height, color=pal.soft, alpha=0.55, lw=0)
+    ax.barh(y, chart.values, height=height, color=bar_colours(st, n), lw=0)
     ax.set_xlim(0, scale * 1.16)
     ax.set_ylim(-0.6, n - 0.4)
     ax.set_yticks(y)
     ax.set_yticklabels(
         [_wrap(lab, wrap_at) for lab in chart.labels],
         fontsize=7.2 if n <= 5 else 6.4,
-        color=INK,
+        color=pal.ink,
         linespacing=1.1,
     )
     ax.tick_params(axis="y", length=0, pad=10)
-    ax.tick_params(axis="x", labelsize=6 * fs, length=0, colors=INK_3)
-    ax.xaxis.grid(st.gridlines, color=RULE, lw=0.5)
+    ax.tick_params(axis="x", labelsize=6 * fs, length=0, colors=pal.ink_3)
+    if st.gridlines:
+        ax.xaxis.grid(True, color=pal.rule, lw=0.5)
+    else:
+        ax.xaxis.grid(False)
     ax.set_axisbelow(True)
     ticks = ax.get_xticks()
     ax.set_xticks([t for t in ticks if 0 <= t <= scale])
@@ -575,9 +809,12 @@ def render_chart(
             va="center",
             fontsize=8 * fs,
             fontweight="bold",
-            color=INK,
+            color=pal.ink,
         )
-    fig.savefig(path, format="png", dpi=DPI, facecolor=SURFACE)
+    for i, logo in logos.items():
+        if 0 <= i < n:
+            _draw_chart_logo(fig, ax, y[i], logo)
+    fig.savefig(path, format="png", dpi=DPI, facecolor=pal.surface)
     plt.close(fig)
     return path
 
@@ -596,11 +833,12 @@ def render_table(
     (row, col) to a PNG drawn at the cell's left edge (draft/branding.py). Raises
     ImportError without matplotlib, like render_chart.
 
-    A rounded navy header bar with a drop shadow and a top sheen, zebra rows, horizontal
-    hairlines only, bold row labels."""
+    A rounded header bar in the palette's header colour with a drop shadow and a top
+    sheen, zebra rows, horizontal hairlines only, bold row labels."""
     st = style or Style()
+    pal = st.colours
     fs = st.font_scale
-    plt = _setup()
+    plt = _setup(pal)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig = plt.figure(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
@@ -650,34 +888,35 @@ def render_table(
         if (r - 1, c) in logos:
             cell.PAD = 0.05 + _LOGO_PAD / max(widths[c], 0.01)
         cell.set_linewidth(0)  # rows are shaded and ruled by _row_bands below
-        cell.set_facecolor(ZEBRA if r % 2 == 0 else SURFACE)
+        cell.set_facecolor(pal.zebra if r % 2 == 0 else pal.surface)
         if c == 0:
-            cell.set_text_props(fontweight="bold", color=INK)
+            cell.set_text_props(fontweight="bold", color=pal.ink)
         else:
-            cell.set_text_props(color=INK)
+            cell.set_text_props(color=pal.ink)
         if (r - 1, c) in blanked:
-            cell.set_text_props(color=INK_3)
+            cell.set_text_props(color=pal.ink_3)
     fig.canvas.draw()  # positions the cells so the header bar and logos can use them
-    _row_bands(ax, tbl, len(body), len(table.columns))
-    _header_bar(ax, tbl, [c.upper() for c in table.columns], fontsize=5.8 * fs)
+    _row_bands(ax, tbl, len(body), len(table.columns), pal)
+    _header_bar(ax, tbl, [c.upper() for c in table.columns], fontsize=5.8 * fs, pal=pal)
     for (r, c), logo in logos.items():
         _draw_logo(ax, tbl, r + 1, c, logo)
-    fig.savefig(path, format="png", dpi=DPI, facecolor=SURFACE)
+    fig.savefig(path, format="png", dpi=DPI, facecolor=pal.surface)
     plt.close(fig)
     return path
 
 
 _LOGO_PAD = 0.055  # axes fraction reserved left of the text in a cell that carries a logo
-HEADER_SHADOW = "#08213d"
+HEADER_SHADOW = PALETTES[DEFAULT_PALETTE].shadow
 HEADER_RADIUS = 0.012  # axes fraction
 
 
-def _row_bands(ax, tbl, nrows: int, ncols: int) -> None:
+def _row_bands(ax, tbl, nrows: int, ncols: int, pal: Palette | None = None) -> None:
     """Zebra shading and one hairline under each body row, drawn as plain patches: a
     matplotlib table cell only paints along its visible edges, so a cell with just a
     bottom edge shows no fill."""
     from matplotlib.patches import Rectangle
 
+    pal = pal or PALETTES[DEFAULT_PALETTE]
     for r in range(1, nrows + 1):
         cells = [tbl[r, c] for c in range(ncols)]
         x0 = min(c.get_x() for c in cells)
@@ -686,19 +925,27 @@ def _row_bands(ax, tbl, nrows: int, ncols: int) -> None:
         if r % 2 == 0:
             ax.add_patch(
                 Rectangle(
-                    (x0, y0), x1 - x0, h, facecolor=ZEBRA, lw=0, zorder=1, transform=ax.transAxes
+                    (x0, y0),
+                    x1 - x0,
+                    h,
+                    facecolor=pal.zebra,
+                    lw=0,
+                    zorder=1,
+                    transform=ax.transAxes,
                 )
             )
-        ax.plot([x0, x1], [y0, y0], color=RULE, lw=0.5, zorder=1.5, transform=ax.transAxes)
+        ax.plot([x0, x1], [y0, y0], color=pal.rule, lw=0.5, zorder=1.5, transform=ax.transAxes)
     tbl.set_zorder(2)  # the table (and its text) above the bands, below the header bar
     for cell in tbl.get_celld().values():
         cell.set_facecolor("none")
 
 
-def _header_bar(ax, tbl, labels: list[str], *, fontsize: float) -> None:
-    """One rounded navy bar over the header row: a soft drop shadow beneath, the bar, a
+def _header_bar(ax, tbl, labels: list[str], *, fontsize: float, pal: Palette | None = None) -> None:
+    """One rounded bar over the header row: a soft drop shadow beneath, the bar, a
     translucent sheen on its upper half (the 3D read), then the column labels."""
     from matplotlib.patches import FancyBboxPatch, Rectangle
+
+    pal = pal or PALETTES[DEFAULT_PALETTE]
 
     cells = [tbl[0, c] for c in range(len(labels))]
     x0 = min(c.get_x() for c in cells)
@@ -711,7 +958,7 @@ def _header_bar(ax, tbl, labels: list[str], *, fontsize: float) -> None:
             (x0 + 0.004, y0 - 0.012),
             x1 - x0,
             h,
-            facecolor=HEADER_SHADOW,
+            facecolor=pal.shadow,
             alpha=0.28,
             zorder=3,
             transform=ax.transAxes,
@@ -719,7 +966,7 @@ def _header_bar(ax, tbl, labels: list[str], *, fontsize: float) -> None:
         )
     )
     bar = FancyBboxPatch(
-        (x0, y0), x1 - x0, h, facecolor=HEADER_FILL, zorder=4, transform=ax.transAxes, **box
+        (x0, y0), x1 - x0, h, facecolor=pal.header_fill, zorder=4, transform=ax.transAxes, **box
     )
     ax.add_patch(bar)
     sheen = Rectangle(
@@ -778,8 +1025,12 @@ def _draw_logo(ax, tbl, row: int, col: int, logo: Path) -> None:
 __all__ = [
     "BLANK_CELL",
     "CHART_JSON_SCHEMA",
+    "DEFAULT_PALETTE",
+    "PALETTES",
+    "Palette",
     "TABLE_JSON_SCHEMA",
     "Style",
+    "bar_colours",
     "Table",
     "render_table",
     "table_from_json",
