@@ -113,8 +113,10 @@ def run_swarm(
     candidate or the assembly fails every hard rule."""
     model = _swarm_model(cfg)
     assembler_model = str(cfg.get("assembler_model") or "").strip() or model
-    fan_out = int(cfg.get("fan_out", genome.fan_out) or genome.fan_out)
-    layers = int(cfg.get("layers", genome.layers) or genome.layers)
+    # The genome owns its topology; the config values are the fallback for a genome row
+    # that carries none (phase three breeds children with their own fan_out and layers).
+    fan_out = int(genome.fan_out or cfg.get("fan_out", 6))
+    layers = int(genome.layers or cfg.get("layers", 2))
     max_sim = float(cfg.get("max_similarity", 0.85))
     counter = [0]
     log_rows: list[dict] = []

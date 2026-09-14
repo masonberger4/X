@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Swarm{% endblock %}
+{% block content %}
+<h1>Swarm</h1>
+<p class="meta">Step 9. Many cheap calls write each post; a jury compares the result with the
+single strong drafter; X decides which recipes survive. This page is a view: breeding and
+retiring happen in <code>run_evolve.py</code> (the <code>evolve</code> step), and nothing here posts.</p>
+{% if not present %}
+<p class="meta">No swarm runs yet. The tables appear after the first <code>run_draft.py</code>
+with the swarm on (<code>swarm/config.yaml</code>).</p>
+{% endif %}
+
+{% if bet %}
+<h2>Swarm vs control</h2>
+<p>
+  Jury: <strong>{{ bet.swarm_wins }}</strong> swarm wins, <strong>{{ bet.control_wins }}</strong> control wins
+  over {{ bet.runs }} runs.
+  On X: swarm-won posts median <strong>{{ bet.swarm_median_fmt }}</strong> ({{ bet.swarm_posts }} scored),
+  control-won posts median <strong>{{ bet.control_median_fmt }}</strong> ({{ bet.control_posts }} scored)
+  {% if bet.verdict %}<span class="pill {{ 'ok' if bet.verdict == 'swarm ahead' else 'skip' }}">{{ bet.verdict }}</span>{% endif %}
+</p>
+<p class="meta">A score is a post's impressions divided by the median of the account's posts in
+the 30 days before it: 1.00 is average. Under a few scored posts a side, read nothing into it.</p>
+{% endif %}
+
+{% for kind, title in [("writer", "Writer genomes"), ("designer", "Designers")] %}
+{% if rows[kind] %}
+<h2>{{ title }}</h2>
+<table>
+  <tr><th>Name</th><th>State</th><th>Posts</th><th>Median score</th><th>Parent</th><th>{{ 'Topology and slots' if kind == 'writer' else 'Style' }}</th><th>Age</th></tr>
+  {% for r in rows[kind] %}
+  <tr>
+    <td style="padding-left:{{ 0.6 + r.depth * 1.2 }}em"><strong>{{ r.name }}</strong>
+      {% if r.notes %}<div class="meta">{{ r.notes }}</div>{% endif %}</td>
+    <td>{% if r.state == 'live' %}<span class="pill ok">live</span>{% else %}<span class="pill skip">retired</span>
+      {% if r.retired_reason %}<div class="meta">{{ r.retired_reason }}</div>{% endif %}{% endif %}</td>
+    <td>{{ r.posts }}</td>
+    <td class="{{ r.score_class }}"><strong>{{ r.score }}</strong></td>
+    <td class="meta">{{ r.parent }}</td>
+    <td class="meta wrap">{{ r.summary }}</td>
+    <td class="meta">{{ r.age }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endfor %}
+{% endblock %}

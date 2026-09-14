@@ -1,6 +1,8 @@
 """A genome is the swarm's heritable part: the slots a thread is built from, each slot's
 local rule, and the topology numbers (fan-out, layers). Pure: no DB, no network. Phase one
-seeds DEFAULT_GENOME; phase three writes children of it (parent_id)."""
+seeds DEFAULT_GENOME; phase two adds the seed population; phase three breeds children
+(parent_id, `swarm/mutate.py`) and adds DESIGNER genomes: a draft.chart.Style preset the
+picture starts from before the image grader turns its knobs."""
 
 from __future__ import annotations
 
@@ -141,3 +143,52 @@ SEED_GENOMES: list[Genome] = [DEFAULT_GENOME, WIDE_GENOME, DEEP_GENOME]
 
 def genome_dict(g: Genome) -> dict[str, Any]:
     return asdict(g)
+
+
+# Bounds a bred child must stay inside (swarm/mutate.py validates against these).
+MIN_SLOTS, MAX_SLOTS = 3, 6
+MIN_FAN_OUT, MAX_FAN_OUT = 2, 12
+MIN_LAYERS, MAX_LAYERS = 1, 4
+
+
+@dataclass
+class Designer:
+    """A designer genome: the Style knobs (draft.chart.Style field -> value) a chart or
+    table is first drawn with. The grader loop still adjusts from there."""
+
+    name: str
+    style: dict[str, Any]
+    parent_id: int | None = None
+    id: int | None = None
+    notes: str = ""
+
+    def to_json(self) -> str:
+        d = asdict(self)
+        d.pop("id", None)
+        return json.dumps(d, ensure_ascii=False)
+
+    @classmethod
+    def from_json(cls, text: str, *, id: int | None = None) -> Designer:
+        d = json.loads(text)
+        return cls(
+            name=str(d["name"]),
+            style=dict(d.get("style") or {}),
+            parent_id=d.get("parent_id"),
+            id=id,
+            notes=str(d.get("notes", "")),
+        )
+
+
+SEED_DESIGNERS: list[Designer] = [
+    Designer("house", {}, notes="Phase-three seed: the house style as shipped."),
+    Designer(
+        "compact",
+        {"font_scale": 0.9, "row_pitch": 0.085, "table_row_height": 0.09, "bar_height": 0.55},
+        notes="Phase-three seed: tighter rows, slightly smaller text.",
+    ),
+    Designer(
+        "bold",
+        {"title_scale": 1.25, "highlight_first": True, "track": False, "bar_height": 0.6},
+        notes="Phase-three seed: bigger title, first bar highlighted, no tracks.",
+    ),
+]

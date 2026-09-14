@@ -431,6 +431,103 @@ def fetch_latest_feedback_report(conn: sqlite3.Connection) -> dict[str, Any] | N
     }
 
 
+def fetch_swarm_population(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Step 9's swarm_genomes with each row's fitness (swarm_fitness: one row per posted
+    run with a `relative` score, credited to genome_id for writers and designer_id for
+    designers). Read-only; [] when swarm_genomes is absent. One dict per genome:
+    id, name, kind, parent_id, parent_name, created_at, retired_at, retired_reason, notes,
+    posts (scored), median_relative, fan_out, layers, style (designers)."""
+    present = tables(conn)
+    if "swarm_genomes" not in present:
+        return []
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(swarm_genomes)").fetchall()}
+    kind_col = "kind" if "kind" in cols else "'writer' AS kind"
+    reason_col = "retired_reason" if "retired_reason" in cols else "NULL AS retired_reason"
+    rows = conn.execute(
+        f"SELECT id, name, genome_json, parent_id, created_at, retired_at, {reason_col}, "
+        f"{kind_col} FROM swarm_genomes ORDER BY id"
+    ).fetchall()
+    names = {int(r["id"]): r["name"] for r in rows}
+    rel: dict[tuple[str, int], list[float]] = {}
+    if "swarm_fitness" in present:
+        fcols = {r[1] for r in conn.execute("PRAGMA table_info(swarm_fitness)").fetchall()}
+        dcol = "designer_id" if "designer_id" in fcols else "NULL AS designer_id"
+        for f in conn.execute(
+            f"SELECT genome_id, {dcol}, relative FROM swarm_fitness WHERE relative IS NOT NULL"
+        ).fetchall():
+            if f["genome_id"] is not None:
+                rel.setdefault(("writer", int(f["genome_id"])), []).append(float(f["relative"]))
+            if f["designer_id"] is not None:
+                rel.setdefault(("designer", int(f["designer_id"])), []).append(float(f["relative"]))
+    out = []
+    for r in rows:
+        try:
+            g = json.loads(r["genome_json"] or "{}")
+        except ValueError:
+            g = {}
+        kind = r["kind"] or "writer"
+        values = sorted(rel.get((kind, int(r["id"])), []))
+        median = None
+        if values:
+            mid = len(values) // 2
+            median = values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+        out.append(
+            {
+                "id": int(r["id"]),
+                "name": r["name"],
+                "kind": kind,
+                "parent_id": r["parent_id"],
+                "parent_name": names.get(r["parent_id"]) if r["parent_id"] else None,
+                "created_at": _parse(r["created_at"]),
+                "retired_at": _parse(r["retired_at"]),
+                "retired_reason": r["retired_reason"],
+                "notes": g.get("notes", ""),
+                "posts": len(values),
+                "median_relative": median,
+                "fan_out": g.get("fan_out"),
+                "layers": g.get("layers"),
+                "slots": [s.get("name") for s in g.get("slots", []) if isinstance(s, dict)],
+                "style": g.get("style") or {},
+            }
+        )
+    return out
+
+
+def fetch_swarm_bet(conn: sqlite3.Connection) -> dict[str, Any]:
+    """The swarm-vs-control measurement from step 9: for posts the jury gave to the swarm
+    and to the control, how many have a relative score and their medians; plus the jury's
+    raw tally over every swarm run. Empty dict when swarm_runs is absent."""
+    present = tables(conn)
+    if "swarm_runs" not in present:
+        return {}
+    out: dict[str, Any] = {
+        "runs": int(_scalar(conn, "SELECT COUNT(*) FROM swarm_runs") or 0),
+        "swarm_wins": int(
+            _scalar(conn, "SELECT COUNT(*) FROM swarm_runs WHERE winner = 'swarm'") or 0
+        ),
+        "control_wins": int(
+            _scalar(conn, "SELECT COUNT(*) FROM swarm_runs WHERE winner = 'control'") or 0
+        ),
+    }
+    for side in ("swarm", "control"):
+        values: list[float] = []
+        if "swarm_fitness" in present:
+            values = sorted(
+                float(r[0])
+                for r in conn.execute(
+                    "SELECT relative FROM swarm_fitness WHERE winner = ? AND relative IS NOT NULL",
+                    (side,),
+                ).fetchall()
+            )
+        median = None
+        if values:
+            mid = len(values) // 2
+            median = values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+        out[f"{side}_posts"] = len(values)
+        out[f"{side}_median"] = median
+    return out
+
+
 def table_counts(conn: sqlite3.Connection) -> dict[str, int]:
     """Row counts of every user table (read-only; reported, never acted on)."""
     out: dict[str, int] = {}

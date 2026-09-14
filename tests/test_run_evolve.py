@@ -95,16 +95,40 @@ def test_score_prune_report(conn, monkeypatch, capsys):
                 "min_baseline_posts": 3,
                 "min_posts": 5,
                 "min_alive": 2,
+                "population_size": 3,
+                "mutation_model": "",
             }
         },
     )
+    # breed is part of the default run; a fake strong model answers it
+    import json as _json
+
+    from swarm import mutate as _mutate
+
+    def fake_strong(system, user, model):
+        assert system == _mutate.MUTATION_SYSTEM and "GENOME default-6" in user
+        return _json.dumps(
+            {
+                "name": "kid",
+                "change": "more proposals",
+                "fan_out": 9,
+                "layers": 2,
+                "slots": [s.__dict__ for s in SEED_GENOMES[0].slots],
+            }
+        )
+
+    monkeypatch.setattr(_mutate, "call_anthropic", fake_strong)
+    orig = _mutate.breed_writer
+    monkeypatch.setattr(_mutate, "breed_writer", lambda *a, **k: orig(*a, call=fake_strong, **k))
     assert run_evolve.main(["--dry-run"]) == 0
     rows = swarm_store.list_fitness(conn)
     assert len(rows) == 13
     assert rows[0].relative is None and rows[3].relative == 2.0  # 2000 / median(1000 x3)
     assert {g.name for g in swarm_store.live_genomes(conn)} == set(ids)  # dry run
     out = capsys.readouterr().out
-    assert "default-6    live         5" in out and "wide-6       live         5" in out
+    assert "default-6              live         5" in out
+    assert "wide-6                 live         5" in out
+    assert "designers " in out and "house " in out
     assert "swarm won:   5 posts" in out and "control won: 5 posts" in out
 
     assert run_evolve.main(["prune"]) == 0
@@ -112,10 +136,50 @@ def test_score_prune_report(conn, monkeypatch, capsys):
     assert live == {"default-6", "deep-4"}
     row = conn.execute("SELECT retired_reason FROM swarm_genomes WHERE id = ?", (w,)).fetchone()
     assert "population" in row[0]
+    # breed fills the gap with a child of the best scorer, and records the parent
+    assert run_evolve.main(["breed"]) == 0
+    live = {g.name: g for g in swarm_store.live_genomes(conn)}
+    assert set(live) == {"default-6", "deep-4", "kid"}
+    assert live["kid"].parent_id == d and live["kid"].fan_out == 9
+    assert live["kid"].notes == "more proposals"
+    # designers had no scored posts (no designer_id on these runs): none bred without --force
+    assert len(swarm_store.live_genomes(conn, "designer")) == 3
     assert run_evolve.main(["report"]) == 0
-    assert "wide-6       retired      5" in capsys.readouterr().out
+    assert "wide-6                 retired      5" in capsys.readouterr().out
     # run_draft would now alternate the two survivors
     assert swarm_store.next_genome(conn).name == "deep-4"
+
+
+def test_breed_designers_with_force_and_skips_full_populations(conn, monkeypatch):
+    import run_evolve
+
+    ids = _setup(conn)
+    swarm_store.retire_genome(conn, ids["wide-6"], "test")
+    designers = swarm_store.live_genomes(conn, "designer")
+    swarm_store.retire_genome(conn, designers[0].id, "test")
+    swarm_store.retire_genome(conn, designers[1].id, "test")
+    cfg = {"population_size": 3, "mutation_model": "m"}
+    # nothing scored, no --force: nothing bred
+    assert run_evolve.cmd_breed(conn, cfg, [], dry_run=False, force=False) == []
+    born = run_evolve.cmd_breed(
+        conn,
+        cfg,
+        [],
+        dry_run=False,
+        force=True,
+        call=lambda *a: "not json",
+        rng=__import__("random").Random(1),
+    )
+    # the writer child failed (invalid answer) and is logged; the two designer gaps are filled
+    kinds = [type(b).__name__ for b in born]
+    assert kinds == ["Designer", "Designer"]
+    live_d = swarm_store.live_genomes(conn, "designer")
+    assert len(live_d) == 3 and all(b.parent_id == designers[2].id for b in born)
+    assert len({b.name for b in born}) == 2 and all(b.name.startswith("bold-") for b in born)
+    assert len(swarm_store.live_genomes(conn, "writer")) == 2
+    # a dry run stores nothing
+    born = run_evolve.cmd_breed(conn, cfg, [], dry_run=True, force=True, call=lambda *a: "not json")
+    assert born == [] and len(swarm_store.live_genomes(conn, "designer")) == 3
 
 
 def test_bad_kpi_exits(conn, monkeypatch):

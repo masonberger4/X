@@ -182,3 +182,64 @@ def series_growth(series: list[dict]) -> dict:
         "since": first["captured_on"],
         "on": last["captured_on"],
     }
+
+
+def swarm_rows(population: list[dict], now: datetime) -> dict[str, list[dict]]:
+    """The swarm page's two tables (writers, designers), live rows first then retired,
+    each with a display-ready score, its parent's name, its topology or style summary and
+    a depth for the family tree indent (0 for a seed)."""
+    by_id = {p["id"]: p for p in population}
+
+    def depth(p: dict) -> int:
+        d, seen = 0, set()
+        while p.get("parent_id") in by_id and p["parent_id"] not in seen:
+            seen.add(p["parent_id"])
+            p = by_id[p["parent_id"]]
+            d += 1
+        return d
+
+    out: dict[str, list[dict]] = {"writer": [], "designer": []}
+    for p in population:
+        med = p.get("median_relative")
+        if p["kind"] == "designer":
+            summary = ", ".join(f"{k} {v}" for k, v in sorted(p.get("style", {}).items()))
+            summary = summary or "house style"
+        else:
+            slots = " · ".join(p.get("slots") or [])
+            summary = f"fan-out {p.get('fan_out')}, layers {p.get('layers')}; {slots}"
+        out.setdefault(p["kind"], []).append(
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "state": "retired" if p.get("retired_at") else "live",
+                "parent": p.get("parent_name") or "seed",
+                "depth": depth(p),
+                "posts": p.get("posts", 0),
+                "score": f"{med:.2f}" if med is not None else "-",
+                "score_class": "high" if (med or 0) >= 1.0 and med is not None else "meta",
+                "summary": summary,
+                "notes": p.get("notes") or "",
+                "age": fmt_age(now, p.get("created_at")),
+                "retired_reason": p.get("retired_reason") or "",
+            }
+        )
+    for rows in out.values():
+        rows.sort(key=lambda r: (r["state"] != "live", r["id"]))
+    return out
+
+
+def bet_summary_row(bet: dict) -> dict:
+    """The swarm-vs-control line for the template: medians formatted, plus a verdict word
+    when both sides have posts."""
+    if not bet:
+        return {}
+    sm, cm = bet.get("swarm_median"), bet.get("control_median")
+    verdict = ""
+    if sm is not None and cm is not None:
+        verdict = "swarm ahead" if sm > cm else ("control ahead" if cm > sm else "level")
+    return {
+        **bet,
+        "swarm_median_fmt": f"{sm:.2f}" if sm is not None else "-",
+        "control_median_fmt": f"{cm:.2f}" if cm is not None else "-",
+        "verdict": verdict,
+    }

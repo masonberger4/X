@@ -40,10 +40,13 @@ def attach_chart(
     *,
     source_url: str = "",
     cfg: dict | None = None,
+    style: Style | None = None,
 ) -> Path | None:
     """Render `chart` for draft `draft_id`, store its path, return it. None when there is no
     chart, images are disabled, or rendering failed (logged; drafts.image_path stays NULL).
-    A Table is left for run_verify.py (attach_table) and returns None."""
+    A Table is left for run_verify.py (attach_table) and returns None. `style` (step 9's
+    designer genome) is the Style the first render starts from; the grader loop adjusts
+    from there."""
     if chart is None:
         return None
     if isinstance(chart, Table):
@@ -56,6 +59,7 @@ def attach_chart(
         lambda path, style: render_chart(chart, path, source_url=source_url, style=style),
         alt_text(chart, source_url),
         cfg,
+        style,
     )
 
 
@@ -67,6 +71,7 @@ def attach_table(
     source_url: str = "",
     blanked: frozenset[tuple[int, int]] = frozenset(),
     cfg: dict | None = None,
+    style: Style | None = None,
 ) -> Path | None:
     """Render a table whose cells step 2b has checked; `blanked` cells are drawn as blanks.
     Company cells get their configured ticker and logo first (draft/branding.py); the alt
@@ -81,6 +86,7 @@ def attach_table(
         ),
         alt_text(drawn, source_url, blanked),
         cfg,
+        style,
     )
 
 
@@ -104,12 +110,13 @@ def _render(
     draw,
     alt: str,
     cfg: dict | None,
+    style: Style | None = None,
 ) -> Path | None:
     if not images_enabled(cfg):
         log.info("draft %d: visual kept as spec only (images disabled in draft/config)", draft_id)
         return None
     path = store.image_file(draft_id)
-    style = Style()
+    style = style or Style()
     try:
         draw(path, style)
     except ImportError:

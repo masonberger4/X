@@ -332,6 +332,24 @@ def feedback_page(request: Request, conn: Conn):
     )
 
 
+@app.get("/swarm", response_class=HTMLResponse)
+def swarm_page(request: Request, conn: Conn):
+    """Step 9: the population of writer genomes and designers, their fitness and family
+    tree, and the swarm-vs-control measurement. A view: nothing here breeds or retires."""
+    now = _now()
+    population = ops_store.fetch_swarm_population(conn)
+    return templates.TemplateResponse(
+        request,
+        "swarm.html",
+        {
+            "rows": views.swarm_rows(population, now),
+            "bet": views.bet_summary_row(ops_store.fetch_swarm_bet(conn)),
+            "present": bool(population),
+            "now": now,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # runs
 # ---------------------------------------------------------------------------

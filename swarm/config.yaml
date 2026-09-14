@@ -28,3 +28,10 @@ evolve:
   min_baseline_posts: 3     # fewer earlier posts in the window -> no relative score yet
   min_posts: 5              # a genome is judged only after this many scored posts
   min_alive: 2              # pruning never leaves fewer live genomes than this
+  # Phase three (run_evolve.py breed): keep this many live writer genomes and this many
+  # live designers; each gap after pruning is filled by one child of a top scorer.
+  population_size: 3
+  # The one strong model in the loop: writes a writer child that varies exactly one thing
+  # (a slot rule, a split or merge, fan_out, layers). Blank = the drafting model
+  # (DRAFT_MODEL / models.drafter / draft/config.yaml). Designer children need no model.
+  mutation_model: ""

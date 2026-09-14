@@ -456,13 +456,18 @@ source only when it is due, and score only scores what is new.
    draft against the posts before it and retires the genomes that keep
    losing, so the next drafts come from the winners:
    ```
-   python run_evolve.py                     # score, prune, report
-   python run_evolve.py report              # the table only, no change
+   python run_evolve.py                     # score, prune, breed, report
+   python run_evolve.py report              # the tables only, no change
    python run_evolve.py prune --dry-run     # see what would be retired
+   python run_evolve.py breed --dry-run     # see what children would be bred
+   python run_evolve.py breed --force       # breed before any post is scored
    ```
    The report's last two lines are the swarm-vs-control measurement: whether
    the posts the AI jury gave to the swarm did better on X than the ones it
-   gave to the single strong drafter.
+   gave to the single strong drafter. `breed` replaces each retired recipe
+   with a child of a winner that changes one thing (one strong-model call per
+   writer child; a designer child, the picture style, needs no model). The
+   control panel's **Swarm** page shows the family tree and every score.
 
 ---
 
@@ -519,6 +524,9 @@ to stop it. Four pages:
   minimum gap between posts in minutes, are the only settings the panel
   edits ("Save limits" writes them into `publish\config.yaml`, and the next
   publish run uses them).
+- **Swarm** (`/swarm`) — step 9's recipes (writer genomes and designers):
+  live or retired, posts scored, median score, parent, and the swarm-vs-control
+  line. A view only; `run_evolve.py` does the breeding and retiring.
 - **Feedback** (`/feedback`) — followers over time, your posts ranked by
   impressions, and the suggestions from the latest weekly report. The
   suggestions are proposals only; applying one means editing a settings file.
