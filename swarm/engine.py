@@ -95,6 +95,7 @@ def _candidates_for_slot(
                 max_chars=max_chars,
                 needs_url=True if single else None,
                 needs_preprint=(brief.preprint if single else None),
+                handles=list(brief.handles),
             )
             log_rows.append({"slot": slot.name, "layer": layer, "text": text, "problems": problems})
             if problems:
@@ -188,6 +189,7 @@ def run_swarm(
             source_text=brief.source_text,
             call=call,
             fmt=fmt,
+            handles=list(brief.handles),
             **kwargs,
         )
     except DraftRejected as exc:
