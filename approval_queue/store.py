@@ -845,11 +845,25 @@ def list_image_grades(conn: sqlite3.Connection, draft_id: int) -> list[ImageGrad
     ]
 
 
-def drop_image(conn: sqlite3.Connection, draft_id: int, note: str | None = None) -> None:
+def drop_image(
+    conn: sqlite3.Connection,
+    draft_id: int,
+    note: str | None = None,
+    index: int | None = None,
+) -> None:
     """The human decided the post goes out without its chart: forget the chart spec and the
     image, delete the file, and log an 'edit' decision with the text unchanged so the history
-    shows it. Nothing else about the draft changes."""
+    shows it. Nothing else about the draft changes.
+
+    With `index` only that one picture goes (phase four: a draft may carry two). The ones
+    after it move down a place, so index 0 stays the picture drafts.image_path names and
+    drafts.images_json stays 0-based with no gap; a draft left with no picture ends up
+    exactly where dropping them all would leave it. Raises IndexError when the draft has
+    no picture at that index."""
     row = _require(conn, draft_id)
+    if index is not None:
+        _drop_one_image(conn, row, index, note)
+        return
     paths = [resolve_image(row.image_path)] + [resolve_image(d["path"]) for d in row.images]
     draft = row.draft
     draft.extra_visuals = []
@@ -862,6 +876,60 @@ def drop_image(conn: sqlite3.Connection, draft_id: int, note: str | None = None)
     _record_decision(conn, draft_id, ACTION_EDIT, text, text, note or "image dropped", None)
     conn.commit()
     for path in {p for p in paths if p is not None}:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _drop_one_image(
+    conn: sqlite3.Connection, row: DraftRow, index: int, note: str | None
+) -> None:
+    """One picture of a draft goes; the others stay (see drop_image)."""
+    draft = row.draft
+    entry = next((d for d in row.images if int(d.get("index", 0)) == index), None)
+    if entry is None and index >= len(draft.visuals):
+        raise IndexError(f"draft {row.id} has no picture at index {index}")
+    gone = [resolve_image(entry["path"])] if entry else []
+    if index == 0:
+        gone.append(resolve_image(row.image_path))
+    # The spec that made this picture goes with it: index 0 is chart_json (a chart or a
+    # table), anything after it is the extra chart at that place.
+    if index == 0:
+        promoted = draft.extra_visuals.pop(0) if draft.extra_visuals else None
+        draft.chart = promoted if isinstance(promoted, Chart) else None
+        draft.table = None
+    elif index - 1 < len(draft.extra_visuals):
+        draft.extra_visuals.pop(index - 1)
+    if index < len(draft.anchors) and len(draft.anchors) > 1:
+        draft.anchors = draft.anchors[:index] + draft.anchors[index + 1 :]
+    images = [
+        dict(d, index=int(d.get("index", 0)) - 1) if int(d.get("index", 0)) > index else dict(d)
+        for d in row.images
+        if int(d.get("index", 0)) != index
+    ]
+    images.sort(key=lambda d: int(d.get("index", 0)))
+    first = images[0] if images and int(images[0].get("index", 0)) == 0 else None
+    conn.execute(
+        "UPDATE drafts SET chart_json = ?, image_path = ?, image_alt = ?, images_json = ?, "
+        "format_json = ?, updated_at = ? WHERE id = ?",
+        (
+            _chart_json(draft),
+            first["path"] if first else None,
+            (first.get("alt") or "") if first else "",
+            json.dumps(images) if images else None,
+            _format_json(draft),
+            _now(),
+            row.id,
+        ),
+    )
+    text = _serialise_text(draft.thread)
+    _record_decision(
+        conn, row.id, ACTION_EDIT, text, text, note or f"image {index + 1} dropped", None
+    )
+    conn.commit()
+    keep = {resolve_image(d["path"]) for d in images}
+    for path in {p for p in gone if p is not None} - keep:
         try:
             path.unlink()
         except OSError:

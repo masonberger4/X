@@ -224,6 +224,85 @@ def test_store_round_trips_format_and_extra_visuals_and_images(conn):
     assert row.images == [] and row.draft.extra_visuals == [] and not p1.exists()
 
 
+def _two_picture_draft(conn, item="i1"):
+    """A two-visual draft with both pictures on disk: (draft id, first path, second path)."""
+    seed_item(conn, item)
+    d = validate_output(
+        out(visuals=[CHART2], thread=["one", "two", "three", "four", f"five {URL}"]),
+        Format(visuals=2, anchors=("first", "last")),
+    )
+    did = qstore.insert_draft(conn, item_id=item, model="m", draft=d)
+    p0, p1 = qstore.image_file(did), qstore.image_file(did, 1)
+    p0.parent.mkdir(parents=True, exist_ok=True)
+    p0.write_bytes(b"a")
+    p1.write_bytes(b"b")
+    qstore.set_image(conn, did, p0, "first alt")
+    qstore.set_image(conn, did, p1, "second alt", index=1)
+    return did, p0, p1
+
+
+def test_drop_image_by_index_keeps_the_other_one(conn):
+    # dropping the second picture leaves the first one and its chart alone
+    did, p0, p1 = _two_picture_draft(conn)
+    qstore.drop_image(conn, did, note="second one is noise", index=1)
+    row = qstore.get_draft(conn, did)
+    assert row.draft.extra_visuals == [] and row.draft.anchors == [1]
+    assert row.draft.chart is not None and row.image_path == f"draft_{did}.png"
+    assert [(i["index"], i["alt"]) for i in row.images] == [(0, "first alt")]
+    assert p0.exists() and not p1.exists()
+    dec = qstore.list_decisions(conn, did)
+    assert dec[-1]["action"] == "edit" and dec[-1]["note"] == "second one is noise"
+    assert row.draft.thread[0] == "one"  # text untouched
+    # publish sees one picture, on its own post
+    qstore.approve(conn, did)
+    got = pstore.fetch_approved(10, conn=conn)[0]
+    assert [(a, anchor) for _, a, anchor in got.images] == [("first alt", 1)]
+
+
+def test_dropping_the_first_picture_promotes_the_second(conn):
+    did, p0, p1 = _two_picture_draft(conn)
+    qstore.drop_image(conn, did, index=0)
+    row = qstore.get_draft(conn, did)
+    # the extra chart becomes the draft's visual and its picture becomes the first one
+    assert row.draft.chart.title == "Cohort" and row.draft.extra_visuals == []
+    assert row.draft.anchors == [5]
+    assert row.image_path == p1.name and row.image_alt == "second alt"
+    assert [(i["index"], i["anchor"], i["alt"]) for i in row.images] == [(0, 5, "second alt")]
+    assert p1.exists() and not p0.exists()
+    assert qstore.list_decisions(conn, did)[-1]["note"] == "image 1 dropped"
+    qstore.approve(conn, did)
+    got = pstore.fetch_approved(10, conn=conn)[0]
+    assert [(a, anchor) for _, a, anchor in got.images] == [("second alt", 5)]
+
+
+def test_dropping_every_picture_one_at_a_time_ends_where_drop_all_does(conn):
+    did, p0, p1 = _two_picture_draft(conn)
+    qstore.drop_image(conn, did, index=1)
+    qstore.drop_image(conn, did, index=0)
+    row = qstore.get_draft(conn, did)
+    assert row.images == [] and row.image_path is None and row.image_alt == ""
+    assert row.draft.visual is None and row.draft.extra_visuals == []
+    assert not p0.exists() and not p1.exists()
+    with pytest.raises(IndexError):
+        qstore.drop_image(conn, did, index=0)
+
+
+def test_queue_drops_one_picture_of_two(conn):
+    from fastapi.testclient import TestClient
+
+    from approval_queue.app import app
+
+    did, p0, p1 = _two_picture_draft(conn)
+    with TestClient(app) as client:
+        page = client.get(f"/drafts/{did}").text
+        assert f"/drafts/{did}/image/0/drop" in page and f"/drafts/{did}/image/1/drop" in page
+        r = client.post(f"/drafts/{did}/image/1/drop", data={"note": "one is enough"})
+        assert r.status_code == 200
+        assert client.post(f"/drafts/{did}/image/7/drop").status_code == 404
+    row = qstore.get_draft(conn, did)
+    assert [i["index"] for i in row.images] == [0] and p0.exists() and not p1.exists()
+
+
 def test_long_post_survives_publish_checks_and_single_is_not_numbered(conn):
     long_text = "x" * 900 + f" {URL}"
     assert split_thread([long_text], url=URL, max_chars=4000) == [long_text]
