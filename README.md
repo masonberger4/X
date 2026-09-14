@@ -32,11 +32,11 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/` | health checks, the last outcome of every orchestrator step, row counts, database size, latest backup |
 | `/sources` | every configured ingest source with its freshness, last error and item counts |
 | `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline; one "Ingest and score" button |
-| `/publishing` | approved and waiting, what has posted, any partial thread needing a human, and a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept) |
+| `/publishing` | approved and waiting, what has posted, any partial thread needing a human, a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept) and the "Automatic publishing" switch (`auto_publish_enabled` / `auto_publish_interval_minutes`, `save_auto_publish`): while the app runs, `panel/autopublish.py` starts `run_publish.py --live` every interval through `JobManager.start_publish_auto`, still gated by `PUBLISH_ENABLED=1`; a run that posted nothing leaves no row |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | every run's log (whichever page started it) and the checkboxes to run any enabled step; stop the one in progress |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue (its Revise box sends a draft back through the drafter with your note); the pending page has "Draft" and "Verify" buttons |
-| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`) and "Set schedule" to number the order the slots post them (`schedule.position`) |
+| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), and when automatic publishing is on, when its next run is due |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)

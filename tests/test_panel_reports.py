@@ -159,9 +159,11 @@ def test_publishing_shows_posts_and_what_needs_a_human(client, conn):
 
 
 def test_publishing_never_offers_to_post(client):
-    """The only form on the page edits the two caps; nothing here posts."""
+    """The forms on the page edit settings (the two caps, the automatic-publishing
+    switch); nothing here posts a draft itself."""
     body = client.get("/publishing").text
-    assert body.count("<form") == 1 and 'action="/publishing/caps"' in body
+    assert body.count("<form") == 2
+    assert 'action="/publishing/caps"' in body and 'action="/publishing/auto"' in body
     assert "/publishing/now" not in body
     assert "--live" not in body
 

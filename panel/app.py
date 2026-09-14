@@ -16,6 +16,8 @@ Routes owned here:
   POST /publishing/now    post one approved draft now (run_publish.py --live --now --draft)
   POST /publishing/order  save the approved page's publishing order (schedule.position)
   POST /publishing/caps   save max_posts_per_day / min_gap_minutes into publish/config.yaml
+  POST /publishing/auto   switch automatic publishing on or off and set its interval
+                          (auto_publish_* in publish/config.yaml; panel/autopublish.py)
 
 The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., /voice),
 so the operator has one URL for the whole workflow. Everything else this app shows is
@@ -23,8 +25,10 @@ read through `ops/store.py`'s read-only adapters; it owns no tables of its own.
 
 Read-only by design: the panel never edits config.yaml, voice.md or a draft's text. Its
 run buttons sit on the pages they affect and every log stays on /runs. The approved
-page's "Publish now" is the one live action: a run of the publisher for one draft, which
-still posts nothing unless PUBLISH_ENABLED=1 is set in .env.
+page's "Publish now" is a run of the publisher for one draft; automatic publishing
+(`panel/autopublish.py`, switched on from the publishing page) is the same run without a
+draft, every few minutes while the app is open. Both still post nothing unless
+PUBLISH_ENABLED=1 is set in .env.
 """
 
 from __future__ import annotations
@@ -32,8 +36,8 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -54,6 +58,7 @@ from ops.config import load_ops_config
 from ops.health import Thresholds
 from panel import feed, views
 from panel import publishing as publish_order_store
+from panel.autopublish import AutoPublisher
 from panel.frozen import data_dir, step_interpreter
 from panel.jobs import JobError, JobManager
 from publish import scheduler as publish_scheduler
@@ -72,12 +77,25 @@ templates.env.loader = ChoiceLoader(
 )
 templates.env.globals["HAS_PANEL"] = True
 
-app = FastAPI(title="Pipeline control panel")
-
 CONFIG = load_ops_config()
 # Steps run in the data directory (the repo root, or the exe's folder in the desktop
 # build) under the interpreter that can run them there (see panel/frozen.py).
 JOBS = JobManager(CONFIG, data_dir(), python=step_interpreter())
+# Automatic publishing ticks while the server runs (uvicorn drives the lifespan; a test
+# client that is not used as a context manager never starts it).
+AUTO = AutoPublisher(JOBS)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    AUTO.start()
+    try:
+        yield
+    finally:
+        AUTO.stop()
+
+
+app = FastAPI(title="Pipeline control panel", lifespan=lifespan)
 
 
 def current_run() -> dict[str, Any] | None:
@@ -104,8 +122,27 @@ def publish_live() -> bool:
     return os.environ.get("PUBLISH_ENABLED") == "1"
 
 
+def auto_publish() -> dict[str, Any]:
+    """The automatic-publishing loop's state for the approved and publishing pages (a
+    template global on both envs, like current_run)."""
+    now = _now()
+    st = AUTO.status(now)
+    return {
+        "enabled": st.enabled,
+        "active": st.active,
+        "live": st.live,
+        "interval_minutes": st.interval_minutes,
+        "last_started": views.fmt_age(now, st.last_started) if st.last_started else "never",
+        "next_due": views.fmt_duration((st.next_due - now).total_seconds())
+        if st.next_due and st.next_due > now
+        else "now",
+        "reason": st.reason,
+    }
+
+
 templates.env.globals["current_run"] = current_run
 templates.env.globals["publish_live"] = publish_live
+templates.env.globals["auto_publish"] = auto_publish
 
 
 def _now() -> datetime:
@@ -313,6 +350,22 @@ async def publishing_caps(request: Request):
     return RedirectResponse("/publishing?saved=1", status_code=303)
 
 
+@app.post("/publishing/auto")
+async def publishing_auto(request: Request):
+    """Switch automatic publishing on or off and set its cadence (two more keys in
+    publish/config.yaml). The loop reads the file on every tick, so the change takes
+    effect at once; when switched on it starts a run on its next poll."""
+    form = await read_form(request)
+    enabled = _first(form, "enabled") == "1"
+    try:
+        publish_scheduler.save_auto_publish(enabled, int(_first(form, "interval_minutes") or ""))
+    except ValueError as exc:
+        msg = str(exc) if "must" in str(exc) else "the interval needs a whole number of minutes"
+        return RedirectResponse(f"/publishing?{urlencode({'error': msg})}", status_code=303)
+    log.info("automatic publishing %s", "on" if enabled else "off")
+    return RedirectResponse("/publishing?saved=1", status_code=303)
+
+
 @app.get("/feedback", response_class=HTMLResponse)
 def feedback_page(request: Request, conn: Conn):
     now = _now()
@@ -489,6 +542,7 @@ def _adopt_queue_routes() -> None:
     # whether a live post is possible, looked up at render time.
     queue_app.templates.env.globals["current_run"] = current_run
     queue_app.templates.env.globals["publish_live"] = publish_live
+    queue_app.templates.env.globals["auto_publish"] = auto_publish
     have = {getattr(r, "path", None) for r in app.router.routes}
     for route in queue_app.app.router.routes:
         path = getattr(route, "path", None)
