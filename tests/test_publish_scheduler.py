@@ -36,7 +36,7 @@ def approved(draft_id=1, source="pubmed", title="A paper", score=30.0, approved_
 
 def test_config_loads_with_defaults():
     cfg = load_publish_config()
-    assert cfg["timezone"] and cfg["slots"] and cfg["max_posts_per_day"] >= 1
+    assert cfg["timezone"] and isinstance(cfg["slots"], list) and cfg["max_posts_per_day"] >= 1
     assert cfg["breaking"]["source_prefixes"]
 
 

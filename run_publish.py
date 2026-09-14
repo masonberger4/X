@@ -111,6 +111,12 @@ def choose(
         return rank(breaking, policy)[0], "breaking", "breaking news, posting outside slots"
     if args.breaking:
         return None, None, "no breaking items"
+    if not slots:
+        # Continuous mode: no slots configured, so every run posts the top candidate as
+        # soon as the daily cap and the minimum gap allow (the cron cadence sets the pace).
+        if blocked:
+            return None, None, f"continuous mode: {blocked}"
+        return rank(approved, policy)[0], "continuous", "continuous mode: top candidate"
     slot = open_slot(now, slots, tz, int(cfg["grace_minutes"]))
     if slot is None:
         nxt = next_slot(now, slots, tz)
