@@ -3,7 +3,7 @@
 # how engagement metrics are collected and reported.
 
 # X handle whose follower counts are snapshotted (without the @). Leave empty to skip.
-username: ""
+username: "biotech_leads"
 
 # X API v2 base URL and the bearer token env var (app-only auth, read-only endpoints).
 api_base: https://api.x.com/2
