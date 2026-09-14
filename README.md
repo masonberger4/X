@@ -559,8 +559,9 @@ either is missing. The `evolve` step in `ops/config.yaml` runs after `feedback`
 on every scheduled run (both enabled: the account has the paid X read tier).
 
 **Phase three: breeding and designers** (`run_evolve.py breed`, part of the
-default run). After pruning, every gap under `evolve.population_size` is filled
-by a child of a top scorer. A **writer** child is written by ONE strong-model
+default run). After pruning, every gap under `evolve.population_size`
+(`evolve.designer_population_size` for designers, six in the shipped config so
+the pictures keep varying) is filled by a child of a top scorer. A **writer** child is written by ONE strong-model
 call (`evolve.mutation_model`, blank = the drafting model; `swarm/mutate.py`,
 through `draft/drafter.py:call_anthropic`) that reads the live genomes with
 their scores and best posts and varies exactly one thing: reword a slot's rule,
@@ -570,11 +571,14 @@ child stays within 3-6 slots, fan-out 2-12 and 1-4 layers; an invalid answer is
 retried, then skipped. A genome owns its topology: `fan_out` and `layers` in
 `swarm/config.yaml` are only the fallback for a row without them. **Designers**
 are the picture side: a designer genome is a `draft/chart.py:Style` preset the
-chart or table is first drawn with (the grader loop still adjusts from there);
-three seeds (`house`, `compact`, `bold`) are drawn round-robin
+chart or table is first drawn with (the grader loop still adjusts from there):
+layout knobs plus the card's `palette` (one of the named palettes in
+`draft/chart.py:PALETTES`) and `multi_colour` (one hue per bar). Six seeds
+(`house`, `compact`, `bold`, `teal`, `vivid`, `midnight`) are drawn round-robin
 (`next_designer`, recorded in `swarm_runs.designer_id`), scored with the same
 relative KPI, pruned the same way, and bred without a model by stepping one
-knob at random inside its range. Children carry `parent_id`, so the family tree
+knob at random inside its range, flipping a flag or swapping the palette
+(colour moves are drawn as often as every layout knob together). Children carry `parent_id`, so the family tree
 is readable on the panel's **/swarm** page (`ops/store.py:fetch_swarm_population`
 and `fetch_swarm_bet`, read-only; the page breeds and retires nothing). Without
 a scored genome nothing is bred unless `--force`. Because selection acts on the

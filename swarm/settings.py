@@ -26,6 +26,7 @@ DEFAULTS: dict[str, Any] = {
         "min_posts": 5,
         "min_alive": 2,
         "population_size": 3,
+        "designer_population_size": 6,
         "mutation_model": "",
         "format_min_posts": 8,
         "format_population_size": 5,

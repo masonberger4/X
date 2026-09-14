@@ -6,7 +6,7 @@ import feedback.store as fstore
 import publish.store as pstore
 from approval_queue import store
 from swarm import store as swarm_store
-from swarm.genome import SEED_GENOMES
+from swarm.genome import SEED_DESIGNERS, SEED_GENOMES
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -143,7 +143,7 @@ def test_score_prune_report(conn, monkeypatch, capsys):
     assert live["kid"].parent_id == d and live["kid"].fan_out == 9
     assert live["kid"].notes == "more proposals"
     # designers had no scored posts (no designer_id on these runs): none bred without --force
-    assert len(swarm_store.live_genomes(conn, "designer")) == 3
+    assert len(swarm_store.live_genomes(conn, "designer")) == len(SEED_DESIGNERS)
     assert run_evolve.main(["report"]) == 0
     assert "wide-6                 retired      5" in capsys.readouterr().out
     # run_draft would now alternate the two survivors
@@ -156,9 +156,10 @@ def test_breed_designers_with_force_and_skips_full_populations(conn, monkeypatch
     ids = _setup(conn)
     swarm_store.retire_genome(conn, ids["wide-6"], "test")
     designers = swarm_store.live_genomes(conn, "designer")
-    swarm_store.retire_genome(conn, designers[0].id, "test")
-    swarm_store.retire_genome(conn, designers[1].id, "test")
-    cfg = {"population_size": 3, "mutation_model": "m"}
+    for d in designers:
+        if d.name != "bold":  # leave one live designer, so two of three slots are gaps
+            swarm_store.retire_genome(conn, d.id, "test")
+    cfg = {"population_size": 3, "designer_population_size": 3, "mutation_model": "m"}
     # nothing scored, no --force: nothing bred
     assert run_evolve.cmd_breed(conn, cfg, [], dry_run=False, force=False) == []
     born = run_evolve.cmd_breed(
