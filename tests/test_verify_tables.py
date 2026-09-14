@@ -497,7 +497,8 @@ def test_redraw_button_remakes_the_table_picture_and_keeps_the_spec(conn, monkey
     client = TestClient(app, follow_redirects=False)
     assert f'action="/drafts/{did}/image/redraw"' in client.get(f"/drafts/{did}").text
     r = client.post(f"/drafts/{did}/image/redraw")
-    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}"
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}?redrawn=1"
+    assert "Picture redrawn from the same spec" in client.get(r.headers["location"]).text
     row = store.get_draft(conn, did)
     assert row.draft.table is not None and store.resolve_image(row.image_path) == path
     assert path.read_bytes() == old  # redrawn from the stored verdicts, no web call

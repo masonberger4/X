@@ -18,6 +18,7 @@
 </p>
 {% if error %}<p class="flash over">{{ error }}</p>{% endif %}
 {% if revised %}<p class="flash">Revised. Read the new text below; claims whose text changed lost their verdict; supported claims that stayed the same kept theirs (run <code>python run_verify.py</code> or wait for the scheduler).</p>{% endif %}
+{% if redrawn %}{% set kept = image_grades | selectattr("kept") | first %}<p class="flash">Picture redrawn from the same spec{% if kept %}, kept at {{ kept.score }}/10 after {{ image_grades|length }} render{{ "s" if image_grades|length != 1 else "" }}{% endif %}. The text, the numbers and the verdicts are unchanged.</p>{% endif %}
 {% if d.rejection_reason %}<p class="flash over">Hard-rule failure: {{ d.rejection_reason }}</p>{% endif %}
 {% if d.rationale %}<p><strong>Scorer rationale:</strong> {{ d.rationale }}</p>{% endif %}
 {% if d.suggested_angle %}<p><strong>Suggested angle:</strong> {{ d.suggested_angle }}</p>{% endif %}

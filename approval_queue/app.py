@@ -48,6 +48,7 @@ from draft.voice_report import build_report
 from verify import render as verify_render
 from verify import settings as verify_settings
 from verify import store as verify_store
+from verify import tables as verify_tables
 from verify.autorevise import (  # noqa: F401  (re-exported)
     auto_rounds_used,
     cell_problems,
@@ -225,8 +226,17 @@ def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
 
 
 @app.get("/drafts/{draft_id}", response_class=HTMLResponse)
-def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised: int = 0):
-    return _render_detail(request, conn, draft_id, error=error, revised=bool(revised))
+def detail(
+    draft_id: int,
+    request: Request,
+    conn: Conn,
+    error: str = "",
+    revised: int = 0,
+    redrawn: int = 0,
+):
+    return _render_detail(
+        request, conn, draft_id, error=error, revised=bool(revised), redrawn=bool(redrawn)
+    )
 
 
 def _render_detail(
@@ -236,6 +246,7 @@ def _render_detail(
     *,
     error: str = "",
     revised: bool = False,
+    redrawn: bool = False,
     edit_form: dict[str, str] | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
@@ -247,7 +258,7 @@ def _render_detail(
         raise HTTPException(404, "no such draft")
     decisions = _decision_views(store.list_decisions(conn, draft_id))
     checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
-    has_image = store.resolve_image(row.image_path) is not None
+    image_file = store.resolve_image(row.image_path)
     table_checks = {(k.row, k.col): k for k in verify_store.table_checks_for_draft(conn, draft_id)}
     cells_contradicted = len(cell_problems(row.draft.table, table_checks.values()))
     image_grades = store.list_image_grades(conn, draft_id)
@@ -260,14 +271,17 @@ def _render_detail(
             "publish": store.publish_states(conn, [draft_id]).get(draft_id),
             "table_checks": table_checks,
             "image_grades": image_grades,
-            "table_unverified": row.draft.table is not None and not has_image,
-            "image_url": f"/drafts/{draft_id}/image" if has_image else "",
+            "table_unverified": row.draft.table is not None and image_file is None,
+            "image_url": _image_url(f"/drafts/{draft_id}/image", image_file),
             "image_alt": row.image_alt
             or (alt_text(row.draft.visual, row.url) if row.draft.visual else ""),
             "extra_images": [
                 {
                     "index": int(im["index"]),
-                    "url": f"/drafts/{draft_id}/image/{int(im['index'])}",
+                    "url": _image_url(
+                        f"/drafts/{draft_id}/image/{int(im['index'])}",
+                        store.resolve_image(im["path"]),
+                    ),
                     "alt": im.get("alt", ""),
                     "anchor": im.get("anchor", 1),
                 }
@@ -287,6 +301,7 @@ def _render_detail(
             "auto_rounds": auto_rounds_used(conn, draft_id),
             "error": error,
             "revised": revised,
+            "redrawn": redrawn,
         },
         status_code=status_code,
     )
@@ -477,13 +492,29 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     return await run_in_threadpool(work)
 
 
-def _detail_redirect(draft_id: int, *, error: str = "", revised: bool = False) -> RedirectResponse:
+def _detail_redirect(
+    draft_id: int, *, error: str = "", revised: bool = False, redrawn: bool = False
+) -> RedirectResponse:
     url = f"/drafts/{draft_id}"
     if error:
         url += f"?error={quote(error)}"
     elif revised:
         url += "?revised=1"
+    elif redrawn:
+        url += "?redrawn=1"
     return RedirectResponse(url, status_code=303)
+
+
+# A redraw rewrites the PNG in place: the browser must revalidate, never serve its copy.
+_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
+
+def _image_url(route: str, path: Path | None) -> str:
+    """The image route with the file's mtime as a cache-buster. A redraw rewrites the same
+    PNG in place, so without this the browser shows the picture it already has."""
+    if path is None:
+        return ""
+    return f"{route}?v={int(path.stat().st_mtime)}"
 
 
 @app.get("/drafts/{draft_id}/image", include_in_schema=False)
@@ -495,7 +526,7 @@ def image(draft_id: int, conn: Conn):
     path = store.resolve_image(row.image_path)
     if path is None:
         raise HTTPException(404, "this draft has no image")
-    return FileResponse(str(path), media_type="image/png")
+    return FileResponse(str(path), media_type="image/png", headers=_NO_CACHE)
 
 
 @app.get("/drafts/{draft_id}/image/{index}", include_in_schema=False)
@@ -508,7 +539,7 @@ def image_at(draft_id: int, index: int, conn: Conn):
         if int(im.get("index", 0)) == index:
             path = store.resolve_image(im["path"])
             if path is not None:
-                return FileResponse(str(path), media_type="image/png")
+                return FileResponse(str(path), media_type="image/png", headers=_NO_CACHE)
     raise HTTPException(404, "this draft has no such image")
 
 
@@ -558,12 +589,15 @@ async def redraw_image(draft_id: int, conn: Conn):
             hosts = trusted_hosts(cfg, verify_render.root_config())
             decision = verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
             log.info("draft %d: table redrawn by the reviewer (%s)", draft_id, decision.status)
+            # Only a RENDER decision draws: pending, blocked and dropped tables leave the
+            # picture alone, and the page's own flashes say why. Do not claim a redraw then.
+            return _detail_redirect(draft_id, redrawn=decision.status == verify_tables.RENDER)
         else:
             path = images.attach_chart(conn, draft_id, row.draft.chart, source_url=row.url)
             log.info("draft %d: chart redrawn by the reviewer -> %s", draft_id, path)
             if path is None:
                 return _detail_redirect(draft_id, error="the chart could not be rendered")
-        return _detail_redirect(draft_id)
+        return _detail_redirect(draft_id, redrawn=True)
 
     return await run_in_threadpool(work)
 

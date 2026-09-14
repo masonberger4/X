@@ -1,6 +1,7 @@
 """Chart images through the store, run_draft, the queue and the revise route."""
 
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -158,10 +159,32 @@ def test_redraw_button_remakes_a_chart(conn, db_file):
     path.write_bytes(b"stale")
     client = TestClient(app, follow_redirects=False)
     r = client.post(f"/drafts/{did}/image/redraw")
-    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}"
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}?redrawn=1"
     assert path.read_bytes() == old and store.get_draft(conn, did).draft.chart == chart
+    # the redirect lands on a page that says the redraw happened
+    assert "Picture redrawn from the same spec" in client.get(r.headers["location"]).text
+    assert "Picture redrawn" not in client.get(f"/drafts/{did}").text
     # nothing to redraw: refused with a message, not an error page
     seed_item(conn, "i2")
     plain = store.insert_draft(conn, item_id="i2", model="m", draft=_draft())
     r = client.post(f"/drafts/{plain}/image/redraw")
     assert r.status_code == 303 and "error=" in r.headers["location"]
+
+
+def test_image_url_is_cache_busted_and_the_png_is_not_cached(conn, db_file):
+    """A redraw rewrites the same PNG in place, so the page must not let the browser show
+    the copy it already has: the <img> src carries the file's mtime and the route says
+    no-cache."""
+    seed_item(conn, "i1")
+    chart = Chart("t", ["A", "B"], [88.0, 4.1], "%")
+    did = store.insert_draft(conn, item_id="i1", model="m", draft=_draft(chart))
+    path = images.attach_chart(conn, did, chart, source_url=URL)
+    client = TestClient(app)
+    assert (
+        f'src="/drafts/{did}/image?v={int(path.stat().st_mtime)}"'
+        in client.get(f"/drafts/{did}").text
+    )
+    r = client.get(f"/drafts/{did}/image")
+    assert r.status_code == 200 and "no-cache" in r.headers["cache-control"]
+    os.utime(path, (0, 0))  # a redraw gives the file a new mtime: so does the src
+    assert f'src="/drafts/{did}/image?v=0"' in client.get(f"/drafts/{did}").text
