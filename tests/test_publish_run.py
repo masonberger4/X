@@ -82,6 +82,15 @@ def keep_failed(tmp_path):
     return ["--config", str(cfg)]
 
 
+@pytest.fixture
+def slotted(tmp_path):
+    """--config args for a publish config with the two classic slots (the shipped file
+    is continuous mode, `slots: []`)."""
+    cfg = tmp_path / "slotted.yaml"
+    cfg.write_text("timezone: America/New_York\nslots: ['08:30', '12:15']\n")
+    return ["--config", str(cfg)]
+
+
 def seed_image(conn, did, *, chart=None):
     """Give a draft a chart spec and a (fake) rendered PNG in the images folder."""
     chart = chart or Chart("ORR by arm", ["A", "B"], [88.0, 14.6], "%", "n=97")
@@ -132,10 +141,10 @@ def test_live_without_env_gate_stays_dry(conn, fake_x, monkeypatch):
     assert fake_x.calls == []
 
 
-def test_live_posts_one_post_thread_and_is_idempotent(conn, fake_x, monkeypatch):
+def test_live_posts_one_post_thread_and_is_idempotent(conn, fake_x, monkeypatch, slotted):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     seed_draft(conn, "a")
-    assert run_publish.main(["--live"], now=SLOT_TIME) == 0
+    assert run_publish.main([*slotted, "--live"], now=SLOT_TIME) == 0
     assert len(fake_x.calls) == 1 and fake_x.calls[0] == (f"Post a {URL}", None)
     rows = store.list_posts(conn, 1)
     assert rows[0]["tweet_id"] == "tw1" and rows[0]["slot"] == "2026-06-01 08:30"
@@ -153,13 +162,34 @@ def test_claim_is_atomic_under_double_run(conn):
     other.close()
 
 
-def test_no_open_slot_posts_nothing(conn, fake_x, monkeypatch, caplog):
+def test_no_open_slot_posts_nothing(conn, fake_x, monkeypatch, caplog, slotted):
     caplog.set_level(logging.INFO)
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     seed_draft(conn, "a")
-    assert run_publish.main(["--live"], now=OFF_SLOT) == 0
+    assert run_publish.main([*slotted, "--live"], now=OFF_SLOT) == 0
     assert fake_x.calls == []
     assert "next slot 2026-06-01 12:15" in caplog.text
+
+
+def test_no_slots_means_continuous_mode(conn, fake_x, monkeypatch, tmp_path, caplog):
+    """`slots: []` turns slot gating off: a run outside any window posts the top candidate,
+    the next run is held by the minimum gap, and a run after the gap posts the next one."""
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    cfg = tmp_path / "publish.yaml"
+    cfg.write_text("timezone: America/New_York\nslots: []\nmin_gap_minutes: 90\n")
+    args = ["--config", str(cfg), "--live"]
+    seed_draft(conn, "a")
+    seed_draft(conn, "b")
+    assert run_publish.main(args, now=OFF_SLOT) == 0
+    assert len(fake_x.calls) == 1
+    rows = store.list_posts(conn)
+    assert rows[0]["slot"] == "continuous"
+    with caplog.at_level("INFO"):
+        assert run_publish.main(args, now=OFF_SLOT + timedelta(minutes=30)) == 0
+    assert len(fake_x.calls) == 1
+    assert "continuous mode: min gap not met" in caplog.text
+    assert run_publish.main(args, now=OFF_SLOT + timedelta(minutes=91)) == 0
+    assert len(fake_x.calls) == 2
 
 
 def test_now_flag_ignores_slots(conn, fake_x, monkeypatch):

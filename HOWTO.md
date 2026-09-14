@@ -254,7 +254,9 @@ source only when it is due, and score only scores what is new.
    learn.astct.org, say) adds that host to `trusted_domains` in
    `verify\config.yaml` for good, flips every stored verdict from that host
    to trusted, and redraws this draft's table from the verdicts it already
-   has: no new web call, no text change. Doing it by hand is the same: add
+   has: no new web call, no text change. A status bar at the top of the page
+   says so while it runs (redrawing and grading the picture can take up to a
+   minute) and the page reloads when it is done. Doing it by hand is the same: add
    the host to the list and rerun `run_verify.py --draft <id>`. Once the
    scheduler in part 6 is running, this happens automatically after every
    drafting run, so by the time you open the queue the evidence is already
@@ -358,6 +360,11 @@ source only when it is due, and score only scores what is new.
    python run_publish.py
    ```
    Run this a few times over a couple of days until the plan looks right.
+   The shipped `slots: []` is continuous mode: each run posts the top approved
+   draft as soon as `min_gap_minutes` has passed since the last post and the
+   daily cap allows, so a cron every 15 minutes drains the queue one draft per
+   gap, day and night. List times under `slots:` (e.g. `"08:30"`, `"12:15"`) to
+   post only inside those windows instead.
 2. Go live. Two things are required, so nothing posts by accident: in `.env`
    ```
    PUBLISH_ENABLED=1
