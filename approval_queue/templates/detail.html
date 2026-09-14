@@ -36,6 +36,12 @@
 {% endif %}
 <p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid #ccc"></p>
 <p class="meta">{{ image_alt }}</p>
+{% if extra_images %}
+<form class="inline" method="post" action="/drafts/{{ d.id }}/image/0/drop">
+  <input name="note" placeholder="why (optional)">
+  <button>Drop this picture</button> <span class="meta">the other picture stays</span>
+</form>
+{% endif %}
 {% if image_grades %}
 <details>
   <summary class="meta">Image grader: {% for g in image_grades %}{% if g.kept %}<strong>{{ g.score }}/10</strong> (kept){% else %}{{ g.score }}/10{% endif %}{% if not loop.last %} → {% endif %}{% endfor %} over {{ image_grades|length }} render{{ 's' if image_grades|length != 1 else '' }}</summary>
@@ -48,10 +54,14 @@
 <p class="meta">Second picture, attached to post {{ im.anchor }} when published.</p>
 <p><img src="{{ im.url }}" alt="{{ im.alt }}" style="max-width:100%;border:1px solid #ccc"></p>
 <p class="meta">{{ im.alt }}</p>
+<form class="inline" method="post" action="/drafts/{{ d.id }}/image/{{ im.index }}/drop">
+  <input name="note" placeholder="why (optional)">
+  <button>Drop this picture</button> <span class="meta">the first picture stays</span>
+</form>
 {% endfor %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/drop">
   <input name="note" placeholder="why (optional)">
-  <button>Drop image{{ 's' if extra_images else '' }}</button> <span class="meta">the post goes out text-only</span>
+  <button>Drop {{ 'both images' if extra_images else 'image' }}</button> <span class="meta">the post goes out text-only</span>
 </form>
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/redraw">
   <button>Redraw</button> <span class="meta">remake the picture from the same {{ 'table and its verdicts' if d.draft.table else 'numbers' }}; nothing else changes</span>
