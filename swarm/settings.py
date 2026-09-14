@@ -1,0 +1,30 @@
+"""Loads swarm/config.yaml (step 9's own settings; not the root config.yaml)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+CONFIG_PATH = Path(__file__).with_name("config.yaml")
+
+DEFAULTS: dict[str, Any] = {
+    "enabled": True,
+    "model": "",
+    "assembler_model": "",
+    "fan_out": 6,
+    "layers": 2,
+    "judge_votes": 3,
+    "max_similarity": 0.85,
+    "control": {"enabled": True},
+}
+
+
+def load_swarm_config(path: str | Path | None = None) -> dict[str, Any]:
+    """Return swarm/config.yaml with every key present (missing keys take DEFAULTS)."""
+    with open(path or CONFIG_PATH, encoding="utf-8") as fh:
+        raw = yaml.safe_load(fh) or {}
+    cfg = {**DEFAULTS, **raw}
+    cfg["control"] = {**DEFAULTS["control"], **(raw.get("control") or {})}
+    return cfg

@@ -345,7 +345,7 @@ def draft_item(
         rationale=rationale,
         examples_block=examples_block,
     )
-    return _generate(
+    return generate(
         system,
         user,
         model=model,
@@ -403,7 +403,7 @@ def revise_item(
         claim_problems=claim_problems,
         cell_problems=cell_problems,
     )
-    return _generate(
+    return generate(
         system,
         user,
         model=model,
@@ -416,7 +416,7 @@ def revise_item(
     )
 
 
-def _generate(
+def generate(
     system: str,
     user: str,
     *,
@@ -424,11 +424,12 @@ def _generate(
     url: str,
     source: str,
     source_text: str,
-    call: CallFn,
-    max_attempts: int,
-    sleep: Callable[[float], None],
+    call: CallFn = call_anthropic,
+    max_attempts: int = MAX_ATTEMPTS,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> DraftResult:
-    """The shared attempt loop behind draft_item and revise_item."""
+    """The shared attempt loop behind draft_item and revise_item, public so step 9's swarm
+    assembly runs through the same schema check, hard rules, chart check and retries."""
     last_reasons: list[str] = []
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
@@ -462,3 +463,6 @@ def _generate(
         raise DraftRejected(last_reasons)
     assert last_exc is not None
     raise last_exc
+
+
+_generate = generate  # the pre-step-9 private name

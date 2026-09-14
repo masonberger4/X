@@ -1,0 +1,20 @@
+# Step 9 (swarm drafting) settings. This is swarm/'s own file, NOT the root config.yaml.
+# Loaded by swarm.settings.load_swarm_config(). Nothing here changes what is ingested,
+# scored, verified or posted; it controls how run_draft.py writes a draft.
+
+enabled: true
+
+# The cheap model behind every cell, synthesiser and judge call. The whole point of the
+# swarm is many narrow calls on a small model; the strong drafter runs as the control.
+model: claude-haiku-4-5-20251001
+# The assembly call (chosen cells -> the step 2 JSON with visual and claims). Blank means
+# the same model as above.
+assembler_model: ""
+
+fan_out: 6          # proposals per slot per layer
+layers: 2           # 1 = proposals only; 2 and up add Mixture-of-Agents synthesis layers
+judge_votes: 3      # odd; the swarm-vs-control jury size (ties go to the control)
+max_similarity: 0.85  # difflib ratio at or above which a later candidate is a near twin and dropped
+
+control:
+  enabled: true     # also run the single strong drafter (draft_item) and let the jury pick
