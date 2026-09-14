@@ -266,6 +266,7 @@ def _render_detail(
             or (alt_text(row.draft.visual, row.url) if row.draft.visual else ""),
             "extra_images": [
                 {
+                    "index": int(im["index"]),
                     "url": f"/drafts/{draft_id}/image/{int(im['index'])}",
                     "alt": im.get("alt", ""),
                     "anchor": im.get("anchor", 1),
@@ -520,6 +521,22 @@ async def drop_image(draft_id: int, request: Request, conn: Conn):
     except KeyError as exc:
         raise HTTPException(404, "no such draft") from exc
     log.info("draft %d: image dropped by the reviewer", draft_id)
+    return _detail_redirect(draft_id)
+
+
+@app.post("/drafts/{draft_id}/image/{index}/drop")
+async def drop_one_image(draft_id: int, index: int, request: Request, conn: Conn):
+    """Phase four: drop just this picture, keeping the others. The pictures after it move
+    down a place; the spec that made it (the chart or table for index 0, the extra chart
+    after) goes with it and the text is untouched."""
+    form = await read_form(request)
+    try:
+        store.drop_image(conn, draft_id, note=_note(form), index=index)
+    except KeyError as exc:
+        raise HTTPException(404, "no such draft") from exc
+    except IndexError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    log.info("draft %d: image %d dropped by the reviewer", draft_id, index)
     return _detail_redirect(draft_id)
 
 
