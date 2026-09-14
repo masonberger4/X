@@ -37,6 +37,7 @@ CLIS = (
     "run_feedback",
     "run_ops",
     "run_logos",
+    "run_evolve",
 )
 
 

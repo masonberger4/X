@@ -40,9 +40,14 @@ def test_dashboard_shows_health_steps_and_counts(client):
     assert "database" in body and "disk free" in body
 
 
-def test_dashboard_marks_a_disabled_step(client):
+def test_dashboard_marks_a_disabled_step(client, monkeypatch):
+    import copy
+
+    cfg = copy.deepcopy(panel_app.JOBS.cfg)
+    next(s for s in cfg["steps"] if s["name"] == "feedback")["enabled"] = False
+    monkeypatch.setattr(panel_app.JOBS, "cfg", cfg)
     body = client.get("/").text
-    # feedback is the step shipped disabled; the steps table is below the checks table
+    # the steps table is below the checks table
     row = body.rsplit("<strong>feedback</strong>", 1)[1].split("</tr>")[0]
     assert "disabled" in row
     assert 'value="feedback"' not in row, "a disabled step has no run checkbox"

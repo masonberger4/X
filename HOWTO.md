@@ -420,6 +420,12 @@ source only when it is due, and score only scores what is new.
    ```
    with `PUBLISH_ENABLED=1` already in `.env`. Until then, publishing stays a
    command you run by hand.
+   The `feedback` and `evolve` steps are on in `ops\config.yaml`: the account
+   has the paid X API read tier, so put the bearer token on `X_BEARER_TOKEN=`
+   in `.env` (Part 7) and every scheduled run also snapshots metrics and
+   scores the swarm. Without the token the feedback step fails with an error
+   in the log and the run carries on (it is optional). `evolve` runs `run_evolve.py` after `feedback` and
+   never calls the network.
 4. Alerts (optional): put a Slack or Discord incoming-webhook URL on
    `ALERT_WEBHOOK_URL=` in `.env`, or fill the `SMTP_*` and `ALERT_EMAIL_*`
    lines, and the hourly health task will message you when a source or step
@@ -446,6 +452,17 @@ source only when it is due, and score only scores what is new.
    The report proposes changes to the scoring rubric, prefilter keywords,
    posting slots and voice guide. It applies none of them; tell me which you
    want and I will commit them.
+3. Swarm fitness (step 9, once snapshots exist). Scores every posted swarm
+   draft against the posts before it and retires the genomes that keep
+   losing, so the next drafts come from the winners:
+   ```
+   python run_evolve.py                     # score, prune, report
+   python run_evolve.py report              # the table only, no change
+   python run_evolve.py prune --dry-run     # see what would be retired
+   ```
+   The report's last two lines are the swarm-vs-control measurement: whether
+   the posts the AI jury gave to the swarm did better on X than the ones it
+   gave to the single strong drafter.
 
 ---
 
@@ -668,6 +685,8 @@ before scoring, `enabled: false` turns it off),
 skips the chart), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules; `media: attach_images`
-attaches or skips the chart), `feedback\config.yaml`
-and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
+attaches or skips the chart), `feedback\config.yaml`,
+`swarm\config.yaml` (step 9: the cheap model, how many cells per post, how many
+layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
+drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.

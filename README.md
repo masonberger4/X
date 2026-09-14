@@ -494,6 +494,60 @@ the root `config.yaml` if you add that key, else `model` in
 `draft/config.yaml`. Databases created before step 7 are migrated in place
 (`decisions.category` is added with a guarded `ALTER TABLE`).
 
+## Swarm drafting (step 9)
+
+Step 9 takes the human out of the creative loop. Instead of one strong model
+writing a thread, many cheap calls each write ONE post ("cell") of it: a
+genome names the slots (`hook`, `mechanism`, `thesis`, `catalyst`, `risk`,
+`closer`) and each slot's one-line job; `fan_out` proposals per slot are
+followed by `layers - 1` Mixture-of-Agents rounds where each cheap call sees
+every earlier candidate and writes a better one; cells that fail the per-post
+hard rules (280 chars, advice phrases, a number not verbatim in the source,
+the closer's URL, the hook's preprint label) are dropped in code; near twins
+are removed; a single-elimination tournament of pairwise cheap judges picks
+the slot's post, which becomes context for the next slot. One assembly call
+then turns the chosen cells into the step 2 JSON (visual, why_it_matters,
+claims_to_verify) through the drafter's own schema check, hard rules, chart
+check and retries. The bet ("more is different": the arrangement, not the
+model, carries the quality) is measured, not assumed: with `control.enabled`
+the single strong drafter also writes the story, a jury of `judge_votes`
+cheap judges compares the two threads with the A/B order randomised, and the
+winner is stored as the ordinary pending draft (`model` column `swarm:<model>`
+for a swarm win). A swarm that fails its rules loses to the control.
+
+```bash
+python run_draft.py               # swarm on (swarm/config.yaml enabled: true)
+python run_draft.py --no-swarm    # the single strong drafter only, as before step 9
+```
+
+Settings live in `swarm/config.yaml` (cheap `model`, `assembler_model`,
+`fan_out`, `layers`, `judge_votes`, `max_similarity`, `control.enabled`).
+Every call goes through `draft/drafter.py:call_anthropic`. Tables (step 9's
+own): `swarm_genomes` (the heritable slots and topology; phase three writes
+children), `swarm_runs` (genome, winner, call count and the full cell and
+tournament log per story) and `swarm_variants` (both drafts of a run and
+whether each passed the hard rules), so later phases can score the jury and
+the genomes against real X engagement (`prompts/prompt9.md`). About 110 cheap
+calls per story at the shipped values. The human's remaining creative-adjacent
+controls are "Publish now" and "Set schedule" on the approved page.
+
+**Phase two: fitness from X** (`run_evolve.py`, no network). Three seed
+genomes (`default-6`, `wide-6` with more proposals and no synthesis layer,
+`deep-4` with four slots and two synthesis layers) are drafted round-robin
+(`swarm.store.next_genome`: the live genome with the fewest runs). Once
+`run_feedback.py snapshot` has metrics, `run_evolve.py score` gives every
+posted swarm draft the head tweet's KPI (`evolve.kpi`), the median KPI of the
+posts in the trailing `baseline_days` before it, and their ratio (a slow week
+prunes nobody), stored in `swarm_fitness`. `prune` retires a live genome with
+at least `min_posts` scored posts whose median ratio is below the population
+median, never below `min_alive` live genomes (`swarm_genomes.retired_at`,
+`retired_reason`). `report` prints the per-genome table and the
+swarm-vs-control measurement: median ratio of posts the jury gave to the swarm
+against posts it gave to the control. `fetch_head_metrics` in `swarm/store.py`
+is the one read of step 3's `posts` and step 4's `tweet_metrics`, empty when
+either is missing. The `evolve` step in `ops/config.yaml` runs after `feedback`
+on every scheduled run (both enabled: the account has the paid X read tier).
+
 ## Headless backend (optional)
 
 By default the scorer and drafter call the Anthropic API with `ANTHROPIC_API_KEY`

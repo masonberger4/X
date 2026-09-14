@@ -1,7 +1,7 @@
 """CLI: draft every scored candidate above threshold that has no draft yet.
 
 Usage: python run_draft.py [--min-score 30] [--since-hours 48] [--limit N] [--dry-run]
-                           [--no-examples]
+                           [--no-examples] [--no-swarm]
 
 Drafts that pass every hard rule are stored as pending. Drafts the model could not get
 past the hard rules are stored as status=failed with the reason, so they are not retried
@@ -17,6 +17,12 @@ Step 7: unless --no-examples (or examples.enabled: false in draft/config.yaml), 
 edits and rejections from the approval queue are built ONCE per run into an examples block
 that goes into every draft's system prompt; draft_examples records which decisions each
 draft was shown.
+
+Step 9: unless --no-swarm (or enabled: false in swarm/config.yaml), each story is also
+written by the swarm (many cheap calls, one post per slot, see swarm/) and, when
+control.enabled, by the single strong drafter as before; a jury of cheap judges picks the
+winner, which is stored as the ordinary pending draft. swarm_runs / swarm_variants record
+both versions and the verdict. A swarm that fails its hard rules loses to the control.
 """
 
 from __future__ import annotations
@@ -39,6 +45,10 @@ from draft.examples import (
 )
 from draft.schema import Draft
 from draft.settings import load_draft_config
+from swarm import engine as swarm_engine
+from swarm import store as swarm_store
+from swarm.prompts import Brief
+from swarm.settings import load_swarm_config
 
 log = logging.getLogger("run_draft")
 
@@ -68,6 +78,120 @@ def build_examples(
     return block, edits, rejections
 
 
+def draft_with_swarm(
+    conn: store.sqlite3.Connection,
+    c: store.Candidate,
+    swarm_cfg: dict,
+    examples_block: str | None,
+) -> tuple[object, int]:
+    """Step 9: swarm + control, jury, winner. Returns (DraftResult or DraftRejected, run id).
+
+    The control is draft_item exactly as the pre-step-9 path; the swarm is
+    swarm.engine.run_swarm. Both variants are recorded; the run row gets its draft_id once
+    the winner is stored."""
+    brief = Brief(
+        title=c.title,
+        abstract=c.abstract,
+        url=c.url,
+        source=c.source,
+        published_at=c.published_at,
+        suggested_angle=c.suggested_angle,
+        rationale=c.rationale,
+    )
+    genome = swarm_store.next_genome(conn)
+    log_rows: dict = {}
+    swarm_result = None
+    swarm_problem: str | None = None
+    try:
+        swarm_result = swarm_engine.run_swarm(
+            brief, genome, swarm_cfg, examples_block=examples_block
+        )
+        log_rows["swarm"] = swarm_result.log
+    except swarm_engine.SwarmFailed as exc:
+        swarm_problem = str(exc)
+        log.warning("%s: swarm failed: %s", c.item_id, exc)
+    except Exception as exc:  # API failure inside the swarm: the control still runs
+        swarm_problem = f"error: {exc}"
+        log.exception("%s: swarm error", c.item_id)
+
+    control_result = None
+    control_problem: list[str] | None = None
+    if (swarm_cfg.get("control") or {}).get("enabled", True):
+        try:
+            control_result = draft_item(
+                title=c.title,
+                abstract=c.abstract,
+                url=c.url,
+                source=c.source,
+                published_at=c.published_at,
+                suggested_angle=c.suggested_angle,
+                rationale=c.rationale,
+                examples_block=examples_block,
+            )
+        except DraftRejected as exc:
+            control_problem = exc.reasons
+        # any other exception propagates: the caller retries the story next run
+
+    calls = swarm_result.calls if swarm_result else 0
+    winner: str | None
+    verdict = None
+    if swarm_result and control_result:
+        verdict = swarm_engine.compare(
+            swarm_result.draft_result.draft, control_result.draft, brief, swarm_cfg
+        )
+        calls += verdict.calls
+        log_rows["jury"] = verdict.votes
+        winner = verdict.winner
+    elif swarm_result:
+        winner = "swarm"
+    elif control_result:
+        winner = "control"
+    else:
+        winner = None
+    run_id = swarm_store.record_run(
+        conn,
+        item_id=c.item_id,
+        cluster_id=c.cluster_id,
+        genome_id=genome.id,
+        winner=winner,
+        calls=calls,
+        log=log_rows,
+    )
+    swarm_store.record_variant(
+        conn,
+        run_id,
+        role="swarm",
+        model=swarm_result.draft_result.model if swarm_result else None,
+        draft=swarm_result.draft_result.draft if swarm_result else None,
+        problems=[swarm_problem] if swarm_problem else None,
+    )
+    if (swarm_cfg.get("control") or {}).get("enabled", True):
+        swarm_store.record_variant(
+            conn,
+            run_id,
+            role="control",
+            model=control_result.model if control_result else None,
+            draft=control_result.draft if control_result else None,
+            problems=control_problem,
+        )
+    log.info(
+        "%s: swarm %s, control %s -> %s (%d calls)",
+        c.item_id,
+        "ok" if swarm_result else "failed",
+        "ok" if control_result else ("off" if control_problem is None else "failed"),
+        winner,
+        calls,
+    )
+    if winner == "swarm":
+        return swarm_result.draft_result, run_id
+    if winner == "control":
+        return control_result, run_id
+    reasons = list(control_problem or [])
+    if swarm_problem:
+        reasons.append(f"swarm: {swarm_problem}")
+    return DraftRejected(reasons or ["no variant produced a draft"]), run_id
+
+
 def _default_min_score() -> float:
     """config.yaml scoring.threshold (the digest's bar), else 30 on the 0-50 scale."""
     try:
@@ -95,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
         "--no-examples",
         action="store_true",
         help="do not add recent human edits/rejections to the prompt (step 7)",
+    )
+    ap.add_argument(
+        "--no-swarm",
+        action="store_true",
+        help="draft with the single strong model only, as before step 9 (no swarm, no jury)",
     )
     ap.add_argument(
         "--retry-failed",
@@ -128,6 +257,21 @@ def main(argv: list[str] | None = None) -> int:
             log.info("voice examples: disabled in draft/config.yaml")
         else:
             examples_block, edits, rejections = build_examples(conn, draft_cfg)
+        swarm_cfg = load_swarm_config()
+        use_swarm = bool(swarm_cfg.get("enabled", True)) and not args.no_swarm
+        if args.no_swarm:
+            log.info("swarm: disabled by --no-swarm")
+        elif not use_swarm:
+            log.info("swarm: disabled in swarm/config.yaml")
+        else:
+            swarm_store.ensure_tables(conn)
+            log.info(
+                "swarm: on (%s, fan_out %s, layers %s, control %s)",
+                swarm_cfg.get("model"),
+                swarm_cfg.get("fan_out"),
+                swarm_cfg.get("layers"),
+                "on" if (swarm_cfg.get("control") or {}).get("enabled", True) else "off",
+            )
         edit_ids = [e.decision_id for e in edits]
         rejection_ids = [r.decision_id for r in rejections]
         if args.dry_run:
@@ -157,17 +301,23 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if args.retry_failed:
                 store.delete_failed_drafts(conn, c.item_id, c.cluster_id)
+            run_id: int | None = None
             try:
-                result = draft_item(
-                    title=c.title,
-                    abstract=c.abstract,
-                    url=c.url,
-                    source=c.source,
-                    published_at=c.published_at,
-                    suggested_angle=c.suggested_angle,
-                    rationale=c.rationale,
-                    examples_block=examples_block,
-                )
+                if use_swarm:
+                    result, run_id = draft_with_swarm(conn, c, swarm_cfg, examples_block)
+                    if isinstance(result, DraftRejected):
+                        raise result
+                else:
+                    result = draft_item(
+                        title=c.title,
+                        abstract=c.abstract,
+                        url=c.url,
+                        source=c.source,
+                        published_at=c.published_at,
+                        suggested_angle=c.suggested_angle,
+                        rationale=c.rationale,
+                        examples_block=examples_block,
+                    )
             except DraftRejected as exc:
                 failed += 1
                 draft_id = store.insert_draft(
@@ -180,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
                     rejection_reason="; ".join(exc.reasons),
                 )
                 store.record_examples(conn, draft_id, edit_ids, rejection_ids)
+                if run_id is not None:
+                    swarm_store.set_run_draft(conn, run_id, draft_id)
                 continue
             except Exception:
                 log.exception("API failure drafting %s; will retry next run", c.item_id)
@@ -192,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
                 draft=result.draft,
             )
             store.record_examples(conn, draft_id, edit_ids, rejection_ids)
+            if run_id is not None:
+                swarm_store.set_run_draft(conn, run_id, draft_id)
             drafted += 1
             if result.flagged_numbers:
                 log.warning("%s: numbers flagged for review: %s", c.item_id, result.flagged_numbers)

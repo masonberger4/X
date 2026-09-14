@@ -129,3 +129,25 @@ source. Ask me before adding any dependency not listed above.
 
 Do not build drafting, posting, or any X API integration yet.
 ```
+
+### 9. Swarm (takes the human out of the creative loop)
+Premise ("more is different"): a single cheap model is a poor analyst, but
+many cheap calls with narrow jobs, local rules and no view of the whole,
+arranged in layers, may beat one strong call. So no agent writes a thread:
+a genome names the slots and each slot's job; cheap cells propose, cheap
+synthesisers improve on every earlier candidate, cheap judges run a
+tournament per slot, one assembly call produces the step 3 JSON through the
+same hard rules. The human keeps one job: when a post goes out.
+- Phase one (built, `swarm/`): cells + layers + jury against the single
+  strong drafter as a CONTROL on every story; both variants and the verdict
+  are recorded (`swarm_runs`, `swarm_variants`).
+- Phase two (built, `run_evolve.py`): fitness from X. Join step 4's metrics
+  to the run; relative KPI (post / trailing 30-day median); the jury's
+  swarm-vs-control verdicts measured against reality; three seed genomes
+  drafted round-robin; below-median genomes retired.
+- Phase three: mutation. One strong call writes a child genome that varies
+  ONE thing (a slot rule, fan-out, layers, a split); designer genomes own a
+  chart Style and go through the image grader with the same accounting.
+  Selection acts on the topology, so a single strong call can win back if
+  that is what X rewards.
+Full specification: `prompts/prompt9.md`.
