@@ -119,6 +119,26 @@ def test_queue_serves_and_drops_the_image(client, conn):
     assert client.post("/drafts/999/image/drop").status_code == 404
 
 
+def test_a_redrawn_picture_is_never_served_from_the_browser_cache(client, conn):
+    """A redraw rewrites the same file name at the same URL, so the page must not let a
+    browser reuse the old picture: the response says revalidate and the URL carries the
+    file's mtime."""
+    import os
+
+    seed_item(conn, "i1")
+    chart = Chart("Outcomes", ["ORR", "CRS"], [88.0, 4.1], "%", "n=97")
+    did = store.insert_draft(conn, item_id="i1", model="m", draft=_draft(chart))
+    path = images.attach_chart(conn, did, chart, source_url=URL)
+    assert client.get(f"/drafts/{did}/image").headers["cache-control"] == "no-cache"
+    first = client.get(f"/drafts/{did}").text
+    assert f"/drafts/{did}/image?v={int(path.stat().st_mtime)}" in first
+    # a redraw a second later changes the URL, so a cached picture is not reused
+    os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 60))
+    second = client.get(f"/drafts/{did}").text
+    assert f"/drafts/{did}/image?v={int(path.stat().st_mtime)}" in second
+    assert first != second
+
+
 def test_revise_replaces_the_image(client, conn, monkeypatch):
     seed_item(conn, "i1")
     chart = Chart("Old", ["ORR", "CRS"], [88.0, 4.1], "%")
