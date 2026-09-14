@@ -205,3 +205,77 @@ def test_run_evolve_touches_only_its_own_tables(conn):
     after = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in before}
     assert before == after
     assert isinstance(store.list_drafts(conn), list)
+
+
+def test_formats_are_scored_pruned_and_bred_with_their_own_bar(conn, monkeypatch):
+    import run_evolve
+
+    _setup(conn)
+    formats = {f.name: f for f in swarm_store.live_genomes(conn, "format")}
+    assert set(formats) == {"thread-1-first", "thread-2-ends", "thread-0", "single-1", "long-1"}
+    cfg = {"population_size": 3, "format_population_size": 5, "mutation_model": "m"}
+    # the population is full: nothing bred
+    assert (
+        run_evolve.cmd_breed(conn, cfg, [], dry_run=False, force=True, call=lambda *a: "{}") == []
+    )
+    swarm_store.retire_genome(conn, formats["thread-0"].id, "test")
+    born = run_evolve.cmd_breed(
+        conn,
+        cfg,
+        [],
+        dry_run=False,
+        force=True,
+        call=lambda *a: "{}",
+        rng=__import__("random").Random(4),
+    )
+    kinds = [type(b).__name__ for b in born]
+    assert kinds == ["FormatGenome"]
+    assert born[0].parent_id in {f.id for f in formats.values()}
+    assert len(swarm_store.live_genomes(conn, "format")) == 5
+    # a format needs format_min_posts scored posts before pruning looks at it
+    from swarm import fitness
+
+    obs = [
+        fitness.Observation(
+            i,
+            i,
+            None,
+            "swarm",
+            fitness.parse_when("2026-01-01T00:00:00+00:00"),
+            1.0,
+            1.0,
+            rel,
+            format_id=fid,
+        )
+        for i, (fid, rel) in enumerate(
+            [(formats["thread-1-first"].id, 2.0)] * 6 + [(formats["single-1"].id, 0.2)] * 6
+        )
+    ]
+    assert (
+        run_evolve.cmd_prune(
+            conn, {"min_posts": 5, "format_min_posts": 8, "min_alive": 2}, obs, dry_run=False
+        )
+        == []
+    )
+    obs += [
+        fitness.Observation(
+            99 + i,
+            99 + i,
+            None,
+            "swarm",
+            fitness.parse_when("2026-01-01T00:00:00+00:00"),
+            1.0,
+            1.0,
+            rel,
+            format_id=fid,
+        )
+        for i, (fid, rel) in enumerate(
+            [(formats["thread-1-first"].id, 2.0)] * 2 + [(formats["single-1"].id, 0.2)] * 2
+        )
+    ]
+    retired = run_evolve.cmd_prune(
+        conn, {"min_posts": 5, "format_min_posts": 8, "min_alive": 2}, obs, dry_run=False
+    )
+    assert retired == [formats["single-1"].id]
+    out = run_evolve.render_report(conn, {"kpi": "impressions", "baseline_days": 30}, obs)
+    assert "formats " in out and "single-1" in out and "retired" in out

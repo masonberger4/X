@@ -49,6 +49,8 @@ class FakeModel:
                 for line in user.splitlines()
                 if line.startswith("[") and "] " in line
             ]
+            if "joined by blank lines" in user:  # a long post: one string of sections
+                cells = ["\n\n".join(cells)]
             return json.dumps(
                 {
                     "thread": cells,
@@ -68,7 +70,7 @@ class FakeModel:
         layer = "syn" if "CANDIDATES FROM THE PREVIOUS ROUND" in user else "prop"
         if self.bad_every and self.n % self.bad_every == 0:
             return f"{slot} {layer} claims ORR 99% which is invented"
-        tail = f" {URL}" if slot == "closer" else ""
+        tail = f" {URL}" if slot in ("closer", "single") else ""
         # the counter is spelled with letters: a digit would fail the verbatim-number rule
         tag = "".join(chr(ord("a") + int(d)) for d in str(self.n))
         return f"{slot} {layer} post {tag} reads the 88% ORR well{tail}"

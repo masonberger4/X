@@ -13,17 +13,28 @@ from swarm.genome import CLOSER, HOOK
 
 
 def cell_problems(
-    text: str, *, source_text: str, url: str, slot: str, is_preprint: bool
+    text: str,
+    *,
+    source_text: str,
+    url: str,
+    slot: str,
+    is_preprint: bool,
+    max_chars: int = MAX_POST_CHARS,
+    needs_url: bool | None = None,
+    needs_preprint: bool | None = None,
 ) -> list[str]:
     """Why one candidate post is unusable. Empty means it may enter the tournament. The same
-    rules draft.drafter.check_hard_rules applies to a thread, applied to one post."""
+    rules draft.drafter.check_hard_rules applies to a thread, applied to one post.
+    `max_chars` is the cell's limit (a long post's section, phase four); `needs_url` /
+    `needs_preprint` override the slot-name defaults (the closer carries the URL, the hook
+    the preprint label) for a single-post format where one cell must do both."""
     problems: list[str] = []
     t = text.strip()
     if not t:
         return ["empty"]
     n = tweet_length(t)
-    if n > MAX_POST_CHARS:
-        problems.append(f"{n} chars (> {MAX_POST_CHARS})")
+    if n > max_chars:
+        problems.append(f"{n} chars (> {max_chars})")
     if m := _ADVICE_RE.search(t):
         problems.append(f"reads as medical advice: {m.group(0)!r}")
     if m := _INVEST_RE.search(t):
@@ -31,10 +42,14 @@ def cell_problems(
     missing = [num for num in numbers_in(t) if not _number_in_source(num, source_text)]
     if missing:
         problems.append("numbers not in the source: " + ", ".join(dict.fromkeys(missing)))
-    if slot == CLOSER and url not in t:
-        problems.append("closer is missing the primary source URL")
-    if slot == HOOK and is_preprint and PREPRINT_LABEL not in t.lower():
-        problems.append("preprint not labelled in the hook")
+    if needs_url is None:
+        needs_url = slot == CLOSER
+    if needs_preprint is None:
+        needs_preprint = slot == HOOK and is_preprint
+    if needs_url and url not in t:
+        problems.append(f"{slot} is missing the primary source URL")
+    if needs_preprint and PREPRINT_LABEL not in t.lower():
+        problems.append(f"preprint not labelled in the {slot}")
     return problems
 
 

@@ -136,3 +136,17 @@ def test_no_swarm_flag_skips_everything(conn, monkeypatch):
     assert "swarm_runs" not in {
         r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
+
+
+def test_run_records_the_format_and_both_variants_write_to_it(conn, monkeypatch):
+    import run_draft
+
+    seed_item(conn, "s5", total=9.0)
+    _wire(monkeypatch, FakeModel(), jury_pick="swarm")
+    assert run_draft.main(["--min-score", "7"]) == 0
+    row = conn.execute("SELECT format_id, log_json FROM swarm_runs").fetchone()
+    assert row[0] is not None
+    assert json.loads(row[1])["format"]["shape"] == "thread"
+    d = store.list_drafts(conn)[0]
+    assert d.draft.wanted_visuals == 1 and d.draft.shape == "thread"
+    assert conn.execute("SELECT format_json FROM drafts").fetchone()[0]

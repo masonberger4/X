@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from draft.schema import Draft
-from swarm.genome import SEED_DESIGNERS, SEED_GENOMES, Designer, Genome
+from swarm.genome import SEED_DESIGNERS, SEED_FORMATS, SEED_GENOMES, Designer, FormatGenome, Genome
 
 ROLES = ("swarm", "control")
-KINDS = ("writer", "designer")
+KINDS = ("writer", "designer", "format")
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -102,14 +102,26 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE swarm_runs ADD COLUMN designer_id INTEGER")
     if "designer_id" not in _columns(conn, "swarm_fitness"):
         conn.execute("ALTER TABLE swarm_fitness ADD COLUMN designer_id INTEGER")
+    if "format_id" not in _columns(conn, "swarm_runs"):
+        conn.execute("ALTER TABLE swarm_runs ADD COLUMN format_id INTEGER")
+    if "format_id" not in _columns(conn, "swarm_fitness"):
+        conn.execute("ALTER TABLE swarm_fitness ADD COLUMN format_id INTEGER")
     conn.commit()
 
 
+def _kind_of(obj: Genome | Designer | FormatGenome) -> str:
+    if isinstance(obj, Designer):
+        return "designer"
+    if isinstance(obj, FormatGenome):
+        return "format"
+    return "writer"
+
+
 def insert_genome(
-    conn: sqlite3.Connection, obj: Genome | Designer, *, kind: str | None = None
+    conn: sqlite3.Connection, obj: Genome | Designer | FormatGenome, *, kind: str | None = None
 ) -> int:
-    """Store a writer genome or a designer; returns its id and sets obj.id."""
-    kind = kind or ("designer" if isinstance(obj, Designer) else "writer")
+    """Store a writer genome, a designer or a format; returns its id and sets obj.id."""
+    kind = kind or _kind_of(obj)
     if kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}")
     cur = conn.execute(
@@ -134,6 +146,9 @@ def seed_default(conn: sqlite3.Connection) -> int:
     for d in SEED_DESIGNERS:
         if (d.name, "designer") not in names:
             names[(d.name, "designer")] = insert_genome(conn, d, kind="designer")
+    for f in SEED_FORMATS:
+        if (f.name, "format") not in names:
+            names[(f.name, "format")] = insert_genome(conn, f, kind="format")
     return names[(SEED_GENOMES[0].name, "writer")]
 
 
@@ -177,26 +192,38 @@ def next_designer(conn: sqlite3.Connection) -> Designer:
     return Designer.from_json(row[1], id=int(row[0]))
 
 
-def live_genomes(conn: sqlite3.Connection, kind: str = "writer") -> list[Genome | Designer]:
+def next_format(conn: sqlite3.Connection) -> FormatGenome:
+    """Round-robin over the live format genomes (phase four)."""
+    row = _next_row(conn, "format", "format_id")
+    return FormatGenome.from_json(row[1], id=int(row[0]))
+
+
+def _parse(kind: str, text: str, id: int) -> Genome | Designer | FormatGenome:
+    if kind == "designer":
+        return Designer.from_json(text, id=id)
+    if kind == "format":
+        return FormatGenome.from_json(text, id=id)
+    return Genome.from_json(text, id=id)
+
+
+def live_genomes(
+    conn: sqlite3.Connection, kind: str = "writer"
+) -> list[Genome | Designer | FormatGenome]:
     rows = conn.execute(
         "SELECT id, genome_json FROM swarm_genomes WHERE retired_at IS NULL AND kind = ? "
         "ORDER BY id",
         (kind,),
     ).fetchall()
-    if kind == "designer":
-        return [Designer.from_json(r[1], id=int(r[0])) for r in rows]
-    return [_genome_row(r) for r in rows]
+    return [_parse(kind, r[1], int(r[0])) for r in rows]
 
 
-def get_genome(conn: sqlite3.Connection, genome_id: int) -> Genome | Designer | None:
+def get_genome(conn: sqlite3.Connection, genome_id: int) -> Genome | Designer | FormatGenome | None:
     row = conn.execute(
         "SELECT id, genome_json, kind FROM swarm_genomes WHERE id = ?", (genome_id,)
     ).fetchone()
     if row is None:
         return None
-    if row[2] == "designer":
-        return Designer.from_json(row[1], id=int(row[0]))
-    return _genome_row(row)
+    return _parse(row[2] or "writer", row[1], int(row[0]))
 
 
 def retire_genome(conn: sqlite3.Connection, genome_id: int, reason: str) -> None:
@@ -224,11 +251,12 @@ def record_run(
     log: list[dict] | dict | None,
     draft_id: int | None = None,
     designer_id: int | None = None,
+    format_id: int | None = None,
 ) -> int:
     cur = conn.execute(
         """INSERT INTO swarm_runs (draft_id, item_id, cluster_id, genome_id, winner, calls,
-                                   log_json, created_at, designer_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                   log_json, created_at, designer_id, format_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             draft_id,
             item_id,
@@ -239,6 +267,7 @@ def record_run(
             json.dumps(log, ensure_ascii=False) if log is not None else None,
             _now(),
             designer_id,
+            format_id,
         ),
     )
     conn.commit()
@@ -324,6 +353,7 @@ class HeadMetric:
     captured_on: str
     metrics: dict[str, int]
     designer_id: int | None = None
+    format_id: int | None = None
 
 
 def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
@@ -336,7 +366,7 @@ def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
         """SELECT r.id AS run_id, r.draft_id, r.genome_id, r.winner,
                   p.tweet_id, p.posted_at,
                   m.captured_on, m.impressions, m.likes, m.reposts, m.replies, m.quotes,
-                  m.bookmarks, r.designer_id
+                  m.bookmarks, r.designer_id, r.format_id
            FROM swarm_runs r
            JOIN posts p ON p.draft_id = r.draft_id AND p.position = 1
                         AND p.status = 'posted' AND p.tweet_id IS NOT NULL
@@ -361,6 +391,7 @@ def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
                 captured_on=str(r[6]),
                 metrics={k: int(v or 0) for k, v in zip(KPIS, r[7:13], strict=True)},
                 designer_id=int(r[13]) if r[13] is not None else None,
+                format_id=int(r[14]) if r[14] is not None else None,
             )
         )
     return out
@@ -405,17 +436,19 @@ def upsert_fitness(
     baseline: float | None,
     relative: float | None,
     designer_id: int | None = None,
+    format_id: int | None = None,
 ) -> None:
     conn.execute(
         """INSERT INTO swarm_fitness (run_id, draft_id, genome_id, winner, tweet_id, posted_at,
-                                      kpi, value, baseline, relative, computed_at, designer_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      kpi, value, baseline, relative, computed_at, designer_id,
+                                      format_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(run_id) DO UPDATE SET
                genome_id = excluded.genome_id, winner = excluded.winner,
                tweet_id = excluded.tweet_id, posted_at = excluded.posted_at,
                kpi = excluded.kpi, value = excluded.value, baseline = excluded.baseline,
                relative = excluded.relative, computed_at = excluded.computed_at,
-               designer_id = excluded.designer_id""",
+               designer_id = excluded.designer_id, format_id = excluded.format_id""",
         (
             run_id,
             draft_id,
@@ -429,6 +462,7 @@ def upsert_fitness(
             relative,
             _now(),
             designer_id,
+            format_id,
         ),
     )
     conn.commit()
@@ -446,12 +480,13 @@ class FitnessRow:
     baseline: float | None
     relative: float | None
     designer_id: int | None = None
+    format_id: int | None = None
 
 
 def list_fitness(conn: sqlite3.Connection) -> list[FitnessRow]:
     rows = conn.execute(
         "SELECT run_id, draft_id, genome_id, winner, posted_at, kpi, value, baseline, relative, "
-        "designer_id FROM swarm_fitness ORDER BY posted_at, run_id"
+        "designer_id, format_id FROM swarm_fitness ORDER BY posted_at, run_id"
     ).fetchall()
     return [FitnessRow(*r) for r in rows]
 

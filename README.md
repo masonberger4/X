@@ -187,6 +187,10 @@ snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
 
 ## Draft images (charts)
 
+Since step 9 phase four a draft may carry zero, one or two pictures, each
+anchored to a post (`drafts.images_json`); what follows describes the first
+picture, which every older reader still finds in `image_path`.
+
 The drafter's `suggested_visual` is a one-line description for the reviewer. The
 image that actually ships is a **chart the model specifies and code renders**
 (`draft/chart.py`) or a table (below): the output JSON must carry exactly one of
@@ -570,6 +574,32 @@ and `fetch_swarm_bet`, read-only; the page breeds and retires nothing). Without
 a scored genome nothing is bred unless `--force`. Because selection acts on the
 topology, the population can end up somewhere nobody designed, a single wide
 layer included, if that is what X rewards.
+
+**Phase four: the format is a gene.** Phases one to three evolved inside three
+fixed opinions: every draft a 3-6 post thread, exactly one picture, on the
+first post. Phase four makes them a third population, **format genomes**
+(`swarm/genome.py:SEED_FORMATS`): `thread-1-first` (the old physics),
+`thread-2-ends` (a chart on the first and the last post), `thread-0` (no
+picture), `single-1` (one 280-character post) and `long-1` (one Premium
+long-form post of up to `formats.long_max_chars`, shipped 4000; X allows 25000
+on Premium and the API rejects a long post from a non-Premium account). They
+are drafted round-robin like writers and designers, and the swarm and the
+control write the same story to the same format so the jury compares like
+with like. `draft/schema.py:Format` is what the drafter, `validate_output` and
+`check_hard_rules` read; without one they require the old physics, so nothing
+changes for a draft made before phase four. The first picture may be a chart
+or a table (step 2b's table checks are unchanged); a second must be a chart
+(`visuals` in the output, numbers verbatim). Each picture is rendered to its
+own file, recorded in `drafts.images_json` with the post it is anchored to,
+shown on the queue's draft page, and attached by `run_publish.py` to that
+post; `publish/thread.py` checks each post against the draft's own limit, so
+a long post is never refused for being over 280. The swarm runs one cell for
+a single post and its slots as sections of `formats.long_section_chars` for
+a long one. Formats are scored with the same relative KPI, pruned only after
+`evolve.format_min_posts` posts (a coarse gene needs more evidence than a slot
+rule), and bred without a model by stepping one field (shape, picture count,
+an anchor, the post range) to a neighbour. The panel's `/swarm` page has a
+Formats table.
 
 ## Headless backend (optional)
 

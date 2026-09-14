@@ -14,6 +14,7 @@ from typing import Any
 
 from draft.chart import Style
 from draft.drafter import CallFn, call_anthropic, parse_json_response
+from draft.schema import ANCHOR_WORDS, MAX_VISUALS, SHAPES, THREAD_MAX
 from swarm.genome import (
     CLOSER,
     HOOK,
@@ -24,6 +25,7 @@ from swarm.genome import (
     MIN_LAYERS,
     MIN_SLOTS,
     Designer,
+    FormatGenome,
     Genome,
     Slot,
 )
@@ -245,3 +247,83 @@ def breed_designer(parent: Designer, taken_names: set[str], rng: random.Random) 
             notes=f"{knob}: {current} -> {new}",
         )
     raise ChildError("no knob could be stepped")
+
+
+def format_neighbours(parent: FormatGenome) -> list[tuple[FormatGenome, str]]:
+    """Every format one step from the parent: another shape, one more or fewer visual, one
+    anchor moved, min or max posts stepped (threads). Each with a one-line note."""
+    out: list[tuple[FormatGenome, str]] = []
+
+    def child(**over: Any) -> FormatGenome:
+        d = {
+            "shape": parent.shape,
+            "min_posts": parent.min_posts,
+            "max_posts": parent.max_posts,
+            "visuals": parent.visuals,
+            "anchors": list(parent.anchors),
+        }
+        d.update(over)
+        return FormatGenome(name="", parent_id=parent.id, **d)
+
+    for shape in SHAPES:
+        if shape == parent.shape:
+            continue
+        if shape == "thread":
+            c = child(shape=shape, min_posts=3, max_posts=6, anchors=["first"] * parent.visuals)
+        else:
+            c = child(shape=shape, min_posts=1, max_posts=1, anchors=["first"] * parent.visuals)
+        out.append((c, f"shape {parent.shape} -> {shape}"))
+    if parent.visuals < MAX_VISUALS:
+        out.append(
+            (
+                child(visuals=parent.visuals + 1, anchors=list(parent.anchors) + ["first"]),
+                f"visuals {parent.visuals} -> {parent.visuals + 1}",
+            )
+        )
+    if parent.visuals > 0:
+        out.append(
+            (
+                child(visuals=parent.visuals - 1, anchors=list(parent.anchors)[:-1]),
+                f"visuals {parent.visuals} -> {parent.visuals - 1}",
+            )
+        )
+    if parent.shape == "thread":
+        for i, a in enumerate(parent.anchors):
+            for word in ANCHOR_WORDS:
+                if word == a:
+                    continue
+                anchors = list(parent.anchors)
+                anchors[i] = word
+                out.append((child(anchors=anchors), f"anchor {i + 1} {a} -> {word}"))
+        for lo, hi in (
+            (parent.min_posts - 1, parent.max_posts),
+            (parent.min_posts + 1, parent.max_posts),
+            (parent.min_posts, parent.max_posts - 1),
+            (parent.min_posts, parent.max_posts + 1),
+        ):
+            if 2 <= lo <= hi <= THREAD_MAX and (lo, hi) != (parent.min_posts, parent.max_posts):
+                out.append((child(min_posts=lo, max_posts=hi), f"posts {lo}-{hi}"))
+    return out
+
+
+def format_name(f: FormatGenome) -> str:
+    """A readable name: shape, post range, visual count and anchors."""
+    posts = f"{f.min_posts}-{f.max_posts}" if f.shape == "thread" else "1"
+    where = "".join(a[0] for a in f.anchors) if f.anchors else "0"
+    return f"{f.shape}-{posts}-{f.visuals}{where}"
+
+
+def breed_format(parent: FormatGenome, taken_names: set[str], rng: random.Random) -> FormatGenome:
+    """A child one step from the parent (pure code), with an unused name."""
+    options = format_neighbours(parent)
+    rng.shuffle(options)
+    for c, note in options:
+        base = format_name(c)
+        name, n = base, 1
+        while name in taken_names:
+            n += 1
+            name = f"{base}-{n}"
+        c.name = name
+        c.notes = note
+        return c
+    raise ChildError("no neighbouring format")
