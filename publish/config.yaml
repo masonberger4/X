@@ -3,10 +3,10 @@ timezone: America/New_York
 
 # Daily posting slots, local time (HH:MM). run_publish.py is meant to run from cron every
 # 15 minutes; a slot is "open" from its start until grace_minutes later, and it is used at
-# most once per day.
-slots:
-  - "08:30"
-  - "12:15"
+# most once per day. An EMPTY list (`slots: []`) turns slots off: every run then posts the
+# top approved draft as soon as min_gap_minutes has passed since the last post and the
+# daily cap is not reached, so the queue drains at one draft per gap, around the clock.
+slots: []
 grace_minutes: 20
 
 # Hard limits that apply to every post, breaking news included.
