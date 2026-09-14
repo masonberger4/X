@@ -38,7 +38,7 @@ from draft.schema import (
     validate_output,
 )
 from draft.settings import load_draft_config
-from draft.tags import Handle, load_handles, relevant_handles, tag_problems
+from draft.tags import Handle, company_names, load_handles, relevant_handles, tag_problems
 
 log = logging.getLogger(__name__)
 
@@ -123,6 +123,12 @@ def _root_config() -> dict:
         return root_config.load_config()
     except Exception:  # root config.yaml missing or unreadable
         return {}
+
+
+def known_company_names() -> frozenset[str]:
+    """Every configured company name (rule 11: never tagged as a drug); empty without a
+    config."""
+    return company_names(_root_config())
 
 
 def story_handles(*, source_text: str, url: str, source: str) -> list[Handle]:
@@ -269,6 +275,7 @@ def check_hard_rules(
     draft. `handles` (rule 11) are the accounts the story may mention: a post that names
     one without its @handle fails, and a trial or drug name without its # always fails."""
     problems: list[str] = []
+    companies = known_company_names()
     limit = fmt.max_chars if fmt is not None else (draft.max_chars or MAX_POST_CHARS)
     for i, post in enumerate(draft.all_posts()):
         label = f"thread[{i}]"
@@ -283,7 +290,7 @@ def check_hard_rules(
             problems.append(
                 f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
-        problems += [f"{label} {p}" for p in tag_problems(post, handles)]
+        problems += [f"{label} {p}" for p in tag_problems(post, handles, companies)]
     if draft.table is not None:
         for text in [draft.table.title, draft.table.note, *(c for _, _, c in draft.table.cells())]:
             if _ADVICE_RE.search(text):
