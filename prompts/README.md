@@ -15,6 +15,7 @@ previous one on a separate branch, with strict file-ownership boundaries.
 | [prompt6.md](prompt6.md) | Conference abstracts, KOL X list, HTTP retry | merged (PR #14) |
 | [prompt7.md](prompt7.md) | Voice learning loop | merged (PR #15) |
 | [prompt8.md](prompt8.md) | PROJECT BUILD COMPLETE: audit of PLAN.md against steps 1-7 | merged (PR #13) |
+| [prompt9.md](prompt9.md) | Swarm drafting: cells, layers, jury vs the control (phase one); X fitness and mutation planned | in progress |
 
 The prompts are kept as a record of how the code was specified, not as
 instructions to re-run. Any new requirement should be written as its own
