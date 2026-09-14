@@ -668,6 +668,8 @@ before scoring, `enabled: false` turns it off),
 skips the chart), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules; `media: attach_images`
-attaches or skips the chart), `feedback\config.yaml`
-and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
+attaches or skips the chart), `feedback\config.yaml`,
+`swarm\config.yaml` (step 9: the cheap model, how many cells per post, how many
+layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
+drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.

@@ -14,7 +14,9 @@ All seven build steps are implemented: 1 ingest + dedup + prefilter + score +
 digest, 2 draft + human approval queue, 3 publish to X, 4 feedback loop,
 5 operations (orchestrator, health, alerts, backups), 6 conference abstracts +
 KOL X list + HTTP retry, 7 voice learning loop, 8 control panel (one web app over
-the whole workflow). The kickoff prompt that built
+the whole workflow), 9 swarm drafting (phase one: many cheap cells + layers + jury
+against the single strong drafter; phases two and three, X fitness and genome
+mutation, are specified in `prompts/prompt9.md` and not built yet). The kickoff prompt that built
 each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 `PUBLISH_ENABLED=1` **and** `--live`.
 
@@ -27,7 +29,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   a required explanation that starts with a reason category from
   `score/editorial.py`; stored in `ratings` as 5/1, and the model rater answers the
   same question as `rater='auto:<model>'`; human decisions stay the ground truth),
-  `python run_draft.py`, `python run_verify.py` (claim checks with web search),
+  `python run_draft.py` (`--no-swarm` for the single drafter only), `python run_verify.py`
+  (claim checks with web search),
   `python run_queue.py` (approval UI on localhost:8000),
   `python run_app.py` (control panel: dashboard, sources, runs and the queue, same port;
   the run buttons sit on the pages they affect and "Publish now" lives on the approved page),
@@ -272,6 +275,23 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   as a marker for `ops/runner.py:cli_missing`, which also looks in `sys._MEIPASS`).
   `pipeline_cli.py` dispatches only the names in `panel/frozen.py:CLIS`. pywebview and
   PyInstaller live in the `desktop` extra only.
+- **Step 9 (`swarm/`) writes a thread one post at a time from many cheap calls.**
+  `swarm/genome.py:Genome` (slots + rules + `fan_out`/`layers`, seeded from
+  `DEFAULT_GENOME` into `swarm_genomes`) is the heritable part; `swarm/prompts.py`
+  and `swarm/cells.py` are pure (a cell sees the brief, its slot's rule, the earlier
+  chosen cells and the per-post hard rules, never the whole thread);
+  `swarm/engine.py:run_swarm` does proposals, Mixture-of-Agents synthesis layers,
+  `cell_problems` drops, `dedupe`, a pairwise-judge `tournament` per slot and one
+  assembly through `draft/drafter.py:generate` (the public name of the draft_item
+  attempt loop: schema, `check_hard_rules`, `chart_problems`, retries), and
+  `compare` is the jury against the control draft (ties go to the control). Every
+  call takes `call=` and defaults to `draft.drafter.call_anthropic`; no new network
+  module and no `claude-*` ID in code (`swarm/config.yaml` holds the cheap model).
+  `run_draft.py:draft_with_swarm` stores the winner through `store.insert_draft`
+  exactly as before, so verify, the queue, publish and feedback are unchanged;
+  `swarm/store.py` owns `swarm_runs` / `swarm_variants` / `swarm_genomes` and reads
+  no other step's table. `tests/conftest.py` turns the swarm off for every test that
+  does not opt in.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -306,6 +326,10 @@ panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed 
           ratings), jobs.py (JobManager, background step runs), frozen.py (data dir,
           step interpreter and bundle manifest for the desktop build),
           app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback), templates/
+swarm/    config.yaml, settings.py, genome.py (Slot, Genome, DEFAULT_GENOME), prompts.py
+          (Brief, cell/judge/assembly prompts, parse_winner), cells.py (cell_problems,
+          dedupe, tournament), engine.py (run_swarm, compare, SwarmFailed),
+          store.py (swarm_genomes, swarm_runs, swarm_variants)
 verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck,
           verify_claim, call_model), store.py (claim_checks, table_checks,
           mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop

@@ -56,6 +56,13 @@ def _no_image_grader_network(monkeypatch):
     monkeypatch.setattr(grader, "call_grader", offline)
 
 
+@pytest.fixture(autouse=True)
+def _swarm_off(monkeypatch):
+    """Step 9's swarm is on in the shipped config; every test runs the plain drafter unless it
+    turns the swarm on itself (see tests/test_swarm_run_draft.py)."""
+    monkeypatch.setattr(run_draft, "load_swarm_config", lambda *a, **k: {"enabled": False})
+
+
 @pytest.fixture
 def db():
     d = Database(":memory:")
