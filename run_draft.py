@@ -1,7 +1,7 @@
 """CLI: draft every scored candidate above threshold that has no draft yet.
 
 Usage: python run_draft.py [--min-score 30] [--since-hours 48] [--limit N] [--dry-run]
-                           [--no-examples] [--no-swarm]
+                           [--no-examples] [--no-swarm] [--retry-failed] [--retag]
 
 Drafts that pass every hard rule are stored as pending. Drafts the model could not get
 past the hard rules are stored as status=failed with the reason, so they are not retried
@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 
 from approval_queue import images, store
 from draft.chart import Style
-from draft.drafter import DraftRejected, draft_item, story_handles
+from draft.drafter import DraftRejected, draft_item, revise_item, story_handles
 from draft.examples import (
     EditExample,
     RejectionExample,
@@ -48,10 +48,12 @@ from draft.examples import (
 )
 from draft.schema import Draft
 from draft.settings import load_draft_config
+from draft.tags import tag_problems
 from swarm import engine as swarm_engine
 from swarm import store as swarm_store
 from swarm.prompts import Brief
 from swarm.settings import load_swarm_config
+from verify import store as verify_store
 
 log = logging.getLogger("run_draft")
 
@@ -228,6 +230,80 @@ def designer_style_for(conn: store.sqlite3.Connection, run_id: int | None) -> St
     return Style().apply(designer.style)
 
 
+RETAG_NOTE = "apply mentions and hashtags (hard rule 11)"
+RETAG_INSTRUCTIONS = (
+    "Apply HARD RULE 11 to every post: write each listed account as its @handle where the "
+    "post names it, and write every formal drug name and named trial as a hashtag, spelled "
+    "as the source spells it. Change nothing else: keep every sentence, number, claim and "
+    "the visual exactly as they are."
+)
+
+
+def retag_problems(row: store.DraftRow) -> list[str]:
+    """Rule 11 violations in a stored draft's current posts (the handles are looked up
+    from config.yaml for its story). Empty when the draft already complies."""
+    handles = story_handles(
+        source_text=f"{row.title}\n{row.abstract}", url=row.url, source=row.source
+    )
+    out: list[str] = []
+    for i, post in enumerate(row.draft.all_posts()):
+        out += [f"thread[{i}] {p}" for p in tag_problems(post, handles)]
+    return out
+
+
+def retag_drafts(conn: store.sqlite3.Connection, *, dry_run: bool = False) -> int:
+    """`--retag`: bring every current pending and approved draft (not yet posted) under
+    hard rule 11 by revising it through the queue's own path, `revise_item` with the
+    instruction to change only the tags, `store.revise` (status unchanged, a `revise`
+    decision with note RETAG_NOTE) and `carry_over_checks`. Drafts that already comply are
+    skipped; a draft whose revision fails is left as it was. Returns the number revised."""
+    rows = store.list_drafts(conn, store.STATUS_PENDING) + store.list_drafts(
+        conn, store.STATUS_APPROVED
+    )
+    posted = store.publish_states(conn, [r.id for r in rows])
+    todo = []
+    for r in rows:
+        if r.id in posted:
+            continue
+        problems = retag_problems(r)
+        if problems:
+            todo.append((r, problems))
+    log.info("retag: %d of %d current draft(s) break rule 11", len(todo), len(rows))
+    done = 0
+    for row, problems in todo:
+        log.info("draft %d (%s): %s", row.id, row.status, "; ".join(problems))
+        if dry_run:
+            continue
+        try:
+            result = revise_item(
+                current=row.draft,
+                instructions=RETAG_INSTRUCTIONS,
+                title=row.title,
+                abstract=row.abstract,
+                url=row.url,
+                source=row.source,
+                suggested_angle=row.suggested_angle or None,
+                rationale=row.rationale or None,
+            )
+        except DraftRejected as exc:
+            log.warning("draft %d: retag broke a hard rule, left as it was: %s", row.id, exc)
+            continue
+        except Exception as exc:  # API / network errors: keep the draft as it was
+            log.error("draft %d: retag failed, left as it was: %s", row.id, exc)
+            continue
+        store.revise(conn, row.id, draft=result.draft, model=result.model, note=RETAG_NOTE)
+        verify_store.carry_over_checks(
+            conn, row.id, [c.claim for c in result.draft.claims_to_verify]
+        )
+        verify_store.carry_over_table_checks(conn, row.id, row.draft.table, result.draft.table)
+        images.attach_chart(conn, row.id, result.draft.chart, source_url=row.url)
+        if result.draft.extra_visuals:
+            images.attach_extra_charts(conn, row.id, result.draft.extra_visuals, source_url=row.url)
+        done += 1
+        log.info("draft %d retagged (%d attempt(s))", row.id, result.attempts)
+    return done
+
+
 def _default_min_score() -> float:
     """config.yaml scoring.threshold (the digest's bar), else 30 on the 0-50 scale."""
     try:
@@ -266,6 +342,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also draft stories whose only drafts failed the hard rules",
     )
+    ap.add_argument(
+        "--retag",
+        action="store_true",
+        help="revise every current pending/approved draft that breaks the mention/hashtag "
+        "rule (hard rule 11) instead of drafting new stories; --dry-run lists them",
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(
@@ -277,6 +359,10 @@ def main(argv: list[str] | None = None) -> int:
 
     conn = store.connect()
     try:
+        if args.retag:
+            n = retag_drafts(conn, dry_run=args.dry_run)
+            log.info("retag: %d draft(s) revised", n)
+            return 0
         if not store.step1_tables_present(conn):
             log.error(
                 "no items/clusters/scores tables in %s; run step 1 (run_ingest/run_score) first",

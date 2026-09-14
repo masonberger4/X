@@ -120,11 +120,18 @@ source only when it is due, and score only scores what is new.
    host only). The drafter is only shown the handles of accounts the story
    names or that own the source URL's host, and never invents one: a company
    without `x:` is written by name. Verify each handle on x.com before adding
-   it; a wrong handle mentions a stranger.
+   it; a wrong handle mentions a stranger. Drafts written before the rule, or
+   before a handle was added, are brought under it with
+   `python run_draft.py --retag`: every pending and approved draft not yet
+   posted whose posts break the rule is revised with the one instruction to
+   change only the tags (a `revise` decision on the draft page, the rest of
+   the text and the visual kept; claim checks carry over as after any
+   revision). `--retag --dry-run` lists what would change without a call.
    ```
    python run_draft.py --dry-run                 # show what would be drafted
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
    python run_draft.py --retry-failed            # try again on stories whose draft failed
+   python run_draft.py --retag                   # apply @handles and #tags to current drafts
    ```
    A draft may come with a picture. Nothing draws it freehand: when the source
    has two or more comparable numbers (arms, endpoints, cohorts) the drafter
