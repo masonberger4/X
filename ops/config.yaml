@@ -18,11 +18,15 @@ steps:
     enabled: true
     required: true
     timeout_seconds: 1200
+  # No time limit (0): on the claude_code backend every swarm cell is one CLI launch and
+  # a story is ~110 of them at the planned fan_out and layers, so a run can take an hour
+  # or more. Drafts are stored as they land, so the runs page's Stop button loses only the
+  # story in flight.
   - name: draft
     argv: ["python", "run_draft.py"]
     enabled: true
     required: true
-    timeout_seconds: 1200
+    timeout_seconds: 0
   # Step 2b: check each new draft's claims against the web and attach the evidence so
   # the queue shows it. Optional: a failure here leaves the claims "unchecked", never
   # blocks the run. No time limit (0): each claim is one web-search call of a minute
@@ -58,7 +62,7 @@ steps:
     argv: ["python", "run_evolve.py"]
     enabled: true
     required: false
-    timeout_seconds: 300
+    timeout_seconds: 0             # breed makes one CLI call per writer child
 
 lock_path: ./pipeline.lock       # fcntl lock; overlapping cron fires exit 2
 run_log_tail_chars: 4000         # stdout/stderr kept per step per run
