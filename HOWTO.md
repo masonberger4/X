@@ -343,6 +343,11 @@ source only when it is due, and score only scores what is new.
    python run_publish.py
    ```
    Run this a few times over a couple of days until the plan looks right.
+   The shipped `slots: []` is continuous mode: each run posts the top approved
+   draft as soon as `min_gap_minutes` has passed since the last post and the
+   daily cap allows, so a cron every 15 minutes drains the queue one draft per
+   gap, day and night. List times under `slots:` (e.g. `"08:30"`, `"12:15"`) to
+   post only inside those windows instead.
 2. Go live. Two things are required, so nothing posts by accident: in `.env`
    ```
    PUBLISH_ENABLED=1

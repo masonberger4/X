@@ -286,7 +286,9 @@ python run_verify.py --no-auto-revise  # one run without the loop
 `run_publish.py` reads approved drafts through `publish/store.py:fetch_approved`
 and posts them to X via tweepy (`publish/client.py`, the only module that
 imports tweepy). Slots, timezone, daily cap, minimum gap between posts and
-the breaking-news rules live in `publish/config.yaml`.
+the breaking-news rules live in `publish/config.yaml`. With `slots: []` (the
+shipped value) there are no windows: every run posts the top candidate once
+`min_gap_minutes` has passed and the daily cap is not reached.
 
 Safety gates, all of which must hold before a single tweet is sent:
 
