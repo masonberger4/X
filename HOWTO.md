@@ -388,7 +388,11 @@ source only when it is due, and score only scores what is new.
 1. Try the orchestrator by hand first. It runs ingest, score, draft and
    verify in order under a lock, and records each step.
    The `verify` step runs after `draft` and is optional: if it fails, the
-   claims show as "not checked yet" and the run carries on.
+   claims show as "not checked yet" and the run carries on. The `draft` and
+   `evolve` steps have no time limit: with the swarm on and the Claude Code
+   backend, every cell is one CLI launch and a run can take an hour or more.
+   Until that settles, run the steps by hand from the panel and post from
+   the approved page; the scheduler can come back later.
    ```
    mkdir logs
    python run_ops.py run --dry-run
