@@ -137,6 +137,8 @@ def revise_round(conn, draft_id: int, *, lifetime_cap: int) -> RoundResult:
     kept = store.carry_over_checks(conn, draft_id, [c.claim for c in result.draft.claims_to_verify])
     store.carry_over_table_checks(conn, draft_id, row.draft.table, result.draft.table)
     images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)
+    if result.draft.extra_visuals:
+        images.attach_extra_charts(conn, draft_id, result.draft.extra_visuals, source_url=row.url)
     return RoundResult(True, total, kept=kept)
 
 

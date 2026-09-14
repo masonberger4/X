@@ -32,6 +32,7 @@ from draft.schema import (
     URL_CHARS,
     Claim,
     Draft,
+    Format,
     SchemaError,
     tweet_length,
     validate_output,
@@ -206,22 +207,24 @@ def verify_numbers(draft: Draft, source_text: str) -> list[str]:
 
 
 def verify_chart(draft: Draft, source_text: str) -> list[str]:
-    """Every number in the draft's chart (values, title, labels, note) that is not verbatim in
-    the source. Empty when there is no chart."""
-    if draft.chart is None:
-        return []
+    """Every number in the draft's chart(s) (values, title, labels, note) that is not
+    verbatim in the source. Empty when there is no chart. Phase four: the extra charts in
+    `extra_visuals` are checked the same way."""
+    charts = ([draft.chart] if draft.chart is not None else []) + list(draft.extra_visuals)
     missing: list[str] = []
-    for num in draft.chart.numbers():
-        # JSON cannot tell 2 from 2.0, so a whole-number value also matches its ".0" spelling.
-        spellings = [num]
-        if "." not in num:
-            spellings.append(num.replace("%", "") + ".0" + ("%" if num.endswith("%") else ""))
-        if not any(_number_in_source(n, source_text) for n in spellings) and num not in missing:
-            missing.append(num)
-    for text in draft.chart.texts():
-        for num in numbers_in(text):
-            if not _number_in_source(num, source_text) and num not in missing:
-                missing.append(num)
+    for chart in charts:
+        for num in chart.numbers():
+            # JSON cannot tell 2 from 2.0: a whole-number value also matches its ".0" spelling.
+            spellings = [num]
+            if "." not in num:
+                spellings.append(num.replace("%", "") + ".0" + ("%" if num.endswith("%") else ""))
+            if not any(_number_in_source(n, source_text) for n in spellings):
+                if num not in missing:
+                    missing.append(num)
+        for text in chart.texts():
+            for num in numbers_in(text):
+                if not _number_in_source(num, source_text) and num not in missing:
+                    missing.append(num)
     return missing
 
 
@@ -240,14 +243,20 @@ def chart_problems(draft: Draft, source_text: str) -> list[str]:
     ]
 
 
-def check_hard_rules(draft: Draft, *, url: str, source: str) -> list[str]:
-    """Violations that make a draft unusable. Empty list means the draft passes."""
+def check_hard_rules(
+    draft: Draft, *, url: str, source: str, fmt: Format | None = None
+) -> list[str]:
+    """Violations that make a draft unusable. Empty list means the draft passes. The
+    per-post limit is the format's `max_chars` (phase four: a long post), else 280; with
+    fmt None the draft's own `max_chars` is used, which is 280 for every pre-phase-four
+    draft."""
     problems: list[str] = []
+    limit = fmt.max_chars if fmt is not None else (draft.max_chars or MAX_POST_CHARS)
     for i, post in enumerate(draft.all_posts()):
         label = f"thread[{i}]"
         n = tweet_length(post)
-        if n > MAX_POST_CHARS:
-            problems.append(f"{label} is {n} chars (> {MAX_POST_CHARS})")
+        if n > limit:
+            problems.append(f"{label} is {n} chars (> {limit})")
         if _ADVICE_RE.search(post):
             problems.append(
                 f"{label} reads as medical advice: {_ADVICE_RE.search(post).group(0)!r}"
@@ -291,17 +300,17 @@ def flag_unverified_numbers(draft: Draft, source_text: str) -> list[str]:
 CallFn = Callable[[str, str, str], str]
 
 
-def retry_prompt(user: str, reasons: list[str]) -> str:
+def retry_prompt(user: str, reasons: list[str], limit: int = MAX_POST_CHARS) -> str:
     """The user prompt for a retry: the previous attempt's failures are appended so the
     model fixes them instead of guessing. Length failures are the common case and the model
-    cannot count characters exactly, so it is told to leave a margin."""
+    cannot count characters exactly, so it is told to leave a margin under `limit`."""
     if not reasons:
         return user
     lines = "\n".join(f"- {r}" for r in reasons)
     return (
         f"{user}\n\nYOUR PREVIOUS ATTEMPT WAS DISCARDED for these hard-rule violations:\n{lines}\n"
         f"Write a new draft that fixes every one of them. Keep every post under "
-        f"{MAX_POST_CHARS - 20} characters (counting a URL as {URL_CHARS}) to leave a margin."
+        f"{limit - 20} characters (counting a URL as {URL_CHARS}) to leave a margin."
     )
 
 
@@ -325,6 +334,7 @@ def draft_item(
     model: str | None = None,
     max_attempts: int = MAX_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
+    fmt: Format | None = None,
 ) -> DraftResult:
     """Draft one item. Retries on API errors, bad JSON, schema errors and hard-rule failures.
 
@@ -344,6 +354,7 @@ def draft_item(
         suggested_angle=suggested_angle,
         rationale=rationale,
         examples_block=examples_block,
+        fmt=fmt,
     )
     return generate(
         system,
@@ -355,6 +366,7 @@ def draft_item(
         call=call,
         max_attempts=max_attempts,
         sleep=sleep,
+        fmt=fmt,
     )
 
 
@@ -376,6 +388,7 @@ def revise_item(
     model: str | None = None,
     max_attempts: int = MAX_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
+    fmt: Format | None = None,
 ) -> DraftResult:
     """Revise an existing draft: the model gets the same brief as draft_item plus the draft as
     it stands, the editor's instructions, the claims the fact-checker (step 2b) contradicted
@@ -386,6 +399,7 @@ def revise_item(
     if not (instructions or "").strip() and not claim_problems and not cell_problems:
         raise ValueError("nothing to revise: give instructions or at least one claim problem")
     model = model or model_name()
+    fmt = fmt or format_of(current)
     system, base_user = build_prompt(
         title=title,
         abstract=abstract,
@@ -395,6 +409,7 @@ def revise_item(
         suggested_angle=suggested_angle,
         rationale=rationale,
         examples_block=examples_block,
+        fmt=fmt,
     )
     user = build_revision_user_prompt(
         base_user_prompt=base_user,
@@ -413,6 +428,26 @@ def revise_item(
         call=call,
         max_attempts=max_attempts,
         sleep=sleep,
+        fmt=fmt,
+    )
+
+
+def format_of(draft: Draft) -> Format | None:
+    """The Format a stored draft was written to (phase four), so a revision keeps its shape
+    and visual count. None for a pre-phase-four thread with one visual (the default)."""
+    n = draft.wanted_visuals if draft.wanted_visuals is not None else 1
+    anchors = ("first",) * n  # the exact words are not stored; positions are re-resolved
+    if draft.shape == "thread" and n == 1 and draft.max_chars == MAX_POST_CHARS:
+        return None
+    if draft.shape == "thread":
+        return Format(visuals=n, anchors=anchors)
+    return Format(
+        shape=draft.shape,
+        min_posts=1,
+        max_posts=1,
+        visuals=n,
+        anchors=anchors,
+        max_chars=draft.max_chars,
     )
 
 
@@ -427,14 +462,17 @@ def generate(
     call: CallFn = call_anthropic,
     max_attempts: int = MAX_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
+    fmt: Format | None = None,
 ) -> DraftResult:
     """The shared attempt loop behind draft_item and revise_item, public so step 9's swarm
-    assembly runs through the same schema check, hard rules, chart check and retries."""
+    assembly runs through the same schema check, hard rules, chart check and retries.
+    `fmt` (phase four) is what validate_output and check_hard_rules require."""
     last_reasons: list[str] = []
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            raw = call(system, retry_prompt(user, last_reasons), model)
+            limit = fmt.max_chars if fmt is not None else MAX_POST_CHARS
+            raw = call(system, retry_prompt(user, last_reasons, limit), model)
         except Exception as exc:  # network / rate limit / SDK errors
             last_exc = exc
             log.warning("attempt %d: API call failed: %s", attempt, exc)
@@ -442,12 +480,12 @@ def generate(
                 _sleep_backoff(attempt, sleep)
             continue
         try:
-            draft = validate_output(parse_json_response(raw))
+            draft = validate_output(parse_json_response(raw), fmt)
         except (json.JSONDecodeError, SchemaError) as exc:
             last_reasons = [f"invalid output: {exc}"]
             log.warning("attempt %d: %s", attempt, last_reasons[0])
             continue
-        problems = check_hard_rules(draft, url=url, source=source) + chart_problems(
+        problems = check_hard_rules(draft, url=url, source=source, fmt=fmt) + chart_problems(
             draft, source_text
         )
         if problems:

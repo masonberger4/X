@@ -28,12 +28,13 @@ def parse_thread_json(thread_json: str) -> list[str]:
     return posts
 
 
-def check_post(text: str, *, url: str | None = None) -> list[str]:
-    """Problems with one post: over 280 (URLs count 23) or missing a required URL."""
+def check_post(text: str, *, url: str | None = None, max_chars: int = MAX_POST_CHARS) -> list[str]:
+    """Problems with one post: over the limit (280, or the long post's `max_chars`; URLs
+    count 23) or missing a required URL."""
     problems: list[str] = []
     n = tweet_length(text)
-    if n > MAX_POST_CHARS:
-        problems.append(f"{n} chars > {MAX_POST_CHARS}")
+    if n > max_chars:
+        problems.append(f"{n} chars > {max_chars}")
     if url and url not in text:
         problems.append("missing source URL")
     return problems
@@ -51,12 +52,16 @@ def number_posts(posts: list[str]) -> list[str]:
     return out
 
 
-def split_thread(thread_json: str | list[str], *, url: str) -> list[str]:
-    """Ordered posts ready to send. Raises ThreadError rather than editing content."""
+def split_thread(
+    thread_json: str | list[str], *, url: str, max_chars: int = MAX_POST_CHARS
+) -> list[str]:
+    """Ordered posts ready to send. Raises ThreadError rather than editing content.
+    `max_chars` is the per-post limit the draft was written to (a long post's, phase
+    four); a single post is a one-element thread and is never numbered."""
     posts = thread_json if isinstance(thread_json, list) else parse_thread_json(thread_json)
     problems = []
     for i, p in enumerate(posts, 1):
-        for prob in check_post(p):
+        for prob in check_post(p, max_chars=max_chars):
             problems.append(f"post {i}: {prob}")
     if url not in posts[-1]:
         problems.append("last post: missing source URL")

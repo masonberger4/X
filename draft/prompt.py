@@ -8,14 +8,69 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from draft.schema import MAX_POST_CHARS, OUTPUT_JSON_SCHEMA, THREAD_MAX, THREAD_MIN, URL_CHARS
+from draft.schema import (
+    MAX_POST_CHARS,
+    OUTPUT_JSON_SCHEMA,
+    SHAPE_SINGLE,
+    THREAD_MAX,
+    THREAD_MIN,
+    URL_CHARS,
+    Format,
+)
 
 VOICE_PATH = Path(__file__).with_name("voice.md")
 
 PREPRINT_SOURCES = ("biorxiv", "medrxiv")
 PREPRINT_LABEL = "preprint"
 
-HARD_RULES = f"""HARD RULES. A draft that breaks any of these is discarded automatically.
+
+def _shape_rules(fmt: Format | None) -> tuple[str, str, str]:
+    """(rule 5, rule 6, rule 9's first sentence) for the format. None = phase-one physics."""
+    if fmt is None or fmt.is_thread:
+        lo, hi = (THREAD_MIN, THREAD_MAX) if fmt is None else (fmt.min_posts, fmt.max_posts)
+        r5 = (
+            f"5. Every post is at most {MAX_POST_CHARS} characters. Count every URL as "
+            f"{URL_CHARS} characters."
+        )
+        r6 = f"6. The thread has {lo} to {hi} posts."
+    elif fmt.shape == SHAPE_SINGLE:
+        r5 = (
+            f"5. This is a SINGLE post of at most {MAX_POST_CHARS} characters (a URL counts as "
+            f"{URL_CHARS}); rules 2 and 3 apply to that one post."
+        )
+        r6 = '6. "thread" holds exactly one string: the whole post.'
+    else:
+        r5 = (
+            f"5. This is ONE long-form post of at most {fmt.max_chars} characters (a URL "
+            f"counts as {URL_CHARS}), written as short sections separated by blank lines; "
+            "rules 2 and 3 apply to that one post."
+        )
+        r6 = '6. "thread" holds exactly one string: the whole long post.'
+    n = 1 if fmt is None else fmt.visuals
+    if n == 0:
+        r9 = (
+            '9. This draft carries NO visual: "chart" and "table" are both null and '
+            '"visuals" is absent. "suggested_visual" says what a picture could have shown.'
+        )
+    elif n == 1:
+        r9 = (
+            '9. Every draft carries exactly one visual, a "chart" or a "table" (null for the '
+            "other); a draft with neither is discarded."
+        )
+    else:
+        r9 = (
+            f'9. This draft carries {n} visuals: the first is a "chart" or a "table" (null for '
+            'the other) and each further one is a chart in "visuals". A draft with fewer is '
+            "discarded."
+        )
+    return r5, r6, r9
+
+
+def hard_rules(fmt: Format | None = None) -> str:
+    """The HARD RULES block for a format; hard_rules(None) is the pre-phase-four text."""
+    r5, r6, r9 = _shape_rules(fmt)
+    where = "the first post" if fmt is None or fmt.is_thread else "the post"
+    return f"""HARD RULES. A draft that breaks any of these is discarded automatically.
 1. No medical advice and no treatment recommendations. Describe evidence; never tell
    anyone what they or their doctor should do.
 1b. No investment advice. Never tell anyone to buy, sell, hold, short, or avoid a stock,
@@ -27,14 +82,14 @@ HARD_RULES = f"""HARD RULES. A draft that breaks any of these is discarded autom
 4. Every number you write must appear verbatim in the source abstract or title. Do not
    round, convert units, compute differences or percentages, or infer sample sizes.
    If a number you want is not in the abstract, leave it out.
-5. Every post is at most {MAX_POST_CHARS} characters. Count every URL as {URL_CHARS} characters.
-6. The thread has {THREAD_MIN} to {THREAD_MAX} posts.
+{r5}
+{r6}
 7. Every post must contain an interpretation, not just a restatement (see voice guide).
 8. Any claim that goes beyond what the abstract states goes into claims_to_verify with an
    honest confidence level.
-9. Every draft carries exactly one visual, a "chart" or a "table" (null for the other);
-   a draft with neither is discarded. "chart" is a bar chart that code renders and
-   attaches to the first post: give it when the source states two or more comparable
+{r9}
+   "chart" is a bar chart that code renders and
+   attaches to {where}: give it when the source states two or more comparable
    numbers (arms, endpoints, cohorts) and copy each value exactly as written. Every
    number in the chart is checked against the source like rule 4; one miss and the draft
    is sent back to you. "suggested_visual" is a one-line description of the visual for
@@ -50,6 +105,9 @@ HARD_RULES = f"""HARD RULES. A draft that breaks any of these is discarded autom
 """
 
 
+HARD_RULES = hard_rules(None)
+
+
 @lru_cache(maxsize=1)
 def load_voice_guide(path: Path = VOICE_PATH) -> str:
     return path.read_text(encoding="utf-8")
@@ -61,12 +119,13 @@ def is_preprint(source: str | None) -> bool:
     return any(p in name for p in PREPRINT_SOURCES)
 
 
-def build_system_prompt(examples_block: str | None = None) -> str:
+def build_system_prompt(examples_block: str | None = None, fmt: Format | None = None) -> str:
     """System prompt: voice guide, then (optionally) recent human edits, then the hard rules.
 
     With examples_block=None the output is byte-identical to the pre-step-7 prompt. The
     examples go AFTER the voice guide and BEFORE HARD_RULES and the schema, so the hard rules
-    are the last thing the model reads and no example can relax them.
+    are the last thing the model reads and no example can relax them. `fmt` (phase four)
+    rewrites the shape rules; None keeps the thread physics.
     """
     examples = f"{examples_block.rstrip()}\n\n" if examples_block else ""
     return (
@@ -79,7 +138,7 @@ def build_system_prompt(examples_block: str | None = None) -> str:
         f"{load_voice_guide()}\n"
         "=== END VOICE GUIDE ===\n\n"
         f"{examples}"
-        f"{HARD_RULES}\n"
+        f"{hard_rules(fmt)}\n"
         "Respond with a single JSON object and nothing else, matching this JSON schema:\n"
         f"{json.dumps(OUTPUT_JSON_SCHEMA, indent=2)}"
     )
@@ -217,9 +276,11 @@ def build_prompt(
     suggested_angle: str | None = None,
     rationale: str | None = None,
     examples_block: str | None = None,
+    fmt: Format | None = None,
 ) -> tuple[str, str]:
-    """Return (system_prompt, user_prompt). examples_block (step 7) goes into the system prompt."""
-    return build_system_prompt(examples_block), build_user_prompt(
+    """Return (system_prompt, user_prompt). examples_block (step 7) goes into the system
+    prompt; fmt (step 9 phase four) rewrites its shape rules."""
+    return build_system_prompt(examples_block, fmt), build_user_prompt(
         title=title,
         abstract=abstract,
         url=url,

@@ -13,7 +13,8 @@ runs `--live --now --draft ID`; the caps in publish/config.yaml still apply). Th
 on the panel's approved page (schedule.position) is honoured before the config's policy.
 
 A draft whose chart was rendered (run_draft.py) and not dropped in the queue has that PNG
-attached to its first post, with alt text, unless media.attach_images is false in
+attached to the post it is anchored to (the first, before step 9 phase four), with alt
+text, unless media.attach_images is false in
 publish/config.yaml. The dry run prints the image path and alt text.
 
 A draft whose attempt posted nothing (status 'failed') goes back to approved on its own, up to
@@ -84,7 +85,9 @@ def texts_for(approved: Approved) -> tuple[str, list[str]]:
     """(kind, ordered texts). Raises ThreadError if the content fails a hard check."""
     if not approved.thread:
         raise ThreadError("draft has no thread")
-    return store.KIND_THREAD, split_thread(approved.thread, url=approved.url)
+    return store.KIND_THREAD, split_thread(
+        approved.thread, url=approved.url, max_chars=approved.max_chars
+    )
 
 
 def choose(
@@ -125,6 +128,21 @@ def image_for(approved: Approved, cfg: dict) -> str | None:
     return approved.image_path or None
 
 
+def images_for(approved: Approved, cfg: dict) -> dict[int, list[tuple[str, str]]]:
+    """Phase four: {post position: [(png path, alt), ...]} for every picture the draft
+    carries, by the post each is anchored to. Empty when media.attach_images is false. A
+    row from before phase four gives {1: [the first picture]}."""
+    if not (cfg.get("media") or {}).get("attach_images", True):
+        return {}
+    out: dict[int, list[tuple[str, str]]] = {}
+    images = approved.images or (
+        [(approved.image_path, approved.image_alt, 1)] if approved.image_path else []
+    )
+    for path, alt, anchor in images:
+        out.setdefault(max(1, int(anchor)), []).append((path, alt))
+    return out
+
+
 def publish_one(
     conn,
     approved: Approved,
@@ -133,17 +151,26 @@ def publish_one(
     slot: str,
     now: datetime,
     image: str | None = None,
+    images: dict[int, list[tuple[str, str]]] | None = None,
 ) -> str:
-    """Post texts in order, chaining replies; `image` is attached to the first post. Returns
-    the schedule status. An image upload failure happens before any tweet, so the draft is
-    simply 'failed' and nothing is live."""
+    """Post texts in order, chaining replies. `image` is attached to the first post (the
+    pre-phase-four call); `images` (phase four) maps a post position to the pictures
+    uploaded just before that post, anchored past the thread's end they go on the last
+    post. Returns the schedule status. An upload failure before post 1 means nothing is
+    live and the draft is 'failed'; a later one leaves a PARTIAL thread like a failed post."""
+    by_pos: dict[int, list[tuple[str, str]]] = dict(images or {})
+    if image and not by_pos:
+        by_pos = {1: [(image, approved.image_alt)]}
+    last = len(texts)
+    for pos in [p for p in by_pos if p > last]:
+        by_pos.setdefault(last, []).extend(by_pos.pop(pos))
     prev: str | None = None
     for pos, text in enumerate(texts, 1):
         try:
             media_ids = None
-            if pos == 1 and image:
-                media_ids = [client.upload_media(image, approved.image_alt)]
-                log.info("draft %d: image uploaded (%s)", approved.draft_id, image)
+            for path, alt in by_pos.get(pos, []):
+                media_ids = (media_ids or []) + [client.upload_media(path, alt)]
+                log.info("draft %d: image uploaded for post %d (%s)", approved.draft_id, pos, path)
             tweet_id = client.post_tweet(text, in_reply_to=prev, media_ids=media_ids)
         except client.PublishError as exc:
             store.record_post(
@@ -307,21 +334,22 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
                 store.finish(conn, cand.draft_id, store.SCHED_REFUSED, str(exc))
             return 0
 
-        image = image_for(cand, cfg)
+        images = images_for(cand, cfg)
         if not live:
             print(f"DRY RUN — would post draft {cand.draft_id} ({kind}, {reason}) [{cand.source}]")
             for i, t in enumerate(texts, 1):
                 print(f"  {i}/{len(texts)}: {t}")
-            if image:
-                print(f"  image on post 1: {image}")
-                print(f"  alt text: {cand.image_alt}")
+            for pos in sorted(images):
+                for path, alt in images[pos]:
+                    print(f"  image on post {pos}: {path}")
+                    print(f"  alt text: {alt}")
             return 0
 
         if not store.claim(conn, cand.draft_id, slot):
             log.info("draft %d already claimed by another run; skipping", cand.draft_id)
             return 0
         log.info("claimed draft %d for %s (%s)", cand.draft_id, slot, reason)
-        status = publish_one(conn, cand, kind, texts, slot, now, image=image)
+        status = publish_one(conn, cand, kind, texts, slot, now, images=images)
         if status == store.SCHED_FAILED:
             auto_release(conn, cand.draft_id, cfg["retry"])
         return 0 if status == store.SCHED_POSTED else 2

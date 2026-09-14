@@ -26,6 +26,100 @@ THREAD_MIN = 3
 THREAD_MAX = 6
 CONFIDENCE_LEVELS = ("high", "medium", "low")
 
+# Step 9 phase four: the shape of a draft is a gene, not a constant. A Format says what
+# validate_output and check_hard_rules require; with no Format they require the phase-one
+# physics (a 3-6 post thread with exactly one visual) exactly as before.
+SHAPES = ("thread", "single", "long")
+SHAPE_THREAD, SHAPE_SINGLE, SHAPE_LONG = SHAPES
+ANCHOR_WORDS = ("first", "last", "middle")
+MAX_VISUALS = 2
+DEFAULT_LONG_MAX_CHARS = 4000
+
+
+@dataclass(frozen=True)
+class Format:
+    """What a draft must look like. `anchors` has one word per visual (first | last |
+    middle) resolved against the thread length by `resolve_anchors`; a single or long post
+    anchors everything to post 1. `max_chars` is the per-post limit (280 unless long)."""
+
+    shape: str = SHAPE_THREAD
+    min_posts: int = THREAD_MIN
+    max_posts: int = THREAD_MAX
+    visuals: int = 1
+    anchors: tuple[str, ...] = ("first",)
+    max_chars: int = MAX_POST_CHARS
+
+    def __post_init__(self) -> None:
+        if self.shape not in SHAPES:
+            raise ValueError(f"shape must be one of {SHAPES}, got {self.shape!r}")
+        if not 0 <= self.visuals <= MAX_VISUALS:
+            raise ValueError(f"visuals must be 0-{MAX_VISUALS}, got {self.visuals}")
+        if len(self.anchors) != self.visuals:
+            raise ValueError("one anchor per visual")
+        if any(a not in ANCHOR_WORDS for a in self.anchors):
+            raise ValueError(f"anchors must be in {ANCHOR_WORDS}")
+        if self.shape == SHAPE_THREAD:
+            if not 2 <= self.min_posts <= self.max_posts <= THREAD_MAX:
+                raise ValueError("a thread needs 2 <= min_posts <= max_posts <= 6")
+            if self.max_chars != MAX_POST_CHARS:
+                raise ValueError("thread posts are 280 characters")
+        elif self.shape == SHAPE_SINGLE:
+            if (self.min_posts, self.max_posts, self.max_chars) != (1, 1, MAX_POST_CHARS):
+                raise ValueError("a single post is one post of 280 characters")
+        elif (self.min_posts, self.max_posts) != (1, 1) or self.max_chars <= MAX_POST_CHARS:
+            raise ValueError("a long post is one post with max_chars above 280")
+
+    @property
+    def is_thread(self) -> bool:
+        return self.shape == SHAPE_THREAD
+
+    def resolve_anchors(self, n_posts: int) -> list[int]:
+        """1-based post index per visual for a thread of n_posts."""
+        out = []
+        for a in self.anchors:
+            if a == "first" or n_posts <= 1:
+                out.append(1)
+            elif a == "last":
+                out.append(n_posts)
+            else:
+                out.append((n_posts + 1) // 2)
+        return out
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "shape": self.shape,
+            "min_posts": self.min_posts,
+            "max_posts": self.max_posts,
+            "visuals": self.visuals,
+            "anchors": list(self.anchors),
+            "max_chars": self.max_chars,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any] | None) -> Format | None:
+        if not d:
+            return None
+        return cls(
+            shape=str(d.get("shape", SHAPE_THREAD)),
+            min_posts=int(d.get("min_posts", THREAD_MIN)),
+            max_posts=int(d.get("max_posts", THREAD_MAX)),
+            visuals=int(d.get("visuals", 1)),
+            anchors=tuple(d.get("anchors") or ()),
+            max_chars=int(d.get("max_chars", MAX_POST_CHARS)),
+        )
+
+
+DEFAULT_FORMAT = Format()  # the phase-one physics
+
+
+def single_format() -> Format:
+    return Format(shape=SHAPE_SINGLE, min_posts=1, max_posts=1)
+
+
+def long_format(max_chars: int = DEFAULT_LONG_MAX_CHARS) -> Format:
+    return Format(shape=SHAPE_LONG, min_posts=1, max_posts=1, max_chars=max_chars)
+
+
 _URL_RE = re.compile(r"https?://\S+")
 
 
@@ -52,10 +146,47 @@ class Draft:
     # Comparison table (draft/chart.py:Table), the alternative to a chart. Its cells are
     # web-verified by step 2b before anything is rendered.
     table: Table | None = None
+    # Phase four: the draft's shape and where each picture goes (1-based post index per
+    # visual, the first visual first). Older rows: thread, anchored to post 1.
+    shape: str = SHAPE_THREAD
+    anchors: list[int] = field(default_factory=lambda: [1])
+    max_chars: int = MAX_POST_CHARS
+    # Further visuals beyond the first: charts only (verbatim numbers, no web check).
+    extra_visuals: list[Chart] = field(default_factory=list)
+    # How many visuals the format asked for when the draft was written (a reviewer may drop
+    # one later); None for a draft from before phase four, which means the default physics.
+    wanted_visuals: int | None = None
 
     @property
     def visual(self) -> Chart | Table | None:
         return self.chart if self.chart is not None else self.table
+
+    @property
+    def visuals(self) -> list[Chart | Table]:
+        first = [self.visual] if self.visual is not None else []
+        return first + list(self.extra_visuals)
+
+    def format_dict(self) -> dict[str, Any]:
+        """What drafts.format_json stores (phase four)."""
+        return {
+            "shape": self.shape,
+            "anchors": list(self.anchors),
+            "max_chars": self.max_chars,
+            "wanted_visuals": self.wanted_visuals,
+        }
+
+    def apply_format_dict(self, d: dict[str, Any] | None) -> None:
+        """Restore the fields format_dict stored; a missing or empty dict leaves the
+        pre-phase-four defaults."""
+        if not d:
+            return
+        self.shape = str(d.get("shape") or SHAPE_THREAD)
+        anchors = d.get("anchors")
+        if isinstance(anchors, list) and anchors:
+            self.anchors = [int(a) for a in anchors]
+        self.max_chars = int(d.get("max_chars") or MAX_POST_CHARS)
+        wv = d.get("wanted_visuals")
+        self.wanted_visuals = int(wv) if wv is not None else None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -91,6 +222,13 @@ OUTPUT_JSON_SCHEMA: dict[str, Any] = {
         },
         "chart": CHART_JSON_SCHEMA,
         "table": TABLE_JSON_SCHEMA,
+        "visuals": {
+            "type": "array",
+            "maxItems": MAX_VISUALS - 1,
+            "items": CHART_JSON_SCHEMA,
+            "description": "Further charts beyond the first visual, only when the format "
+            "asks for more than one picture. Each is checked like 'chart'.",
+        },
         "claims_to_verify": {
             "type": "array",
             "items": {
@@ -121,13 +259,15 @@ def _require_str(data: dict[str, Any], key: str) -> str:
     return value.strip()
 
 
-def validate_output(data: Any) -> Draft:
+def validate_output(data: Any, fmt: Format | None = None) -> Draft:
     """Validate raw JSON (already parsed) and return a Draft.
 
-    Checks structure and types only, plus that exactly one of chart/table is given. Content
-    rules (280 chars, URL present, preprint label, number verification) live in
-    draft.drafter.check_hard_rules.
+    Checks structure and types only, plus the visual count the format asks for. Content
+    rules (character limit, URL present, preprint label, number verification) live in
+    draft.drafter.check_hard_rules. With fmt None the phase-one physics apply: a 3-6 post
+    thread with exactly one of chart/table.
     """
+    fmt = fmt or DEFAULT_FORMAT
     if not isinstance(data, dict):
         raise SchemaError("output must be a JSON object")
     missing = [k for k in OUTPUT_JSON_SCHEMA["required"] if k not in data]
@@ -143,18 +283,34 @@ def validate_output(data: Any) -> Draft:
     thread = [p.strip() for p in thread]
     if any(not p for p in thread):
         raise SchemaError("'thread' contains an empty post")
-    if not THREAD_MIN <= len(thread) <= THREAD_MAX:
-        raise SchemaError(f"'thread' must have {THREAD_MIN}-{THREAD_MAX} posts, got {len(thread)}")
+    lo, hi = fmt.min_posts, fmt.max_posts
+    if not lo <= len(thread) <= hi:
+        what = "'thread'" if fmt.is_thread else f"a {fmt.shape} post"
+        raise SchemaError(f"{what} must have {lo}-{hi} posts, got {len(thread)}")
 
     try:
         chart = validate_chart(data.get("chart"))
         table = validate_table(data.get("table"))
+        extras_raw = data.get("visuals") or []
+        if not isinstance(extras_raw, list):
+            raise SchemaError("'visuals' must be a list")
+        extras = [validate_chart(v) for v in extras_raw]
     except ChartError as exc:
         raise SchemaError(str(exc)) from exc
+    if any(v is None for v in extras):
+        raise SchemaError("'visuals' contains an empty chart")
     if chart is not None and table is not None:
         raise SchemaError("give a chart or a table, not both")
-    if chart is None and table is None:
+    n_visuals = (1 if chart is not None or table is not None else 0) + len(extras)
+    if fmt.visuals == 0 and n_visuals:
+        raise SchemaError("this format carries no visual: give neither chart nor table")
+    if fmt.visuals >= 1 and chart is None and table is None:
         raise SchemaError("every draft needs a visual: give a chart or a table")
+    if n_visuals != fmt.visuals:
+        raise SchemaError(
+            f"this format carries {fmt.visuals} visual(s), got {n_visuals} "
+            "(the first is 'chart' or 'table', any further one goes in 'visuals')"
+        )
 
     claims_raw = data["claims_to_verify"]
     if not isinstance(claims_raw, list):
@@ -180,4 +336,9 @@ def validate_output(data: Any) -> Draft:
         claims_to_verify=claims,
         chart=chart,
         table=table,
+        shape=fmt.shape,
+        anchors=fmt.resolve_anchors(len(thread)),
+        max_chars=fmt.max_chars,
+        extra_visuals=[v for v in extras if v is not None],
+        wanted_visuals=fmt.visuals,
     )

@@ -264,6 +264,16 @@ def _render_detail(
             "image_url": f"/drafts/{draft_id}/image" if has_image else "",
             "image_alt": row.image_alt
             or (alt_text(row.draft.visual, row.url) if row.draft.visual else ""),
+            "extra_images": [
+                {
+                    "url": f"/drafts/{draft_id}/image/{int(im['index'])}",
+                    "alt": im.get("alt", ""),
+                    "anchor": im.get("anchor", 1),
+                }
+                for im in row.images
+                if int(im.get("index", 0)) > 0 and store.resolve_image(im["path"]) is not None
+            ],
+            "first_anchor": (row.draft.anchors or [1])[0],
             "decisions": decisions,
             "thread_text": edit_form.get("thread", "\n---\n".join(row.draft.thread)),
             "edit_note": edit_form.get("note", ""),
@@ -448,6 +458,10 @@ async def revise(draft_id: int, request: Request, conn: Conn):
             conn, draft_id, row.draft.table, result.draft.table
         )
         images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)
+        if result.draft.extra_visuals:
+            images.attach_extra_charts(
+                conn, draft_id, result.draft.extra_visuals, source_url=row.url
+            )
         log.info(
             "draft %d revised (%d attempt(s), %d claim problem(s), %d verdict(s) and %d table "
             "cell(s) kept)",
@@ -481,6 +495,20 @@ def image(draft_id: int, conn: Conn):
     if path is None:
         raise HTTPException(404, "this draft has no image")
     return FileResponse(str(path), media_type="image/png")
+
+
+@app.get("/drafts/{draft_id}/image/{index}", include_in_schema=False)
+def image_at(draft_id: int, index: int, conn: Conn):
+    """Phase four: the k-th rendered picture (index 0 is /drafts/{id}/image)."""
+    row = store.get_draft(conn, draft_id)
+    if row is None:
+        raise HTTPException(404, "no such draft")
+    for im in row.images:
+        if int(im.get("index", 0)) == index:
+            path = store.resolve_image(im["path"])
+            if path is not None:
+                return FileResponse(str(path), media_type="image/png")
+    raise HTTPException(404, "this draft has no such image")
 
 
 @app.post("/drafts/{draft_id}/image/drop")
