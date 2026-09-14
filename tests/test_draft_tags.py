@@ -4,6 +4,7 @@ from draft import drafter
 from draft.prompt import HARD_RULES, build_user_prompt
 from draft.schema import validate_output
 from draft.tags import (
+    company_names,
     drug_names,
     handles_block,
     load_handles,
@@ -60,6 +61,11 @@ def test_load_handles_from_config():
     assert load_handles(None) == [] and load_handles({}) == []
 
 
+def test_company_names_from_config():
+    assert company_names(CFG) == {"merck", "nkarta", "johnson & johnson", "j&j"}
+    assert company_names(None) == frozenset()
+
+
 def test_relevant_handles_by_name_host_and_source():
     hs = load_handles(CFG)
     rel = relevant_handles(hs, source_text="Merck reports data", url=URL, source="pubmed")
@@ -89,6 +95,10 @@ def test_trial_and_drug_names():
         "osimertinib",
     ]
     assert drug_names("#Trastuzumab Deruxtecan (T-DXd) and #cilta-cel; cancel the cab") == []
+    # companies named like antibodies are never drugs: built in, or from config
+    assert drug_names("Genmab and Alphamab sell epcoritamab") == ["epcoritamab"]
+    assert drug_names("Examplemab sells epcoritamab", {"examplemab"}) == ["epcoritamab"]
+    assert tag_problems("Examplemab's drug", None, {"examplemab"}) == []
 
 
 def test_tag_problems():

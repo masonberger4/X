@@ -46,6 +46,9 @@ _INN_RE = re.compile(
     r"(?<![#@$\w-])([A-Za-z]{3,}(?:" + "|".join(_INN_SUFFIXES) + r")|[A-Za-z]{2,}-cel)(?![\w-])"
 )
 _NOT_TRIALS = frozenset({"covid"})
+# Company names that end like an antibody. `company_names(cfg)` adds every configured
+# company on top, so a competitor mention is never tagged as a drug.
+_NOT_DRUGS = frozenset({"genmab", "alphamab", "i-mab", "biomab", "innovent"})
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,22 @@ def load_handles(root_cfg: dict[str, Any] | None) -> list[Handle]:
     return out
 
 
+def company_names(root_cfg: dict[str, Any] | None) -> frozenset[str]:
+    """Every configured company name and alias, lower-cased (`companies.feeds` and
+    `branding.companies`, with or without a handle): words the drug-name check must skip."""
+    cfg = root_cfg or {}
+    entries = [e for e in ((cfg.get("companies") or {}).get("feeds") or []) if isinstance(e, dict)]
+    entries += [
+        e for e in ((cfg.get("branding") or {}).get("companies") or []) if isinstance(e, dict)
+    ]
+    out = set()
+    for e in entries:
+        for n in (e.get("name"), *(e.get("aliases") or [])):
+            if str(n or "").strip():
+                out.add(str(n).strip().lower())
+    return frozenset(out)
+
+
 def relevant_handles(
     handles: list[Handle], *, source_text: str, url: str = "", source: str = ""
 ) -> list[Handle]:
@@ -179,13 +198,17 @@ def trial_names(text: str) -> list[str]:
     return found
 
 
-def drug_names(text: str) -> list[str]:
+def drug_names(text: str, exclude: frozenset[str] | set[str] = frozenset()) -> list[str]:
     """Generic drug names (by INN stem) written without a hashtag, without repeats. A
     second stem word right after a first ("trastuzumab deruxtecan", "#Trastuzumab
-    Deruxtecan") belongs to the same name: only the first word carries the #."""
+    Deruxtecan") belongs to the same name: only the first word carries the #. `exclude`
+    (lower-cased company names from `company_names`) and the built-in `_NOT_DRUGS` are
+    companies whose names end like an antibody, never drugs."""
     text = _URL_RE.sub(" ", text)
     found = []
     for m in _INN_RE.finditer(text):
+        if m.group(1).lower() in _NOT_DRUGS or m.group(1).lower() in exclude:
+            continue
         before = text[: m.start()].rstrip()
         prev = before.split()[-1] if before and text[m.start() - 1].isspace() else ""
         if prev and (_INN_RE.fullmatch(prev) or _INN_RE.fullmatch(prev.lstrip("#"))):
@@ -196,11 +219,16 @@ def drug_names(text: str) -> list[str]:
     return found
 
 
-def tag_problems(text: str, handles: list[Handle] | None = None) -> list[str]:
+def tag_problems(
+    text: str,
+    handles: list[Handle] | None = None,
+    company_names: frozenset[str] | set[str] = frozenset(),
+) -> list[str]:
     """Why one post breaks the mention/hashtag rule, worded for the retry prompt. Empty
     when it passes. `handles` are the accounts the post is allowed to know about (the
     relevant ones for the story); a name written without its @handle is a violation, as is
-    a trial or drug name without its #."""
+    a trial or drug name without its #. `company_names` (from `company_names(cfg)`) are
+    never drug names."""
     problems: list[str] = []
     for h in handles or []:
         if h.named_in(text) and not h.mentioned_in(text):
@@ -210,7 +238,7 @@ def tag_problems(text: str, handles: list[Handle] | None = None) -> list[str]:
         problems.append(
             "trial name(s) without a hashtag: " + ", ".join(f"{t} -> #{t}" for t in trials)
         )
-    drugs = drug_names(text)
+    drugs = drug_names(text, company_names)
     if drugs:
         problems.append(
             "drug name(s) without a hashtag: " + ", ".join(f"{d} -> #{d}" for d in drugs)

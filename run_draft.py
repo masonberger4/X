@@ -38,7 +38,13 @@ from dotenv import load_dotenv
 
 from approval_queue import images, store
 from draft.chart import Style
-from draft.drafter import DraftRejected, draft_item, revise_item, story_handles
+from draft.drafter import (
+    DraftRejected,
+    draft_item,
+    known_company_names,
+    revise_item,
+    story_handles,
+)
 from draft.examples import (
     EditExample,
     RejectionExample,
@@ -245,9 +251,10 @@ def retag_problems(row: store.DraftRow) -> list[str]:
     handles = story_handles(
         source_text=f"{row.title}\n{row.abstract}", url=row.url, source=row.source
     )
+    companies = known_company_names()
     out: list[str] = []
     for i, post in enumerate(row.draft.all_posts()):
-        out += [f"thread[{i}] {p}" for p in tag_problems(post, handles)]
+        out += [f"thread[{i}] {p}" for p in tag_problems(post, handles, companies)]
     return out
 
 

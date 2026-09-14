@@ -6,7 +6,13 @@ from __future__ import annotations
 import difflib
 from collections.abc import Callable
 
-from draft.drafter import _ADVICE_RE, _INVEST_RE, _number_in_source, numbers_in
+from draft.drafter import (
+    _ADVICE_RE,
+    _INVEST_RE,
+    _number_in_source,
+    known_company_names,
+    numbers_in,
+)
 from draft.prompt import PREPRINT_LABEL
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.tags import Handle, tag_problems
@@ -54,7 +60,7 @@ def cell_problems(
         problems.append(f"{slot} is missing the primary source URL")
     if needs_preprint and PREPRINT_LABEL not in t.lower():
         problems.append(f"preprint not labelled in the {slot}")
-    problems += tag_problems(t, handles)
+    problems += tag_problems(t, handles, known_company_names())
     return problems
 
 

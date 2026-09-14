@@ -128,7 +128,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `mentions:` list of journals, societies and regulators with `domains:` and
   `match_names:`) must be written as @handle when a post names it, and a formal drug name
   (INN stem regex, `-cel` short names) or trial name (`KEYNOTE-189` shape) must be a
-  hashtag. Handles are never guessed: `drafter.story_handles` (`tags.load_handles` +
+  hashtag; a configured company name (`tags.company_names`, `drafter.known_company_names`)
+  is never a drug, so Genmab is not `#Genmab`. Handles are never guessed: `drafter.story_handles` (`tags.load_handles` +
   `relevant_handles`: named in the source text, owning the URL host, or the
   `company_<key>` source) is the only list the model sees (`X HANDLES` in the user prompt,
   `Brief.handles` for the swarm) and the only one enforced. `numbers_in` ignores
