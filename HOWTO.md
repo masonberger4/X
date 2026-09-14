@@ -288,7 +288,11 @@ source only when it is due, and score only scores what is new.
    If the draft has a chart it is shown under "Image" with the exact text a
    screen reader will get (the alt text), and it is attached to the first
    post when published. Check every bar against the source like any other
-   number. "Drop image" posts the text alone; a Revise redraws the chart from
+   number. "Drop image" posts the text alone; when the draft carries two
+   pictures (a step 9 format genome) the button reads "Drop both images" and
+   each picture also has its own "Drop this picture" beside it
+   (`POST /drafts/{id}/image/{index}/drop`), which removes that one and the
+   spec behind it and leaves the other in place. A Revise redraws the chart from
    the new draft (or removes it if the new draft has none). "Redraw" remakes
    the picture from the same spec: a chart is rendered again through the
    grader loop, a table is redrawn from the cell verdicts already stored.

@@ -231,7 +231,11 @@ would break "never fabricate numbers", so:
   rounded navy bar with a drop shadow and sheen;
 - the queue shows the PNG and its alt text at `/drafts/{id}/image`; "Drop
   image" (`POST /drafts/{id}/image/drop`) clears both and logs an `edit`
-  decision with the text unchanged; a revise re-renders from the new draft;
+  decision with the text unchanged; `POST /drafts/{id}/image/{index}/drop`
+  ("Drop this picture") drops just that one of a two-picture draft, with the
+  chart or table behind it, and moves the pictures after it down a place, so
+  index 0 stays what `drafts.image_path` names; a revise re-renders from the
+  new draft;
 - `run_publish.py` attaches it to the first post (`publish/client.py:
   upload_media`, v2 media upload plus alt text, then `post_tweet` with
   `media_ids`). `media: attach_images: false` in `publish/config.yaml` posts
