@@ -5,10 +5,14 @@ and `ops/runner.py` runs exactly what that file says, under the same `ops/lock.p
 lock cron takes. So a run started here is the same run cron would start, and a step
 that is disabled in the config (publishing, by default) is skipped, not run.
 
-The one run the panel does build itself is "Publish now" (`start_publish_now`): the
-approved page's button runs `run_publish.py --live --now --draft ID` for the draft the
-human pointed at. It is the only argv here that carries the live flag; ops/config.yaml
-still never does, and run_publish.py still posts nothing unless PUBLISH_ENABLED=1.
+The two runs the panel does build itself both carry the publisher's live flag:
+"Publish now" (`start_publish_now`), the approved page's button, runs
+`run_publish.py --live --now --draft ID` for the draft the human pointed at; automatic
+publishing (`start_publish_auto`, ticked by `panel/autopublish.py` while the switch on
+the publishing page is on) runs `run_publish.py --live`, the run cron would make. No other
+argv here carries the flag, ops/config.yaml still never does, and run_publish.py still
+posts nothing unless PUBLISH_ENABLED=1. An automatic run that found nothing to post is
+dropped again (`Job.quiet`): it leaves no row on the runs page or in `pipeline_runs`.
 
 Results are recorded in `pipeline_runs` through `ops/store.py` and a health report is
 recomputed afterwards. Manual runs never send alerts: a human is already watching.
@@ -42,7 +46,9 @@ STATE_STOPPED = "stopped"
 FORBIDDEN_ARGS = ("--live",)
 
 PUBLISH_NOW = "publish now"  # the step name of a start_publish_now() run
+AUTO_PUBLISH = "auto publish"  # the step name of a start_publish_auto() run
 PUBLISH_CLI = "run_publish.py"
+QUIET_MARKER = "nothing to post"  # what run_publish.py logs when a run posts nothing
 
 
 class JobError(RuntimeError):
@@ -64,6 +70,7 @@ class Job:
     active_since: datetime | None = None
     active_stdout: str = ""  # that step's log so far, refreshed as it writes
     active_stderr: str = ""
+    quiet: bool = False  # an automatic publish run that posted nothing: not kept
 
     @property
     def running(self) -> bool:
@@ -162,20 +169,31 @@ class JobManager:
         """Post one approved draft now: `run_publish.py --live --now --draft ID`, as its own
         run, so its log lands on the runs page like any other step. The caps in
         publish/config.yaml still apply and run_publish.py stays a dry run unless
-        PUBLISH_ENABLED=1 is set; this is the only place the panel passes the live flag."""
+        PUBLISH_ENABLED=1 is set."""
         draft_id = int(draft_id)
         if draft_id <= 0:
             raise JobError("publish now needs a draft id")
+        return self._launch_publish(PUBLISH_NOW, ["--now", "--draft", str(draft_id)])
+
+    def start_publish_auto(self) -> Job:
+        """One automatic publish run: `run_publish.py --live`, exactly the run cron would
+        make, so slots, caps, gap and breaking rules all apply. Started by
+        `panel/autopublish.py` on its cadence; the same gate (PUBLISH_ENABLED=1) applies."""
+        return self._launch_publish(AUTO_PUBLISH, [])
+
+    def _launch_publish(self, name: str, extra: list[str]) -> Job:
+        """The publisher with the live flag, as a run of its own. The step's timeout comes
+        from the config's publish step; this is the only place the panel passes the flag."""
         base = next((s for s in self.steps() if s.name == "publish"), None)
         timeout = base.timeout_seconds if base is not None else 300
         step = Step(
-            name=PUBLISH_NOW,
-            argv=["python", PUBLISH_CLI, "--live", "--now", "--draft", str(draft_id)],
+            name=name,
+            argv=["python", PUBLISH_CLI, "--live", *extra],
             enabled=True,
             required=False,
             timeout_seconds=timeout,
         )
-        return self._launch([PUBLISH_NOW], [step])
+        return self._launch([name], [step])
 
     def _launch(self, names: list[str], plan: list[Step]) -> Job:
         with self._mutex:
@@ -204,8 +222,9 @@ class JobManager:
             elif job.state == STATE_RUNNING:
                 job.state = STATE_DONE
             with self._mutex:
-                self._history.insert(0, job)
-                del self._history[self._history_size :]
+                if not job.quiet:
+                    self._history.insert(0, job)
+                    del self._history[self._history_size :]
                 self._current = None
 
     def _run_under_lock(self, job: Job) -> None:
@@ -241,7 +260,9 @@ class JobManager:
                 on_result=finished,
                 on_output=output,
             )
-            self._record(job)
+            job.quiet = is_quiet(job)
+            if not job.quiet:
+                self._record(job)
 
     def _record(self, job: Job) -> None:
         run_id = f"{job.started_at.strftime('%Y%m%dT%H%M%SZ')}-panel-{job.id}"
@@ -250,3 +271,15 @@ class JobManager:
             store.record_results(conn, run_id, job.results)
         finally:
             conn.close()
+
+
+def is_quiet(job: Job) -> bool:
+    """An automatic publish run that exited cleanly having found nothing to post. Every
+    fifteen minutes such a run would otherwise bury the runs page and `pipeline_runs`;
+    a run that posted, refused or failed is always kept."""
+    if job.steps != [AUTO_PUBLISH] or len(job.results) != 1:
+        return False
+    r = job.results[0]
+    if r.exit_code != 0 or r.timed_out or r.skipped:
+        return False
+    return QUIET_MARKER in (r.stdout_tail + r.stderr_tail)
