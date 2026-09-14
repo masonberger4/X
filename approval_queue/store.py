@@ -882,9 +882,7 @@ def drop_image(
             pass
 
 
-def _drop_one_image(
-    conn: sqlite3.Connection, row: DraftRow, index: int, note: str | None
-) -> None:
+def _drop_one_image(conn: sqlite3.Connection, row: DraftRow, index: int, note: str | None) -> None:
     """One picture of a draft goes; the others stay (see drop_image)."""
     draft = row.draft
     entry = next((d for d in row.images if int(d.get("index", 0)) == index), None)
