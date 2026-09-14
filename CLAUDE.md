@@ -121,6 +121,19 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
   after generation (plus 280 chars/post with URLs as 23, source URL placement,
   and verbatim-number verification); drafts that fail are stored as `failed`.
+- **Mentions and hashtags are a hard rule** (rule 11 in `draft/prompt.py:hard_rules`,
+  mirrored by `draft/tags.py:tag_problems`, called from `check_hard_rules` per post and
+  from `swarm/cells.py:cell_problems` per cell): an account whose X handle the story is
+  given (`config.yaml`: `x:` on a `companies.feeds` / `branding.companies` entry, and the
+  `mentions:` list of journals, societies and regulators with `domains:` and
+  `match_names:`) must be written as @handle when a post names it, and a formal drug name
+  (INN stem regex, `-cel` short names) or trial name (`KEYNOTE-189` shape) must be a
+  hashtag. Handles are never guessed: `drafter.story_handles` (`tags.load_handles` +
+  `relevant_handles`: named in the source text, owning the URL host, or the
+  `company_<key>` source) is the only list the model sees (`X HANDLES` in the user prompt,
+  `Brief.handles` for the swarm) and the only one enforced. `numbers_in` ignores
+  `@`/`#` tokens so a trial name's digits are not a number to verify. Publish's re-check
+  and human-approved texts are untouched.
 - **The shape of a draft is a gene, not a constant** (step 9 phase four). `Draft.thread`
   is always the list of posts; `draft/schema.py:Format` (shape `thread` | `single` |
   `long`, `min_posts`/`max_posts`, `visuals` 0-2, one anchor word per visual, `max_chars`)
@@ -360,7 +373,8 @@ draft/    schema.py (Draft, Format, validate_output), chart.py (chart + table sp
           knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,
           grade_image, call_grader), branding.py (tickers + logos for company cells),
           logos.py (site icon discovery + PNG normalisation for run_logos.py), prompt.py,
-          voice.md, drafter.py, config.yaml, settings.py,
+          voice.md, drafter.py, config.yaml, settings.py, tags.py (Handle, load_handles,
+          relevant_handles, trial_names, drug_names, tag_problems),
           examples.py (EditExample, select_edit_examples, format_examples_block),
           voice_report.py (VoiceReport, build_report, render_markdown, CLI)
 approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,

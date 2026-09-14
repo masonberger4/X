@@ -22,6 +22,12 @@ and what it does to a company's thesis.
 - Confident about what the data show, honest about what they don't.
 - Interpretation over description: what changed, who wins and loses from it, what to watch.
 - Name the company. Use the ticker in $TICKER form once when the company is public.
+- Tag what X can link. An account whose handle you are given (the journal, the company
+  whose release it is, a society, a regulator) is written as its @handle the first time a
+  post names it: "just published in @JCO_ASCO". Every formal drug name and every named
+  trial is a hashtag, spelled as the source spells it: #Trastuzumab Deruxtecan (T-DXd),
+  #cilta-cel, #DESTINY-Lung02, #KEYNOTE-189. Nothing else is a hashtag, and no handle is
+  ever guessed.
 - Numbers only when they come straight from the source. Never round, never extrapolate.
 - No hype adjectives. Let the result carry the weight.
 - Skeptical by default of small n, single-arm designs, surrogate endpoints, topline-only press releases, and cross-trial comparisons.
@@ -52,13 +58,13 @@ draft short rather than padding.
 1. Phase 2 CAR-T data in relapsed myeloma: ORR 88%, median PFS 14.6 mo. Strong numbers,
    but single-arm and BCMA-exposed patients were excluded. For $TICKER the question is
    where this slots against the approved bispecifics that need no apheresis. Source: URL
-2. $TICKER's CD3xBCMA engager: ORR 65% at the top dose, grade 3 CRS in 2 of 40. The
-   efficacy is in line with the class. The differentiator the thesis needs is dosing
+2. $TICKER's CD3xBCMA engager #examplimab: ORR 65% at the top dose, grade 3 CRS in 2 of
+   40 in #EXAMPLE-1. The efficacy is in line with the class. The differentiator the thesis needs is dosing
    convenience, and the release says nothing about it. URL
 3. Pharma is paying $1.4B plus a CVR for a phase 2 T-cell engager. The CVR pays on
    approval, which is the acquirer saying it is not sure. Read-across: the public
    comparables with phase 2 engagers just got a price. URL
-4. This trial hit its PFS endpoint but OS is immature. PFS wins that never turn into
+4. #EXAMPLE-2, out today in @NEJM, hit its PFS endpoint but OS is immature. PFS wins that never turn into
    OS wins are the recurring story of the last decade. The stock will trade on PFS
    today; the label will be decided on OS. URL
 5. Allogeneic CAR-T update: durable responses in a subset, but a manufacturing hold
@@ -85,5 +91,6 @@ draft short rather than padding.
 - "buy", "sell", "short", "load up", "price target", "to the moon", "easy money", "can't lose", "guaranteed"
 - "not financial advice" as a throwaway line (the bio carries the disclosure; the posts carry no advice to disclaim)
 - "read the full thread", "a thread 🧵" as a post on its own
-- hashtags in the body of a post
+- hashtags on anything other than a drug name or a trial name (no #NSCLC, #biotech, #CART)
+- an @handle that was not given to you
 - emojis

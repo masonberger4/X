@@ -104,8 +104,23 @@ source only when it is due, and score only scores what is new.
    Writes one draft (a 3 to 6 post thread with a chart or a table) for up to 10
    stories from the last 48 hours scoring at or above the digest threshold
    (30 of 50, from `config.yaml`). Drafts that break a hard rule (advice,
-   made-up numbers, missing source link, too long) are stored as failed, not
-   shown.
+   made-up numbers, missing source link, too long, a missing @handle or #tag)
+   are stored as failed, not shown.
+
+   Posts tag what X can link. A journal, society, regulator or company the
+   pipeline knows the X account of is written as its @handle when a post names
+   it (`@JCO_ASCO`, `@Merck`), and every formal drug name and named trial is a
+   hashtag as the source spells it (`#Trastuzumab Deruxtecan`, `#cilta-cel`,
+   `#DESTINY-Lung02`, `#KEYNOTE-189`); nothing else is a hashtag. Handles come
+   from `config.yaml` only: `x: Merck` on a company's line under
+   `companies: feeds:` or `branding: companies:`, and the `mentions:` list for
+   journals, societies and regulators (`name`, `handle`, `aliases`, `domains`
+   for the URL hosts that identify it, and `match_names: false` for a journal
+   named after an ordinary word such as Blood, which is then recognised by its
+   host only). The drafter is only shown the handles of accounts the story
+   names or that own the source URL's host, and never invents one: a company
+   without `x:` is written by name. Verify each handle on x.com before adding
+   it; a wrong handle mentions a stranger.
    ```
    python run_draft.py --dry-run                 # show what would be drafted
    python run_draft.py --min-score 38 --limit 5  # only the strongest few

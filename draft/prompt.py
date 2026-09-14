@@ -17,6 +17,7 @@ from draft.schema import (
     URL_CHARS,
     Format,
 )
+from draft.tags import Handle, handles_block
 
 VOICE_PATH = Path(__file__).with_name("voice.md")
 
@@ -102,6 +103,13 @@ def hard_rules(fmt: Format | None = None) -> str:
    is blanked, and one contradicted cell blocks the table. So keep cells short, factual
    and checkable (a phase, a date, a mechanism, a ticker, a number), never an opinion.
    Use "suggested_visual" to say what the table shows.
+11. Mentions and hashtags. Write an account whose X handle you are given (the journal or
+   society that published the source, the company whose release it is, a regulator) as its
+   @handle the first time a post names it, e.g. "just published in @JCO_ASCO". Never invent
+   a handle: an account not in the list is written by name. Write every formal drug name
+   (the generic or brand name, e.g. #Trastuzumab Deruxtecan, #cilta-cel) and every named
+   trial (#DESTINY-Lung02, #KEYNOTE-189) as a hashtag, exactly as the source spells it,
+   each time it appears. No other hashtags.
 """
 
 
@@ -153,7 +161,10 @@ def build_user_prompt(
     published_at: str | None = None,
     suggested_angle: str | None = None,
     rationale: str | None = None,
+    handles: list[Handle] | None = None,
 ) -> str:
+    """`handles` (rule 11) are the accounts this story may mention, listed after the
+    abstract; with none the prompt is unchanged."""
     parts = [
         f"SOURCE: {source}" + ("  (THIS IS A PREPRINT)" if is_preprint(source) else ""),
         f"PRIMARY SOURCE URL: {url}",
@@ -168,6 +179,8 @@ def build_user_prompt(
         parts.append(f"SCORER RATIONALE: {rationale}")
     if suggested_angle:
         parts.append(f"SUGGESTED ANGLE: {suggested_angle}")
+    if handles:
+        parts.append(handles_block(handles))
     parts.append("")
     parts.append("Draft the thread and its visual now. Output JSON only.")
     return "\n".join(parts)
@@ -277,9 +290,11 @@ def build_prompt(
     rationale: str | None = None,
     examples_block: str | None = None,
     fmt: Format | None = None,
+    handles: list[Handle] | None = None,
 ) -> tuple[str, str]:
     """Return (system_prompt, user_prompt). examples_block (step 7) goes into the system
-    prompt; fmt (step 9 phase four) rewrites its shape rules."""
+    prompt; fmt (step 9 phase four) rewrites its shape rules; handles (rule 11) are listed
+    in the user prompt."""
     return build_system_prompt(examples_block, fmt), build_user_prompt(
         title=title,
         abstract=abstract,
@@ -288,4 +303,5 @@ def build_prompt(
         published_at=published_at,
         suggested_angle=suggested_angle,
         rationale=rationale,
+        handles=handles,
     )
