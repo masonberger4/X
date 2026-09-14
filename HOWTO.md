@@ -540,9 +540,19 @@ to stop it. Four pages:
   kept on the draft (shown as #1, #2) until it posts.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
-  halfway is never retried for you). Posting happens from the approved page
-  or on the schedule; the two limits at the top, posts per day and the
-  minimum gap between posts in minutes, are the only settings the panel
+  halfway is never retried for you). Posting happens from the approved page,
+  on the schedule, or automatically: the "Automatic publishing" switch runs
+  the publisher every N minutes (15 by default) for as long as this app is
+  open, the same run cron would make, so approved drafts go out one per run
+  under the limits and the slots in `publish\config.yaml` with no button
+  pressed. It needs `PUBLISH_ENABLED=1` in `.env` (part 5) like everything
+  else; switched on without it the page says "on, but not live" and nothing
+  runs. The switch and the interval are kept in `publish\config.yaml`
+  (`auto_publish_enabled`, `auto_publish_interval_minutes`), so the app
+  comes back up the way you left it; the approved page shows when the next
+  run is due. Runs that found nothing to post leave no row on the runs page.
+  The two limits at the top, posts per day and the
+  minimum gap between posts in minutes, are the other settings the panel
   edits ("Save limits" writes them into `publish\config.yaml`, and the next
   publish run uses them).
 - **Swarm** (`/swarm`) — step 9's recipes (writer genomes, designers and
@@ -716,7 +726,8 @@ before scoring, `enabled: false` turns it off),
 skips the chart), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules; `media: attach_images`
-attaches or skips the chart), `feedback\config.yaml`,
+attaches or skips the chart; `auto_publish_enabled` and
+`auto_publish_interval_minutes` are the panel's automatic-publishing switch), `feedback\config.yaml`,
 `swarm\config.yaml` (step 9: the cheap model, how many cells per post, how many
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
