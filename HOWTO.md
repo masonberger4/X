@@ -104,12 +104,34 @@ source only when it is due, and score only scores what is new.
    Writes one draft (a 3 to 6 post thread with a chart or a table) for up to 10
    stories from the last 48 hours scoring at or above the digest threshold
    (30 of 50, from `config.yaml`). Drafts that break a hard rule (advice,
-   made-up numbers, missing source link, too long) are stored as failed, not
-   shown.
+   made-up numbers, missing source link, too long, a missing @handle or #tag)
+   are stored as failed, not shown.
+
+   Posts tag what X can link. A journal, society, regulator or company the
+   pipeline knows the X account of is written as its @handle when a post names
+   it (`@JCO_ASCO`, `@Merck`), and every formal drug name and named trial is a
+   hashtag as the source spells it (`#Trastuzumab Deruxtecan`, `#cilta-cel`,
+   `#DESTINY-Lung02`, `#KEYNOTE-189`); nothing else is a hashtag. Handles come
+   from `config.yaml` only: `x: Merck` on a company's line under
+   `companies: feeds:` or `branding: companies:`, and the `mentions:` list for
+   journals, societies and regulators (`name`, `handle`, `aliases`, `domains`
+   for the URL hosts that identify it, and `match_names: false` for a journal
+   named after an ordinary word such as Blood, which is then recognised by its
+   host only). The drafter is only shown the handles of accounts the story
+   names or that own the source URL's host, and never invents one: a company
+   without `x:` is written by name. Verify each handle on x.com before adding
+   it; a wrong handle mentions a stranger. Drafts written before the rule, or
+   before a handle was added, are brought under it with
+   `python run_draft.py --retag`: every pending and approved draft not yet
+   posted whose posts break the rule is revised with the one instruction to
+   change only the tags (a `revise` decision on the draft page, the rest of
+   the text and the visual kept; claim checks carry over as after any
+   revision). `--retag --dry-run` lists what would change without a call.
    ```
    python run_draft.py --dry-run                 # show what would be drafted
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
    python run_draft.py --retry-failed            # try again on stories whose draft failed
+   python run_draft.py --retag                   # apply @handles and #tags to current drafts
    ```
    A draft may come with a picture. Nothing draws it freehand: when the source
    has two or more comparable numbers (arms, endpoints, cohorts) the drafter
@@ -120,21 +142,30 @@ source only when it is due, and score only scores what is new.
    on the draft page is still just the model's one-line idea for you; the
    chart is what actually gets attached. `images: enabled: false` in
    `draft\config.yaml` turns the drawing off. Every picture (chart or table)
-   uses one house style: a 16:9 card with a navy rule and an
-   "IMMUNO-ONCOLOGY · DATA BRIEF" eyebrow, the title, horizontal bars in one
-   blue with a light track showing the full scale and the verified value at
-   each tip (tables get a navy header row and zebra rows), and a footer with
-   the note on the left and the source host on the right. The colours, the
-   eyebrow text and the font list are constants at the top of the rendering
-   section of `draft\chart.py`.
+   shares one card layout: 16:9, an accent rule and an
+   "IMMUNO-ONCOLOGY · DATA BRIEF" eyebrow, the title, horizontal bars with a
+   light track showing the full scale and the verified value at each tip
+   (tables get a rounded header row and zebra rows), and a footer with the
+   note on the left and the source host on the right. The colours are NOT
+   fixed: `draft\chart.py` ships eight named palettes (navy, teal, crimson,
+   forest, amber, plum, slate and midnight, a dark card), and a picture's
+   palette and whether each bar gets its own hue (`multi_colour`) are layout
+   knobs like text size, so the designer genome a draft starts from and the
+   image grader both choose them. The eyebrow text and the font list are
+   constants at the top of the rendering section of `draft\chart.py`; the
+   palettes sit just below them and a new one is a new entry in `PALETTES`.
 
    Every picture is then graded. A second model looks at the PNG and scores
    it 1 to 10 on three things: easy to read, good use of colour and graphics,
    little empty space. It also lists the flaws it saw and a fix for each.
    A score of 8 or more is done. Below that the code applies the grader's
-   layout changes (text size, bar thickness, row spacing, a highlighted first
-   bar, gridlines, the scale track) and draws the picture again, up to four
-   times, and keeps the best-scoring version. A low score always costs another
+   layout and colour changes (text size, bar thickness, row spacing, a
+   highlighted first bar, gridlines, the scale track, the palette, one hue
+   per bar) and draws the picture again, up to four
+   times, and keeps the best-scoring version. The grader is told that the
+   same navy card every time is a flaw and to try another palette when a
+   picture is merely competent; a bold try costs nothing because the best
+   render is what stays. A low score always costs another
    render: if the grader names no layout change, the code steps the text size and
    row spacing up itself. The grader can only move layout;
    it can never add or change a number, a label or a title. Each draft page in
@@ -147,11 +178,16 @@ source only when it is due, and score only scores what is new.
    drawn and the log says so. Besides the overall score the grader rates a
    checklist of professional touches (readable at thumbnail size, clear
    hierarchy, aligned columns, a rounded 3D header, logos and tickers in
-   company cells, consistent numbers, a quiet source line, house style), and
+   company cells, consistent numbers, a quiet source line, and whether the
+   card would stand out from the account's other cards), and
    those per-item scores show next to each render on the draft page.
 
-   Company cells in a table get a stock ticker and a logo automatically when
-   the company is configured. Add `ticker: AMGN` to the company's line under
+   Company cells in a table, and chart bars labelled with a company, get a
+   stock ticker and a logo automatically when
+   the company is configured. In a table that means the row-label column and
+   every column headed company, sponsor, developer, partner, owner or
+   acquirer; only an exact configured name matches, so a trial or drug name
+   in the first column is left alone. Add `ticker: AMGN` to the company's line under
    `companies: feeds:` in `config.yaml`, or list a company that has no feed
    under `branding: companies:` (with `aliases:` for other spellings, e.g.
    J&J). That `domain:` also makes the company's own press releases a trusted
@@ -160,7 +196,8 @@ source only when it is due, and score only scores what is new.
 
        python run_logos.py
 
-   once: for every configured company it opens the company's own website
+   once (the shipped repo has no logo files, so until you do every card shows
+   tickers only): for every configured company it opens the company's own website
    (`domain:` on the config line, or the feed's host with `ir.` / `investors.`
    / `www.` removed) and saves the icon that site advertises (its
    apple-touch-icon, else the largest favicon) as `assets\logos\<key>.png`.
@@ -548,9 +585,19 @@ to stop it. Four pages:
   kept on the draft (shown as #1, #2) until it posts.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
-  halfway is never retried for you). Posting happens from the approved page
-  or on the schedule; the two limits at the top, posts per day and the
-  minimum gap between posts in minutes, are the only settings the panel
+  halfway is never retried for you). Posting happens from the approved page,
+  on the schedule, or automatically: the "Automatic publishing" switch runs
+  the publisher every N minutes (15 by default) for as long as this app is
+  open, the same run cron would make, so approved drafts go out one per run
+  under the limits and the slots in `publish\config.yaml` with no button
+  pressed. It needs `PUBLISH_ENABLED=1` in `.env` (part 5) like everything
+  else; switched on without it the page says "on, but not live" and nothing
+  runs. The switch and the interval are kept in `publish\config.yaml`
+  (`auto_publish_enabled`, `auto_publish_interval_minutes`), so the app
+  comes back up the way you left it; the approved page shows when the next
+  run is due. Runs that found nothing to post leave no row on the runs page.
+  The two limits at the top, posts per day and the
+  minimum gap between posts in minutes, are the other settings the panel
   edits ("Save limits" writes them into `publish\config.yaml`, and the next
   publish run uses them).
 - **Swarm** (`/swarm`) — step 9's recipes (writer genomes, designers and
@@ -724,7 +771,8 @@ before scoring, `enabled: false` turns it off),
 skips the chart), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules; `media: attach_images`
-attaches or skips the chart), `feedback\config.yaml`,
+attaches or skips the chart; `auto_publish_enabled` and
+`auto_publish_interval_minutes` are the panel's automatic-publishing switch), `feedback\config.yaml`,
 `swarm\config.yaml` (step 9: the cheap model, how many cells per post, how many
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by

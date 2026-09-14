@@ -5,7 +5,15 @@ import json
 import pytest
 
 from draft import chart as chartmod
-from draft.chart import Chart, ChartError, alt_text, format_value, render_chart, validate_chart
+from draft.chart import (
+    Chart,
+    ChartError,
+    Style,
+    alt_text,
+    format_value,
+    render_chart,
+    validate_chart,
+)
 from draft.drafter import DraftRejected, chart_problems, verify_chart
 from draft.schema import SchemaError, validate_output
 from tests.test_draft_drafter import ABSTRACT, URL, fake_call, good_json, run
@@ -122,3 +130,47 @@ def test_chart_from_json_round_trip_and_garbage():
     assert chartmod.chart_from_json(None) is None
     assert chartmod.chart_from_json("not json") is None
     assert chartmod.chart_from_json('{"title": "x"}') is None
+
+
+def test_palette_and_multi_colour_are_style_knobs():
+    from draft.chart import DEFAULT_PALETTE, PALETTES, bar_colours
+
+    assert Style().palette == DEFAULT_PALETTE and set(Style.CHOICES["palette"]) == set(PALETTES)
+    st = Style().apply({"palette": " Midnight ", "multi_colour": 1})
+    assert st.palette == "midnight" and st.multi_colour is True
+    assert Style().apply({"palette": "sepia"}) == Style()  # unknown palette ignored
+    assert bar_colours(st, 3) == list(PALETTES["midnight"].series[:3])
+    assert bar_colours(Style(palette="teal", highlight_first=True), 3) == [
+        PALETTES["teal"].accent,
+        PALETTES["teal"].tint,
+        PALETTES["teal"].tint,
+    ]
+    assert bar_colours(Style(), 2) == [PALETTES["navy"].accent] * 2
+    assert len(bar_colours(Style(multi_colour=True), 12)) == 12  # wraps past the series
+
+
+def test_render_chart_in_every_palette_and_with_logos(tmp_path):
+    pytest.importorskip("matplotlib")
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from draft.chart import PALETTES
+
+    logo = tmp_path / "logo.png"
+    fig = plt.figure(figsize=(1, 1))
+    fig.savefig(logo)
+    plt.close(fig)
+    chart = validate_chart(CHART)
+    sizes = set()
+    for name in PALETTES:
+        path = render_chart(
+            chart, tmp_path / f"{name}.png", style=Style(palette=name, multi_colour=True)
+        )
+        sizes.add(path.stat().st_size)
+    assert len(sizes) == len(PALETTES)  # every palette draws a different picture
+    path = render_chart(
+        chart, tmp_path / "logos.png", logos={0: logo, 1: tmp_path / "missing.png", 9: logo}
+    )
+    assert path.stat().st_size > 1000

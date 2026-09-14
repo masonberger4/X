@@ -38,6 +38,7 @@ from draft.schema import (
     validate_output,
 )
 from draft.settings import load_draft_config
+from draft.tags import Handle, company_names, load_handles, relevant_handles, tag_problems
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ _INVEST_RE = re.compile("|".join(INVESTMENT_ADVICE_PATTERNS), re.IGNORECASE)
 # Numbers: integers with optional thousands separators, decimals, and percentages.
 _NUMBER_RE = re.compile(r"(?<![\w/.])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(\s?%)?")
 _URL_RE = re.compile(r"https?://\S+")
+_TAG_RE = re.compile(r"(?<!\w)[#@][\w-]+")
 
 
 class DraftRejected(Exception):
@@ -121,6 +123,21 @@ def _root_config() -> dict:
         return root_config.load_config()
     except Exception:  # root config.yaml missing or unreadable
         return {}
+
+
+def known_company_names() -> frozenset[str]:
+    """Every configured company name (rule 11: never tagged as a drug); empty without a
+    config."""
+    return company_names(_root_config())
+
+
+def story_handles(*, source_text: str, url: str, source: str) -> list[Handle]:
+    """The X accounts (rule 11) this story may mention: every handle `config.yaml` knows
+    (draft/tags.py:load_handles) that the source text names or that owns the source URL.
+    Empty when the config is missing, so nothing is ever enforced against a guessed handle."""
+    return relevant_handles(
+        load_handles(_root_config()), source_text=source_text, url=url, source=source
+    )
 
 
 def call_anthropic(system: str, user: str, model: str) -> str:
@@ -173,8 +190,9 @@ def _url_in(text: str, url: str) -> bool:
 
 
 def numbers_in(text: str) -> list[str]:
-    """Numbers as written, e.g. '88%', '14.6', '1,200'. URLs are ignored."""
-    text = _URL_RE.sub(" ", text)
+    """Numbers as written, e.g. '88%', '14.6', '1,200'. URLs, @handles and #hashtags
+    (a trial name such as #KEYNOTE-189 is a name, not a figure) are ignored."""
+    text = _TAG_RE.sub(" ", _URL_RE.sub(" ", text))
     return [
         m.group(1) + (m.group(2).replace(" ", "") if m.group(2) else "")
         for m in _NUMBER_RE.finditer(text)
@@ -244,13 +262,20 @@ def chart_problems(draft: Draft, source_text: str) -> list[str]:
 
 
 def check_hard_rules(
-    draft: Draft, *, url: str, source: str, fmt: Format | None = None
+    draft: Draft,
+    *,
+    url: str,
+    source: str,
+    fmt: Format | None = None,
+    handles: list[Handle] | None = None,
 ) -> list[str]:
     """Violations that make a draft unusable. Empty list means the draft passes. The
     per-post limit is the format's `max_chars` (phase four: a long post), else 280; with
     fmt None the draft's own `max_chars` is used, which is 280 for every pre-phase-four
-    draft."""
+    draft. `handles` (rule 11) are the accounts the story may mention: a post that names
+    one without its @handle fails, and a trial or drug name without its # always fails."""
     problems: list[str] = []
+    companies = known_company_names()
     limit = fmt.max_chars if fmt is not None else (draft.max_chars or MAX_POST_CHARS)
     for i, post in enumerate(draft.all_posts()):
         label = f"thread[{i}]"
@@ -265,6 +290,7 @@ def check_hard_rules(
             problems.append(
                 f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
+        problems += [f"{label} {p}" for p in tag_problems(post, handles, companies)]
     if draft.table is not None:
         for text in [draft.table.title, draft.table.note, *(c for _, _, c in draft.table.cells())]:
             if _ADVICE_RE.search(text):
@@ -335,6 +361,7 @@ def draft_item(
     max_attempts: int = MAX_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
     fmt: Format | None = None,
+    handles: list[Handle] | None = None,
 ) -> DraftResult:
     """Draft one item. Retries on API errors, bad JSON, schema errors and hard-rule failures.
 
@@ -343,8 +370,12 @@ def draft_item(
 
     examples_block (step 7): recent human edits, inserted into the system prompt before the
     hard rules. check_hard_rules and flag_unverified_numbers run on every output regardless.
+    handles (rule 11): the accounts the story may mention; None looks them up in config.yaml.
     """
     model = model or model_name()
+    source_text = f"{title}\n{abstract}"
+    if handles is None:
+        handles = story_handles(source_text=source_text, url=url, source=source)
     system, user = build_prompt(
         title=title,
         abstract=abstract,
@@ -355,6 +386,7 @@ def draft_item(
         rationale=rationale,
         examples_block=examples_block,
         fmt=fmt,
+        handles=handles,
     )
     return generate(
         system,
@@ -362,11 +394,12 @@ def draft_item(
         model=model,
         url=url,
         source=source,
-        source_text=f"{title}\n{abstract}",
+        source_text=source_text,
         call=call,
         max_attempts=max_attempts,
         sleep=sleep,
         fmt=fmt,
+        handles=handles,
     )
 
 
@@ -389,6 +422,7 @@ def revise_item(
     max_attempts: int = MAX_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
     fmt: Format | None = None,
+    handles: list[Handle] | None = None,
 ) -> DraftResult:
     """Revise an existing draft: the model gets the same brief as draft_item plus the draft as
     it stands, the editor's instructions, the claims the fact-checker (step 2b) contradicted
@@ -400,6 +434,9 @@ def revise_item(
         raise ValueError("nothing to revise: give instructions or at least one claim problem")
     model = model or model_name()
     fmt = fmt or format_of(current)
+    source_text = f"{title}\n{abstract}"
+    if handles is None:
+        handles = story_handles(source_text=source_text, url=url, source=source)
     system, base_user = build_prompt(
         title=title,
         abstract=abstract,
@@ -410,6 +447,7 @@ def revise_item(
         rationale=rationale,
         examples_block=examples_block,
         fmt=fmt,
+        handles=handles,
     )
     user = build_revision_user_prompt(
         base_user_prompt=base_user,
@@ -424,11 +462,12 @@ def revise_item(
         model=model,
         url=url,
         source=source,
-        source_text=f"{title}\n{abstract}",
+        source_text=source_text,
         call=call,
         max_attempts=max_attempts,
         sleep=sleep,
         fmt=fmt,
+        handles=handles,
     )
 
 
@@ -463,6 +502,7 @@ def generate(
     max_attempts: int = MAX_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
     fmt: Format | None = None,
+    handles: list[Handle] | None = None,
 ) -> DraftResult:
     """The shared attempt loop behind draft_item and revise_item, public so step 9's swarm
     assembly runs through the same schema check, hard rules, chart check and retries.
@@ -485,9 +525,9 @@ def generate(
             last_reasons = [f"invalid output: {exc}"]
             log.warning("attempt %d: %s", attempt, last_reasons[0])
             continue
-        problems = check_hard_rules(draft, url=url, source=source, fmt=fmt) + chart_problems(
-            draft, source_text
-        )
+        problems = check_hard_rules(
+            draft, url=url, source=source, fmt=fmt, handles=handles
+        ) + chart_problems(draft, source_text)
         if problems:
             last_reasons = problems
             log.warning("attempt %d: hard-rule violations: %s", attempt, "; ".join(problems))

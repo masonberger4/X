@@ -104,3 +104,19 @@ def test_slot_names_are_normalised():
     slots[2] = {"name": " The Thesis ", "rule": "  spaced   out  "}
     c = mutate.validate_child(child(slots=slots), G, set())
     assert c.slots[2] == Slot("the_thesis", "spaced out")
+
+
+def test_breed_designer_swaps_palettes_and_flips_multi_colour():
+    from draft.chart import PALETTES
+
+    parent = SEED_DESIGNERS[0]  # the house style
+    seen: set[str] = set()
+    for seed in range(60):
+        c = mutate.breed_designer(parent, set(), random.Random(seed))
+        before, after = Style().apply(parent.style).to_dict(), Style().apply(c.style).to_dict()
+        changed = [k for k in before if before[k] != after[k]]
+        assert len(changed) == 1, changed
+        seen.add(changed[0])
+        if changed[0] == "palette":
+            assert after["palette"] in PALETTES and after["palette"] != "navy"
+    assert {"palette", "multi_colour"} <= seen

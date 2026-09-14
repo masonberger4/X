@@ -3,7 +3,9 @@
 Usage: pythonw run_desktop.py [--host 127.0.0.1] [--port 0] [--no-window]
 
 Starts the same server run_app.py starts, then opens it in a native window (pywebview:
-Edge on Windows). Closing the window stops the server and any run in progress. --port 0
+Edge on Windows). Closing the window stops the server, any run in progress and the
+automatic-publishing loop (the publishing page's switch), which only ticks while the
+window is open. --port 0
 (the default) picks a free port, so it never clashes with a run_app.py already on 8000;
 give a fixed --port
 and --host 0.0.0.0 to reach the same window from a phone (HOWTO part 8). --no-window

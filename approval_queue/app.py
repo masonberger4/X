@@ -259,6 +259,7 @@ def _render_detail(
     decisions = _decision_views(store.list_decisions(conn, draft_id))
     checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
     image_file = store.resolve_image(row.image_path)
+    has_image = image_file is not None
     table_checks = {(k.row, k.col): k for k in verify_store.table_checks_for_draft(conn, draft_id)}
     cells_contradicted = len(cell_problems(row.draft.table, table_checks.values()))
     image_grades = store.list_image_grades(conn, draft_id)
@@ -271,17 +272,15 @@ def _render_detail(
             "publish": store.publish_states(conn, [draft_id]).get(draft_id),
             "table_checks": table_checks,
             "image_grades": image_grades,
-            "table_unverified": row.draft.table is not None and image_file is None,
-            "image_url": _image_url(f"/drafts/{draft_id}/image", image_file),
+            "table_unverified": row.draft.table is not None and not has_image,
+            "image_url": f"/drafts/{draft_id}/image?v={_stamp(image_file)}" if has_image else "",
             "image_alt": row.image_alt
             or (alt_text(row.draft.visual, row.url) if row.draft.visual else ""),
             "extra_images": [
                 {
                     "index": int(im["index"]),
-                    "url": _image_url(
-                        f"/drafts/{draft_id}/image/{int(im['index'])}",
-                        store.resolve_image(im["path"]),
-                    ),
+                    "url": f"/drafts/{draft_id}/image/{int(im['index'])}"
+                    f"?v={_stamp(store.resolve_image(im['path']))}",
                     "alt": im.get("alt", ""),
                     "anchor": im.get("anchor", 1),
                 }
@@ -505,16 +504,20 @@ def _detail_redirect(
     return RedirectResponse(url, status_code=303)
 
 
-# A redraw rewrites the PNG in place: the browser must revalidate, never serve its copy.
-_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+def _stamp(path: Path | None) -> int:
+    """Modification time of a rendered picture, the `v=` in its URL: a redraw writes the
+    same file name, so without it a browser can show the previous picture."""
+    try:
+        return int(path.stat().st_mtime) if path is not None else 0
+    except OSError:
+        return 0
 
 
-def _image_url(route: str, path: Path | None) -> str:
-    """The image route with the file's mtime as a cache-buster. A redraw rewrites the same
-    PNG in place, so without this the browser shows the picture it already has."""
-    if path is None:
-        return ""
-    return f"{route}?v={int(path.stat().st_mtime)}"
+def _image_response(path: Path) -> FileResponse:
+    """A draft's PNG. `no-cache` means revalidate, not "do not cache": the browser still
+    gets a 304 from the ETag while the file is unchanged, and the new picture the moment a
+    redraw or a cell edit rewrites it."""
+    return FileResponse(str(path), media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/drafts/{draft_id}/image", include_in_schema=False)
@@ -526,7 +529,7 @@ def image(draft_id: int, conn: Conn):
     path = store.resolve_image(row.image_path)
     if path is None:
         raise HTTPException(404, "this draft has no image")
-    return FileResponse(str(path), media_type="image/png", headers=_NO_CACHE)
+    return _image_response(path)
 
 
 @app.get("/drafts/{draft_id}/image/{index}", include_in_schema=False)
@@ -539,7 +542,7 @@ def image_at(draft_id: int, index: int, conn: Conn):
         if int(im.get("index", 0)) == index:
             path = store.resolve_image(im["path"])
             if path is not None:
-                return FileResponse(str(path), media_type="image/png", headers=_NO_CACHE)
+                return _image_response(path)
     raise HTTPException(404, "this draft has no such image")
 
 

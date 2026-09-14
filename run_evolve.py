@@ -18,8 +18,9 @@ prune   A live genome with at least `min_posts` (`format_min_posts` for a format
         posts whose median relative KPI is below the median of every such genome is retired
         (swarm_genomes.retired_at and retired_reason), never below `min_alive` live genomes.
         --dry-run prints and keeps.
-breed   Phase three. While fewer than `population_size` writer genomes (or designers;
-        formats use `format_population_size`) are live, breed one child per gap: a writer
+breed   Phase three. While fewer than `population_size` writer genomes (designers use
+        `designer_population_size`, formats `format_population_size`) are live, breed one
+        child per gap: a writer
         child by ONE strong-model call (`evolve.mutation_model`, blank = the drafting model)
         that reads the top genomes and their best posts and varies exactly one thing (code
         checks that it did); a designer child by stepping one Style knob at random; a
@@ -129,6 +130,8 @@ def _min_posts(cfg: dict, kind: str) -> int:
 def _population_size(cfg: dict, kind: str) -> int:
     if kind == "format":
         return int(cfg.get("format_population_size", cfg.get("population_size", 3)))
+    if kind == "designer":
+        return int(cfg.get("designer_population_size", cfg.get("population_size", 3)))
     return int(cfg.get("population_size", 3))
 
 
@@ -188,7 +191,8 @@ def cmd_breed(
     call=None,
     rng: random.Random | None = None,
 ) -> list[Genome | Designer | FormatGenome]:
-    """Fill the population back up to `population_size` per kind (`format_population_size`
+    """Fill the population back up to `population_size` per kind (`designer_population_size`
+    for designers, `format_population_size`
     for formats), one child per gap."""
     rng = rng or random.Random()
     model = str(cfg.get("mutation_model") or "").strip() or drafting_model()

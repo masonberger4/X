@@ -6,9 +6,16 @@ from __future__ import annotations
 import difflib
 from collections.abc import Callable
 
-from draft.drafter import _ADVICE_RE, _INVEST_RE, _number_in_source, numbers_in
+from draft.drafter import (
+    _ADVICE_RE,
+    _INVEST_RE,
+    _number_in_source,
+    known_company_names,
+    numbers_in,
+)
 from draft.prompt import PREPRINT_LABEL
 from draft.schema import MAX_POST_CHARS, tweet_length
+from draft.tags import Handle, tag_problems
 from swarm.genome import CLOSER, HOOK
 
 
@@ -22,12 +29,15 @@ def cell_problems(
     max_chars: int = MAX_POST_CHARS,
     needs_url: bool | None = None,
     needs_preprint: bool | None = None,
+    handles: list[Handle] | None = None,
 ) -> list[str]:
     """Why one candidate post is unusable. Empty means it may enter the tournament. The same
     rules draft.drafter.check_hard_rules applies to a thread, applied to one post.
     `max_chars` is the cell's limit (a long post's section, phase four); `needs_url` /
     `needs_preprint` override the slot-name defaults (the closer carries the URL, the hook
-    the preprint label) for a single-post format where one cell must do both."""
+    the preprint label) for a single-post format where one cell must do both. `handles`
+    are the accounts the story may mention (rule 11: a name without its @handle fails; a
+    trial or drug name without its # always fails)."""
     problems: list[str] = []
     t = text.strip()
     if not t:
@@ -50,6 +60,7 @@ def cell_problems(
         problems.append(f"{slot} is missing the primary source URL")
     if needs_preprint and PREPRINT_LABEL not in t.lower():
         problems.append(f"preprint not labelled in the {slot}")
+    problems += tag_problems(t, handles, known_company_names())
     return problems
 
 

@@ -285,4 +285,19 @@ SEED_DESIGNERS: list[Designer] = [
         {"title_scale": 1.25, "highlight_first": True, "track": False, "bar_height": 0.6},
         notes="Phase-three seed: bigger title, first bar highlighted, no tracks.",
     ),
+    Designer(
+        "teal",
+        {"palette": "teal", "highlight_first": True},
+        notes="Phase-three seed: the teal palette, first bar highlighted.",
+    ),
+    Designer(
+        "vivid",
+        {"palette": "crimson", "multi_colour": True, "track": False, "bar_height": 0.58},
+        notes="Phase-three seed: one hue per bar on the crimson palette, no tracks.",
+    ),
+    Designer(
+        "midnight",
+        {"palette": "midnight", "gridlines": False, "bar_height": 0.55},
+        notes="Phase-three seed: the dark card.",
+    ),
 ]

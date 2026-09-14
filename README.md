@@ -32,11 +32,11 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/` | health checks, the last outcome of every orchestrator step, row counts, database size, latest backup |
 | `/sources` | every configured ingest source with its freshness, last error and item counts |
 | `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline; one "Ingest and score" button |
-| `/publishing` | approved and waiting, what has posted, any partial thread needing a human, and a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept) |
+| `/publishing` | approved and waiting, what has posted, any partial thread needing a human, a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept) and the "Automatic publishing" switch (`auto_publish_enabled` / `auto_publish_interval_minutes`, `save_auto_publish`): while the app runs, `panel/autopublish.py` starts `run_publish.py --live` every interval through `JobManager.start_publish_auto`, still gated by `PUBLISH_ENABLED=1`; a run that posted nothing leaves no row |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | every run's log (whichever page started it) and the checkboxes to run any enabled step; stop the one in progress |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue (its Revise box sends a draft back through the drafter with your note); the pending page has "Draft" and "Verify" buttons |
-| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`) and "Set schedule" to number the order the slots post them (`schedule.position`) |
+| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), and when automatic publishing is on, when its next run is due |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
@@ -559,8 +559,9 @@ either is missing. The `evolve` step in `ops/config.yaml` runs after `feedback`
 on every scheduled run (both enabled: the account has the paid X read tier).
 
 **Phase three: breeding and designers** (`run_evolve.py breed`, part of the
-default run). After pruning, every gap under `evolve.population_size` is filled
-by a child of a top scorer. A **writer** child is written by ONE strong-model
+default run). After pruning, every gap under `evolve.population_size`
+(`evolve.designer_population_size` for designers, six in the shipped config so
+the pictures keep varying) is filled by a child of a top scorer. A **writer** child is written by ONE strong-model
 call (`evolve.mutation_model`, blank = the drafting model; `swarm/mutate.py`,
 through `draft/drafter.py:call_anthropic`) that reads the live genomes with
 their scores and best posts and varies exactly one thing: reword a slot's rule,
@@ -570,11 +571,14 @@ child stays within 3-6 slots, fan-out 2-12 and 1-4 layers; an invalid answer is
 retried, then skipped. A genome owns its topology: `fan_out` and `layers` in
 `swarm/config.yaml` are only the fallback for a row without them. **Designers**
 are the picture side: a designer genome is a `draft/chart.py:Style` preset the
-chart or table is first drawn with (the grader loop still adjusts from there);
-three seeds (`house`, `compact`, `bold`) are drawn round-robin
+chart or table is first drawn with (the grader loop still adjusts from there):
+layout knobs plus the card's `palette` (one of the named palettes in
+`draft/chart.py:PALETTES`) and `multi_colour` (one hue per bar). Six seeds
+(`house`, `compact`, `bold`, `teal`, `vivid`, `midnight`) are drawn round-robin
 (`next_designer`, recorded in `swarm_runs.designer_id`), scored with the same
 relative KPI, pruned the same way, and bred without a model by stepping one
-knob at random inside its range. Children carry `parent_id`, so the family tree
+knob at random inside its range, flipping a flag or swapping the palette
+(colour moves are drawn as often as every layout knob together). Children carry `parent_id`, so the family tree
 is readable on the panel's **/swarm** page (`ops/store.py:fetch_swarm_population`
 and `fetch_swarm_bet`, read-only; the page breeds and retires nothing). Without
 a scored genome nothing is bred unless `--force`. Because selection acts on the

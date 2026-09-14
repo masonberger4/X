@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from draft.prompt import PREPRINT_LABEL, is_preprint
 from draft.schema import MAX_POST_CHARS, SHAPE_LONG, SHAPE_SINGLE, URL_CHARS, Format
+from draft.tags import Handle, handles_block
 from swarm.genome import CLOSER, HOOK, Genome, Slot
 
 
@@ -29,6 +30,7 @@ class Brief:
     published_at: str | None = None
     suggested_angle: str | None = None
     rationale: str | None = None
+    handles: tuple[Handle, ...] = ()  # the accounts this story may @-mention (rule 11)
 
     @property
     def preprint(self) -> bool:
@@ -57,7 +59,10 @@ def cell_rules(max_chars: int = MAX_POST_CHARS) -> str:
 - Every number must appear verbatim in the source title or abstract. Do not round,
   convert, subtract or compute. No number in the source means no number in the post.
 - An interpretation, not a restatement: say what it means, what to watch, what is overhyped.
-- Plain text only: no hashtags, no emoji, no "1/", no quotation of the whole abstract."""
+- Write an account whose handle the brief lists as @handle when you name it; never invent
+  a handle. Write every formal drug name (#Trastuzumab Deruxtecan, #cilta-cel) and every
+  named trial (#KEYNOTE-189, #DESTINY-Lung02) as a hashtag, spelled as the source spells it.
+- Otherwise plain text: no other hashtags, no emoji, no "1/", no quotation of the whole abstract."""
 
 
 CELL_RULES = f"""RULES for this one post (a post that breaks one is discarded by code):
@@ -67,7 +72,10 @@ CELL_RULES = f"""RULES for this one post (a post that breaks one is discarded by
 - Every number must appear verbatim in the source title or abstract. Do not round,
   convert, subtract or compute. No number in the source means no number in the post.
 - An interpretation, not a restatement: say what it means, what to watch, what is overhyped.
-- Plain text only: no hashtags, no emoji, no "1/", no quotation of the whole abstract."""
+- Write an account whose handle the brief lists as @handle when you name it; never invent
+  a handle. Write every formal drug name (#Trastuzumab Deruxtecan, #cilta-cel) and every
+  named trial (#KEYNOTE-189, #DESTINY-Lung02) as a hashtag, spelled as the source spells it.
+- Otherwise plain text: no other hashtags, no emoji, no "1/", no quotation of the whole abstract."""
 
 
 def brief_block(brief: Brief) -> str:
@@ -85,6 +93,8 @@ def brief_block(brief: Brief) -> str:
         parts.append(f"SCORER RATIONALE: {brief.rationale}")
     if brief.suggested_angle:
         parts.append(f"SUGGESTED ANGLE: {brief.suggested_angle}")
+    if brief.handles:
+        parts.append(handles_block(list(brief.handles)))
     return "\n".join(parts)
 
 

@@ -4,8 +4,9 @@ Nothing here is fetched or guessed. Tickers come from `config.yaml` (`ticker:` o
 `companies.feeds` entry, or `branding.companies` for companies without a feed) and logos
 are PNG files a human has placed in `branding.logos_dir` (default `assets/logos/`), named
 by the company key. `brand_table` rewrites a fact-checked table's company cells to
-"Name ($TICKER)" and tells the renderer which logo to draw in which cell; a company the
-config does not know is left exactly as it was. Pure: no network, no database.
+"Name ($TICKER)" and tells the renderer which logo to draw in which cell; `brand_chart`
+does the same for a chart whose bar labels name companies. A company the config does not
+know is left exactly as it was. Pure: no network, no database.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from draft.chart import Table
+from draft.chart import Chart, Table
 
 DEFAULT_LOGOS_DIR = "assets/logos"
 DEFAULT_COMPANY_COLUMNS = ("company", "sponsor", "developer", "partner", "owner", "acquirer")
@@ -128,9 +129,11 @@ def brand_table(table: Table, branding: Branding) -> tuple[Table, dict[tuple[int
     """The table with tickers appended in company columns, and the logo to draw per cell.
     Cells the config does not recognise are untouched, so nothing new is ever asserted:
     a ticker only appears next to a name the human wrote into config.yaml."""
-    company_cols = [c for c, h in enumerate(table.columns) if branding.is_company_column(h)]
-    if not company_cols:
-        return table, {}
+    # The row-label column is always tried: a landscape table often lists companies under
+    # "Asset" or "Program"; `match` is exact, so a trial or drug name never gets a ticker.
+    company_cols = sorted(
+        {0} | {c for c, h in enumerate(table.columns) if branding.is_company_column(h)}
+    )
     rows = [list(r) for r in table.rows]
     logos: dict[tuple[int, int], Path] = {}
     for r, row in enumerate(rows):
@@ -145,4 +148,29 @@ def brand_table(table: Table, branding: Branding) -> tuple[Table, dict[tuple[int
     return branded, logos
 
 
-__all__ = ["Brand", "Branding", "brand_table", "load_branding"]
+def brand_chart(chart: Chart, branding: Branding) -> tuple[Chart, dict[int, Path]]:
+    """The chart with tickers appended to bar labels that name a configured company, and
+    the logo to draw per bar index. Values, title, unit and note are untouched, so the
+    verified numbers are exactly what the drafter wrote."""
+    labels = list(chart.labels)
+    logos: dict[int, Path] = {}
+    for i, label in enumerate(labels):
+        brand = branding.match(label) if label.strip() else None
+        if brand is None:
+            continue
+        labels[i] = brand.label(label)
+        if brand.logo is not None:
+            logos[i] = brand.logo
+    if labels == list(chart.labels) and not logos:
+        return chart, {}
+    branded = Chart(
+        title=chart.title,
+        labels=labels,
+        values=list(chart.values),
+        unit=chart.unit,
+        note=chart.note,
+    )
+    return branded, logos
+
+
+__all__ = ["Brand", "Branding", "brand_chart", "brand_table", "load_branding"]
