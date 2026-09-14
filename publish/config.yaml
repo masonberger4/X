@@ -18,7 +18,7 @@ auto_publish_enabled: false
 auto_publish_interval_minutes: 15
 
 # Hard limits that apply to every post, breaking news included.
-max_posts_per_day: 3
+max_posts_per_day: 16
 min_gap_minutes: 90
 
 # Breaking items may post outside slots (still subject to the caps above).

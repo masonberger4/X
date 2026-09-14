@@ -213,8 +213,18 @@ def test_breaking_posts_outside_slots_but_respects_gap(conn, fake_x, monkeypatch
 
 
 def test_daily_cap(conn, fake_x, monkeypatch):
+    """The cap is whatever publish/config.yaml says, so the test pins its own rather than
+    the shipped number (an operator changes that one from the panel)."""
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
-    for i in range(4):
+    real = run_publish.load_publish_config
+
+    def capped(path=None):
+        cfg = real(path)
+        cfg["max_posts_per_day"] = 3
+        return cfg
+
+    monkeypatch.setattr(run_publish, "load_publish_config", capped)
+    for i in range(5):
         seed_draft(conn, f"d{i}", source="fda_press")
     times = [datetime(2026, 6, 1, h, 0, tzinfo=NY) for h in (6, 9, 12, 15, 18)]
     for t in times:
