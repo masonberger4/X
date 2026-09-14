@@ -91,15 +91,27 @@
 <div id="working" role="status" aria-live="polite"><span class="msg"></span><div class="track"><div class="fill"></div></div></div>
 <main>{% block content %}{% endblock %}</main>
 <script>
-  // Long-running forms (the AI revise) give no feedback while the browser waits
-  // for the redirect; show a status bar and lock the form so it is not sent twice.
+  // Long-running forms (the AI revise, and anything that redraws and grades the picture)
+  // give no feedback while the browser waits for the redirect; show a status bar and lock
+  // the form so it is not sent twice. The route is the submitting button's formaction when
+  // it has one (the "trust host" button inside the table-cells form), else the form's action.
+  var WORKING = [
+    ["/revise", "Revising with AI\u2026 the drafter is rewriting the post; the page reloads when it is done (usually 10\u201330 seconds)."],
+    ["/trust", "Trusting the source\u2026 adding the host to trusted_domains, flipping its verdicts and redrawing the picture; the page reloads when it is done (up to a minute when the picture is graded)."],
+    ["/table", "Saving cells\u2026 redrawing the picture from the verdicts; the page reloads when it is done (up to a minute when the picture is graded)."],
+    ["/image/redraw", "Redrawing the picture\u2026 the page reloads when it is done (up to a minute when the picture is graded)."]
+  ];
   document.addEventListener("submit", function (ev) {
     var form = ev.target;
-    if (!form.matches("form[action$='/revise']")) return;
+    var button = ev.submitter;
+    var route = (button && button.hasAttribute("formaction")) ? button.getAttribute("formaction") : form.getAttribute("action") || "";
+    var msg = null;
+    WORKING.forEach(function (w) { if (route.slice(-w[0].length) === w[0]) msg = w[1]; });
+    if (!msg) return;
     if (form.classList.contains("busy")) { ev.preventDefault(); return; }
     form.classList.add("busy");
     var bar = document.getElementById("working");
-    bar.querySelector(".msg").textContent = "Revising with AI\u2026 the drafter is rewriting the post; the page reloads when it is done (usually 10\u201330 seconds).";
+    bar.querySelector(".msg").textContent = msg;
     bar.classList.add("on");
   });
   window.addEventListener("pageshow", function () {
