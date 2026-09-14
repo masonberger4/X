@@ -141,9 +141,10 @@ same hard rules. The human keeps one job: when a post goes out.
 - Phase one (built, `swarm/`): cells + layers + jury against the single
   strong drafter as a CONTROL on every story; both variants and the verdict
   are recorded (`swarm_runs`, `swarm_variants`).
-- Phase two: fitness from X. Join step 4's metrics to the run; relative
-  KPI (post / trailing 30-day median); score the jury against reality;
-  draft a population of genomes round-robin; retire below-median genomes.
+- Phase two (built, `run_evolve.py`): fitness from X. Join step 4's metrics
+  to the run; relative KPI (post / trailing 30-day median); the jury's
+  swarm-vs-control verdicts measured against reality; three seed genomes
+  drafted round-robin; below-median genomes retired.
 - Phase three: mutation. One strong call writes a child genome that varies
   ONE thing (a slot rule, fan-out, layers, a split); designer genomes own a
   chart Style and go through the image grader with the same accounting.

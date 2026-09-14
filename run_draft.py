@@ -98,7 +98,7 @@ def draft_with_swarm(
         suggested_angle=c.suggested_angle,
         rationale=c.rationale,
     )
-    genome = swarm_store.active_genome(conn)
+    genome = swarm_store.next_genome(conn)
     log_rows: dict = {}
     swarm_result = None
     swarm_problem: str | None = None

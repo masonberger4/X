@@ -15,8 +15,9 @@ digest, 2 draft + human approval queue, 3 publish to X, 4 feedback loop,
 5 operations (orchestrator, health, alerts, backups), 6 conference abstracts +
 KOL X list + HTTP retry, 7 voice learning loop, 8 control panel (one web app over
 the whole workflow), 9 swarm drafting (phase one: many cheap cells + layers + jury
-against the single strong drafter; phases two and three, X fitness and genome
-mutation, are specified in `prompts/prompt9.md` and not built yet). The kickoff prompt that built
+against the single strong drafter; phase two: X fitness, round-robin seed genomes and
+pruning via `run_evolve.py`; phase three, genome mutation, is specified in
+`prompts/prompt9.md` and not built yet). The kickoff prompt that built
 each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 `PUBLISH_ENABLED=1` **and** `--live`.
 
@@ -40,6 +41,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `python run_publish.py` (dry run by default; `--live` needs `PUBLISH_ENABLED=1`;
   `--draft ID` targets one approved draft),
   `python run_feedback.py snapshot|report|followers`,
+  `python run_evolve.py [score|prune|report] [--dry-run]` (step 9 phase two: swarm fitness
+  from X, no network),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -289,9 +292,15 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   module and no `claude-*` ID in code (`swarm/config.yaml` holds the cheap model).
   `run_draft.py:draft_with_swarm` stores the winner through `store.insert_draft`
   exactly as before, so verify, the queue, publish and feedback are unchanged;
-  `swarm/store.py` owns `swarm_runs` / `swarm_variants` / `swarm_genomes` and reads
-  no other step's table. `tests/conftest.py` turns the swarm off for every test that
-  does not opt in.
+  `swarm/store.py` owns `swarm_runs` / `swarm_variants` / `swarm_genomes` /
+  `swarm_fitness`; its one read of another step's tables is `fetch_head_metrics`
+  (step 3 `posts` + step 4 `tweet_metrics`, read-only, empty when missing).
+  `run_draft.py` drafts the live genomes round-robin (`next_genome`; the seeds are
+  `swarm/genome.py:SEED_GENOMES`). `swarm/fitness.py` is pure (relative KPI against
+  the trailing median, per-genome scores, `bet_summary`, `prune`); `run_evolve.py`
+  writes only `swarm_fitness` and `swarm_genomes.retired_at`/`retired_reason` and is
+  the disabled `evolve` step in `ops/config.yaml`. `tests/conftest.py` turns the
+  swarm off for every test that does not opt in.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -329,7 +338,8 @@ panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed 
 swarm/    config.yaml, settings.py, genome.py (Slot, Genome, DEFAULT_GENOME), prompts.py
           (Brief, cell/judge/assembly prompts, parse_winner), cells.py (cell_problems,
           dedupe, tournament), engine.py (run_swarm, compare, SwarmFailed),
-          store.py (swarm_genomes, swarm_runs, swarm_variants)
+          fitness.py (score, genome_scores, bet_summary, prune), store.py (swarm_genomes,
+          swarm_runs, swarm_variants, swarm_fitness, next_genome, fetch_head_metrics)
 verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck,
           verify_claim, call_model), store.py (claim_checks, table_checks,
           mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop
@@ -346,5 +356,5 @@ assets/   logos/<company key>.png (human-supplied company logos for table cells)
 deploy/   crontab.example, pipeline.service, pipeline.timer, desktop.spec, README.md
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
 run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py
-run_logos.py   (CLIs)
+run_logos.py  run_evolve.py   (CLIs)
 ```

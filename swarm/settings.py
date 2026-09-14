@@ -18,6 +18,13 @@ DEFAULTS: dict[str, Any] = {
     "judge_votes": 3,
     "max_similarity": 0.85,
     "control": {"enabled": True},
+    "evolve": {
+        "kpi": "impressions",
+        "baseline_days": 30,
+        "min_baseline_posts": 3,
+        "min_posts": 5,
+        "min_alive": 2,
+    },
 }
 
 
@@ -27,4 +34,5 @@ def load_swarm_config(path: str | Path | None = None) -> dict[str, Any]:
         raw = yaml.safe_load(fh) or {}
     cfg = {**DEFAULTS, **raw}
     cfg["control"] = {**DEFAULTS["control"], **(raw.get("control") or {})}
+    cfg["evolve"] = {**DEFAULTS["evolve"], **(raw.get("evolve") or {})}
     return cfg

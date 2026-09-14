@@ -420,6 +420,10 @@ source only when it is due, and score only scores what is new.
    ```
    with `PUBLISH_ENABLED=1` already in `.env`. Until then, publishing stays a
    command you run by hand.
+   The `feedback` and `evolve` steps are off in the shipped `ops\config.yaml`
+   (they need the paid X API read tier, Part 7); switch both to
+   `enabled: true` together once `X_BEARER_TOKEN` is in `.env`. `evolve`
+   runs `run_evolve.py` after `feedback` and never calls the network.
 4. Alerts (optional): put a Slack or Discord incoming-webhook URL on
    `ALERT_WEBHOOK_URL=` in `.env`, or fill the `SMTP_*` and `ALERT_EMAIL_*`
    lines, and the hourly health task will message you when a source or step
@@ -446,6 +450,17 @@ source only when it is due, and score only scores what is new.
    The report proposes changes to the scoring rubric, prefilter keywords,
    posting slots and voice guide. It applies none of them; tell me which you
    want and I will commit them.
+3. Swarm fitness (step 9, once snapshots exist). Scores every posted swarm
+   draft against the posts before it and retires the genomes that keep
+   losing, so the next drafts come from the winners:
+   ```
+   python run_evolve.py                     # score, prune, report
+   python run_evolve.py report              # the table only, no change
+   python run_evolve.py prune --dry-run     # see what would be retired
+   ```
+   The report's last two lines are the swarm-vs-control measurement: whether
+   the posts the AI jury gave to the swarm did better on X than the ones it
+   gave to the single strong drafter.
 
 ---
 

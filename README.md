@@ -531,6 +531,23 @@ the genomes against real X engagement (`prompts/prompt9.md`). About 110 cheap
 calls per story at the shipped values. The human's remaining creative-adjacent
 controls are "Publish now" and "Set schedule" on the approved page.
 
+**Phase two: fitness from X** (`run_evolve.py`, no network). Three seed
+genomes (`default-6`, `wide-6` with more proposals and no synthesis layer,
+`deep-4` with four slots and two synthesis layers) are drafted round-robin
+(`swarm.store.next_genome`: the live genome with the fewest runs). Once
+`run_feedback.py snapshot` has metrics, `run_evolve.py score` gives every
+posted swarm draft the head tweet's KPI (`evolve.kpi`), the median KPI of the
+posts in the trailing `baseline_days` before it, and their ratio (a slow week
+prunes nobody), stored in `swarm_fitness`. `prune` retires a live genome with
+at least `min_posts` scored posts whose median ratio is below the population
+median, never below `min_alive` live genomes (`swarm_genomes.retired_at`,
+`retired_reason`). `report` prints the per-genome table and the
+swarm-vs-control measurement: median ratio of posts the jury gave to the swarm
+against posts it gave to the control. `fetch_head_metrics` in `swarm/store.py`
+is the one read of step 3's `posts` and step 4's `tweet_metrics`, empty when
+either is missing. The `evolve` step in `ops/config.yaml` ships disabled, like
+`feedback`.
+
 ## Headless backend (optional)
 
 By default the scorer and drafter call the Anthropic API with `ANTHROPIC_API_KEY`

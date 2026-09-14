@@ -103,5 +103,41 @@ DEFAULT_GENOME = Genome(
 )
 
 
+# Phase two needs variance to select on before phase three can breed. Two hand-written
+# variants of the default: a wide, shallow one and a deep, short one. run_draft.py drafts
+# the unretired seeds round-robin (swarm.store.next_genome).
+WIDE_GENOME = Genome(
+    name="wide-6",
+    fan_out=8,
+    layers=1,
+    notes="Phase-two seed: same six slots, more proposals, no synthesis layer.",
+    slots=list(DEFAULT_GENOME.slots),
+)
+
+DEEP_GENOME = Genome(
+    name="deep-4",
+    fan_out=4,
+    layers=3,
+    notes="Phase-two seed: four slots, two synthesis layers.",
+    slots=[
+        DEFAULT_GENOME.slots[0],
+        Slot(
+            "thesis",
+            "In one post: the science as the source states it (target, modality, setting, "
+            "design) and what the result does to the company's thesis. An interpretation, "
+            "never a buy/sell/hold call.",
+        ),
+        Slot(
+            "risk",
+            "The honest caveat and what to watch next: sample size, follow-up, design, the "
+            "next readout or decision the source supports. Specific, no moralising.",
+        ),
+        DEFAULT_GENOME.slots[-1],
+    ],
+)
+
+SEED_GENOMES: list[Genome] = [DEFAULT_GENOME, WIDE_GENOME, DEEP_GENOME]
+
+
 def genome_dict(g: Genome) -> dict[str, Any]:
     return asdict(g)

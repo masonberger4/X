@@ -249,8 +249,10 @@ def test_default_ops_config_never_contains_live():
         "verify",
         "publish",
         "feedback",
+        "evolve",
     ]
     assert steps["verify"]["enabled"] and not steps["verify"]["required"]
+    assert steps["evolve"]["enabled"] is False and steps["evolve"]["required"] is False
     # the shipped publish step runs, but as a dry run: its argv never carries --live
     assert steps["publish"]["enabled"] is True
     assert steps["publish"]["argv"] == ["python", "run_publish.py"]

@@ -17,8 +17,9 @@ def test_seed_active_and_runs():
     store.ensure_tables(conn)
     gid = store.seed_default(conn)
     assert store.seed_default(conn) == gid  # idempotent
+    assert store.next_genome(conn).id == gid  # round-robin starts at the default
     g = store.active_genome(conn)
-    assert g.id == gid and g.name == "default-6"
+    assert g.name == "deep-4"  # newest seed
 
     run_id = store.record_run(
         conn, item_id="i1", cluster_id=3, genome_id=gid, winner="swarm", calls=42, log={"x": 1}
