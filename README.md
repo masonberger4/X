@@ -545,8 +545,8 @@ median, never below `min_alive` live genomes (`swarm_genomes.retired_at`,
 swarm-vs-control measurement: median ratio of posts the jury gave to the swarm
 against posts it gave to the control. `fetch_head_metrics` in `swarm/store.py`
 is the one read of step 3's `posts` and step 4's `tweet_metrics`, empty when
-either is missing. The `evolve` step in `ops/config.yaml` ships disabled, like
-`feedback`.
+either is missing. The `evolve` step in `ops/config.yaml` runs after `feedback`
+on every scheduled run (both enabled: the account has the paid X read tier).
 
 ## Headless backend (optional)
 

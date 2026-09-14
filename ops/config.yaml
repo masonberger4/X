@@ -44,18 +44,19 @@ steps:
     enabled: true
     required: false
     timeout_seconds: 300
-  # Daily metrics snapshot (step 4). Optional; enable once feedback/ has
-  # merged and X_BEARER_TOKEN is set.
+  # Daily metrics snapshot (step 4). Needs the paid X API read tier and
+  # X_BEARER_TOKEN in .env. Without the token the step fails with an ERROR in the
+  # log, and being optional it never stops the run.
   - name: feedback
     argv: ["python", "run_feedback.py", "snapshot"]
-    enabled: false
+    enabled: true
     required: false
     timeout_seconds: 300
   # Step 9 phase two: score posted swarm drafts against X and retire losing genomes.
-  # No network; only useful once feedback snapshots exist. Enable with feedback.
+  # No network; it reads the snapshots the feedback step just took.
   - name: evolve
     argv: ["python", "run_evolve.py"]
-    enabled: false
+    enabled: true
     required: false
     timeout_seconds: 300
 

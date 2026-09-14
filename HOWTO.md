@@ -420,10 +420,12 @@ source only when it is due, and score only scores what is new.
    ```
    with `PUBLISH_ENABLED=1` already in `.env`. Until then, publishing stays a
    command you run by hand.
-   The `feedback` and `evolve` steps are off in the shipped `ops\config.yaml`
-   (they need the paid X API read tier, Part 7); switch both to
-   `enabled: true` together once `X_BEARER_TOKEN` is in `.env`. `evolve`
-   runs `run_evolve.py` after `feedback` and never calls the network.
+   The `feedback` and `evolve` steps are on in `ops\config.yaml`: the account
+   has the paid X API read tier, so put the bearer token on `X_BEARER_TOKEN=`
+   in `.env` (Part 7) and every scheduled run also snapshots metrics and
+   scores the swarm. Without the token the feedback step fails with an error
+   in the log and the run carries on (it is optional). `evolve` runs `run_evolve.py` after `feedback` and
+   never calls the network.
 4. Alerts (optional): put a Slack or Discord incoming-webhook URL on
    `ALERT_WEBHOOK_URL=` in `.env`, or fill the `SMTP_*` and `ALERT_EMAIL_*`
    lines, and the hourly health task will message you when a source or step

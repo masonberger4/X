@@ -252,11 +252,11 @@ def test_default_ops_config_never_contains_live():
         "evolve",
     ]
     assert steps["verify"]["enabled"] and not steps["verify"]["required"]
-    assert steps["evolve"]["enabled"] is False and steps["evolve"]["required"] is False
+    assert steps["evolve"]["enabled"] is True and steps["evolve"]["required"] is False
     # the shipped publish step runs, but as a dry run: its argv never carries --live
     assert steps["publish"]["enabled"] is True
     assert steps["publish"]["argv"] == ["python", "run_publish.py"]
-    assert steps["feedback"]["enabled"] is False and steps["feedback"]["required"] is False
+    assert steps["feedback"]["enabled"] is True and steps["feedback"]["required"] is False
     for name in ("ingest", "score", "draft"):
         assert steps[name]["enabled"] and steps[name]["required"]
     for step in cfg["steps"]:
