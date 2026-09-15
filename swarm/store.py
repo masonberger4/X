@@ -15,17 +15,22 @@ the picture.
 
 The two places step 9 reads another step's tables, both read-only and empty when a table is
 missing: fetch_head_metrics (step 3's posts + step 4's tweet_metrics) and
-fetch_winning_threads (step 2's drafts.thread_json, for the mutation prompt).
+fetch_winning_threads (step 2's drafts.thread_json, for the mutation prompt). It also
+imports feedback.models for the KPI weights only (pure dataclasses, no DB and no network),
+so the fitness loop and the feedback report weight `conversation` identically.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from draft.schema import Draft
+from feedback import models as feedback_models
 from swarm.genome import SEED_DESIGNERS, SEED_FORMATS, SEED_GENOMES, Designer, FormatGenome, Genome
 
 ROLES = ("swarm", "control")
@@ -337,7 +342,19 @@ def list_variants(conn: sqlite3.Connection, run_id: int) -> list[sqlite3.Row]:
 # Phase two: fitness
 # ---------------------------------------------------------------------------
 
-KPIS = ("impressions", "likes", "reposts", "replies", "quotes", "bookmarks")
+# The six stored columns, in the order fetch_head_metrics selects them.
+METRIC_COLUMNS = ("impressions", "likes", "reposts", "replies", "quotes", "bookmarks")
+# What evolve.kpi may name: the stored columns plus the derived `conversation` weighting
+# (feedback/models.py), which is what selection should point at.
+KPIS = (*METRIC_COLUMNS, feedback_models.CONVERSATION)
+
+
+def _metrics(values: Sequence[Any]) -> dict[str, int]:
+    """The stored counts plus the derived `conversation` KPI, so a caller can read either
+    by name. Computed through feedback/models.py so both loops weight it the same way."""
+    counts = {k: int(v or 0) for k, v in zip(METRIC_COLUMNS, values, strict=True)}
+    counts[feedback_models.CONVERSATION] = feedback_models.Metrics(**counts).conversation
+    return counts
 
 
 @dataclass
@@ -389,7 +406,7 @@ def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
                 tweet_id=str(r[4]),
                 posted_at=str(r[5]),
                 captured_on=str(r[6]),
-                metrics={k: int(v or 0) for k, v in zip(KPIS, r[7:13], strict=True)},
+                metrics=_metrics(r[7:13]),
                 designer_id=int(r[13]) if r[13] is not None else None,
                 format_id=int(r[14]) if r[14] is not None else None,
             )

@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from draft.hook import hook_rule
 from draft.schema import (
     MAX_POST_CHARS,
     OUTPUT_JSON_SCHEMA,
@@ -71,6 +72,9 @@ def hard_rules(fmt: Format | None = None) -> str:
     """The HARD RULES block for a format; hard_rules(None) is the pre-phase-four text."""
     r5, r6, r9 = _shape_rules(fmt)
     where = "the first post" if fmt is None or fmt.is_thread else "the post"
+    # A single or long post is its own opener AND the post that carries the URL, so rule 12
+    # asks for the claim-first sentence without the link ban or the length cap.
+    r12 = hook_rule(carries_url=not (fmt is None or fmt.is_thread))
     return f"""HARD RULES. A draft that breaks any of these is discarded automatically.
 1. No medical advice and no treatment recommendations. Describe evidence; never tell
    anyone what they or their doctor should do.
@@ -110,6 +114,7 @@ def hard_rules(fmt: Format | None = None) -> str:
    (the generic or brand name, e.g. #Trastuzumab Deruxtecan, #cilta-cel) and every named
    trial (#DESTINY-Lung02, #KEYNOTE-189) as a hashtag, exactly as the source spells it,
    each time it appears. No other hashtags.
+{r12}
 """
 
 

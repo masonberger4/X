@@ -227,7 +227,7 @@ def _stub_call(monkeypatch, responses):
 def test_revise_rewrites_draft_from_instructions_and_keeps_pending(
     client, conn, draft_id, monkeypatch
 ):
-    calls = _stub_call(monkeypatch, [_revision_json(f"Preprint: tighter. ORR 88%. {URL}")])
+    calls = _stub_call(monkeypatch, [_revision_json("Preprint: tighter. ORR 88%.")])
     r = client.post(
         f"/drafts/{draft_id}/revise", data={"instructions": "tighter opening", "category": "voice"}
     )
@@ -258,7 +258,7 @@ def test_revise_with_empty_box_fixes_failed_claims_and_resets_checks(
         ClaimCheck(0, "Number '15'...", "contradicted", "https://src", "it was 14", "wrong", True),
         "checker",
     )
-    calls = _stub_call(monkeypatch, [_revision_json(f"Preprint: fixed. ORR 88%. {URL}")])
+    calls = _stub_call(monkeypatch, [_revision_json("Preprint: fixed. ORR 88%.")])
     r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": ""})
     assert r.status_code == 303
     user = calls[0][1]
@@ -285,7 +285,7 @@ def test_revise_keeps_supported_verdicts_for_unchanged_claims(client, conn, draf
         ClaimCheck(2, "Phase 3", "supported", "https://src", "ph3", "", True),
         "checker",
     )
-    body = json.loads(_revision_json(f"Preprint: tighter. ORR 88%. {URL}"))
+    body = json.loads(_revision_json("Preprint: tighter. ORR 88%."))
     body["claims_to_verify"] = [
         {"claim": "n=40", "confidence": "low"},
         {"claim": "orr was 88%", "confidence": "high"},  # same claim, new position and case

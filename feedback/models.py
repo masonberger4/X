@@ -6,6 +6,21 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 
 METRICS = ("impressions", "likes", "reposts", "replies", "quotes", "bookmarks")
+
+# The ranker pays for conversation, not for reach: a reply, a quote or a bookmark is a
+# much stronger signal than a like, and impressions are the OUTCOME of those signals, not
+# a thing a draft can aim at. `conversation` is the weighted sum below, a derived KPI that
+# can be selected on (feedback/config.yaml `kpi`, swarm/config.yaml `evolve.kpi`) exactly
+# like a raw metric; it is never stored, always computed from the stored counts.
+CONVERSATION = "conversation"
+CONVERSATION_WEIGHTS = {
+    "replies": 3.0,
+    "quotes": 3.0,
+    "bookmarks": 2.0,
+    "reposts": 2.0,
+    "likes": 1.0,
+}
+KPIS = (*METRICS, CONVERSATION)
 DIMENSIONS = (
     "novelty",
     "clinical_significance",
@@ -33,9 +48,17 @@ class Metrics:
         )
 
     def get(self, name: str) -> int:
+        if name == CONVERSATION:
+            return self.conversation
         if name not in METRICS:
             raise KeyError(f"unknown metric {name!r}")
         return int(getattr(self, name))
+
+    @property
+    def conversation(self) -> int:
+        """Weighted conversation signal (CONVERSATION_WEIGHTS), rounded to an int so it
+        prints and sorts like the raw counts."""
+        return round(sum(w * getattr(self, n) for n, w in CONVERSATION_WEIGHTS.items()))
 
     @property
     def engagements(self) -> int:

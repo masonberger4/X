@@ -322,15 +322,15 @@ def test_cli_json_and_markdown_and_examples(db_file, capsys, tmp_path):
         conn,
         item_id="i1",
         model="m",
-        draft=Draft([f"Huge, exciting CAR-T news today {URL}", "a", f"b {URL}"], "", ""),
+        draft=Draft(["Huge, exciting CAR-T news today", "a", f"b {URL}"], "", ""),
     )
-    store.edit(conn, did, thread=[f"CAR-T data {URL}", "a", f"b {URL}"], note="less hype")
+    store.edit(conn, did, thread=["CAR-T data", "a", f"b {URL}"], note="less hype")
     conn.close()
 
     assert main(["--json", "--weeks", "2"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["drafts_total"] == 1 and data["edited"] == 1
-    assert data["top_pairs"][0]["edited_thread"][0] == f"CAR-T data {URL}"
+    assert data["top_pairs"][0]["edited_thread"][0] == "CAR-T data"
 
     out = tmp_path / "voice.md"
     assert main(["--out", str(out)]) == 0
@@ -339,7 +339,7 @@ def test_cli_json_and_markdown_and_examples(db_file, capsys, tmp_path):
 
     assert main(["--examples"]) == 0
     block = capsys.readouterr().out
-    assert "=== RECENT HUMAN EDITS ===" in block and f"CAR-T data {URL}" in block
+    assert "=== RECENT HUMAN EDITS ===" in block and "CAR-T data" in block
 
 
 def test_cli_examples_with_empty_db(db_file, capsys):
