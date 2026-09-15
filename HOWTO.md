@@ -336,10 +336,15 @@ source only when it is due, and score only scores what is new.
    the text alone and records why, so a picture is never attached after you
    stopped looking. A Revise keeps the verdict of every cell whose row label,
    column and text did not change.
-   On a pending draft every cell is a text box: retype a cell to correct it,
-   clear it to blank it in the picture, then press "Save cells". A cell you
-   typed counts as checked by you (its verdict says "supported (typed in)",
-   no web call), every cell you left alone keeps its verdict, and the picture
+   While a draft still awaits your decision (pending, or snoozed and back on
+   the pending page) every cell is a text box: retype a cell to correct it,
+   clear it to blank it in the picture, then press "Save cells". Saving counts
+   as checking every cell by hand ("supported (typed in)", no web call): the
+   ones you changed, and the ones you left standing that the fact-checker
+   could not verify or verified from an untrusted source, which is also what
+   retyping a cell to exactly what was there already means. A cell already
+   supported from a trusted source keeps its own verdict and a contradicted
+   cell still has to be corrected (or its host trusted). The picture
    is redrawn at once through the same render-or-drop step as the verifier.
    Headers, title and the post text never change here; use Edit for the text.
    The history logs the edit with the number of cells changed.
