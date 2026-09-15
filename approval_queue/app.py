@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import difflib
 import logging
-import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -39,7 +38,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from approval_queue import images, store
+from approval_queue import images, publishing, store
 from draft import drafter
 from draft.chart import ChartError, alt_text, validate_table
 from draft.examples import parse_decision_text
@@ -47,7 +46,6 @@ from draft.prompt import VOICE_PATH
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.settings import load_draft_config
 from draft.voice_report import build_report
-from publish import store as publish_store
 from verify import render as verify_render
 from verify import settings as verify_settings
 from verify import store as verify_store
@@ -66,13 +64,20 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["tweet_length"] = tweet_length
 templates.env.globals["MAX_POST_CHARS"] = MAX_POST_CHARS
 templates.env.globals["DECISION_CATEGORIES"] = store.DECISION_CATEGORIES
-# The shared nav (base.html) shows the control-panel links only when the queue is
-# served as part of it (panel/app.py sets this True); run_queue.py serves the queue alone.
-templates.env.globals["HAS_PANEL"] = False
-# The panel replaces these with live lookups (panel/app.py); alone, the queue shows no
-# run buttons, so nothing is ever in flight and nothing can post.
-templates.env.globals["current_run"] = lambda: None
-templates.env.globals["publish_live"] = lambda: False
+
+
+def install_standalone_globals() -> None:
+    """The template globals run_queue.py serves the queue with. The shared nav (base.html)
+    shows the control-panel links only when the panel hosts the queue, and alone the queue
+    shows no run buttons, so nothing is ever in flight and nothing can post. panel/app.py
+    overwrites all three on this same environment when it adopts the queue's routes, which
+    is process-wide; a test that wants the standalone pages calls this to put them back."""
+    templates.env.globals["HAS_PANEL"] = False
+    templates.env.globals["current_run"] = lambda: None
+    templates.env.globals["publish_live"] = lambda: False
+
+
+install_standalone_globals()
 
 app = FastAPI(title="Approval queue")
 
@@ -748,30 +753,17 @@ async def reopen(draft_id: int, request: Request, conn: Conn):
                 draft_id, error=f"only an approved draft can be reopened (this one is {row.status})"
             )
         info = store.publish_states(conn, [draft_id]).get(draft_id)
-        if info is not None and info.status in ("posted", "partial"):
-            return _detail_redirect(
-                draft_id,
-                error="this draft is already live on X and cannot be reopened; "
-                "reject it instead if it should not run again",
-            )
-        if info is not None and info.status == "claimed":
-            return _detail_redirect(
-                draft_id,
-                error="publishing has already claimed this draft and will not re-read its "
-                "status; wait until that run finishes before reopening it",
-            )
-        try:
-            # An unclaimed row is dropped outright; a failed or refused attempt was claimed,
-            # so release_failed is what clears that one (it too refuses anything live). Both
-            # leave posted and partial rows alone, so no saved position outlives a reopen.
-            released = publish_store.release_unclaimed(conn, [draft_id])
-            released += publish_store.release_failed(conn, [draft_id])
-        except sqlite3.OperationalError:  # no publish run yet: the schedule table is missing
-            released = []
+        blocked = publishing.block_reason(conn, draft_id, info)
+        if blocked:
+            return _detail_redirect(draft_id, error=blocked)
+        # The status goes first: a pending draft is invisible to fetch_approved, so no run
+        # can claim it while we let go of its schedule row. The other order would leave the
+        # row deleted and the draft still approved if this raised.
         try:
             store.reopen(conn, draft_id, note=_note(form))
         except KeyError as exc:
             raise HTTPException(404, "no such draft") from exc
+        released = publishing.forget(conn, draft_id)
         log.info(
             "draft %d reopened for review (%d schedule row(s) released)", draft_id, len(released)
         )

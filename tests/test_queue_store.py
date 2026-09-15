@@ -284,6 +284,31 @@ def test_connect_turns_a_snoozed_draft_back_into_a_pending_one(tmp_path):
     conn.close()
 
 
+def test_the_snooze_migration_moves_nothing_else(tmp_path):
+    """It runs on every connect, so a WHERE clause lost here would quietly un-approve and
+    un-reject every draft in a live database."""
+    path = tmp_path / "mixed.db"
+    conn = store.connect(path)
+    ids = {}
+    for name in ("snoozed", "approved", "rejected", "failed", "pending"):
+        did = store.insert_draft(conn, item_id=f"i_{name}", model="m", draft=make_draft())
+        conn.execute("UPDATE drafts SET status = ? WHERE id = ?", (name, did))
+        ids[name] = did
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(path)
+    after = {name: store.get_draft(conn, did).status for name, did in ids.items()}
+    assert after == {
+        "snoozed": store.STATUS_PENDING,  # the only one that moves
+        "approved": store.STATUS_APPROVED,
+        "rejected": store.STATUS_REJECTED,
+        "failed": store.STATUS_FAILED,
+        "pending": store.STATUS_PENDING,
+    }
+    conn.close()
+
+
 def test_connect_is_idempotent_on_new_database(tmp_path):
     path = tmp_path / "new.db"
     store.connect(path).close()

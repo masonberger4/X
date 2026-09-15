@@ -8,6 +8,7 @@ import logging
 import sqlite3
 import sys
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -896,3 +897,60 @@ def test_reopening_a_draft_hides_it_from_publish_and_drops_its_position(conn):
     qstore.approve(conn, did)
     (again,) = store.fetch_approved(10, conn=conn)
     assert again.draft_id == did and again.position is None
+
+
+def test_release_failed_with_an_empty_list_releases_nothing(conn):
+    """An empty list means no draft. It used to fall back to the no-filter branch and drop
+    every eligible row, which is the opposite of what a caller computing an empty list wants."""
+    a, b = seed_draft(conn, "a"), seed_draft(conn, "b")
+    store.set_order(conn, [a, b])
+    conn.execute(
+        "UPDATE schedule SET claimed_at = ?, status = ?",
+        ("2026-01-01T00:00:00+00:00", store.SCHED_FAILED),
+    )
+    conn.commit()
+    assert store.release_failed(conn, []) == []
+    assert store.get_schedule(conn, a) is not None and store.get_schedule(conn, b) is not None
+    assert store.release_failed(conn) == [a, b]  # None still means every eligible row
+
+
+def test_release_never_deletes_a_row_claimed_after_its_select(conn):
+    """The DELETE repeats the guard instead of trusting the ids the SELECT found, so a claim
+    taken between the two keeps its row — otherwise the publisher would post a thread whose
+    schedule row had been deleted under it, and nothing would stop it going out twice."""
+    did = seed_draft(conn, "a")
+    store.set_order(conn, [did])  # an unclaimed row, as "Set schedule" leaves it
+
+    class ClaimsAfterTheSelect:
+        """The real connection, except that a publish run claims the draft in the instant
+        between the release's SELECT and its DELETE."""
+
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def execute(self, sql, *args):
+            out = self._real.execute(sql, *args)
+            if sql.lstrip().startswith("SELECT draft_id FROM schedule"):
+                rows = out.fetchall()
+                self._real.execute(
+                    "UPDATE schedule SET claimed_at = ?, status = ? WHERE draft_id = ?",
+                    ("2026-01-01T00:00:00+00:00", store.SCHED_CLAIMED, did),
+                )
+                return SimpleNamespace(fetchall=lambda: rows)
+            return out
+
+    assert store.release_unclaimed(ClaimsAfterTheSelect(conn), [did]) == []
+    row = store.get_schedule(conn, did)
+    assert row is not None and row["claimed_at"] is not None
+
+
+def test_forget_is_empty_before_step_3_has_ever_run(tmp_path):
+    """The queue calls forget on a database that may have no schedule or posts table yet."""
+    bare = sqlite3.connect(tmp_path / "bare.db")
+    bare.row_factory = sqlite3.Row
+    assert store.forget(bare, [1]) == []
+    assert store.is_live(bare, 1) is False
+    bare.close()

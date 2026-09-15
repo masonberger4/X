@@ -1,8 +1,10 @@
 import json
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
 
+from approval_queue import app as queue_app
 from approval_queue import store
 from approval_queue.app import app
 from draft import drafter
@@ -297,8 +299,11 @@ def test_approved_page_offers_reopen_but_not_approve_reject_or_revise(client, co
     assert f'action="/drafts/{draft_id}/reopen"' in body and ">Reopen<" in body
     for action in ("approve", "reject", "revise", "edit"):
         assert f'action="/drafts/{draft_id}/{action}"' not in body
-    # Whether "Publish now" shows depends on HAS_PANEL, which panel.app installs on the
-    # queue's template env for the whole process, so it is not this test's business.
+    # "Publish now" belongs to the panel; the standalone queue never offers it. Ask for the
+    # standalone globals rather than assuming them: importing panel.app sets the panel's on
+    # this same environment, for the whole process (conftest puts back whatever we change).
+    queue_app.install_standalone_globals()
+    assert 'action="/publishing/now"' not in client.get("/status/approved").text
     # once step 3 has it, neither button is offered any more
     _publish_draft(conn, draft_id, tweet_id="555")
     body = client.get("/status/approved?posted=1").text
@@ -392,6 +397,9 @@ def test_reopen_refused_once_publishing_owns_the_draft(client, conn, draft_id, s
         _publish_draft(conn, draft_id, status=state, tweet_id="555")
     r = client.post(f"/drafts/{draft_id}/reopen")
     assert r.status_code == 303 and r.headers["location"].startswith(f"/drafts/{draft_id}?error=")
+    # the three refusals mean different things to the operator, so they must read differently
+    said = unquote(r.headers["location"])
+    assert ("already claimed" in said) if state == "claimed" else ("live on X" in said)
     assert store.get_draft(conn, draft_id).status == "approved"
     assert "reopen" not in [d["action"] for d in store.list_decisions(conn, draft_id)]
     # and the schedule row survives the refusal
@@ -480,3 +488,62 @@ def test_reopen_works_before_any_publish_run_has_made_step_3s_tables(client, con
     r = client.post(f"/drafts/{draft_id}/reopen")
     assert r.status_code == 303 and r.headers["location"] == "/status/approved"
     assert store.get_draft(conn, draft_id).status == "pending"
+
+
+def test_reopen_refused_for_a_draft_that_reached_x_without_a_schedule_row(client, conn, draft_id):
+    """The posts log is the ground truth. A schedule row can be missing — deleted by hand,
+    or lost to a release — while the tweets are still up, and the draft must stay put."""
+    store.approve(conn, draft_id)
+    _publish_draft(conn, draft_id, tweet_id="555")
+    conn.execute("DELETE FROM schedule WHERE draft_id = ?", (draft_id,))
+    conn.commit()
+    assert store.publish_states(conn, [draft_id]) == {}  # schedule alone says: never posted
+    r = client.post(f"/drafts/{draft_id}/reopen")
+    assert r.status_code == 303 and "error=" in r.headers["location"]
+    assert "live%20on%20X" in r.headers["location"]
+    assert store.get_draft(conn, draft_id).status == "approved"
+    assert "reopen" not in [d["action"] for d in store.list_decisions(conn, draft_id)]
+
+
+def test_reopen_refused_for_a_schedule_state_it_does_not_know(client, conn, draft_id):
+    """The guard is an allowlist: a state a later step 3 invents holds the draft instead of
+    falling through to a reopen."""
+    store.approve(conn, draft_id)
+    _publish_draft(conn, draft_id, status="posting", tweet_id=None)
+    r = client.post(f"/drafts/{draft_id}/reopen")
+    assert r.status_code == 303 and "error=" in r.headers["location"]
+    assert store.get_draft(conn, draft_id).status == "approved"
+
+
+@pytest.mark.parametrize(
+    "state,offered",
+    [
+        (None, True),
+        ("pending", True),
+        ("failed", True),
+        ("refused", True),
+        ("claimed", False),
+        ("posted", False),
+        ("partial", False),
+    ],
+)
+def test_the_reopen_button_is_offered_exactly_where_the_route_allows_it(
+    client, conn, draft_id, state, offered
+):
+    """The approved list, the draft's page and the route each decide whether a draft can be
+    taken back. All three read PublishInfo.reopenable, and this pins them to one table."""
+    store.approve(conn, draft_id)
+    if state == "claimed":
+        _claim_draft(conn, draft_id)
+    elif state == "pending":
+        publish_store.set_order(conn, [draft_id])
+    elif state is not None:
+        # failed and refused mean nothing reached X; posted and partial mean something did
+        live = state in ("posted", "partial")
+        _publish_draft(conn, draft_id, status=state, tweet_id="555" if live else None)
+    form = f'action="/drafts/{draft_id}/reopen"'
+    assert (form in client.get("/status/approved?posted=1").text) is offered
+    assert (form in client.get(f"/drafts/{draft_id}").text) is offered
+    # and the route agrees with the button
+    client.post(f"/drafts/{draft_id}/reopen")
+    assert (store.get_draft(conn, draft_id).status == "pending") is offered

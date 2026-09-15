@@ -192,15 +192,21 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   tables are `drafts` and `decisions`; edits log original vs edited text.
   An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
   decision carrying the text and the optional note) puts an approved draft back to
-  `pending`, and is refused when `store.publish_states` says step 3 has posted,
-  partially posted or claimed it — nothing on X is ever unposted here. Before the
-  status flips, the route calls `publish/store.py:release_unclaimed` and
-  `release_failed` (step 3's only writes from step 2: together they delete that draft's
-  `schedule` row whether it was never claimed or claimed and failed, and neither ever
-  touches a posted or partial one), so a saved `position` cannot resurrect itself on
-  re-approval.
-  There is no snooze: a draft left `snoozed` in an older database is migrated to
-  `pending` by `store.connect`.
+  `pending`. `approval_queue/publishing.py` is the queue's one door to step 3 (as
+  `panel/publishing.py` is the panel's): `block_reason` refuses the reopen when
+  `publish/store.py:is_live` finds a `posts` row with a tweet id — the ground truth,
+  asked before and independently of the schedule — or when the draft's
+  `store.publish_states` entry is not `PublishInfo.reopenable`
+  (`store.REOPENABLE_STATES`, an allowlist of `pending`/`failed`/`refused`, which both
+  templates read too so the button and the route cannot drift). Nothing on X is ever
+  unposted here. The status flips first, which hides the draft from `fetch_approved` so
+  no run can claim it, and only then does `publishing.forget` call
+  `publish/store.py:forget` (step 2's one write into step 3's tables: it deletes that
+  draft's `schedule` row when it was never claimed, or claimed and failed or refused,
+  and never one that is posted or partial), so a saved `position` cannot resurrect
+  itself on re-approval. There is no snooze: a draft left `snoozed` in an older database
+  is migrated to `pending` by `store.connect`, and `drafts.snoozed_until` stays in the
+  schema as a dead column so old databases need no rebuild.
   A human asks for changes in words, not by retyping: `POST /drafts/{id}/revise`
   calls `draft/drafter.py:revise_item` (same `call_anthropic`, same schema check and
   `check_hard_rules` loop as `draft_item`; the user prompt is
@@ -268,8 +274,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   The queue touches those two tables only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
   missing) to label and hide posted drafts on the approved page, and, on a reopen
-  (above), `release_unclaimed` and `release_failed`, which read and delete step 3's
-  rows through step 3's own module.
+  (above), `publish/store.py:forget` and `is_live`, which read and delete step 3's rows
+  through step 3's own module.
   Texts are re-checked before posting and refused, never edited, on failure.
 - Step 4 reads other steps' tables only through `feedback/store.py:fetch_posted`
   (posts) and `fetch_post_context` (drafts/decisions/items/scores/ratings). Its
@@ -432,7 +438,8 @@ verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck
           mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop
           decision), render.py (finalize_table: decide, then draw or drop)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
-          fetch_approved, release_unclaimed), client.py (post_tweet, upload_media,
+          fetch_approved, is_live, forget = release_unclaimed + release_failed),
+          client.py (post_tweet, upload_media,
           verify_credentials)
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
           store.py (tweet_metrics, follower_snapshots, feedback_reports,

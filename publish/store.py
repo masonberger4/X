@@ -408,28 +408,54 @@ def failed_attempts(conn: sqlite3.Connection, draft_id: int) -> int:
     return int(row[0])
 
 
+def forget(conn: sqlite3.Connection, draft_ids: list[int]) -> list[int]:
+    """Drop these drafts' schedule rows when nothing of them is live: the row was never
+    claimed, or it was claimed and the attempt failed or was refused, and no posts row
+    carries a tweet_id. A posted or partial row is never touched — a live thread stays a
+    human decision. Empty when step 3 has never run and its tables do not exist yet.
+    Returns the released draft ids. This is the one way another step lets go of a draft."""
+    if not draft_ids:
+        return []
+    if not _has_table(conn, "schedule") or not _has_table(conn, "posts"):
+        return []
+    return release_unclaimed(conn, draft_ids) + release_failed(conn, draft_ids)
+
+
+def is_live(conn: sqlite3.Connection, draft_id: int) -> bool:
+    """Whether any post of this draft reached X. The `posts` log is the ground truth: a
+    schedule row can be missing, deleted or lagging, but a row here carrying a tweet_id
+    means a tweet exists and nothing may treat the draft as unpublished."""
+    if not _has_table(conn, "posts"):
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM posts WHERE draft_id = ? AND tweet_id IS NOT NULL LIMIT 1", (draft_id,)
+    ).fetchone()
+    return row is not None
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+        ).fetchone()
+        is not None
+    )
+
+
 def release_failed(conn: sqlite3.Connection, draft_ids: list[int] | None = None) -> list[int]:
     """Delete the schedule rows of drafts whose publish attempt failed BEFORE anything went
     live ('failed' or 'refused', and no posts row carries a tweet_id), so fetch_approved picks
     them up again; the failed posts log rows stay as history. 'posted' and 'partial' rows are
     never touched: a partial thread is live on X and stays a human decision. With draft_ids,
     only those drafts; else every eligible row. Returns the released draft ids."""
+    if draft_ids is not None and not draft_ids:
+        return []  # an empty list means no draft, never every draft
     where = f"AND draft_id IN ({','.join('?' * len(draft_ids))})" if draft_ids else ""
-    ids = [
-        int(r[0])
-        for r in conn.execute(
-            f"""SELECT draft_id FROM schedule
-                WHERE status IN (?, ?)
+    guard = f"""status IN (?, ?)
                   AND draft_id NOT IN (SELECT draft_id FROM posts WHERE tweet_id IS NOT NULL)
-                  {where}
-                ORDER BY draft_id""",
-            [SCHED_FAILED, SCHED_REFUSED, *(draft_ids or [])],
-        ).fetchall()
-    ]
-    if ids:
-        conn.execute(f"DELETE FROM schedule WHERE draft_id IN ({','.join('?' * len(ids))})", ids)
-        conn.commit()
-    return ids
+                  {where}"""
+    params = [SCHED_FAILED, SCHED_REFUSED, *(draft_ids or [])]
+    return _release(conn, guard, params)
 
 
 def release_unclaimed(conn: sqlite3.Connection, draft_ids: list[int]) -> list[int]:
@@ -441,20 +467,43 @@ def release_unclaimed(conn: sqlite3.Connection, draft_ids: list[int]) -> list[in
     if not draft_ids:
         return []
     marks = ",".join("?" * len(draft_ids))
-    ids = [
-        int(r[0])
-        for r in conn.execute(
-            f"""SELECT draft_id FROM schedule
-                WHERE claimed_at IS NULL
+    guard = f"""claimed_at IS NULL
                   AND draft_id NOT IN (SELECT draft_id FROM posts WHERE tweet_id IS NOT NULL)
-                  AND draft_id IN ({marks})
-                ORDER BY draft_id""",
-            list(draft_ids),
-        ).fetchall()
-    ]
-    if ids:
-        conn.execute(f"DELETE FROM schedule WHERE draft_id IN ({','.join('?' * len(ids))})", ids)
+                  AND draft_id IN ({marks})"""
+    return _release(conn, guard, list(draft_ids))
+
+
+def _release(conn: sqlite3.Connection, guard: str, params: list) -> list[int]:
+    """Delete every schedule row matching `guard` and return their draft ids. The DELETE
+    repeats the guard rather than listing the ids the SELECT found, and the pair runs inside
+    one BEGIN IMMEDIATE: a claim taken between the two (run_publish.py claims on its own
+    connection, and posts for seconds afterwards without re-reading the draft) would
+    otherwise have its row deleted from under it, and nothing would then stop the same
+    thread going out twice."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        ids = [
+            int(r[0])
+            for r in conn.execute(
+                f"SELECT draft_id FROM schedule WHERE {guard} ORDER BY draft_id", params
+            ).fetchall()
+        ]
+        if ids:
+            conn.execute(f"DELETE FROM schedule WHERE {guard}", params)
+            # Report what went, not what the SELECT hoped to take: a row the guard saved on
+            # the way past (claimed in between) is still here and was never released.
+            marks = ",".join("?" * len(ids))
+            left = {
+                int(r[0])
+                for r in conn.execute(
+                    f"SELECT draft_id FROM schedule WHERE draft_id IN ({marks})", ids
+                ).fetchall()
+            }
+            ids = [i for i in ids if i not in left]
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return ids
 
 

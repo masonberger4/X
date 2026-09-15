@@ -146,7 +146,7 @@
     <button>Approve</button>
     {% if contradicted %}<label><input type="checkbox" name="override" value="1"> approve anyway</label>{% endif %}
   </form>
-  {% if d.status == "approved" and (not publish or publish.status not in ("posted", "partial", "claimed")) %}
+  {% if d.status == "approved" and (not publish or publish.reopenable) %}
   <form class="inline" method="post" action="/drafts/{{ d.id }}/reopen">
     <input name="note" placeholder="why reopen (optional)">
     <button>Reopen</button>

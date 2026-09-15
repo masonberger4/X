@@ -310,8 +310,10 @@ Safety gates, all of which must hold before a single tweet is sent:
   `publish/store.py:set_order`) is honoured before breaking and score;
   `--draft ID` considers one approved draft only (the panel's "Publish now"
   runs `--live --now --draft ID`). Reopening a draft in the queue deletes its
-  unclaimed `schedule` row (`publish/store.py:release_unclaimed`), so a saved
-  order never comes back with it; a claimed, posted or partial row is left alone.
+  `schedule` row when nothing of it went live — never claimed, or claimed and
+  failed or refused (`publish/store.py:forget`) — so a saved order never comes
+  back with it; a posted or partial row is left alone, and a draft with a tweet
+  to its name cannot be reopened at all.
 - A thread that fails at post k keeps posts 1..k-1 live, records the error on
   post k, marks the draft `partial`, and stops. It is not retried; a human
   finishes or deletes it.

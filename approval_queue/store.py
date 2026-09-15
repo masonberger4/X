@@ -537,6 +537,12 @@ def get_draft(conn: sqlite3.Connection, draft_id: int) -> DraftRow | None:
     return _row_to_draft(r) if r else None
 
 
+#: Schedule states a draft may be reopened from: the only ones that mean nothing of it is
+#: on X and no publish run owns it. Posted, partial and claimed hold it, as does anything
+#: unrecognised.
+REOPENABLE_STATES = ("pending", "failed", "refused")
+
+
 @dataclass
 class PublishInfo:
     """What step 3 did with a draft, read from its schedule/posts tables (never written here)."""
@@ -550,6 +556,13 @@ class PublishInfo:
     @property
     def tweet_url(self) -> str:
         return f"https://x.com/i/web/status/{self.tweet_id}" if self.tweet_id else ""
+
+    @property
+    def reopenable(self) -> bool:
+        """Whether a human may still take this draft back. An allowlist, so a state a later
+        step 3 invents holds the draft instead of falling through. Both the button's
+        visibility and the route's refusal read this one property, so they cannot drift."""
+        return self.status in REOPENABLE_STATES
 
 
 def publish_states(conn: sqlite3.Connection, draft_ids: list[int]) -> dict[int, PublishInfo]:

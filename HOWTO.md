@@ -589,16 +589,17 @@ to stop it. Four pages:
   order the scheduled slots should post them and press "Save order". A
   draft without a number follows the numbered ones by score. The order is
   kept on the draft (shown as #1, #2) until it posts. "Reopen" next to a
-  waiting draft takes it back off the list: it becomes pending again, so you
-  can revise, edit or reject it as if it had never been approved, and the
-  order you saved for it is forgotten rather than coming back the next time
-  you approve it. Say why in the box if you want the reason in its history.
-  It is refused for anything already on X — posted, a thread that stopped
-  halfway, or a draft a publish run has just claimed (the page says which);
-  reopening cannot unpost a tweet, so reject it instead if it should not run
-  again. An approved draft whose last attempt failed or was refused can be
-  reopened, and that failed attempt is cleared with it, so it comes back as a
-  clean pending draft. The same button is on the draft's own page.
+  waiting draft takes it back off the list and makes it pending again, so you
+  can revise, edit or reject it; the order you saved for it is forgotten
+  rather than coming back the next time you approve it, and the box beside the
+  button puts your reason in the draft's history. It is refused for anything
+  already on X — posted, or a thread that stopped halfway — and for a draft a
+  publish run has just claimed, because that run will not look at the draft
+  again before it posts (the draft's own page says which); reopening cannot
+  unpost a tweet, so reject it instead if it should not run again. A draft
+  whose last attempt failed or was refused can be reopened, and its failed
+  schedule row goes with it, though the posts log keeps the history. The same
+  button is on the draft's own page.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
   halfway is never retried for you). Posting happens from the approved page,
