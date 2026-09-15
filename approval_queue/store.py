@@ -1,6 +1,6 @@
 """SQLite storage for drafts and decisions, plus the read-only adapter onto step 1's tables.
 
-Owns two tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline DB):
+Owns four tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline DB):
 
   drafts(id INTEGER PK, item_id TEXT UNIQUE, cluster_id, model, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
@@ -13,6 +13,8 @@ Owns two tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline 
             -- (note); original_text/edited_text hold the before/after like an 'edit'.
   draft_examples(id INTEGER PK, draft_id FK, decision_id FK, kind 'edit'|'rejection',
                  created_at)   -- step 7: which examples each draft was shown
+  image_grades(id INTEGER PK, draft_id FK, ...)   -- the image grader's verdicts from the
+                 -- render-grade loop in approval_queue/images.py
 
 Never modifies the items or scores tables. Step 7 reads items only through
 fetch_decisions_for_voice / fetch_draft_stats, and only for source and url.

@@ -51,7 +51,7 @@ claude_code:                      # only used when models.backend is claude_code
 scoring:
   batch_size: 10                  # clusters per API call
   max_tokens: 4096
-  threshold: 30                   # total (0-70) needed to appear in the digest
+  threshold: 30                   # total (0-50) needed to appear in the digest
   max_retries: 5
   backoff_seconds: 2              # base for exponential backoff
   # Fable/Mythos models reject forced tool_choice; set false to fall back to

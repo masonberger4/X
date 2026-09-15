@@ -205,7 +205,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   its verdict). `check_hard_rules` scans table cells for advice phrases.
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
-  tables are `drafts` and `decisions`; edits log original vs edited text.
+  tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
   A human asks for changes in words, not by retyping: `POST /drafts/{id}/revise`
   calls `draft/drafter.py:revise_item` (same `call_anthropic`, same schema check and
   `check_hard_rules` loop as `draft_item`; the user prompt is
