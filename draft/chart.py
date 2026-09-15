@@ -43,6 +43,33 @@ BLANK_CELL = "—"  # what a cell the fact-checker could not support becomes in 
 
 _HOST_RE = re.compile(r"^https?://(?:www\.)?([^/]+)")
 
+# A note is a caption the reader sees under the picture. Phrases that address the operator
+# or the reviewer ("verify each cell before posting", "internal use only") are an aside that
+# leaked out of the drafting conversation and must never be rendered. Case-insensitive.
+INTERNAL_NOTE_PATTERNS = (
+    r"\bbefore (posting|publishing|you post|publication|tweeting)\b",
+    r"\b(verify|check|confirm|double[- ]check|fact[- ]check|update|review)\b[^.;]{0,40}\bbefore\b",
+    r"\b(please )?(verify|check|confirm|double[- ]check|fact[- ]check)\b[^.;]{0,20}"
+    r"\b(each|every|all|the)\s+(cell|row|number|figure|value|claim|date)s?\b",
+    r"\b(internal|draft|placeholder|do not post|not for publication|for review only|reviewer)\b",
+    r"\bTODO\b",
+    r"\bfill in\b",
+)
+_INTERNAL_NOTE_RE = re.compile("|".join(INTERNAL_NOTE_PATTERNS), re.IGNORECASE)
+
+
+def note_problems(text: str, label: str) -> list[str]:
+    """Hard-rule violations for a rendered caption: an aside meant for the operator, worded
+    for the retry prompt. Empty list means the caption is fine to show a reader."""
+    match = _INTERNAL_NOTE_RE.search(text or "")
+    if match is None:
+        return []
+    return [
+        f"{label} addresses the operator instead of the reader: {match.group(0)!r} "
+        "(the note is printed under the picture for everyone to read; give a factual "
+        "caption such as the n, the design or a caveat, or leave it empty)"
+    ]
+
 
 class ChartError(ValueError):
     """The chart spec is malformed (structure), as opposed to unverifiable (numbers)."""
@@ -118,7 +145,13 @@ TABLE_JSON_SCHEMA: dict[str, Any] = {
                 "(a stage, a date, a mechanism, a number); empty string when unknown."
             ),
         },
-        "note": {"type": "string", "description": "Optional footnote."},
+        "note": {
+            "type": "string",
+            "description": (
+                "Optional footnote PRINTED UNDER THE TABLE for the reader: n, as-of date, "
+                "design or caveat. Never an instruction to the operator or reviewer."
+            ),
+        },
     },
     "description": (
         "Optional comparison table (landscape, competitor set, catalyst list) to attach "
@@ -150,7 +183,13 @@ CHART_JSON_SCHEMA: dict[str, Any] = {
             "description": "One value per label, copied verbatim from the source.",
         },
         "unit": {"type": "string", "description": "'%', 'months', 'patients', or ''."},
-        "note": {"type": "string", "description": "Optional footnote: n, design, caveat."},
+        "note": {
+            "type": "string",
+            "description": (
+                "Optional footnote PRINTED UNDER THE CHART for the reader: n, design, "
+                "caveat. Never an instruction to the operator or reviewer."
+            ),
+        },
     },
     "description": (
         "Optional bar chart to attach, or null when the source has no comparable numbers. "
@@ -483,17 +522,6 @@ PALETTES: dict[str, Palette] = {
 }
 DEFAULT_PALETTE = "navy"
 
-# The house (navy) values, kept as module constants for callers and tests that read them.
-SURFACE = PALETTES[DEFAULT_PALETTE].surface
-INK = PALETTES[DEFAULT_PALETTE].ink
-INK_2 = PALETTES[DEFAULT_PALETTE].ink_2
-INK_3 = PALETTES[DEFAULT_PALETTE].ink_3
-RULE = PALETTES[DEFAULT_PALETTE].rule
-ACCENT = PALETTES[DEFAULT_PALETTE].accent
-ACCENT_SOFT = PALETTES[DEFAULT_PALETTE].soft
-HEADER_FILL = PALETTES[DEFAULT_PALETTE].header_fill
-ZEBRA = PALETTES[DEFAULT_PALETTE].zebra
-ACCENT_TINT = PALETTES[DEFAULT_PALETTE].tint
 EYEBROW = "IMMUNO-ONCOLOGY  ·  DATA BRIEF"
 FONT_FAMILIES = [
     "Inter",

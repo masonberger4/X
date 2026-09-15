@@ -46,6 +46,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `python run_evolve.py [score|prune|breed|report] [--dry-run] [--force]` (step 9: swarm
   fitness from X and pruning, no network; `breed` makes the one strong-model call per
   writer child),
+  `python run_scrub_notes.py [--status STATUS] [--dry-run] [-v]` (operator command: blanks
+  picture captions written to the operator in queued drafts and redraws them),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -112,6 +114,22 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - **Fail soft per source.** Errors are logged and recorded in
   `source_runs.error`; the run continues. `ingest/fda_oce.py` returns `[]` on
   any failure.
+- **Times are stored in UTC and shown in one zone.** Every timestamp in SQLite stays
+  an aware-UTC ISO string and every comparison, window and API payload stays UTC;
+  conversion happens only when a datetime becomes text for a human. `timeutil.py` is the
+  single place that converts (`timezone_name`, `display_tz`, `to_display`,
+  `fmt_datetime` -> "2026-06-01 08:30 PDT", `fmt_date`, `install_jinja_filters` ->
+  the Jinja filters `|localtime` / `|localdate`) and the only reader of the root
+  `config.yaml` key `timezone:` (`America/Los_Angeles`). Converted: the panel's
+  dashboard/publishing/feedback pages, the queue's draft detail and voice pages,
+  `panel/feed.py`, `digest.py`, `run_ops.py status`, `ops/health.py`'s report heading,
+  `ops/alert.py`'s alert body, `feedback/report.py`'s heading, `draft/voice_report.py`'s
+  window line and edit headings. Still UTC on purpose, as sort/parse keys: backup
+  filenames `backups/pipeline-<UTC stamp>.sqlite`, the `run_id` stamps and
+  `feedback/store.py:day_of`'s `captured_on` bucket; relative ages are zone-independent.
+  `publish/config.yaml` and `feedback/config.yaml` keep their own `timezone:` because
+  those drive behaviour (posting slots, the "hour posted" column), not display; all
+  three are set to the same zone.
 - Read secrets from `.env` via python-dotenv; never commit `.env`.
 - Logging: stdlib `logging`. INFO for per-source counts, DEBUG for items.
 - Ask before adding a dependency not already in `pyproject.toml`.
@@ -157,7 +175,12 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   the `images` extra, imported inside `render_chart`; fail-soft: no image, never no
   draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
   and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
-  turns rendering off. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
+  turns rendering off. **A note is a caption, not an aside**: a chart's or table's `note` is
+  printed under the picture, so `chart.py:note_problems` (called from `check_hard_rules` for
+  both) fails a draft whose note addresses the operator ("verify each cell before posting",
+  "TODO") and the attempt is retried. `run_scrub_notes.py` is the one-off pass over
+  queued drafts made before that rule: `store.clear_visual_notes` blanks the caption (an
+  `edit` decision, text unchanged) and the picture is drawn again. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
   the named palettes and `Style.palette` / `Style.multi_colour` pick one, so the designer
   genome and the image grader (`draft/grader.py`, whose knob list and checklist name them;
   `distinctiveness` replaced the old house-style row) both vary it; `Style.apply` ignores an
@@ -189,7 +212,24 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   its verdict). `check_hard_rules` scans table cells for advice phrases.
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
-  tables are `drafts` and `decisions`; edits log original vs edited text.
+  tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
+  An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
+  decision carrying the text and the optional note) puts an approved draft back to
+  `pending`. `approval_queue/publishing.py` is the queue's one door to step 3 (as
+  `panel/publishing.py` is the panel's): `block_reason` refuses the reopen when
+  `publish/store.py:is_live` finds a `posts` row with a tweet id — the ground truth,
+  asked before and independently of the schedule — or when the draft's
+  `store.publish_states` entry is not `PublishInfo.reopenable`
+  (`store.REOPENABLE_STATES`, an allowlist of `pending`/`failed`/`refused`, which both
+  templates read too so the button and the route cannot drift). Nothing on X is ever
+  unposted here. The status flips first, which hides the draft from `fetch_approved` so
+  no run can claim it, and only then does `publishing.forget` call
+  `publish/store.py:forget` (step 2's one write into step 3's tables: it deletes that
+  draft's `schedule` row when it was never claimed, or claimed and failed or refused,
+  and never one that is posted or partial), so a saved `position` cannot resurrect
+  itself on re-approval. There is no snooze: a draft left `snoozed` in an older database
+  is migrated to `pending` by `store.connect`, and `drafts.snoozed_until` stays in the
+  schema as a dead column so old databases need no rebuild.
   A human asks for changes in words, not by retyping: `POST /drafts/{id}/revise`
   calls `draft/drafter.py:revise_item` (same `call_anthropic`, same schema check and
   `check_hard_rules` loop as `draft_item`; the user prompt is
@@ -254,9 +294,11 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
   settings live in `publish/config.yaml`, not the root config. Posting is
   idempotent via the claim; partial threads are never retried automatically.
-  The queue reads those two tables back only through
+  The queue touches those two tables only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
-  missing) to label and hide posted drafts on the approved page.
+  missing) to label and hide posted drafts on the approved page, and, on a reopen
+  (above), `publish/store.py:forget` and `is_live`, which read and delete step 3's rows
+  through step 3's own module.
   Texts are re-checked before posting and refused, never edited, on failure.
 - Step 4 reads other steps' tables only through `feedback/store.py:fetch_posted`
   (posts) and `fetch_post_context` (drafts/decisions/items/scores/ratings). Its
@@ -387,6 +429,8 @@ filter/   prefilter.py, dedup.py, link.py (story linking: same-event groups -> o
 score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories),
           rater.py (second-opinion yes/no rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
+timeutil.py  display timezone: UTC storage -> one human-facing zone (root `timezone:`),
+          fmt_datetime/fmt_date, Jinja |localtime / |localdate
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
 draft/    schema.py (Draft, Format, validate_output), chart.py (chart + table specs, verification, PNG rendering, Style
           knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,
@@ -419,7 +463,9 @@ verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck
           mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop
           decision), render.py (finalize_table: decide, then draw or drop)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
-          fetch_approved), client.py (post_tweet, upload_media, verify_credentials)
+          fetch_approved, is_live, forget = release_unclaimed + release_failed),
+          client.py (post_tweet, upload_media,
+          verify_credentials)
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
           store.py (tweet_metrics, follower_snapshots, feedback_reports,
           fetch_posted, fetch_post_context, due_for_snapshot), client.py

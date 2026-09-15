@@ -8,16 +8,17 @@
   · source <strong>{{ d.source or "?" }}</strong>
   · score <strong>{{ "%.1f"|format(d.total) if d.total is not none else "–" }}</strong>
   · model {{ d.model }}
-  · created {{ d.created_at }}
+  · created {{ d.created_at|localtime }}
   {% if d.url %}· <a href="{{ d.url }}" target="_blank" rel="noopener noreferrer">primary source</a>{% endif %}
   {% if publish %}· published
-    {% if publish.status == "posted" %}<a class="pill ok" href="{{ publish.tweet_url }}" target="_blank" rel="noopener noreferrer">posted{% if publish.posted_at %} {{ publish.posted_at[:16] }}{% endif %}</a>
+    {% if publish.status == "posted" %}<a class="pill ok" href="{{ publish.tweet_url }}" target="_blank" rel="noopener noreferrer">posted{% if publish.posted_at %} {{ publish.posted_at|localtime }}{% endif %}</a>
     {% elif publish.status == "partial" %}<span class="pill fail">partial thread</span>{% if publish.tweet_url %} <a href="{{ publish.tweet_url }}" target="_blank" rel="noopener noreferrer">first post</a>{% endif %} <span class="meta">{{ publish.error }}</span>
     {% else %}<span class="pill {{ 'warn' if publish.status == 'claimed' else 'fail' }}">{{ publish.status }}</span>{% if publish.error %} <span class="meta">{{ publish.error }}</span>{% endif %}{% endif %}
   {% endif %}
 </p>
 {% if error %}<p class="flash over">{{ error }}</p>{% endif %}
 {% if revised %}<p class="flash">Revised. Read the new text below; claims whose text changed lost their verdict; supported claims that stayed the same kept theirs (run <code>python run_verify.py</code> or wait for the scheduler).</p>{% endif %}
+{% if redrawn %}{% set kept = image_grades | selectattr("kept") | first %}<p class="flash">Picture redrawn from the same spec{% if kept %}, kept at {{ kept.score }}/10 after {{ image_grades|length }} render{{ "s" if image_grades|length != 1 else "" }}{% endif %}. The text, the numbers and the verdicts are unchanged.</p>{% endif %}
 {% if d.rejection_reason %}<p class="flash over">Hard-rule failure: {{ d.rejection_reason }}</p>{% endif %}
 {% if d.rationale %}<p><strong>Scorer rationale:</strong> {{ d.rationale }}</p>{% endif %}
 {% if d.suggested_angle %}<p><strong>Suggested angle:</strong> {{ d.suggested_angle }}</p>{% endif %}
@@ -88,7 +89,7 @@
     {% for cell in row %}
       {% set k = table_checks.get((r, loop.index0)) %}
       <td class="cell {% if k %}{{ 'shown' if k.shown else k.verdict }}{% elif cell %}unchecked{% endif %}">
-        {% if d.status == "pending" %}<input type="text" name="cell_{{ r }}_{{ loop.index0 }}" value="{{ cell or "" }}" maxlength="60" size="{{ [cell|length, 8]|max }}">{% else %}{{ cell or "" }}{% endif %}
+        {% if d.editable %}<input type="text" name="cell_{{ r }}_{{ loop.index0 }}" value="{{ cell or "" }}" maxlength="60" size="{{ [cell|length, 8]|max }}">{% else %}{{ cell or "" }}{% endif %}
         {% if k %}<div class="meta">{{ k.label }}{% if k.model == "human" %} (typed in){% endif %}{% if k.source_url %} · <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">source</a>{% endif %}{% if k.trustable %} · <button type="submit" class="link" formaction="/drafts/{{ d.id }}/trust" name="host" value="{{ k.host }}" title="Add {{ k.host }} to trusted_domains in verify/config.yaml and redraw the table">trust {{ k.host }}</button>{% endif %}</div>
         {% elif cell %}<div class="meta">not checked yet</div>{% endif %}
       </td>
@@ -97,7 +98,7 @@
   {% endfor %}
   </tbody>
 </table></div>
-{% if d.status == "pending" %}<p class="meta"><button type="submit">Save cells</button> Retype a cell to correct it or clear it to blank it. A cell you type counts as checked by you (no web call) and the picture is redrawn from the verdicts at once; headers, title and text stay as they are.</p>{% endif %}
+{% if d.editable %}<p class="meta"><button type="submit">Save cells</button> Retype a cell to correct it or clear it to blank it. Saving counts every cell you left standing that the fact-checker could not verify (or verified from an untrusted source) as checked by you, as well as the ones you changed — no web call — and the picture is redrawn from the verdicts at once; headers, title and text stay as they are. A contradicted cell still has to be corrected or its host trusted.</p>{% endif %}
 </form>
 {% if d.draft.table.note %}<p class="meta">{{ d.draft.table.note }}</p>{% endif %}
 {% endif %}
@@ -125,7 +126,7 @@
         {% if k.trustable %}· <form method="post" action="/drafts/{{ d.id }}/trust" class="inline"><input type="hidden" name="host" value="{{ k.host }}"><button type="submit" class="link" title="Add {{ k.host }} to trusted_domains in verify/config.yaml">trust {{ k.host }}</button></form>{% endif %}
         {% if k.quote %}<blockquote>{{ k.quote }}</blockquote>{% endif %}
         {% if k.note %}<div class="meta">{{ k.note }}</div>{% endif %}
-        <div class="meta">checked {{ k.checked_at }} by {{ k.model }}. Open the link and read the sentence before approving.</div>
+        <div class="meta">checked {{ k.checked_at|localtime }} by {{ k.model }}. Open the link and read the sentence before approving.</div>
       </div>
     {% else %}
       <div class="meta">not checked yet (run <code>python run_verify.py</code>)</div>
@@ -145,7 +146,12 @@
     <button>Approve</button>
     {% if contradicted %}<label><input type="checkbox" name="override" value="1"> approve anyway</label>{% endif %}
   </form>
-  <form class="inline" method="post" action="/drafts/{{ d.id }}/snooze"><button>Snooze 24h</button></form>
+  {% if d.status == "approved" and (not publish or publish.reopenable) %}
+  <form class="inline" method="post" action="/drafts/{{ d.id }}/reopen">
+    <input name="note" placeholder="why reopen (optional)">
+    <button>Reopen</button>
+  </form>
+  {% endif %}
   <form class="inline" method="post" action="/drafts/{{ d.id }}/reject">
     <input name="note" placeholder="reason (optional)">
     <select name="category" title="why (optional)">
@@ -200,7 +206,7 @@
   <tbody>
   {% for x in decisions %}
     <tr>
-      <td class="meta">{{ x.created_at }}</td>
+      <td class="meta">{{ x.created_at|localtime }}</td>
       <td>{{ x.action }}</td>
       <td>{{ x.category }}</td>
       <td>{{ x.note }}</td>

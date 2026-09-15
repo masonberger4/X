@@ -178,8 +178,11 @@ def test_redraw_button_remakes_a_chart(conn, db_file):
     path.write_bytes(b"stale")
     client = TestClient(app, follow_redirects=False)
     r = client.post(f"/drafts/{did}/image/redraw")
-    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}"
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{did}?redrawn=1"
     assert path.read_bytes() == old and store.get_draft(conn, did).draft.chart == chart
+    # the redirect lands on a page that says the redraw happened
+    assert "Picture redrawn from the same spec" in client.get(r.headers["location"]).text
+    assert "Picture redrawn" not in client.get(f"/drafts/{did}").text
     # nothing to redraw: refused with a message, not an error page
     seed_item(conn, "i2")
     plain = store.insert_draft(conn, item_id="i2", model="m", draft=_draft())

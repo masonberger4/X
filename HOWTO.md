@@ -130,6 +130,7 @@ source only when it is due, and score only scores what is new.
    ```
    python run_draft.py --dry-run                 # show what would be drafted
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
+   python run_draft.py --since-hours 24          # only stories from the last day
    python run_draft.py --retry-failed            # try again on stories whose draft failed
    python run_draft.py --retag                   # apply @handles and #tags to current drafts
    ```
@@ -211,6 +212,21 @@ source only when it is due, and score only scores what is new.
    a company that is not configured is drawn exactly as the drafter wrote
    it, and a private company listed without a ticker gets its logo only. The
    table header is drawn as a rounded navy bar with a shadow.
+   A picture's footnote (`note` in the chart or table spec) is a caption the
+   reader sees under the card: the n, the design, an as-of date, a caveat. A
+   caption that instructs you instead ("verify each cell against current FDA
+   labels before posting", "TODO") is a hard rule failure, so the drafter
+   retries. To clean up drafts made before that rule existed, run
+
+       python run_scrub_notes.py --dry-run
+
+   to list them, then without the flag to blank those captions and redraw the
+   pictures. It touches nothing else: the numbers, rows and post text stay as
+   they are, each change is logged as an edit on the draft, and a draft that
+   is already posted is left alone. By default it covers pending and
+   approved drafts; `--status STATUS` (repeatable) narrows it, `-v` shows per
+   draft detail.
+
    The other kind of picture is a comparison table (a competitor landscape,
    a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
    first column naming the company, asset or trial. Unlike a chart its cells
@@ -228,6 +244,7 @@ source only when it is due, and score only scores what is new.
    python run_verify.py --dry-run     # list the claims, no calls
    python run_verify.py --redo        # check again, replacing old verdicts
    python run_verify.py --draft 12    # one draft
+   python run_verify.py --limit 3     # at most 3 drafts this run
    ```
    The same run then handles comparison tables: every cell that is not
    verbatim in the source article is one more web-search call (the row label
@@ -290,8 +307,9 @@ source only when it is due, and score only scores what is new.
    Then open http://localhost:8000/queue in a browser (the front page is the
    dashboard; part 8 explains it). `python run_queue.py` still opens the
    approval page on its own if that is all you want. For each draft: approve,
-   revise, reject or snooze. Press Ctrl+C in the window to stop the server
-   when done.
+   revise or reject. An approve is not final: "Reopen" on the approved page
+   brings a draft that has not gone out yet back here as pending. Press Ctrl+C
+   in the window to stop the server when done.
    To change a post, do not retype it: write what should change in the
    "what should change?" box (on the list next to each draft, or under
    "Revise" on the draft's page) and press Revise. The drafter rewrites the
@@ -319,6 +337,14 @@ source only when it is due, and score only scores what is new.
    the picture from the same spec: a chart is rendered again through the
    grader loop, a table is redrawn from the cell verdicts already stored.
    No web call, no text change, and the table is kept (unlike "Drop image").
+   It runs while you wait, and the grader loop can take up to a minute, so a
+   bar at the top of the page says it is working and the button greys out
+   until the page reloads. When it is done the page says the picture was
+   redrawn and what the grader kept it at; a table that is still waiting on a
+   cell, or held back by a contradicted one, says that instead (the picture is
+   only redrawn once every cell has a verdict and none is contradicted). The
+   picture on the page is always the file on disk, never a copy your browser
+   kept from before the redraw.
    A table shows under "Table cells" with each cell's verdict and source link
    (green: kept; amber: blanked in the picture; red: contradicted). The
    picture appears once every cell is checked and none is contradicted; a
@@ -328,10 +354,15 @@ source only when it is due, and score only scores what is new.
    the text alone and records why, so a picture is never attached after you
    stopped looking. A Revise keeps the verdict of every cell whose row label,
    column and text did not change.
-   On a pending draft every cell is a text box: retype a cell to correct it,
-   clear it to blank it in the picture, then press "Save cells". A cell you
-   typed counts as checked by you (its verdict says "supported (typed in)",
-   no web call), every cell you left alone keeps its verdict, and the picture
+   While a draft still awaits your decision (pending, which a reopened draft
+   is again) every cell is a text box: retype a cell to correct it,
+   clear it to blank it in the picture, then press "Save cells". Saving counts
+   as checking every cell by hand ("supported (typed in)", no web call): the
+   ones you changed, and the ones you left standing that the fact-checker
+   could not verify or verified from an untrusted source, which is also what
+   retyping a cell to exactly what was there already means. A cell already
+   supported from a trusted source keeps its own verdict and a contradicted
+   cell still has to be corrected (or its host trusted). The picture
    is redrawn at once through the same render-or-drop step as the verifier.
    Headers, title and the post text never change here; use Edit for the text.
    The history logs the edit with the number of cells changed.
@@ -574,7 +605,18 @@ to stop it. Four pages:
   shows a number box next to each waiting draft: number them 1, 2, 3 for the
   order the scheduled slots should post them and press "Save order". A
   draft without a number follows the numbered ones by score. The order is
-  kept on the draft (shown as #1, #2) until it posts.
+  kept on the draft (shown as #1, #2) until it posts. "Reopen" next to a
+  waiting draft takes it back off the list and makes it pending again, so you
+  can revise, edit or reject it; the order you saved for it is forgotten
+  rather than coming back the next time you approve it, and the box beside the
+  button puts your reason in the draft's history. It is refused for anything
+  already on X — posted, or a thread that stopped halfway — and for a draft a
+  publish run has just claimed, because that run will not look at the draft
+  again before it posts (the draft's own page says which); reopening cannot
+  unpost a tweet, so reject it instead if it should not run again. A draft
+  whose last attempt failed or was refused can be reopened, and its failed
+  schedule row goes with it, though the posts log keeps the history. The same
+  button is on the draft's own page.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
   halfway is never retried for you). Posting happens from the approved page,
@@ -616,7 +658,7 @@ to stop it. Four pages:
   `ops/config.yaml`): a backlog of drafts can take an hour or more, and each
   claim's verdict is saved the moment it lands, so stopping the run keeps
   every claim already checked and only the one in flight is redone next time.
-- **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
+- **Pending / Approved / Rejected / Failed / Voice report** — the
   approval pages from part 3. The Approved page is the waiting list for
   `run_publish.py`: each row says `waiting`, `posted` (a link to the tweet),
   `failed` or `partial thread`, and drafts already posted are hidden until you
@@ -769,3 +811,25 @@ attaches or skips the chart; `auto_publish_enabled` and
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
+
+### The clock you see
+
+Every time and date on a screen — the control panel, the approval queue, the
+digest, `run_ops.py status`, the health and feedback reports, the alert emails —
+is shown in one time zone, set by `timezone:` near the top of `config.yaml`. It
+ships as `America/Los_Angeles` (Seattle). To move it, edit that one line to
+another zone name (`America/New_York`, `Europe/London`, and so on) and restart
+whatever is running; nothing else changes.
+
+Two other files have their own `timezone:` line, and you should set all three to
+the same zone: `publish\config.yaml` (which decides what "9am" means for the
+posting slots) and `feedback\config.yaml` (which decides what "hour posted"
+means in the weekly report). Those two are about *behaviour*, not display, which
+is why they are separate.
+
+Behind the scenes nothing about the database moves: every timestamp is stored in
+UTC and only translated when it is printed for you. A few things stay in UTC on
+purpose, because they are filenames or keys rather than something to read: the
+backup files in `backups\` (`pipeline-<UTC stamp>.sqlite`), the run ids on the
+runs page, and the day a follower/metrics snapshot is filed under. Ages like
+"3.2h ago" are the same in any zone.

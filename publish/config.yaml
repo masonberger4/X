@@ -1,5 +1,5 @@
 # Publish-layer settings (step 3). This is NOT the root config.yaml.
-timezone: America/New_York
+timezone: America/Los_Angeles   # Seattle, WA; matches `timezone:` in the root config.yaml
 
 # Daily posting slots, local time (HH:MM). run_publish.py is meant to run from cron every
 # 15 minutes; a slot is "open" from its start until grace_minutes later, and it is used at

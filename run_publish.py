@@ -127,13 +127,6 @@ def choose(
     return pick_for_slot(approved, slot, policy), label, f"slot {label} open"
 
 
-def image_for(approved: Approved, cfg: dict) -> str | None:
-    """The PNG to attach to the first post, or None (no image, or media.attach_images false)."""
-    if not (cfg.get("media") or {}).get("attach_images", True):
-        return None
-    return approved.image_path or None
-
-
 def images_for(approved: Approved, cfg: dict) -> dict[int, list[tuple[str, str]]]:
     """Phase four: {post position: [(png path, alt), ...]} for every picture the draft
     carries, by the post each is anchored to. Empty when media.attach_images is false. A
@@ -147,6 +140,48 @@ def images_for(approved: Approved, cfg: dict) -> dict[int, list[tuple[str, str]]
     for path, alt, anchor in images:
         out.setdefault(max(1, int(anchor)), []).append((path, alt))
     return out
+
+
+def _finalize_or_log(
+    conn, draft_id: int, status: str, error: str, tweet_id: str | None, pos: int, total: int
+) -> None:
+    """A tweet is live on X but the write that was supposed to record it (record_post or
+    the final finish()) raised — disk error, database unreachable. The claim (claimed_at)
+    is already set, so this draft is already excluded from fetch_approved forever and can
+    never be double-posted; the only failure mode left is staying invisibly 'claimed'. Force
+    the schedule row to a terminal status the queue/panel already render ('posted' if this
+    was the last post, 'partial' otherwise) so a human can see and finish/clean it up. Never
+    lets the write failure escape from publish_one: if even this forced write fails, the row
+    stays 'claimed' and we log loudly for manual recovery, which is the least-bad outcome
+    under the no-double-post constraint."""
+    log.critical(
+        "draft %d: tweet %s posted for post %d/%d but recording it failed: %s. "
+        "Forcing schedule status=%s so it is never re-claimed; verify the posts table "
+        "for draft %d by hand.",
+        draft_id,
+        tweet_id,
+        pos,
+        total,
+        error,
+        status,
+        draft_id,
+    )
+    try:
+        conn.rollback()
+    except Exception:  # noqa: BLE001 - best effort only, never let this raise further
+        pass
+    try:
+        store.finish(conn, draft_id, status, f"post-record failure: {error}")
+    except Exception as exc2:  # noqa: BLE001 - logged, not propagated
+        log.critical(
+            "draft %d: could not even force schedule status=%s after a post-record "
+            "failure (%s); the row stays 'claimed' and needs manual recovery in the "
+            "schedule table. It is still excluded from fetch_approved, so it cannot be "
+            "double-posted.",
+            draft_id,
+            status,
+            exc2,
+        )
 
 
 def publish_one(
@@ -202,16 +237,21 @@ def publish_one(
                 exc,
             )
             return store.SCHED_PARTIAL
-        store.record_post(
-            conn,
-            draft_id=approved.draft_id,
-            text=text,
-            kind=kind,
-            position=pos,
-            slot=slot,
-            tweet_id=tweet_id,
-            posted_at=now,
-        )
+        try:
+            store.record_post(
+                conn,
+                draft_id=approved.draft_id,
+                text=text,
+                kind=kind,
+                position=pos,
+                slot=slot,
+                tweet_id=tweet_id,
+                posted_at=now,
+            )
+        except Exception as exc:  # noqa: BLE001 - the tweet is already live, see helper
+            status = store.SCHED_POSTED if pos == last else store.SCHED_PARTIAL
+            _finalize_or_log(conn, approved.draft_id, status, str(exc), tweet_id, pos, last)
+            return status
         log.info(
             "posted draft %d %s %d/%d tweet_id=%s",
             approved.draft_id,
@@ -221,7 +261,10 @@ def publish_one(
             tweet_id,
         )
         prev = tweet_id
-    store.finish(conn, approved.draft_id, store.SCHED_POSTED)
+    try:
+        store.finish(conn, approved.draft_id, store.SCHED_POSTED)
+    except Exception as exc:  # noqa: BLE001 - every tweet is already live, see helper
+        _finalize_or_log(conn, approved.draft_id, store.SCHED_POSTED, str(exc), prev, last, last)
     return store.SCHED_POSTED
 
 

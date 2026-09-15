@@ -25,6 +25,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+import timeutil
 from ops import alert, backup, health, lock, runner, store
 from ops.config import load_ops_config
 
@@ -180,7 +181,11 @@ def cmd_status(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         counts = store.table_counts(conn)
     finally:
         conn.close()
-    lines = [f"Pipeline status at {now.isoformat()}  (db: {db_path})", "", "Last run per step:"]
+    lines = [
+        f"Pipeline status at {timeutil.fmt_datetime(now)}  (db: {db_path})",
+        "",
+        "Last run per step:",
+    ]
     for step in runner.steps_from_config(cfg):
         r = last_runs.get(step.name)
         if r is None:

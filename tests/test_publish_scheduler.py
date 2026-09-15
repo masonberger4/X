@@ -16,7 +16,7 @@ from publish.scheduler import (
 )
 from publish.store import Approved
 
-NY = "America/New_York"
+LA = "America/Los_Angeles"
 SLOTS = ["08:30", "12:15"]
 
 
@@ -41,41 +41,41 @@ def test_config_loads_with_defaults():
 
 
 def test_next_slot_same_day_and_rollover():
-    now = datetime(2026, 6, 1, 9, 0, tzinfo=ZoneInfo(NY))
-    nxt = next_slot(now, SLOTS, NY)
+    now = datetime(2026, 6, 1, 9, 0, tzinfo=ZoneInfo(LA))
+    nxt = next_slot(now, SLOTS, LA)
     assert (nxt.hour, nxt.minute, nxt.day) == (12, 15, 1)
-    late = datetime(2026, 6, 1, 13, 0, tzinfo=ZoneInfo(NY))
-    nxt = next_slot(late, SLOTS, NY)
+    late = datetime(2026, 6, 1, 13, 0, tzinfo=ZoneInfo(LA))
+    nxt = next_slot(late, SLOTS, LA)
     assert (nxt.hour, nxt.minute, nxt.day) == (8, 30, 2)
 
 
 def test_next_slot_across_spring_forward():
-    # 2026-03-08 02:00 EST -> 03:00 EDT. 01:30 EST is 06:30 UTC; 08:30 EDT is 12:30 UTC.
-    now = datetime(2026, 3, 8, 6, 30, tzinfo=UTC)
-    nxt = next_slot(now, SLOTS, NY)
-    assert nxt.strftime("%H:%M %Z") == "08:30 EDT"
+    # 2026-03-08 02:00 PST -> 03:00 PDT. 01:30 PST is 09:30 UTC; 08:30 PDT is 15:30 UTC.
+    now = datetime(2026, 3, 8, 9, 30, tzinfo=UTC)
+    nxt = next_slot(now, SLOTS, LA)
+    assert nxt.strftime("%H:%M %Z") == "08:30 PDT"
     assert nxt - now == timedelta(hours=6)  # only 6 real hours, not 7
 
 
 def test_next_slot_across_fall_back():
-    # 2026-11-01 02:00 EDT -> 01:00 EST. 23:00 EDT on Oct 31 is 03:00 UTC Nov 1.
-    now = datetime(2026, 11, 1, 3, 0, tzinfo=UTC)
-    nxt = next_slot(now, SLOTS, NY)
-    assert nxt.strftime("%Y-%m-%d %H:%M %Z") == "2026-11-01 08:30 EST"
+    # 2026-11-01 02:00 PDT -> 01:00 PST. 23:00 PDT on Oct 31 is 06:00 UTC Nov 1.
+    now = datetime(2026, 11, 1, 6, 0, tzinfo=UTC)
+    nxt = next_slot(now, SLOTS, LA)
+    assert nxt.strftime("%Y-%m-%d %H:%M %Z") == "2026-11-01 08:30 PST"
     assert nxt - now == timedelta(hours=10, minutes=30)  # 9.5h on the wall clock + 1h
 
 
 def test_next_slot_requires_aware_datetime():
     with pytest.raises(ValueError):
-        next_slot(datetime(2026, 1, 1, 9), SLOTS, NY)
+        next_slot(datetime(2026, 1, 1, 9), SLOTS, LA)
 
 
 def test_open_slot_window():
-    zone = ZoneInfo(NY)
-    assert open_slot(datetime(2026, 6, 1, 8, 29, tzinfo=zone), SLOTS, NY, 20) is None
-    s = open_slot(datetime(2026, 6, 1, 8, 44, tzinfo=zone), SLOTS, NY, 20)
+    zone = ZoneInfo(LA)
+    assert open_slot(datetime(2026, 6, 1, 8, 29, tzinfo=zone), SLOTS, LA, 20) is None
+    s = open_slot(datetime(2026, 6, 1, 8, 44, tzinfo=zone), SLOTS, LA, 20)
     assert s is not None and slot_label(s) == "2026-06-01 08:30"
-    assert open_slot(datetime(2026, 6, 1, 8, 50, tzinfo=zone), SLOTS, NY, 20) is None
+    assert open_slot(datetime(2026, 6, 1, 8, 50, tzinfo=zone), SLOTS, LA, 20) is None
 
 
 def test_is_breaking_rules():
@@ -88,7 +88,7 @@ def test_is_breaking_rules():
 
 
 def test_pick_prefers_breaking_then_score_then_oldest():
-    slot = datetime(2026, 6, 1, 8, 30, tzinfo=ZoneInfo(NY))
+    slot = datetime(2026, 6, 1, 8, 30, tzinfo=ZoneInfo(LA))
     pol = Policy()
     a = approved(1, score=40, approved_at="2026-05-30")
     b = approved(2, score=45, approved_at="2026-05-31")
@@ -101,7 +101,7 @@ def test_pick_prefers_breaking_then_score_then_oldest():
 
 
 def test_pick_respects_daily_cap_and_min_gap():
-    slot = datetime(2026, 6, 1, 12, 15, tzinfo=ZoneInfo(NY))
+    slot = datetime(2026, 6, 1, 12, 15, tzinfo=ZoneInfo(LA))
     assert pick_for_slot([approved()], slot, Policy(max_posts_per_day=2, posted_today=2)) is None
     recent = Policy(min_gap_minutes=90, last_posted_at=slot - timedelta(minutes=30))
     assert pick_for_slot([approved()], slot, recent) is None

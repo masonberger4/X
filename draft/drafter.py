@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 import claude_cli
+from draft.chart import note_problems
 from draft.prompt import (
     PREPRINT_LABEL,
     ClaimProblem,
@@ -50,6 +51,7 @@ BACKOFF_BASE_SECONDS = 2.0
 MEDICAL_ADVICE_PATTERNS = (
     r"\bask your (doctor|oncologist|physician)\b",
     r"\btalk to your (doctor|oncologist|physician)\b",
+    r"\b(discuss|consult)(\s+(this|it))?\s+with\s+your\s+(doctor|oncologist|physician)\b",
     r"\bpatients should\b",
     r"\byou should (take|try|switch|stop|start|ask|consider)\b",
     r"\bwe recommend\b",
@@ -186,7 +188,17 @@ def parse_json_response(text: str) -> object:
 
 
 def _url_in(text: str, url: str) -> bool:
-    return url in text
+    """True if `url` appears in `text` as a whole URL: it must be followed by the end of
+    the string, whitespace, or a closing/terminal punctuation character that cannot be
+    part of a URL, not by more URL-shaped characters (so ".../study-2" does not satisfy a
+    required ".../study")."""
+    idx = text.find(url)
+    while idx != -1:
+        end = idx + len(url)
+        if end >= len(text) or text[end] in " \t\r\n.,;:!?)]}\"'":
+            return True
+        idx = text.find(url, idx + 1)
+    return False
 
 
 def numbers_in(text: str) -> list[str]:
@@ -200,13 +212,20 @@ def numbers_in(text: str) -> list[str]:
 
 
 def _number_in_source(num: str, source_text: str) -> bool:
-    """A number counts as verbatim if it (and its % sign, if any) appears in the source text."""
+    """A number counts as verbatim if it (and its % sign, if any) appears in the source text
+    as that whole number, not as a digit run inside a larger number (so '12' does not match
+    inside '312')."""
     bare = num.rstrip("%")
-    if bare not in source_text:
+    if not re.search(r"(?<!\d)" + re.escape(bare) + r"(?!\d)", source_text):
         return False
     if num.endswith("%"):
-        # Accept "88%", "88 %", "88 percent"
-        return bool(re.search(re.escape(bare) + r"\s?(%|percent)", source_text))
+        # Accept "88%", "88 %", "88 percent" (but not "88 percentile")
+        return bool(
+            re.search(
+                r"(?<!\d)" + re.escape(bare) + r"(?!\d)\s?(%|percent\b)",
+                source_text,
+            )
+        )
     return True
 
 
@@ -291,7 +310,10 @@ def check_hard_rules(
                 f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
         problems += [f"{label} {p}" for p in tag_problems(post, handles, companies)]
+    if draft.chart is not None:
+        problems += note_problems(draft.chart.note, "chart note")
     if draft.table is not None:
+        problems += note_problems(draft.table.note, "table note")
         for text in [draft.table.title, draft.table.note, *(c for _, _, c in draft.table.cells())]:
             if _ADVICE_RE.search(text):
                 problems.append(f"table reads as medical advice: {text!r}")
@@ -471,11 +493,33 @@ def revise_item(
     )
 
 
+def _anchor_word(index: int, n_posts: int) -> str:
+    """Best-effort inverse of Format.resolve_anchors: turn a resolved 1-based post index
+    (against a draft's own thread length) back into the anchor word that produced it, so a
+    picture anchored to the last post is still "last" (not a fixed post number) once the
+    thread is revised to a different length."""
+    if n_posts <= 1 or index <= 1:
+        return "first"
+    if index >= n_posts:
+        return "last"
+    return "middle"
+
+
 def format_of(draft: Draft) -> Format | None:
     """The Format a stored draft was written to (phase four), so a revision keeps its shape
-    and visual count. None for a pre-phase-four thread with one visual (the default)."""
+    and visual count. None for a pre-phase-four thread with one visual (the default).
+
+    `Draft.anchors` holds the resolved 1-based post indices (against the draft's own thread
+    length), not the anchor words `Format.anchors` needs; `_anchor_word` re-derives each
+    word from its resolved index and the draft's current post count so that re-resolving
+    against a revision of a different length preserves where the author meant the picture
+    to sit (e.g. "last") rather than collapsing it back to post 1."""
     n = draft.wanted_visuals if draft.wanted_visuals is not None else 1
-    anchors = ("first",) * n  # the exact words are not stored; positions are re-resolved
+    n_posts = len(draft.thread)
+    if len(draft.anchors) == n:
+        anchors = tuple(_anchor_word(a, n_posts) for a in draft.anchors)
+    else:
+        anchors = ("first",) * n
     if draft.shape == "thread" and n == 1 and draft.max_chars == MAX_POST_CHARS:
         return None
     if draft.shape == "thread":

@@ -11,8 +11,9 @@ Routes:
                               and from every claim step 2b contradicted (or could not
                               verify); the draft stays pending, old claim checks are dropped
   POST /drafts/{id}/reject
-  POST /drafts/{id}/snooze    hides the draft for 24h
-  GET  /status/{status}       approved / rejected / snoozed / failed lists
+  POST /drafts/{id}/reopen    sends an approved draft back to pending, unless step 3 has
+                              already claimed or posted it
+  GET  /status/{status}       approved / rejected / failed lists
   GET  /voice                 voice report (step 7) from live data; ?weeks=N
 
 Step 7: the edit and reject forms take an optional category (why the draft was edited or
@@ -37,7 +38,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from approval_queue import images, store
+import timeutil
+from approval_queue import images, publishing, store
 from draft import drafter
 from draft.chart import ChartError, alt_text, validate_table
 from draft.examples import parse_decision_text
@@ -48,27 +50,38 @@ from draft.voice_report import build_report
 from verify import render as verify_render
 from verify import settings as verify_settings
 from verify import store as verify_store
+from verify import tables as verify_tables
 from verify.autorevise import (  # noqa: F401  (re-exported)
     auto_rounds_used,
     cell_problems,
     claim_problems,
 )
-from verify.verifier import trusted_hosts
+from verify.verifier import CONTRADICTED, trusted_hosts
 
 log = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).with_name("templates")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["tweet_length"] = tweet_length
+# `|localtime` / `|localdate` render a stored UTC timestamp in the display zone from
+# the root config.yaml. Storage stays UTC; only what the reviewer reads is converted.
+timeutil.install_jinja_filters(templates.env)
 templates.env.globals["MAX_POST_CHARS"] = MAX_POST_CHARS
 templates.env.globals["DECISION_CATEGORIES"] = store.DECISION_CATEGORIES
-# The shared nav (base.html) shows the control-panel links only when the queue is
-# served as part of it (panel/app.py sets this True); run_queue.py serves the queue alone.
-templates.env.globals["HAS_PANEL"] = False
-# The panel replaces these with live lookups (panel/app.py); alone, the queue shows no
-# run buttons, so nothing is ever in flight and nothing can post.
-templates.env.globals["current_run"] = lambda: None
-templates.env.globals["publish_live"] = lambda: False
+
+
+def install_standalone_globals() -> None:
+    """The template globals run_queue.py serves the queue with. The shared nav (base.html)
+    shows the control-panel links only when the panel hosts the queue, and alone the queue
+    shows no run buttons, so nothing is ever in flight and nothing can post. panel/app.py
+    overwrites all three on this same environment when it adopts the queue's routes, which
+    is process-wide; a test that wants the standalone pages calls this to put them back."""
+    templates.env.globals["HAS_PANEL"] = False
+    templates.env.globals["current_run"] = lambda: None
+    templates.env.globals["publish_live"] = lambda: False
+
+
+install_standalone_globals()
 
 app = FastAPI(title="Approval queue")
 
@@ -161,7 +174,7 @@ def root() -> RedirectResponse:
 
 
 @app.get("/queue", response_class=HTMLResponse)
-def index(request: Request, conn: Conn):
+def index(request: Request, conn: Conn, notice: str = ""):
     drafts = store.list_drafts(conn, store.STATUS_PENDING)
     return templates.TemplateResponse(
         request,
@@ -173,6 +186,7 @@ def index(request: Request, conn: Conn):
             "publish": {},
             "hidden_posted": 0,
             "show_posted": False,
+            "notice": notice,
         },
     )
 
@@ -225,8 +239,17 @@ def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
 
 
 @app.get("/drafts/{draft_id}", response_class=HTMLResponse)
-def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised: int = 0):
-    return _render_detail(request, conn, draft_id, error=error, revised=bool(revised))
+def detail(
+    draft_id: int,
+    request: Request,
+    conn: Conn,
+    error: str = "",
+    revised: int = 0,
+    redrawn: int = 0,
+):
+    return _render_detail(
+        request, conn, draft_id, error=error, revised=bool(revised), redrawn=bool(redrawn)
+    )
 
 
 def _render_detail(
@@ -236,6 +259,7 @@ def _render_detail(
     *,
     error: str = "",
     revised: bool = False,
+    redrawn: bool = False,
     edit_form: dict[str, str] | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
@@ -289,6 +313,7 @@ def _render_detail(
             "auto_rounds": auto_rounds_used(conn, draft_id),
             "error": error,
             "revised": revised,
+            "redrawn": redrawn,
         },
         status_code=status_code,
     )
@@ -315,8 +340,11 @@ def voice(request: Request, conn: Conn, weeks: int | None = None):
     return templates.TemplateResponse(request, "voice.html", {"r": report, "weeks": weeks})
 
 
-def _redirect_home() -> RedirectResponse:
-    return RedirectResponse("/queue", status_code=303)
+def _redirect_home(*, notice: str = "") -> RedirectResponse:
+    url = "/queue"
+    if notice:
+        url += f"?notice={quote(notice)}"
+    return RedirectResponse(url, status_code=303)
 
 
 @app.post("/drafts/{draft_id}/approve")
@@ -334,6 +362,7 @@ async def approve(draft_id: int, request: Request, conn: Conn):
     row = store.get_draft(conn, draft_id)
     if row is None:
         raise HTTPException(404, "no such draft")
+    notice = ""
     if row.draft.table is not None and store.resolve_image(row.image_path) is None:
         # The table's cells were never all verified (or one was contradicted and never
         # fixed), so its picture must never be attached after the human has stopped looking:
@@ -346,9 +375,10 @@ async def approve(draft_id: int, request: Request, conn: Conn):
         )
         store.drop_table(conn, draft_id, why)
         log.info("draft %d: unverified table dropped at approval", draft_id)
+        notice = f"Table dropped: {why}."
     store.approve(conn, draft_id, note=_note(form))
     log.info("draft %d approved%s", draft_id, " (override)" if form.get("override") else "")
-    return _redirect_home()
+    return _redirect_home(notice=notice)
 
 
 def _edit_problem(thread: list[str]) -> str | None:
@@ -479,12 +509,16 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     return await run_in_threadpool(work)
 
 
-def _detail_redirect(draft_id: int, *, error: str = "", revised: bool = False) -> RedirectResponse:
+def _detail_redirect(
+    draft_id: int, *, error: str = "", revised: bool = False, redrawn: bool = False
+) -> RedirectResponse:
     url = f"/drafts/{draft_id}"
     if error:
         url += f"?error={quote(error)}"
     elif revised:
         url += "?revised=1"
+    elif redrawn:
+        url += "?redrawn=1"
     return RedirectResponse(url, status_code=303)
 
 
@@ -576,12 +610,15 @@ async def redraw_image(draft_id: int, conn: Conn):
             hosts = trusted_hosts(cfg, verify_render.root_config())
             decision = verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
             log.info("draft %d: table redrawn by the reviewer (%s)", draft_id, decision.status)
+            # Only a RENDER decision draws: pending, blocked and dropped tables leave the
+            # picture alone, and the page's own flashes say why. Do not claim a redraw then.
+            return _detail_redirect(draft_id, redrawn=decision.status == verify_tables.RENDER)
         else:
             path = images.attach_chart(conn, draft_id, row.draft.chart, source_url=row.url)
             log.info("draft %d: chart redrawn by the reviewer -> %s", draft_id, path)
             if path is None:
                 return _detail_redirect(draft_id, error="the chart could not be rendered")
-        return _detail_redirect(draft_id)
+        return _detail_redirect(draft_id, redrawn=True)
 
     return await run_in_threadpool(work)
 
@@ -611,13 +648,34 @@ async def trust_source(draft_id: int, request: Request, conn: Conn):
             "added to trusted_domains" if added else "already trusted",
             changed,
         )
-        if row.draft.table is not None and row.status == "pending":
+        if row.draft.table is not None and row.editable:
             cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
             hosts = trusted_hosts(cfg, verify_render.root_config()) | {host}
             verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
         return _detail_redirect(draft_id)
 
     return await run_in_threadpool(work)
+
+
+def _vouched_cells(table, changed, checks) -> list[tuple[int, int]]:
+    """The cells of a saved grid the reviewer vouches for without changing their text: a
+    non-empty cell the fact-checker could not verify, or verified from a source that is not
+    trusted, so it would be blanked in the picture. Saving the form is the reviewer saying
+    the grid is right, which is also what retyping a cell to exactly what was there already
+    means — that edit leaves no diff, so `changed` never sees it. A contradicted cell is
+    never vouched for: it has to be corrected (or the host trusted) before the picture is
+    drawn."""
+    done = set(changed)
+    by_pos = {(k.row, k.col): k for k in checks}
+    out: list[tuple[int, int]] = []
+    for r, row in enumerate(table.rows):
+        for c, cell in enumerate(row):
+            if (r, c) in done or not (cell or "").strip():
+                continue
+            k = by_pos.get((r, c))
+            if k is None or (not k.shown and k.verdict != CONTRADICTED):
+                out.append((r, c))
+    return out
 
 
 @app.post("/drafts/{draft_id}/table")
@@ -636,8 +694,10 @@ async def edit_table(draft_id: int, request: Request, conn: Conn):
             raise HTTPException(404, "no such draft")
         if row.draft.table is None:
             return _detail_redirect(draft_id, error="this draft has no table")
-        if row.status != store.STATUS_PENDING:
-            return _detail_redirect(draft_id, error="only a pending draft's table can be edited")
+        if not row.editable:
+            return _detail_redirect(
+                draft_id, error="only a draft still awaiting a decision can have its table edited"
+            )
         old = row.draft.table
         rows = [
             [form.get(f"cell_{r}_{c}", "") for c in range(len(old.columns))]
@@ -656,11 +716,14 @@ async def edit_table(draft_id: int, request: Request, conn: Conn):
             return _detail_redirect(draft_id, error="; ".join(problems))
         _, new, changed = store.edit_table(conn, draft_id, rows)
         verify_store.carry_over_table_checks(conn, draft_id, old, new)
-        recorded = verify_store.mark_cells_human(conn, draft_id, new, changed)
+        vouched = _vouched_cells(new, changed, verify_store.table_checks_for_draft(conn, draft_id))
+        recorded = verify_store.mark_cells_human(conn, draft_id, new, changed + vouched)
         log.info(
-            "draft %d: %d table cell(s) edited by the reviewer, %d recorded as human-supported",
+            "draft %d: %d table cell(s) edited by the reviewer, %d vouched for unchanged, "
+            "%d recorded as human-supported",
             draft_id,
             len(changed),
+            len(vouched),
             recorded,
         )
         fresh = store.get_draft(conn, draft_id)
@@ -684,12 +747,36 @@ async def reject(draft_id: int, request: Request, conn: Conn):
     return _redirect_home()
 
 
-@app.post("/drafts/{draft_id}/snooze")
-async def snooze(draft_id: int, request: Request, conn: Conn):
+@app.post("/drafts/{draft_id}/reopen")
+async def reopen(draft_id: int, request: Request, conn: Conn):
+    """Send an approved draft back to the pending queue so it can be edited or revised
+    again. Refused once step 3 has claimed it (run_publish.py never re-reads the status
+    after claiming) or already put it on X."""
     form = await read_form(request)
-    try:
-        store.snooze(conn, draft_id, note=_note(form))
-    except KeyError as exc:
-        raise HTTPException(404, "no such draft") from exc
-    log.info("draft %d snoozed for %dh", draft_id, store.SNOOZE_HOURS)
-    return _redirect_home()
+
+    def work() -> RedirectResponse:
+        row = store.get_draft(conn, draft_id)
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        if row.status != store.STATUS_APPROVED:
+            return _detail_redirect(
+                draft_id, error=f"only an approved draft can be reopened (this one is {row.status})"
+            )
+        info = store.publish_states(conn, [draft_id]).get(draft_id)
+        blocked = publishing.block_reason(conn, draft_id, info)
+        if blocked:
+            return _detail_redirect(draft_id, error=blocked)
+        # The status goes first: a pending draft is invisible to fetch_approved, so no run
+        # can claim it while we let go of its schedule row. The other order would leave the
+        # row deleted and the draft still approved if this raised.
+        try:
+            store.reopen(conn, draft_id, note=_note(form))
+        except KeyError as exc:
+            raise HTTPException(404, "no such draft") from exc
+        released = publishing.forget(conn, draft_id)
+        log.info(
+            "draft %d reopened for review (%d schedule row(s) released)", draft_id, len(released)
+        )
+        return RedirectResponse("/status/approved", status_code=303)
+
+    return await run_in_threadpool(work)

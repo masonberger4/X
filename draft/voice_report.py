@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import timeutil
 from draft.examples import (
     ACTION_EDIT,
     ACTION_REJECT,
@@ -95,7 +96,6 @@ class VoiceReport:
     approved_unedited: int
     edited: int
     rejected: int
-    snoozed: int
     failed: int
     edit_rate: float | None
     by_source: list[tuple[str, int, int, int]] = field(default_factory=list)
@@ -351,7 +351,6 @@ def build_report(
         1 for d, s in status_of.items() if s == "approved" and d not in edited_draft_ids
     )
     rejected = sum(1 for s in status_of.values() if s == "rejected")
-    snoozed = sum(1 for s in status_of.values() if s == "snoozed")
     failed = sum(1 for s in status_of.values() if s == "failed")
     reviewed = approved_unedited + edited + rejected
     edit_rate = _rate(edited, reviewed)
@@ -429,7 +428,6 @@ def build_report(
         approved_unedited=approved_unedited,
         edited=edited,
         rejected=rejected,
-        snoozed=snoozed,
         failed=failed,
         edit_rate=edit_rate,
         by_source=by_source,
@@ -474,20 +472,19 @@ def render_markdown(report: VoiceReport) -> str:
     lines = [
         "# Voice report",
         "",
-        f"Window: {r.window_start} to {r.window_end}",
+        f"Window: {timeutil.fmt_datetime(r.window_start)} to {timeutil.fmt_datetime(r.window_end)}",
         "",
         SECTION_HEADINGS[0],
         "",
     ]
     lines += _table(
-        ["Drafts", "Approved unedited", "Edited", "Rejected", "Snoozed", "Failed", "Edit rate"],
+        ["Drafts", "Approved unedited", "Edited", "Rejected", "Failed", "Edit rate"],
         [
             [
                 r.drafts_total,
                 r.approved_unedited,
                 r.edited,
                 r.rejected,
-                r.snoozed,
                 r.failed,
                 _pct(r.edit_rate),
             ]
@@ -535,7 +532,9 @@ def render_markdown(report: VoiceReport) -> str:
     lines += ["", SECTION_HEADINGS[6], ""]
     if r.top_pairs:
         for i, e in enumerate(r.top_pairs, 1):
-            lines.append(f"### {i}. {e.source or '?'} · {e.created_at[:10]} · {e.why}")
+            lines.append(
+                f"### {i}. {e.source or '?'} · {timeutil.fmt_date(e.created_at)} · {e.why}"
+            )
             lines.append("")
             lines.append("Before:")
             lines.append("")

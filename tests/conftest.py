@@ -149,3 +149,17 @@ def conn(db_file):
     c = store.connect(db_file)
     yield c
     c.close()
+
+
+@pytest.fixture(autouse=True)
+def _queue_template_globals():
+    """Importing panel.app installs HAS_PANEL and friends on the approval queue's own Jinja
+    environment for the rest of the process. Restore them around every test, so a test that
+    sets them (`install_standalone_globals`, or the panel's own values) cannot change how a
+    later test's queue pages render."""
+    from approval_queue import app as queue_app
+
+    before = dict(queue_app.templates.env.globals)
+    yield
+    queue_app.templates.env.globals.clear()
+    queue_app.templates.env.globals.update(before)

@@ -5,8 +5,10 @@ client.post_tweet is monkeypatched everywhere; tweepy is never imported.
 
 import json
 import logging
+import sqlite3
 import sys
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -18,9 +20,9 @@ from draft.schema import Draft
 from publish import client, store
 from tests.conftest import URL, seed_item
 
-NY = ZoneInfo("America/New_York")
-SLOT_TIME = datetime(2026, 6, 1, 8, 35, tzinfo=NY)  # inside the 08:30 slot window
-OFF_SLOT = datetime(2026, 6, 1, 10, 0, tzinfo=NY)
+LA = ZoneInfo("America/Los_Angeles")
+SLOT_TIME = datetime(2026, 6, 1, 8, 35, tzinfo=LA)  # inside the 08:30 slot window
+OFF_SLOT = datetime(2026, 6, 1, 10, 0, tzinfo=LA)
 
 
 THREAD3 = [f"one {URL}", "two", f"three {URL}"]
@@ -76,7 +78,7 @@ def keep_failed(tmp_path):
     """--config args for a publish config with automatic release of failed claims off."""
     cfg = tmp_path / "publish.yaml"
     cfg.write_text(
-        "timezone: America/New_York\nslots: ['08:30', '12:15']\n"
+        "timezone: America/Los_Angeles\nslots: ['08:30', '12:15']\n"
         "retry:\n  auto_release_failed: false\n"
     )
     return ["--config", str(cfg)]
@@ -87,7 +89,7 @@ def slotted(tmp_path):
     """--config args for a publish config with the two classic slots (the shipped file
     is continuous mode, `slots: []`)."""
     cfg = tmp_path / "slotted.yaml"
-    cfg.write_text("timezone: America/New_York\nslots: ['08:30', '12:15']\n")
+    cfg.write_text("timezone: America/Los_Angeles\nslots: ['08:30', '12:15']\n")
     return ["--config", str(cfg)]
 
 
@@ -176,7 +178,7 @@ def test_no_slots_means_continuous_mode(conn, fake_x, monkeypatch, tmp_path, cap
     the next run is held by the minimum gap, and a run after the gap posts the next one."""
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     cfg = tmp_path / "publish.yaml"
-    cfg.write_text("timezone: America/New_York\nslots: []\nmin_gap_minutes: 90\n")
+    cfg.write_text("timezone: America/Los_Angeles\nslots: []\nmin_gap_minutes: 90\n")
     args = ["--config", str(cfg), "--live"]
     seed_draft(conn, "a")
     seed_draft(conn, "b")
@@ -226,7 +228,7 @@ def test_daily_cap(conn, fake_x, monkeypatch):
     monkeypatch.setattr(run_publish, "load_publish_config", capped)
     for i in range(5):
         seed_draft(conn, f"d{i}", source="fda_press")
-    times = [datetime(2026, 6, 1, h, 0, tzinfo=NY) for h in (6, 9, 12, 15, 18)]
+    times = [datetime(2026, 6, 1, h, 0, tzinfo=LA) for h in (6, 9, 12, 15, 18)]
     for t in times:
         run_publish.main(["--live"], now=t)
     assert len(fake_x.calls) == 3  # max_posts_per_day
@@ -541,7 +543,9 @@ def test_attach_images_false_posts_text_only(conn, fake_x, monkeypatch, tmp_path
     did = seed_draft(conn, "a")
     seed_image(conn, did)
     cfg = tmp_path / "publish.yaml"
-    cfg.write_text("timezone: America/New_York\nslots: ['08:30']\nmedia:\n  attach_images: false\n")
+    cfg.write_text(
+        "timezone: America/Los_Angeles\nslots: ['08:30']\nmedia:\n  attach_images: false\n"
+    )
     assert run_publish.main(["--live", "--config", str(cfg)], now=SLOT_TIME) == 0
     assert fake_x.uploads == [] and [m for _, m in fake_x.media] == [None]
 
@@ -722,7 +726,7 @@ def test_auto_release_can_be_turned_off(conn, monkeypatch, tmp_path):
     monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     cfg = tmp_path / "publish.yaml"
-    cfg.write_text("timezone: America/New_York\nretry:\n  auto_release_failed: false\n")
+    cfg.write_text("timezone: America/Los_Angeles\nretry:\n  auto_release_failed: false\n")
     fx = FakeX(fail_at=1)
     monkeypatch.setattr(client, "post_tweet", fx)
     did = seed_draft(conn, "a")
@@ -755,6 +759,78 @@ def test_set_order_is_honoured_first_and_survives_a_second_open(conn, fake_x, mo
     assert store.get_schedule(conn, b)["status"] == "posted"
 
 
+def test_record_post_failure_after_a_real_post_marks_row_posted_not_claimed(
+    conn, monkeypatch, caplog
+):
+    """b006: record_post raises after the tweet is already live (disk error, DB
+    unreachable). The row must not stay stuck as 'claimed' forever — it lands in an
+    existing, visible terminal state — and the posts table still has the real tweet,
+    because the underlying write happened before the wrapper raised."""
+    fx = FakeX()
+    monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+
+    real_record_post = store.record_post
+
+    def flaky_record_post(*a, **kw):
+        real_record_post(*a, **kw)  # the write really happens
+        raise sqlite3.OperationalError("disk I/O error")  # then bookkeeping blows up
+
+    monkeypatch.setattr(store, "record_post", flaky_record_post)
+    with caplog.at_level(logging.CRITICAL):
+        assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
+    assert len(fx.calls) == 1  # the tweet really posted, exactly once
+    rows = store.list_posts(conn, did)
+    assert len(rows) == 1 and rows[0]["tweet_id"] == "tw1" and rows[0]["status"] == "posted"
+    row = store.get_schedule(conn, did)
+    assert row["status"] in ("posted", "partial")  # a visible, non-'claimed' terminal state
+    assert row["claimed_at"] is not None
+    assert "recording it failed" in caplog.text
+
+
+def test_stuck_row_is_never_returned_by_fetch_approved_again(conn, monkeypatch, caplog):
+    """The whole point: whatever terminal state the fix lands on, the draft is never
+    silently reconsidered and re-posted on a later run."""
+    fx = FakeX()
+    monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+
+    real_record_post = store.record_post
+
+    def flaky_record_post(*a, **kw):
+        real_record_post(*a, **kw)
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(store, "record_post", flaky_record_post)
+    with caplog.at_level(logging.CRITICAL):
+        assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
+    assert len(fx.calls) == 1
+
+    monkeypatch.setattr(store, "record_post", real_record_post)  # back to normal
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT + timedelta(hours=3)) == 0
+    assert len(fx.calls) == 1  # never reposted
+    assert [a.draft_id for a in store.fetch_approved(10, conn=conn)] == []
+    assert run_publish.main(["--release-failed"]) == 0
+    assert store.get_schedule(conn, did)["status"] in ("posted", "partial")  # not released
+
+
+def test_failure_before_any_post_still_takes_the_failed_path(conn, monkeypatch, keep_failed):
+    """Unaffected control: a failure with no tweet posted goes to the existing 'failed'
+    path (and remains eligible for --release-failed), not the new post-record handling."""
+    fx = FakeX(fail_at=1)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+    assert run_publish.main(["--live", "--now", *keep_failed], now=OFF_SLOT) == 2
+    assert store.list_posts(conn, did) == [] or store.list_posts(conn, did)[0]["tweet_id"] is None
+    assert store.get_schedule(conn, did)["status"] == "failed"
+
+
 def test_draft_flag_posts_only_that_draft_and_reports_a_missing_one(
     conn, fake_x, monkeypatch, caplog
 ):
@@ -768,3 +844,187 @@ def test_draft_flag_posts_only_that_draft_and_reports_a_missing_one(
         assert run_publish.main(["--live", "--now", "--draft", "999"], now=OFF_SLOT) == 2
     assert "not approved and waiting" in caplog.text
     assert len(fake_x.calls) == 3  # b's three thread posts and nothing else
+
+
+# --- release_unclaimed (the queue's reopen path) ---------------------------------------
+
+
+def test_release_unclaimed_deletes_only_the_unclaimed_rows_asked_for(conn):
+    """An unclaimed schedule row is the stale `position` a reopened draft would carry back
+    into the queue, so it is deleted and its id returned; another draft's row is untouched."""
+    a = seed_draft(conn, "a")
+    b = seed_draft(conn, "b")
+    assert store.set_order(conn, [a, b]) == 2
+    assert store.get_schedule(conn, a)["position"] == 1
+
+    assert store.release_unclaimed(conn, [a]) == [a]
+    assert store.get_schedule(conn, a) is None
+    assert store.get_schedule(conn, b)["position"] == 2  # other drafts untouched
+
+
+def test_release_unclaimed_never_touches_a_claimed_or_posted_row(conn, monkeypatch):
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    # partial thread: post 2 of a's thread fails
+    fx = FakeX(fail_at=2)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    partial = seed_draft(conn, "a", thread=THREAD3)
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 2
+    # posted one-post thread
+    fx2 = FakeX()
+    monkeypatch.setattr(client, "post_tweet", fx2)
+    posted = seed_draft(conn, "b")
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT + timedelta(hours=3)) == 0
+    # a claim that has not finished yet
+    claimed = seed_draft(conn, "c")
+    assert store.claim(conn, claimed) is True
+
+    assert store.get_schedule(conn, partial)["status"] == "partial"
+    assert store.get_schedule(conn, posted)["status"] == "posted"
+    assert store.release_unclaimed(conn, [partial, posted, claimed]) == []
+    for did, status in [(partial, "partial"), (posted, "posted"), (claimed, "claimed")]:
+        assert store.get_schedule(conn, did)["status"] == status
+
+
+def test_release_unclaimed_never_releases_a_draft_that_reached_x(conn):
+    """A posts row with a tweet_id means a thread is live; even an unclaimed schedule row
+    (hand-written, or left behind by a repair) stays put."""
+    did = seed_draft(conn, "a")
+    store.set_order(conn, [did])
+    store.record_post(
+        conn, draft_id=did, text="t", kind="root", position=1, slot=None, tweet_id="9"
+    )
+    assert store.release_unclaimed(conn, [did]) == []
+    assert store.get_schedule(conn, did) is not None
+    # a failed attempt (no tweet_id) is no reason to keep the row
+    other = seed_draft(conn, "b")
+    store.set_order(conn, [did, other])
+    store.record_post(
+        conn, draft_id=other, text="t", kind="root", position=1, slot=None, error="boom"
+    )
+    assert store.release_unclaimed(conn, [other]) == [other]
+
+
+def test_release_unclaimed_is_a_no_op_without_a_schedule_row(conn):
+    did = seed_draft(conn, "a")
+    other = seed_draft(conn, "b")
+    store.set_order(conn, [other])  # creates the schedule table, but no row for `did`
+    assert store.get_schedule(conn, did) is None
+    assert store.release_unclaimed(conn, [did]) == []
+    assert store.release_unclaimed(conn, [9999]) == []
+    assert store.get_schedule(conn, other) is not None
+
+
+def test_release_unclaimed_needs_the_schedule_table(conn):
+    """Before the first publish run there is no schedule table at all; the queue's reopen
+    route catches this rather than the store pretending the table is there."""
+    did = seed_draft(conn, "a")
+    with pytest.raises(sqlite3.OperationalError):
+        store.release_unclaimed(conn, [did])
+    assert store.release_unclaimed(conn, []) == []  # the empty list never reaches SQL
+
+
+def test_release_unclaimed_with_no_ids_deletes_nothing(conn):
+    """The dangerous edge case: an empty list must not degenerate into an unfiltered
+    DELETE the way an `if draft_ids` WHERE clause would."""
+    a = seed_draft(conn, "a")
+    b = seed_draft(conn, "b")
+    store.set_order(conn, [a, b])
+    assert store.release_unclaimed(conn, []) == []
+    assert store.get_schedule(conn, a) is not None and store.get_schedule(conn, b) is not None
+
+
+def test_release_unclaimed_and_release_failed_agree_on_live_threads(conn, monkeypatch, keep_failed):
+    """Both releases refuse anything that reached X and both return the ids they deleted;
+    they differ only in which rows they may take: release_failed takes a finished (claimed)
+    failure, release_unclaimed takes a row no run has claimed."""
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    fx = FakeX(fail_at=1)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    failed = seed_draft(conn, "a")
+    assert run_publish.main(["--live", "--now", *keep_failed], now=OFF_SLOT) == 2
+    assert store.get_schedule(conn, failed)["status"] == "failed"
+    waiting = seed_draft(conn, "b")
+    store.set_order(conn, [waiting])
+
+    # release_unclaimed will not take the claimed failure; release_failed will not take
+    # the row that was never claimed
+    assert store.release_unclaimed(conn, [failed, waiting]) == [waiting]
+    assert store.release_failed(conn, [failed]) == [failed]
+    assert store.get_schedule(conn, failed) is None
+    assert store.get_schedule(conn, waiting) is None
+
+
+def test_reopening_a_draft_hides_it_from_publish_and_drops_its_position(conn):
+    """The whole reason release_unclaimed exists: a reopened draft is not approved, and
+    re-approving it must not resurrect the place in the queue it had before."""
+    did = seed_draft(conn, "a")
+    store.set_order(conn, [did])
+    (a,) = store.fetch_approved(10, conn=conn)
+    assert a.draft_id == did and a.position == 1
+
+    qstore.reopen(conn, did)
+    assert store.release_unclaimed(conn, [did]) == [did]
+    assert store.fetch_approved(10, conn=conn) == []
+
+    qstore.approve(conn, did)
+    (again,) = store.fetch_approved(10, conn=conn)
+    assert again.draft_id == did and again.position is None
+
+
+def test_release_failed_with_an_empty_list_releases_nothing(conn):
+    """An empty list means no draft. It used to fall back to the no-filter branch and drop
+    every eligible row, which is the opposite of what a caller computing an empty list wants."""
+    a, b = seed_draft(conn, "a"), seed_draft(conn, "b")
+    store.set_order(conn, [a, b])
+    conn.execute(
+        "UPDATE schedule SET claimed_at = ?, status = ?",
+        ("2026-01-01T00:00:00+00:00", store.SCHED_FAILED),
+    )
+    conn.commit()
+    assert store.release_failed(conn, []) == []
+    assert store.get_schedule(conn, a) is not None and store.get_schedule(conn, b) is not None
+    assert store.release_failed(conn) == [a, b]  # None still means every eligible row
+
+
+def test_release_never_deletes_a_row_claimed_after_its_select(conn):
+    """The DELETE repeats the guard instead of trusting the ids the SELECT found, so a claim
+    taken between the two keeps its row — otherwise the publisher would post a thread whose
+    schedule row had been deleted under it, and nothing would stop it going out twice."""
+    did = seed_draft(conn, "a")
+    store.set_order(conn, [did])  # an unclaimed row, as "Set schedule" leaves it
+
+    class ClaimsAfterTheSelect:
+        """The real connection, except that a publish run claims the draft in the instant
+        between the release's SELECT and its DELETE."""
+
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def execute(self, sql, *args):
+            out = self._real.execute(sql, *args)
+            if sql.lstrip().startswith("SELECT draft_id FROM schedule"):
+                rows = out.fetchall()
+                self._real.execute(
+                    "UPDATE schedule SET claimed_at = ?, status = ? WHERE draft_id = ?",
+                    ("2026-01-01T00:00:00+00:00", store.SCHED_CLAIMED, did),
+                )
+                return SimpleNamespace(fetchall=lambda: rows)
+            return out
+
+    assert store.release_unclaimed(ClaimsAfterTheSelect(conn), [did]) == []
+    row = store.get_schedule(conn, did)
+    assert row is not None and row["claimed_at"] is not None
+
+
+def test_forget_is_empty_before_step_3_has_ever_run(tmp_path):
+    """The queue calls forget on a database that may have no schedule or posts table yet."""
+    bare = sqlite3.connect(tmp_path / "bare.db")
+    bare.row_factory = sqlite3.Row
+    assert store.forget(bare, [1]) == []
+    assert store.is_live(bare, 1) is False
+    bare.close()

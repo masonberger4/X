@@ -57,11 +57,14 @@ no fabricated numbers.
 
 ### 4. Approval queue (human step)
 Minimal web UI or Telegram/Slack bot showing draft, source, score.
-Actions: approve / edit / reject / snooze. ~10 min per day.
+Actions: approve / edit / reject, plus reopen for an approved draft that has not
+posted yet. ~10 min per day.
 Edit history is saved as voice-guide training data.
 
 ### 5. Publish (X API v2 via tweepy)
-2–3 daily slots (US morning/lunch) plus immediate post for breaking items
+2–3 daily slots in the configured time zone (`timezone:` in
+`publish/config.yaml`, shipped as US Pacific), aimed at the US working day,
+plus immediate post for breaking items
 (e.g. FDA approvals). Bio discloses AI assistance.
 
 ### 6. Feedback loop (weekly)

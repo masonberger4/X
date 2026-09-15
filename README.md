@@ -36,7 +36,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | every run's log (whichever page started it) and the checkboxes to run any enabled step; stop the one in progress |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue (its Revise box sends a draft back through the drafter with your note); the pending page has "Draft" and "Verify" buttons |
-| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), and when automatic publishing is on, when its next run is due |
+| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), "Reopen" to send a draft that has not gone out back to pending (`POST /drafts/{id}/reopen`; refused for a posted, partial or claimed draft), and when automatic publishing is on, when its next run is due |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
@@ -104,7 +104,8 @@ ruff check . && ruff format --check . && pytest
 ```
 
 Edit `config.yaml` to change feeds, PubMed queries, company list, keywords,
-cadences, the score threshold, or the scoring model.
+cadences, the score threshold, the scoring model, or `timezone:` (see
+[Display time zone](#display-time-zone)).
 
 ### Windows
 
@@ -229,6 +230,10 @@ would break "never fabricate numbers", so:
   `--only KEY`, `--force`, `--dry-run`. The pipeline itself fetches nothing
   and an unconfigured company is left as written. The header row is a
   rounded navy bar with a drop shadow and sheen;
+- a picture's footnote is a caption for the reader (n, design, as-of date), never
+  an instruction to the operator: `draft/chart.py:note_problems` fails such a caption
+  at drafting time, and `python run_scrub_notes.py` (`--status STATUS`, `--dry-run`,
+  `-v`) clears it from drafts made before that rule and redraws their pictures;
 - the queue shows the PNG and its alt text at `/drafts/{id}/image`; "Drop
   image" (`POST /drafts/{id}/image/drop`) clears both and logs an `edit`
   decision with the text unchanged; `POST /drafts/{id}/image/{index}/drop`
@@ -289,8 +294,10 @@ python run_verify.py --no-auto-revise  # one run without the loop
 
 `run_publish.py` reads approved drafts through `publish/store.py:fetch_approved`
 and posts them to X via tweepy (`publish/client.py`, the only module that
-imports tweepy). Slots, timezone, daily cap, minimum gap between posts and
-the breaking-news rules live in `publish/config.yaml`. With `slots: []` (the
+imports tweepy). Slots, daily cap, minimum gap between posts and the
+breaking-news rules live in `publish/config.yaml`, along with its own
+`timezone:` — the zone the slot hours are read in (behaviour, not display; keep
+it equal to the root `timezone:`, see [Display time zone](#display-time-zone)). With `slots: []` (the
 shipped value) there are no windows: every run posts the top candidate once
 `min_gap_minutes` has passed and the daily cap is not reached.
 
@@ -309,7 +316,11 @@ Safety gates, all of which must hold before a single tweet is sent:
 - The human's order from the panel's approved page (`schedule.position`,
   `publish/store.py:set_order`) is honoured before breaking and score;
   `--draft ID` considers one approved draft only (the panel's "Publish now"
-  runs `--live --now --draft ID`).
+  runs `--live --now --draft ID`). Reopening a draft in the queue deletes its
+  `schedule` row when nothing of it went live — never claimed, or claimed and
+  failed or refused (`publish/store.py:forget`) — so a saved order never comes
+  back with it; a posted or partial row is left alone, and a draft with a tweet
+  to its name cannot be reopened at all.
 - A thread that fails at post k keeps posts 1..k-1 live, records the error on
   post k, marks the draft `partial`, and stops. It is not retried; a human
   finishes or deletes it.
@@ -669,6 +680,37 @@ SQLite (`db_path` in config). Tables: `items`, `clusters`, `scores`,
 `health_checks`, `alerts_sent` (step 5). Every score is kept, so re-scoring
 after a prompt change is additive. Each step creates only its own tables and
 reads the others through adapter functions in its `store.py`.
+
+## Display time zone
+
+Storage never changes: every timestamp in SQLite is an aware-UTC ISO string, and
+every comparison, window and API payload is UTC. Conversion happens only when a
+datetime becomes text for a person.
+
+`timeutil.py` is the single place that does it. `timezone_name()` reads
+`timezone:` from the root `config.yaml` (shipped value `America/Los_Angeles`,
+Seattle; it is the only reader of that key, cached, falling back to the default
+when the name is unknown), `display_tz()` returns the tzinfo, `to_display()`
+takes a datetime or a stored ISO string and returns it in that zone,
+`fmt_datetime()` renders `2026-06-01 08:30 PDT`, `fmt_date()` renders the
+calendar date, and `install_jinja_filters(env)` registers the `|localtime` and
+`|localdate` filters used by the panel and approval-queue templates.
+
+Converted: the panel's dashboard, publishing and feedback pages, the approval
+queue's draft detail and voice pages, `panel/feed.py`, `digest.py`,
+`run_ops.py status`, the `ops/health.py` report heading, the `ops/alert.py`
+alert body, the `feedback/report.py` heading, and the window line and edit
+headings in `draft/voice_report.py`.
+
+Deliberately still UTC, because they are sort/parse keys rather than something
+to read: the backup filenames `backups/pipeline-<UTC stamp>.sqlite`, the
+`run_id` stamps, and the `captured_on` day bucket from
+`feedback/store.py:day_of`. Relative ages ("3.2h ago") are zone-independent.
+
+`publish/config.yaml` and `feedback/config.yaml` keep separate `timezone:` keys
+because they drive behaviour — the posting slots and the report's "hour posted"
+column — not display. All three ship as `America/Los_Angeles` and should be
+changed together.
 
 ## Known source caveats
 
