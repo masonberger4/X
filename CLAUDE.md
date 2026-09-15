@@ -46,6 +46,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `python run_evolve.py [score|prune|breed|report] [--dry-run] [--force]` (step 9: swarm
   fitness from X and pruning, no network; `breed` makes the one strong-model call per
   writer child),
+  `python run_scrub_notes.py [--status STATUS] [--dry-run] [-v]` (operator command: blanks
+  picture captions written to the operator in queued drafts and redraws them),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -173,7 +175,12 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   the `images` extra, imported inside `render_chart`; fail-soft: no image, never no
   draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
   and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
-  turns rendering off. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
+  turns rendering off. **A note is a caption, not an aside**: a chart's or table's `note` is
+  printed under the picture, so `chart.py:note_problems` (called from `check_hard_rules` for
+  both) fails a draft whose note addresses the operator ("verify each cell before posting",
+  "TODO") and the attempt is retried. `run_scrub_notes.py` is the one-off pass over
+  queued drafts made before that rule: `store.clear_visual_notes` blanks the caption (an
+  `edit` decision, text unchanged) and the picture is drawn again. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
   the named palettes and `Style.palette` / `Style.multi_colour` pick one, so the designer
   genome and the image grader (`draft/grader.py`, whose knob list and checklist name them;
   `distinctiveness` replaced the old house-style row) both vary it; `Style.apply` ignores an

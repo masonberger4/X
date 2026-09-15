@@ -230,6 +230,10 @@ would break "never fabricate numbers", so:
   `--only KEY`, `--force`, `--dry-run`. The pipeline itself fetches nothing
   and an unconfigured company is left as written. The header row is a
   rounded navy bar with a drop shadow and sheen;
+- a picture's footnote is a caption for the reader (n, design, as-of date), never
+  an instruction to the operator: `draft/chart.py:note_problems` fails such a caption
+  at drafting time, and `python run_scrub_notes.py` (`--status STATUS`, `--dry-run`,
+  `-v`) clears it from drafts made before that rule and redraws their pictures;
 - the queue shows the PNG and its alt text at `/drafts/{id}/image`; "Drop
   image" (`POST /drafts/{id}/image/drop`) clears both and logs an `edit`
   decision with the text unchanged; `POST /drafts/{id}/image/{index}/drop`
