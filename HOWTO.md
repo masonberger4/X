@@ -211,6 +211,21 @@ source only when it is due, and score only scores what is new.
    a company that is not configured is drawn exactly as the drafter wrote
    it, and a private company listed without a ticker gets its logo only. The
    table header is drawn as a rounded navy bar with a shadow.
+   A picture's footnote (`note` in the chart or table spec) is a caption the
+   reader sees under the card: the n, the design, an as-of date, a caveat. A
+   caption that instructs you instead ("verify each cell against current FDA
+   labels before posting", "TODO") is a hard rule failure, so the drafter
+   retries. To clean up drafts made before that rule existed, run
+
+       python run_scrub_notes.py --dry-run
+
+   to list them, then without the flag to blank those captions and redraw the
+   pictures. It touches nothing else: the numbers, rows and post text stay as
+   they are, each change is logged as an edit on the draft, and a draft that
+   is already posted is left alone. By default it covers pending and
+   approved drafts; `--status STATUS` (repeatable) narrows it, `-v` shows per
+   draft detail.
+
    The other kind of picture is a comparison table (a competitor landscape,
    a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
    first column naming the company, asset or trial. Unlike a chart its cells
@@ -794,3 +809,25 @@ attaches or skips the chart; `auto_publish_enabled` and
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
+
+### The clock you see
+
+Every time and date on a screen — the control panel, the approval queue, the
+digest, `run_ops.py status`, the health and feedback reports, the alert emails —
+is shown in one time zone, set by `timezone:` near the top of `config.yaml`. It
+ships as `America/Los_Angeles` (Seattle). To move it, edit that one line to
+another zone name (`America/New_York`, `Europe/London`, and so on) and restart
+whatever is running; nothing else changes.
+
+Two other files have their own `timezone:` line, and you should set all three to
+the same zone: `publish\config.yaml` (which decides what "9am" means for the
+posting slots) and `feedback\config.yaml` (which decides what "hour posted"
+means in the weekly report). Those two are about *behaviour*, not display, which
+is why they are separate.
+
+Behind the scenes nothing about the database moves: every timestamp is stored in
+UTC and only translated when it is printed for you. A few things stay in UTC on
+purpose, because they are filenames or keys rather than something to read: the
+backup files in `backups\` (`pipeline-<UTC stamp>.sqlite`), the run ids on the
+runs page, and the day a follower/metrics snapshot is filed under. Ages like
+"3.2h ago" are the same in any zone.

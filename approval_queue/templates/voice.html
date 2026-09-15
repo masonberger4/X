@@ -3,7 +3,7 @@
 {% block content %}
 <h1>Voice report <span class="meta">last {{ weeks }} week{{ "s" if weeks != 1 }}</span></h1>
 <p class="meta">
-  {{ r.window_start }} to {{ r.window_end }} ·
+  {{ r.window_start|localtime }} to {{ r.window_end|localtime }} ·
   window: <a href="/voice?weeks=1">1</a> · <a href="/voice?weeks=2">2</a> ·
   <a href="/voice?weeks=4">4</a> · <a href="/voice?weeks=12">12</a> weeks ·
   <code>python -m draft.voice_report --weeks {{ weeks }}</code> gives the markdown version.
@@ -78,7 +78,7 @@
   <tbody>
   {% for e in r.top_pairs %}
     <tr>
-      <td class="meta"><a href="/drafts/{{ e.draft_id }}">{{ e.created_at[:10] }}</a></td>
+      <td class="meta"><a href="/drafts/{{ e.draft_id }}">{{ e.created_at|localdate }}</a></td>
       <td>{{ e.source or "?" }}</td>
       <td><div class="post">{{ e.original_lead }}</div></td>
       <td><div class="post">{{ e.edited_lead }}</div>{% if e.thread_changed %}<div class="meta">thread: {{ e.original_thread|length }} posts before, {{ e.edited_thread|length }} after</div>{% endif %}</td>

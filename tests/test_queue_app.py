@@ -547,3 +547,16 @@ def test_the_reopen_button_is_offered_exactly_where_the_route_allows_it(
     # and the route agrees with the button
     client.post(f"/drafts/{draft_id}/reopen")
     assert (store.get_draft(conn, draft_id).status == "pending") is offered
+
+
+def test_detail_shows_created_at_in_the_display_timezone(client, conn, draft_id):
+    """A reviewer reads a Seattle clock, not the UTC string the row is stored as."""
+    conn.execute(
+        "UPDATE drafts SET created_at = ? WHERE id = ?",
+        ("2026-06-01T15:30:00+00:00", draft_id),
+    )
+    conn.commit()
+    body = client.get(f"/drafts/{draft_id}").text
+    assert "created 2026-06-01 08:30 PDT" in body
+    # The raw stored UTC string is never what the page shows.
+    assert "2026-06-01T15:30:00+00:00" not in body

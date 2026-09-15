@@ -856,6 +856,36 @@ def list_image_grades(conn: sqlite3.Connection, draft_id: int) -> list[ImageGrad
     ]
 
 
+def clear_visual_notes(
+    conn: sqlite3.Connection, draft_id: int, note: str | None = None
+) -> list[str]:
+    """Blank the caption of every visual of a draft whose note addresses the operator
+    (draft/chart.py:note_problems), leaving the numbers, rows and text untouched. Returns
+    the captions that were cleared, empty when there was nothing to clear. The picture
+    itself is re-rendered by the caller (run_scrub_notes.py); an 'edit' decision with the
+    text unchanged records what went."""
+    from draft.chart import note_problems
+
+    row = _require(conn, draft_id)
+    draft = row.draft
+    cleared: list[str] = []
+    for visual in draft.visuals:
+        if visual is not None and visual.note and note_problems(visual.note, "note"):
+            cleared.append(visual.note)
+            visual.note = ""
+    if not cleared:
+        return []
+    conn.execute(
+        "UPDATE drafts SET chart_json = ?, format_json = ?, updated_at = ? WHERE id = ?",
+        (_chart_json(draft), _format_json(draft), _now(), draft_id),
+    )
+    text = _serialise_text(draft.thread)
+    reason = note or "caption cleared: " + "; ".join(cleared)
+    _record_decision(conn, draft_id, ACTION_EDIT, text, text, reason, None)
+    conn.commit()
+    return cleared
+
+
 def drop_image(
     conn: sqlite3.Connection,
     draft_id: int,

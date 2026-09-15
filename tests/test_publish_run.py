@@ -20,9 +20,9 @@ from draft.schema import Draft
 from publish import client, store
 from tests.conftest import URL, seed_item
 
-NY = ZoneInfo("America/New_York")
-SLOT_TIME = datetime(2026, 6, 1, 8, 35, tzinfo=NY)  # inside the 08:30 slot window
-OFF_SLOT = datetime(2026, 6, 1, 10, 0, tzinfo=NY)
+LA = ZoneInfo("America/Los_Angeles")
+SLOT_TIME = datetime(2026, 6, 1, 8, 35, tzinfo=LA)  # inside the 08:30 slot window
+OFF_SLOT = datetime(2026, 6, 1, 10, 0, tzinfo=LA)
 
 
 THREAD3 = [f"one {URL}", "two", f"three {URL}"]
@@ -78,7 +78,7 @@ def keep_failed(tmp_path):
     """--config args for a publish config with automatic release of failed claims off."""
     cfg = tmp_path / "publish.yaml"
     cfg.write_text(
-        "timezone: America/New_York\nslots: ['08:30', '12:15']\n"
+        "timezone: America/Los_Angeles\nslots: ['08:30', '12:15']\n"
         "retry:\n  auto_release_failed: false\n"
     )
     return ["--config", str(cfg)]
@@ -89,7 +89,7 @@ def slotted(tmp_path):
     """--config args for a publish config with the two classic slots (the shipped file
     is continuous mode, `slots: []`)."""
     cfg = tmp_path / "slotted.yaml"
-    cfg.write_text("timezone: America/New_York\nslots: ['08:30', '12:15']\n")
+    cfg.write_text("timezone: America/Los_Angeles\nslots: ['08:30', '12:15']\n")
     return ["--config", str(cfg)]
 
 
@@ -178,7 +178,7 @@ def test_no_slots_means_continuous_mode(conn, fake_x, monkeypatch, tmp_path, cap
     the next run is held by the minimum gap, and a run after the gap posts the next one."""
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     cfg = tmp_path / "publish.yaml"
-    cfg.write_text("timezone: America/New_York\nslots: []\nmin_gap_minutes: 90\n")
+    cfg.write_text("timezone: America/Los_Angeles\nslots: []\nmin_gap_minutes: 90\n")
     args = ["--config", str(cfg), "--live"]
     seed_draft(conn, "a")
     seed_draft(conn, "b")
@@ -228,7 +228,7 @@ def test_daily_cap(conn, fake_x, monkeypatch):
     monkeypatch.setattr(run_publish, "load_publish_config", capped)
     for i in range(5):
         seed_draft(conn, f"d{i}", source="fda_press")
-    times = [datetime(2026, 6, 1, h, 0, tzinfo=NY) for h in (6, 9, 12, 15, 18)]
+    times = [datetime(2026, 6, 1, h, 0, tzinfo=LA) for h in (6, 9, 12, 15, 18)]
     for t in times:
         run_publish.main(["--live"], now=t)
     assert len(fake_x.calls) == 3  # max_posts_per_day
@@ -543,7 +543,9 @@ def test_attach_images_false_posts_text_only(conn, fake_x, monkeypatch, tmp_path
     did = seed_draft(conn, "a")
     seed_image(conn, did)
     cfg = tmp_path / "publish.yaml"
-    cfg.write_text("timezone: America/New_York\nslots: ['08:30']\nmedia:\n  attach_images: false\n")
+    cfg.write_text(
+        "timezone: America/Los_Angeles\nslots: ['08:30']\nmedia:\n  attach_images: false\n"
+    )
     assert run_publish.main(["--live", "--config", str(cfg)], now=SLOT_TIME) == 0
     assert fake_x.uploads == [] and [m for _, m in fake_x.media] == [None]
 
@@ -724,7 +726,7 @@ def test_auto_release_can_be_turned_off(conn, monkeypatch, tmp_path):
     monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     cfg = tmp_path / "publish.yaml"
-    cfg.write_text("timezone: America/New_York\nretry:\n  auto_release_failed: false\n")
+    cfg.write_text("timezone: America/Los_Angeles\nretry:\n  auto_release_failed: false\n")
     fx = FakeX(fail_at=1)
     monkeypatch.setattr(client, "post_tweet", fx)
     did = seed_draft(conn, "a")

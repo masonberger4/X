@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import timeutil
 from draft.examples import (
     ACTION_EDIT,
     ACTION_REJECT,
@@ -471,7 +472,7 @@ def render_markdown(report: VoiceReport) -> str:
     lines = [
         "# Voice report",
         "",
-        f"Window: {r.window_start} to {r.window_end}",
+        f"Window: {timeutil.fmt_datetime(r.window_start)} to {timeutil.fmt_datetime(r.window_end)}",
         "",
         SECTION_HEADINGS[0],
         "",
@@ -531,7 +532,9 @@ def render_markdown(report: VoiceReport) -> str:
     lines += ["", SECTION_HEADINGS[6], ""]
     if r.top_pairs:
         for i, e in enumerate(r.top_pairs, 1):
-            lines.append(f"### {i}. {e.source or '?'} · {e.created_at[:10]} · {e.why}")
+            lines.append(
+                f"### {i}. {e.source or '?'} · {timeutil.fmt_date(e.created_at)} · {e.why}"
+            )
             lines.append("")
             lines.append("Before:")
             lines.append("")

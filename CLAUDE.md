@@ -46,6 +46,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `python run_evolve.py [score|prune|breed|report] [--dry-run] [--force]` (step 9: swarm
   fitness from X and pruning, no network; `breed` makes the one strong-model call per
   writer child),
+  `python run_scrub_notes.py [--status STATUS] [--dry-run] [-v]` (operator command: blanks
+  picture captions written to the operator in queued drafts and redraws them),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -112,6 +114,22 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - **Fail soft per source.** Errors are logged and recorded in
   `source_runs.error`; the run continues. `ingest/fda_oce.py` returns `[]` on
   any failure.
+- **Times are stored in UTC and shown in one zone.** Every timestamp in SQLite stays
+  an aware-UTC ISO string and every comparison, window and API payload stays UTC;
+  conversion happens only when a datetime becomes text for a human. `timeutil.py` is the
+  single place that converts (`timezone_name`, `display_tz`, `to_display`,
+  `fmt_datetime` -> "2026-06-01 08:30 PDT", `fmt_date`, `install_jinja_filters` ->
+  the Jinja filters `|localtime` / `|localdate`) and the only reader of the root
+  `config.yaml` key `timezone:` (`America/Los_Angeles`). Converted: the panel's
+  dashboard/publishing/feedback pages, the queue's draft detail and voice pages,
+  `panel/feed.py`, `digest.py`, `run_ops.py status`, `ops/health.py`'s report heading,
+  `ops/alert.py`'s alert body, `feedback/report.py`'s heading, `draft/voice_report.py`'s
+  window line and edit headings. Still UTC on purpose, as sort/parse keys: backup
+  filenames `backups/pipeline-<UTC stamp>.sqlite`, the `run_id` stamps and
+  `feedback/store.py:day_of`'s `captured_on` bucket; relative ages are zone-independent.
+  `publish/config.yaml` and `feedback/config.yaml` keep their own `timezone:` because
+  those drive behaviour (posting slots, the "hour posted" column), not display; all
+  three are set to the same zone.
 - Read secrets from `.env` via python-dotenv; never commit `.env`.
 - Logging: stdlib `logging`. INFO for per-source counts, DEBUG for items.
 - Ask before adding a dependency not already in `pyproject.toml`.
@@ -157,7 +175,12 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   the `images` extra, imported inside `render_chart`; fail-soft: no image, never no
   draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
   and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
-  turns rendering off. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
+  turns rendering off. **A note is a caption, not an aside**: a chart's or table's `note` is
+  printed under the picture, so `chart.py:note_problems` (called from `check_hard_rules` for
+  both) fails a draft whose note addresses the operator ("verify each cell before posting",
+  "TODO") and the attempt is retried. `run_scrub_notes.py` is the one-off pass over
+  queued drafts made before that rule: `store.clear_visual_notes` blanks the caption (an
+  `edit` decision, text unchanged) and the picture is drawn again. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
   the named palettes and `Style.palette` / `Style.multi_colour` pick one, so the designer
   genome and the image grader (`draft/grader.py`, whose knob list and checklist name them;
   `distinctiveness` replaced the old house-style row) both vary it; `Style.apply` ignores an
@@ -406,6 +429,8 @@ filter/   prefilter.py, dedup.py, link.py (story linking: same-event groups -> o
 score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories),
           rater.py (second-opinion yes/no rater)
 db.py     sqlite: items, clusters, scores, ratings, source_runs
+timeutil.py  display timezone: UTC storage -> one human-facing zone (root `timezone:`),
+          fmt_datetime/fmt_date, Jinja |localtime / |localdate
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
 draft/    schema.py (Draft, Format, validate_output), chart.py (chart + table specs, verification, PNG rendering, Style
           knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,

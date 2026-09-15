@@ -23,7 +23,9 @@ MAILTO=""
 # Health checks with notifications (ALERT_WEBHOOK_URL / SMTP_* from .env), hourly at :15.
 15 * * * *    cd $REPO && $PY run_ops.py health --alert >> logs/ops.log 2>&1
 
-# Verified online backup of pipeline.db, daily at 03:40 UTC (keeps `backups.keep` copies).
+# Verified online backup of pipeline.db, daily at 03:40 (keeps `backups.keep` copies).
+# cron times here are the SERVER's clock, not the display zone in config.yaml; set the
+# server to UTC (as the backup filenames assume) or adjust these times to match it.
 40 3 * * *    cd $REPO && $PY run_ops.py backup >> logs/ops.log 2>&1
 
 # Prune ops-owned bookkeeping tables (pipeline_runs, health_checks, alerts_sent), weekly.

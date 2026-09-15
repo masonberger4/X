@@ -38,6 +38,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
+import timeutil
 from approval_queue import images, publishing, store
 from draft import drafter
 from draft.chart import ChartError, alt_text, validate_table
@@ -62,6 +63,9 @@ log = logging.getLogger(__name__)
 TEMPLATES_DIR = Path(__file__).with_name("templates")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["tweet_length"] = tweet_length
+# `|localtime` / `|localdate` render a stored UTC timestamp in the display zone from
+# the root config.yaml. Storage stays UTC; only what the reviewer reads is converted.
+timeutil.install_jinja_filters(templates.env)
 templates.env.globals["MAX_POST_CHARS"] = MAX_POST_CHARS
 templates.env.globals["DECISION_CATEGORIES"] = store.DECISION_CATEGORIES
 

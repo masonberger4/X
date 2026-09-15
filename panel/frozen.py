@@ -38,6 +38,7 @@ CLIS = (
     "run_ops",
     "run_logos",
     "run_evolve",
+    "run_scrub_notes",
 )
 
 
