@@ -761,7 +761,11 @@ async def reopen(draft_id: int, request: Request, conn: Conn):
                 "status; wait until that run finishes before reopening it",
             )
         try:
+            # An unclaimed row is dropped outright; a failed or refused attempt was claimed,
+            # so release_failed is what clears that one (it too refuses anything live). Both
+            # leave posted and partial rows alone, so no saved position outlives a reopen.
             released = publish_store.release_unclaimed(conn, [draft_id])
+            released += publish_store.release_failed(conn, [draft_id])
         except sqlite3.OperationalError:  # no publish run yet: the schedule table is missing
             released = []
         try:

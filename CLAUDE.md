@@ -194,9 +194,11 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   decision carrying the text and the optional note) puts an approved draft back to
   `pending`, and is refused when `store.publish_states` says step 3 has posted,
   partially posted or claimed it — nothing on X is ever unposted here. Before the
-  status flips, the route calls `publish/store.py:release_unclaimed` (step 3's only
-  write from step 2: it deletes that draft's `schedule` row when it was never claimed
-  and never posted), so a saved `position` cannot resurrect itself on re-approval.
+  status flips, the route calls `publish/store.py:release_unclaimed` and
+  `release_failed` (step 3's only writes from step 2: together they delete that draft's
+  `schedule` row whether it was never claimed or claimed and failed, and neither ever
+  touches a posted or partial one), so a saved `position` cannot resurrect itself on
+  re-approval.
   There is no snooze: a draft left `snoozed` in an older database is migrated to
   `pending` by `store.connect`.
   A human asks for changes in words, not by retyping: `POST /drafts/{id}/revise`
@@ -263,10 +265,11 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
   settings live in `publish/config.yaml`, not the root config. Posting is
   idempotent via the claim; partial threads are never retried automatically.
-  The queue reads those two tables back only through
+  The queue touches those two tables only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
-  missing) to label and hide posted drafts on the approved page, and writes them only
-  through `release_unclaimed` on a reopen (above).
+  missing) to label and hide posted drafts on the approved page, and, on a reopen
+  (above), `release_unclaimed` and `release_failed`, which read and delete step 3's
+  rows through step 3's own module.
   Texts are re-checked before posting and refused, never edited, on failure.
 - Step 4 reads other steps' tables only through `feedback/store.py:fetch_posted`
   (posts) and `fetch_post_context` (drafts/decisions/items/scores/ratings). Its

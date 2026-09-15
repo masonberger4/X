@@ -597,7 +597,8 @@ to stop it. Four pages:
   halfway, or a draft a publish run has just claimed (the page says which);
   reopening cannot unpost a tweet, so reject it instead if it should not run
   again. An approved draft whose last attempt failed or was refused can be
-  reopened. The same button is on the draft's own page.
+  reopened, and that failed attempt is cleared with it, so it comes back as a
+  clean pending draft. The same button is on the draft's own page.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
   halfway is never retried for you). Posting happens from the approved page,

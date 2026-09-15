@@ -7,6 +7,7 @@ from approval_queue import store
 from approval_queue.app import app
 from draft import drafter
 from draft.schema import Claim, Draft
+from publish import store as publish_store
 from tests.conftest import URL, seed_item
 from verify import store as verify_store
 from verify.verifier import ClaimCheck
@@ -296,8 +297,8 @@ def test_approved_page_offers_reopen_but_not_approve_reject_or_revise(client, co
     assert f'action="/drafts/{draft_id}/reopen"' in body and ">Reopen<" in body
     for action in ("approve", "reject", "revise", "edit"):
         assert f'action="/drafts/{draft_id}/{action}"' not in body
-    # "Publish now" only exists when the panel hosts the queue (HAS_PANEL)
-    assert 'action="/publishing/now"' not in body
+    # Whether "Publish now" shows depends on HAS_PANEL, which panel.app installs on the
+    # queue's template env for the whole process, so it is not this test's business.
     # once step 3 has it, neither button is offered any more
     _publish_draft(conn, draft_id, tweet_id="555")
     body = client.get("/status/approved?posted=1").text
@@ -405,6 +406,8 @@ def test_reopen_allowed_after_a_failed_or_refused_attempt(client, conn, draft_id
     assert r.status_code == 303 and r.headers["location"] == "/status/approved"
     assert store.get_draft(conn, draft_id).status == "pending"
     assert store.list_decisions(conn, draft_id)[-1]["action"] == "reopen"
+    # the failed attempt's schedule row goes too, so the draft comes back clean
+    assert publish_store.get_schedule(conn, draft_id) is None
 
 
 def test_reopen_allowed_while_only_scheduled_or_with_no_schedule_row(client, conn, draft_id):
