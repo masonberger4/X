@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from email.message import EmailMessage
 from typing import Any
 
+import timeutil
 from ops.models import STATUS_FAIL, STATUS_OK, STATUS_WARN, Check, Report
 
 log = logging.getLogger(__name__)
@@ -73,7 +74,9 @@ def due_checks(
 
 
 def format_message(report: Report, due: list[Due]) -> str:
-    lines = [f"Pipeline health {report.overall.upper()} at {report.checked_at.isoformat()}"]
+    lines = [
+        f"Pipeline health {report.overall.upper()} at {timeutil.fmt_datetime(report.checked_at)}"
+    ]
     for d in due:
         label = "RECOVERED" if d.kind == KIND_RECOVERED else d.check.status.upper()
         lines.append(f"{label} {d.check.name}: {d.check.summary}")

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import timeutil
 from db import Cluster, Database, Score, window_start
 from filter.prefilter import cluster_text
 from score import editorial
@@ -70,7 +71,7 @@ def entry_views(
                 "url": primary.url if primary else None,
                 "source": primary.source if primary else None,
                 "doi": cl.doi,
-                "published": cl.published_at.strftime("%Y-%m-%d") if cl.published_at else "n/a",
+                "published": timeutil.fmt_date(cl.published_at) or "n/a",
                 "also_in": sorted({i.source for i in items[1:]}),
                 "total": sc.total,
                 "parts": [

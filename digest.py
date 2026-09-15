@@ -18,6 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+import timeutil
 from config import load_config, setup_logging
 from db import Cluster, Database, Score, window_start
 from filter.prefilter import cluster_text
@@ -30,7 +31,7 @@ def render_entry(rank: int, db: Database, cl: Cluster, sc: Score) -> str:
     items = db.items_in_cluster(cl.id)
     title, abstract = cluster_text(items) if items else (cl.title, "")
     primary = items[0] if items else None
-    when = cl.published_at.strftime("%Y-%m-%d") if cl.published_at else "n/a"
+    when = timeutil.fmt_date(cl.published_at) or "n/a"
     lines = [f"## {rank}. {title}", ""]
     lines.append(
         f"**Score {sc.total}/50** · {sc.evidence_level} · hype {sc.hype_risk}/10 · "

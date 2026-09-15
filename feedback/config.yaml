@@ -10,7 +10,9 @@ api_base: https://api.x.com/2
 bearer_token_env: X_BEARER_TOKEN
 
 # Timezone used only for the "hour posted" column. Posts are stored in UTC.
-timezone: America/New_York
+# Keep this the same as `timezone:` in the root config.yaml, which is the zone the
+# panel and the reports show every other timestamp in.
+timezone: America/Los_Angeles   # Seattle, WA
 
 # Primary KPI every group comparison and correlation is computed against.
 # One of: impressions | likes | reposts | replies | quotes | bookmarks
