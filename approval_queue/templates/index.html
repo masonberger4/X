@@ -52,7 +52,7 @@
             <button type="submit" {% if run %}disabled{% endif %}>Publish now</button>
           </form>
           {% endif %}
-          {% if not p or p.status == "pending" %}
+          {% if not p or p.status not in ("posted", "partial", "claimed") %}
           <form method="post" action="/drafts/{{ d.id }}/reopen" class="order-hide" style="margin-top:.3rem">
             <button type="submit">Reopen</button>
           </form>
