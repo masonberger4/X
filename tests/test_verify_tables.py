@@ -605,13 +605,15 @@ def test_unchanged_unverified_cell_counts_as_vouched_for(client, conn):
     assert checks[(1, 2)].verdict == "contradicted" and checks[(1, 2)].model == "m"
 
 
-def test_expired_snooze_draft_can_still_have_its_table_edited(client, conn):
-    """A snoozed draft whose snooze has run out is listed as pending, so its cells are
-    editable: the form is rendered and the post is accepted."""
+def test_reopened_draft_can_still_have_its_table_edited(client, conn):
+    """An approved draft sent back with `reopen` is pending again, so its cells are
+    editable once more: the form is rendered and the post is accepted."""
     did = _seed(conn)
-    store.snooze(conn, did, hours=-1)
+    store.approve(conn, did)
+    assert not store.get_draft(conn, did).editable
+    store.reopen(conn, did, note="second thoughts")
     row = store.get_draft(conn, did)
-    assert row.status == "snoozed" and row.editable
+    assert row.status == store.STATUS_PENDING and row.editable
     assert did in {d.id for d in store.list_drafts(conn, store.STATUS_PENDING)}
     assert 'name="cell_1_2"' in client.get(f"/drafts/{did}").text
     rows = [list(r) for r in TABLE["rows"]]

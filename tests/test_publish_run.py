@@ -5,6 +5,7 @@ client.post_tweet is monkeypatched everywhere; tweepy is never imported.
 
 import json
 import logging
+import sqlite3
 import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -768,3 +769,130 @@ def test_draft_flag_posts_only_that_draft_and_reports_a_missing_one(
         assert run_publish.main(["--live", "--now", "--draft", "999"], now=OFF_SLOT) == 2
     assert "not approved and waiting" in caplog.text
     assert len(fake_x.calls) == 3  # b's three thread posts and nothing else
+
+
+# --- release_unclaimed (the queue's reopen path) ---------------------------------------
+
+
+def test_release_unclaimed_deletes_only_the_unclaimed_rows_asked_for(conn):
+    """An unclaimed schedule row is the stale `position` a reopened draft would carry back
+    into the queue, so it is deleted and its id returned; another draft's row is untouched."""
+    a = seed_draft(conn, "a")
+    b = seed_draft(conn, "b")
+    assert store.set_order(conn, [a, b]) == 2
+    assert store.get_schedule(conn, a)["position"] == 1
+
+    assert store.release_unclaimed(conn, [a]) == [a]
+    assert store.get_schedule(conn, a) is None
+    assert store.get_schedule(conn, b)["position"] == 2  # other drafts untouched
+
+
+def test_release_unclaimed_never_touches_a_claimed_or_posted_row(conn, monkeypatch):
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    # partial thread: post 2 of a's thread fails
+    fx = FakeX(fail_at=2)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    partial = seed_draft(conn, "a", thread=THREAD3)
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 2
+    # posted one-post thread
+    fx2 = FakeX()
+    monkeypatch.setattr(client, "post_tweet", fx2)
+    posted = seed_draft(conn, "b")
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT + timedelta(hours=3)) == 0
+    # a claim that has not finished yet
+    claimed = seed_draft(conn, "c")
+    assert store.claim(conn, claimed) is True
+
+    assert store.get_schedule(conn, partial)["status"] == "partial"
+    assert store.get_schedule(conn, posted)["status"] == "posted"
+    assert store.release_unclaimed(conn, [partial, posted, claimed]) == []
+    for did, status in [(partial, "partial"), (posted, "posted"), (claimed, "claimed")]:
+        assert store.get_schedule(conn, did)["status"] == status
+
+
+def test_release_unclaimed_never_releases_a_draft_that_reached_x(conn):
+    """A posts row with a tweet_id means a thread is live; even an unclaimed schedule row
+    (hand-written, or left behind by a repair) stays put."""
+    did = seed_draft(conn, "a")
+    store.set_order(conn, [did])
+    store.record_post(
+        conn, draft_id=did, text="t", kind="root", position=1, slot=None, tweet_id="9"
+    )
+    assert store.release_unclaimed(conn, [did]) == []
+    assert store.get_schedule(conn, did) is not None
+    # a failed attempt (no tweet_id) is no reason to keep the row
+    other = seed_draft(conn, "b")
+    store.set_order(conn, [did, other])
+    store.record_post(
+        conn, draft_id=other, text="t", kind="root", position=1, slot=None, error="boom"
+    )
+    assert store.release_unclaimed(conn, [other]) == [other]
+
+
+def test_release_unclaimed_is_a_no_op_without_a_schedule_row(conn):
+    did = seed_draft(conn, "a")
+    other = seed_draft(conn, "b")
+    store.set_order(conn, [other])  # creates the schedule table, but no row for `did`
+    assert store.get_schedule(conn, did) is None
+    assert store.release_unclaimed(conn, [did]) == []
+    assert store.release_unclaimed(conn, [9999]) == []
+    assert store.get_schedule(conn, other) is not None
+
+
+def test_release_unclaimed_needs_the_schedule_table(conn):
+    """Before the first publish run there is no schedule table at all; the queue's reopen
+    route catches this rather than the store pretending the table is there."""
+    did = seed_draft(conn, "a")
+    with pytest.raises(sqlite3.OperationalError):
+        store.release_unclaimed(conn, [did])
+    assert store.release_unclaimed(conn, []) == []  # the empty list never reaches SQL
+
+
+def test_release_unclaimed_with_no_ids_deletes_nothing(conn):
+    """The dangerous edge case: an empty list must not degenerate into an unfiltered
+    DELETE the way an `if draft_ids` WHERE clause would."""
+    a = seed_draft(conn, "a")
+    b = seed_draft(conn, "b")
+    store.set_order(conn, [a, b])
+    assert store.release_unclaimed(conn, []) == []
+    assert store.get_schedule(conn, a) is not None and store.get_schedule(conn, b) is not None
+
+
+def test_release_unclaimed_and_release_failed_agree_on_live_threads(conn, monkeypatch, keep_failed):
+    """Both releases refuse anything that reached X and both return the ids they deleted;
+    they differ only in which rows they may take: release_failed takes a finished (claimed)
+    failure, release_unclaimed takes a row no run has claimed."""
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    fx = FakeX(fail_at=1)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    failed = seed_draft(conn, "a")
+    assert run_publish.main(["--live", "--now", *keep_failed], now=OFF_SLOT) == 2
+    assert store.get_schedule(conn, failed)["status"] == "failed"
+    waiting = seed_draft(conn, "b")
+    store.set_order(conn, [waiting])
+
+    # release_unclaimed will not take the claimed failure; release_failed will not take
+    # the row that was never claimed
+    assert store.release_unclaimed(conn, [failed, waiting]) == [waiting]
+    assert store.release_failed(conn, [failed]) == [failed]
+    assert store.get_schedule(conn, failed) is None
+    assert store.get_schedule(conn, waiting) is None
+
+
+def test_reopening_a_draft_hides_it_from_publish_and_drops_its_position(conn):
+    """The whole reason release_unclaimed exists: a reopened draft is not approved, and
+    re-approving it must not resurrect the place in the queue it had before."""
+    did = seed_draft(conn, "a")
+    store.set_order(conn, [did])
+    (a,) = store.fetch_approved(10, conn=conn)
+    assert a.draft_id == did and a.position == 1
+
+    qstore.reopen(conn, did)
+    assert store.release_unclaimed(conn, [did]) == [did]
+    assert store.fetch_approved(10, conn=conn) == []
+
+    qstore.approve(conn, did)
+    (again,) = store.fetch_approved(10, conn=conn)
+    assert again.draft_id == did and again.position is None
