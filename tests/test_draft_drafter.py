@@ -468,3 +468,35 @@ def test_revise_item_rejects_after_all_attempts_and_needs_something_to_do():
         )
     with pytest.raises(ValueError):
         revise_item(current=_current(), instructions="  ", call=fake_call([]), **kw)
+
+
+# --- caption rule ----------------------------------------------------------
+
+
+def test_chart_note_addressed_to_the_operator_is_a_hard_rule_failure():
+    chart = {**CHART, "note": "n=97; verify each value before posting"}
+    draft = validate_output(good_json(chart=chart))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert any("chart note addresses the operator" in p for p in problems)
+
+
+def test_table_note_addressed_to_the_operator_is_a_hard_rule_failure():
+    table = {
+        "title": "Approved CD3xBCMA bispecifics",
+        "columns": ["Asset", "Mechanism", "Schedule"],
+        "rows": [
+            ["Tecvayli (J&J)", "CD3xBCMA bispecific", "SC, until progression"],
+            ["Elrexfio (Pfizer)", "CD3xBCMA bispecific", "SC, until progression"],
+        ],
+        "note": "Status as of Sept 2026; verify each cell against current FDA labels "
+        "before posting",
+    }
+    draft = validate_output(good_json(chart=None, table=table))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert any("table note addresses the operator" in p for p in problems)
+
+
+def test_a_factual_caption_passes():
+    chart = {**CHART, "note": "n=97, single arm, investigator-assessed; data cutoff Jan 2026"}
+    draft = validate_output(good_json(chart=chart))
+    assert check_hard_rules(draft, url=URL, source="pubmed") == []
