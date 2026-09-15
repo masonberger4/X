@@ -157,7 +157,10 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   the `images` extra, imported inside `render_chart`; fail-soft: no image, never no
   draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
   and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
-  turns rendering off. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
+  turns rendering off. **A note is a caption, not an aside**: a chart's or table's `note` is
+  printed under the picture, so `chart.py:note_problems` (called from `check_hard_rules` for
+  both) fails a draft whose note addresses the operator ("verify each cell before posting",
+  "TODO") and the attempt is retried. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
   the named palettes and `Style.palette` / `Style.multi_colour` pick one, so the designer
   genome and the image grader (`draft/grader.py`, whose knob list and checklist name them;
   `distinctiveness` replaced the old house-style row) both vary it; `Style.apply` ignores an
