@@ -13,6 +13,7 @@ from draft.drafter import (
     known_company_names,
     numbers_in,
 )
+from draft.hook import hook_problems
 from draft.prompt import PREPRINT_LABEL
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.tags import Handle, tag_problems
@@ -30,6 +31,7 @@ def cell_problems(
     needs_url: bool | None = None,
     needs_preprint: bool | None = None,
     handles: list[Handle] | None = None,
+    is_hook: bool | None = None,
 ) -> list[str]:
     """Why one candidate post is unusable. Empty means it may enter the tournament. The same
     rules draft.drafter.check_hard_rules applies to a thread, applied to one post.
@@ -37,7 +39,9 @@ def cell_problems(
     `needs_preprint` override the slot-name defaults (the closer carries the URL, the hook
     the preprint label) for a single-post format where one cell must do both. `handles`
     are the accounts the story may mention (rule 11: a name without its @handle fails; a
-    trial or drug name without its # always fails)."""
+    trial or drug name without its # always fails). `is_hook` overrides the slot-name
+    default for rule 12 (draft.hook): a hook cell is a link-free one-claim opener, unless
+    it is also the cell carrying the URL (a single or long post)."""
     problems: list[str] = []
     t = text.strip()
     if not t:
@@ -60,6 +64,10 @@ def cell_problems(
         problems.append(f"{slot} is missing the primary source URL")
     if needs_preprint and PREPRINT_LABEL not in t.lower():
         problems.append(f"preprint not labelled in the {slot}")
+    if is_hook is None:
+        is_hook = slot == HOOK
+    if is_hook:
+        problems += hook_problems(t, url=url, carries_url=needs_url)
     problems += tag_problems(t, handles, known_company_names())
     return problems
 

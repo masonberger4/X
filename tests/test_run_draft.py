@@ -130,10 +130,10 @@ def test_run_draft_feeds_recent_edits_into_the_prompt_and_records_them(conn, mon
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft([f"A game-changer! ORR 88%. {URL}", "b", f"c {URL}"], "", ""),
+        draft=store.Draft(["A game-changer! ORR 88%.", "b", f"c {URL}"], "", ""),
     )
-    before = f"A game-changer! ORR 88%. {URL}"
-    after = f"ORR 88% in a single-arm study. The sequencing question is open. {URL}"
+    before = "A game-changer! ORR 88%."
+    after = "ORR 88% in a single-arm study. The sequencing question is open."
     edit_id = store.edit(
         conn,
         old,
@@ -145,7 +145,7 @@ def test_run_draft_feeds_recent_edits_into_the_prompt_and_records_them(conn, mon
         conn,
         item_id="rej",
         model="m",
-        draft=store.Draft([f"Meh {URL}", "b", f"c {URL}"], "", ""),
+        draft=store.Draft(["Meh", "b", f"c {URL}"], "", ""),
     )
     reject_id = store.reject(conn, reject_target, note="not news")
     seed_item(conn, "new", total=9.0)
@@ -180,12 +180,12 @@ def test_run_draft_no_examples_flag_sends_plain_prompt(conn, monkeypatch, caplog
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft([f"A game-changer! ORR 88%. {URL}", "b", f"c {URL}"], "", ""),
+        draft=store.Draft(["A game-changer! ORR 88%.", "b", f"c {URL}"], "", ""),
     )
     store.edit(
         conn,
         old,
-        thread=[f"ORR 88% in a single-arm study. Sequencing is open. {URL}", "b", f"c {URL}"],
+        thread=["ORR 88% in a single-arm study. Sequencing is open.", "b", f"c {URL}"],
         note="less hype",
     )
     seed_item(conn, "new", total=9.0)
@@ -233,12 +233,12 @@ def test_run_draft_records_examples_for_failed_drafts_too(conn, monkeypatch):
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft([f"A game-changer! ORR 88%. {URL}", "b", f"c {URL}"], "", ""),
+        draft=store.Draft(["A game-changer! ORR 88%.", "b", f"c {URL}"], "", ""),
     )
     edit_id = store.edit(
         conn,
         old,
-        thread=[f"ORR 88% in a single-arm study. Sequencing is open. {URL}", "b", f"c {URL}"],
+        thread=["ORR 88% in a single-arm study. Sequencing is open.", "b", f"c {URL}"],
     )
     seed_item(conn, "bad", total=9.0)
     monkeypatch.setattr(

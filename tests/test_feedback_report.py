@@ -240,6 +240,7 @@ def fake_client(monkeypatch):
 def cfg_file(tmp_path):
     cfg = run_feedback.load_feedback_config()
     cfg["username"] = "oncwatch"
+    cfg["kpi"] = "impressions"  # this end-to-end pins the raw KPI; conversation has its own test
     cfg["report"]["min_posts_per_group"] = 3
     cfg["snapshot"]["daily_for_days"] = 5
     p = tmp_path / "feedback.yaml"

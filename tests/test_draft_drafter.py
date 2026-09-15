@@ -194,7 +194,7 @@ def test_preprint_must_be_labelled(source):
     problems = check_hard_rules(draft, url=URL, source=source)
     assert "preprint not labelled in first thread post" in problems
 
-    labelled = good_json(thread=[f"New preprint. {URL}", "b", f"c {URL}"])
+    labelled = good_json(thread=["New preprint.", "b", f"c {URL}"])
     assert check_hard_rules(validate_output(labelled), url=URL, source=source) == []
 
 
@@ -419,7 +419,7 @@ def test_draft_item_retries_with_the_violation_in_the_prompt():
         seen.append(user)
         long = "x" * 281
         good = f"ok {URL}"
-        thread = [long if len(seen) == 1 else good, good, good]
+        thread = [long if len(seen) == 1 else "ok", good, good]
         return json.dumps(
             {
                 "thread": thread,

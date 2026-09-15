@@ -107,6 +107,16 @@ source only when it is due, and score only scores what is new.
    made-up numbers, missing source link, too long, a missing @handle or #tag)
    are stored as failed, not shown.
 
+   The first post is held to its own rule (rule 12): it carries no link, no
+   thread position marker ("1/6"), no "thread" and no emoji, and it stays under
+   220 characters. X ranks a thread on what its opening post does in the first
+   minutes, and a reader who is handed a link, or a summary they cannot answer,
+   never reaches post 2. The source URL goes in the last post only. A draft
+   whose opener breaks this is sent back to the model and, if it keeps breaking
+   it, stored as failed. A single or long post carries its own URL and is
+   exempt from the link rule and the length cap. The cap lives in
+   `draft\hook.py` (`HOOK_MAX_CHARS`) if you want a different opener length.
+
    Posts tag what X can link. A journal, society, regulator or company the
    pipeline knows the X account of is written as its @handle when a post names
    it (`@JCO_ASCO`, `@Merck`), and every formal drug name and named trial is a
@@ -417,15 +427,16 @@ source only when it is due, and score only scores what is new.
    python run_publish.py
    ```
    Run this a few times over a couple of days until the plan looks right.
-   The shipped caps are `max_posts_per_day: 100` and `min_gap_minutes: 15`,
-   which is a drain-the-queue pace: with continuous mode below, that is up to
-   four posts an hour. Lower them (16 a day and a 90 minute gap is a calmer
-   pair) if the account should post less often than the queue fills.
-   The shipped `slots: []` is continuous mode: each run posts the top approved
-   draft as soon as `min_gap_minutes` has passed since the last post and the
-   daily cap allows, so a cron every 15 minutes drains the queue one draft per
-   gap, day and night. List times under `slots:` (e.g. `"08:30"`, `"12:15"`) to
-   post only inside those windows instead.
+   The shipped caps are `max_posts_per_day: 3` and `min_gap_minutes: 15`, and
+   the shipped slots are `"05:30"`, `"06:30"` and `"12:30"` local time: US East
+   morning, London early afternoon, and the US afternoon. Both settings say the
+   same thing, which is that a post wants to land where its readers are awake to
+   reply to it in its first hour, and that three posts a day nobody answers
+   teach the ranker to skip the account. Raise the cap if the queue should drain
+   faster, and set `slots: []` for continuous mode: each run then posts the top
+   approved draft as soon as `min_gap_minutes` has passed since the last post
+   and the daily cap allows, so a cron every 15 minutes drains the queue one
+   draft per gap, day and night.
 2. Go live. Two things are required, so nothing posts by accident: in `.env`
    ```
    PUBLISH_ENABLED=1
@@ -539,6 +550,17 @@ source only when it is due, and score only scores what is new.
    The report proposes changes to the scoring rubric, prefilter keywords,
    posting slots and voice guide. It applies none of them; tell me which you
    want and I will commit them.
+
+   Every table in it is ranked by one KPI, `kpi:` in `feedback\config.yaml`.
+   The shipped value is `conversation`: not a number X reports, but a weighted
+   sum of the ones it does (a reply or a quote counts 3, a bookmark or a repost
+   2, a like 1). Those are the signals the ranker pays for, and impressions are
+   what they buy, so ranking on impressions ranks posts by an outcome rather
+   than by anything a draft controls. Set `kpi: impressions` (or `likes`,
+   `replies`, ...) to measure a raw count instead. `evolve.kpi` in
+   `swarm\config.yaml` is the same setting for step 9 and ships the same way,
+   so the genomes, designers and formats that survive are the ones that got
+   people talking, not the ones that got scrolled past.
 3. Swarm fitness (step 9, once snapshots exist). Scores every posted swarm
    draft against the posts before it and retires the genomes that keep
    losing, so the next drafts come from the winners:

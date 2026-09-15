@@ -15,8 +15,12 @@ bearer_token_env: X_BEARER_TOKEN
 timezone: America/Los_Angeles   # Seattle, WA
 
 # Primary KPI every group comparison and correlation is computed against.
-# One of: impressions | likes | reposts | replies | quotes | bookmarks
-kpi: impressions
+# One of: impressions | likes | reposts | replies | quotes | bookmarks | conversation
+# `conversation` is the derived weighting in feedback/models.py (replies and quotes x3,
+# bookmarks and reposts x2, likes x1): the signals the ranker actually pays for. Reach is
+# what those signals BUY, so selecting on impressions selects on the outcome rather than
+# on anything a draft controls. Set `kpi: impressions` to measure reach instead.
+kpi: conversation
 
 # When to pull a fresh snapshot of a tweet's metrics, counted in days since it was posted.
 snapshot:

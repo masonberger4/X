@@ -153,6 +153,20 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `Brief.handles` for the swarm) and the only one enforced. `numbers_in` ignores
   `@`/`#` tokens so a trial name's digits are not a number to verify. Publish's re-check
   and human-approved texts are untouched.
+- **The first post is the hook** (`draft/hook.py`, pure; rule 12 in `draft/prompt.py:hook_rule`,
+  enforced by `hook_problems` from `check_hard_rules` on `thread[0]` and from
+  `swarm/cells.py:cell_problems` on a hook cell). It carries no link of any kind, no thread
+  position marker ("1/6"), no "thread" and no emoji, and it stays within `HOOK_MAX_CHARS`:
+  X ranks a thread on its opening post, and an outbound link or an unanswerable summary
+  there costs the rest of the thread its readers. The source URL stays in the last post
+  (rule 2). A single or long post is its own opener AND carries the URL, so it is exempt
+  from the link ban and the cap (`carries_url=True`).
+- **KPIs are weighted, not counted.** `feedback/models.py:CONVERSATION_WEIGHTS` defines the
+  derived `conversation` KPI (reply/quote x3, bookmark/repost x2, like x1) beside the six
+  stored counts; `Metrics.get` and `swarm/store.py:_metrics` both serve it, and it is the
+  shipped `kpi:` in `feedback/config.yaml` and `evolve.kpi` in `swarm/config.yaml`, so the
+  report and the swarm's selection point at conversation rather than at reach. `swarm/`
+  imports `feedback.models` for those weights only (pure dataclasses, no DB, no network).
 - **The shape of a draft is a gene, not a constant** (step 9 phase four). `Draft.thread`
   is always the list of posts; `draft/schema.py:Format` (shape `thread` | `single` |
   `long`, `min_posts`/`max_posts`, `visuals` 0-2, one anchor word per visual, `max_chars`)
@@ -432,7 +446,8 @@ db.py     sqlite: items, clusters, scores, ratings, source_runs
 timeutil.py  display timezone: UTC storage -> one human-facing zone (root `timezone:`),
           fmt_datetime/fmt_date, Jinja |localtime / |localdate
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
-draft/    schema.py (Draft, Format, validate_output), chart.py (chart + table specs, verification, PNG rendering, Style
+draft/    schema.py (Draft, Format, validate_output), hook.py (rule 12: the opening post),
+          chart.py (chart + table specs, verification, PNG rendering, Style
           knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,
           grade_image, call_grader), branding.py (tickers + logos for company cells),
           logos.py (site icon discovery + PNG normalisation for run_logos.py), prompt.py,

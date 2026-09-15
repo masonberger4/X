@@ -66,10 +66,11 @@ DEFAULT_GENOME = Genome(
     slots=[
         Slot(
             HOOK,
-            "Open the thread. State the single most important finding or event in one "
-            "sentence a buy-side reader stops for, and name the company, asset or trial. "
-            "No throat-clearing, no 'thread', no emoji. Numbers only if written verbatim "
-            "in the source.",
+            "Open the thread, and assume nobody reads post 2 unless this one earns it. "
+            "ONE short claim: the finding or its consequence, not the setup, naming the "
+            "company, asset or trial, and worded so a specialist could answer or argue "
+            "with it. No link, no thread position marker ('1/6'), no 'thread', no emoji, "
+            "no summary of what follows. Numbers only if written verbatim in the source.",
         ),
         Slot(
             "mechanism",

@@ -17,8 +17,10 @@ grace_minutes: 20
 auto_publish_enabled: true
 auto_publish_interval_minutes: 15
 
-# Hard limits that apply to every post, breaking news included.
-max_posts_per_day: 100
+# Hard limits that apply to every post, breaking news included. Three a day is a ceiling,
+# not a target: an unanswered post teaches the ranker that this account is skippable, so
+# fewer posts that the operator can stay with beat a full queue drained overnight.
+max_posts_per_day: 3
 min_gap_minutes: 15
 
 # Breaking items may post outside slots (still subject to the caps above).
