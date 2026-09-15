@@ -50,6 +50,7 @@ BACKOFF_BASE_SECONDS = 2.0
 MEDICAL_ADVICE_PATTERNS = (
     r"\bask your (doctor|oncologist|physician)\b",
     r"\btalk to your (doctor|oncologist|physician)\b",
+    r"\b(discuss|consult)(\s+(this|it))?\s+with\s+your\s+(doctor|oncologist|physician)\b",
     r"\bpatients should\b",
     r"\byou should (take|try|switch|stop|start|ask|consider)\b",
     r"\bwe recommend\b",
@@ -186,7 +187,17 @@ def parse_json_response(text: str) -> object:
 
 
 def _url_in(text: str, url: str) -> bool:
-    return url in text
+    """True if `url` appears in `text` as a whole URL: it must be followed by the end of
+    the string, whitespace, or a closing/terminal punctuation character that cannot be
+    part of a URL, not by more URL-shaped characters (so ".../study-2" does not satisfy a
+    required ".../study")."""
+    idx = text.find(url)
+    while idx != -1:
+        end = idx + len(url)
+        if end >= len(text) or text[end] in " \t\r\n.,;:!?)]}\"'":
+            return True
+        idx = text.find(url, idx + 1)
+    return False
 
 
 def numbers_in(text: str) -> list[str]:
@@ -200,13 +211,20 @@ def numbers_in(text: str) -> list[str]:
 
 
 def _number_in_source(num: str, source_text: str) -> bool:
-    """A number counts as verbatim if it (and its % sign, if any) appears in the source text."""
+    """A number counts as verbatim if it (and its % sign, if any) appears in the source text
+    as that whole number, not as a digit run inside a larger number (so '12' does not match
+    inside '312')."""
     bare = num.rstrip("%")
-    if bare not in source_text:
+    if not re.search(r"(?<!\d)" + re.escape(bare) + r"(?!\d)", source_text):
         return False
     if num.endswith("%"):
-        # Accept "88%", "88 %", "88 percent"
-        return bool(re.search(re.escape(bare) + r"\s?(%|percent)", source_text))
+        # Accept "88%", "88 %", "88 percent" (but not "88 percentile")
+        return bool(
+            re.search(
+                r"(?<!\d)" + re.escape(bare) + r"(?!\d)\s?(%|percent\b)",
+                source_text,
+            )
+        )
     return True
 
 
