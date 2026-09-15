@@ -14,12 +14,12 @@ grace_minutes: 20
 # run cron would make), so approved drafts post on their own under the caps below and the
 # slots above. Still nothing posts without PUBLISH_ENABLED=1 in .env. The panel's
 # publishing page edits these two keys ("Automatic publishing"); cron users leave them.
-auto_publish_enabled: false
+auto_publish_enabled: true
 auto_publish_interval_minutes: 15
 
 # Hard limits that apply to every post, breaking news included.
-max_posts_per_day: 16
-min_gap_minutes: 90
+max_posts_per_day: 100
+min_gap_minutes: 15
 
 # Breaking items may post outside slots (still subject to the caps above).
 breaking:
