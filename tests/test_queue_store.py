@@ -37,6 +37,29 @@ def test_connect_uses_db_path_env(tmp_path, monkeypatch):
     assert p.exists()
 
 
+def test_fetch_candidates_returns_empty_without_step1_tables(tmp_path, monkeypatch):
+    path = tmp_path / "no_step1.db"
+    monkeypatch.setenv("DB_PATH", str(path))
+    c = store.connect(path)
+    try:
+        assert store.fetch_candidates(min_score=0.0, since_hours=1000, conn=c) == []
+    finally:
+        c.close()
+
+
+def test_drafts_created_at_index_created_idempotently(db_file):
+    c1 = store.connect(db_file)
+    c1.close()
+    c2 = store.connect(db_file)
+    try:
+        rows = c2.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_drafts_created'"
+        ).fetchall()
+        assert len(rows) == 1
+    finally:
+        c2.close()
+
+
 def test_fetch_candidates_filters_by_score_and_age(conn):
     seed_item(conn, "hi", total=9.0)
     seed_item(conn, "low", total=3.0)

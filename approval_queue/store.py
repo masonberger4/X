@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS drafts (
 );
 CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts(status);
 CREATE INDEX IF NOT EXISTS idx_drafts_cluster ON drafts(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_created ON drafts(created_at);
 
 CREATE TABLE IF NOT EXISTS decisions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -327,6 +328,8 @@ def fetch_candidates(
     own = conn is None
     conn = conn or connect()
     try:
+        if not step1_tables_present(conn):
+            return []
         since = (datetime.now(UTC) - timedelta(hours=since_hours)).replace(microsecond=0)
         rows = conn.execute(
             _CANDIDATES_SQL, {"min_score": min_score, "since": since.isoformat()}
