@@ -147,14 +147,14 @@ def test_thread_aggregation_head_plus_replies_shown_separately():
             snap("r2", 7, impressions=200, likes=1),
         ]
     )
-    rows = an.build_rows(tweets, {7: ctx(7)}, latest, timezone="America/New_York")
+    rows = an.build_rows(tweets, {7: ctx(7)}, latest, timezone="America/Los_Angeles")
     assert len(rows) == 1
     r = rows[0]
     assert r.kind == "thread" and r.tweet_id == "h"
     assert r.head.impressions == 1000 and r.kpi("impressions") == 1000
     assert r.reply_sum == Metrics(impressions=500, likes=3) and r.reply_count == 2
     assert r.total.impressions == 1500 and r.total.likes == 13
-    assert r.hour == 8  # 12:30 UTC is 08:30 in New York on 2026-06-01
+    assert r.hour == 5  # 12:30 UTC is 05:30 in Los Angeles on 2026-06-01
     assert r.slot == "08:30"
 
 

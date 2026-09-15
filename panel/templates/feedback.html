@@ -55,8 +55,8 @@ the X API read tier is set up; it is an optional step in <code>ops/config.yaml</
 
 {% if report %}
 <h2>Latest report</h2>
-<p class="meta">{{ report.window_start }} to {{ report.window_end }}, generated
-  {{ report.generated_at.strftime('%Y-%m-%d') if report.generated_at else '' }}.</p>
+<p class="meta">{{ report.window_start|localdate }} to {{ report.window_end|localdate }}, generated
+  {{ report.generated_at|localdate }}.</p>
 {% if report.suggestions %}
 <p class="meta">These are PROPOSALS. Applying one means editing <code>config.yaml</code> or
 <code>publish/config.yaml</code> by hand and bumping <code>PROMPT_VERSION</code>.</p>

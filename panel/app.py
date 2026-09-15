@@ -50,6 +50,7 @@ from jinja2 import ChoiceLoader, FileSystemLoader
 
 import config as root_config
 import run_ops
+import timeutil
 from approval_queue import app as queue_app
 from db import Database
 from ops import backup as ops_backup
@@ -76,6 +77,8 @@ templates.env.loader = ChoiceLoader(
     [FileSystemLoader(str(TEMPLATES_DIR)), FileSystemLoader(str(QUEUE_TEMPLATES_DIR))]
 )
 templates.env.globals["HAS_PANEL"] = True
+# `|localtime` / `|localdate`: stored UTC in, the display zone out (see timeutil.py).
+timeutil.install_jinja_filters(templates.env)
 
 CONFIG = load_ops_config()
 # Steps run in the data directory (the repo root, or the exe's folder in the desktop

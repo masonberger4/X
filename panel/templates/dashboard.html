@@ -2,7 +2,7 @@
 {% block title %}Pipeline dashboard{% endblock %}
 {% block content %}
 <h1>Pipeline</h1>
-<div class="banner {{ overall }}">Health: {{ overall|upper }} <span class="meta">checked {{ checked_at.strftime('%Y-%m-%d %H:%M') }}Z</span></div>
+<div class="banner {{ overall }}">Health: {{ overall|upper }} <span class="meta">checked {{ checked_at|localtime }}</span></div>
 
 {% if job %}
 <p class="flash">A run is in progress ({{ job.steps|join(', ') }}). <a href="/runs">Watch it</a>.</p>

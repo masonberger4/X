@@ -95,7 +95,7 @@ def client(db_file, tmp_path, monkeypatch):
 
     cfg = tmp_path / "publish.yaml"
     cfg.write_text(
-        "timezone: America/New_York\nslots: []\nmax_posts_per_day: 3\n"
+        "timezone: America/Los_Angeles\nslots: []\nmax_posts_per_day: 3\n"
         "min_gap_minutes: 90  # keep\nauto_publish_enabled: false\n"
         "auto_publish_interval_minutes: 15\n"
     )

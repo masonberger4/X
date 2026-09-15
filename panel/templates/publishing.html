@@ -65,7 +65,7 @@ went out, then fix the row by hand.</p>
   <tr>
     <td><a href="/drafts/{{ p.draft_id }}">{{ p.draft_id }}</a>{% if p.kind == 'thread' %} <span class="meta">{{ p.position }}</span>{% endif %}</td>
     <td><span class="pill {{ 'ok' if p.status == 'posted' else 'fail' }}">{{ p.status }}</span></td>
-    <td class="meta">{{ p.posted_at.strftime('%Y-%m-%d %H:%M') if p.posted_at else '' }}</td>
+    <td class="meta">{{ p.posted_at|localtime }}</td>
     <td class="meta">{{ p.slot or '' }}</td>
     <td>
       {% if p.tweet_id %}<a href="https://x.com/i/status/{{ p.tweet_id }}" target="_blank" rel="noopener noreferrer">{{ p.text }}</a>

@@ -797,3 +797,25 @@ attaches or skips the chart; `auto_publish_enabled` and
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
+
+### The clock you see
+
+Every time and date on a screen — the control panel, the approval queue, the
+digest, `run_ops.py status`, the health and feedback reports, the alert emails —
+is shown in one time zone, set by `timezone:` near the top of `config.yaml`. It
+ships as `America/Los_Angeles` (Seattle). To move it, edit that one line to
+another zone name (`America/New_York`, `Europe/London`, and so on) and restart
+whatever is running; nothing else changes.
+
+Two other files have their own `timezone:` line, and you should set all three to
+the same zone: `publish\config.yaml` (which decides what "9am" means for the
+posting slots) and `feedback\config.yaml` (which decides what "hour posted"
+means in the weekly report). Those two are about *behaviour*, not display, which
+is why they are separate.
+
+Behind the scenes nothing about the database moves: every timestamp is stored in
+UTC and only translated when it is printed for you. A few things stay in UTC on
+purpose, because they are filenames or keys rather than something to read: the
+backup files in `backups\` (`pipeline-<UTC stamp>.sqlite`), the run ids on the
+runs page, and the day a follower/metrics snapshot is filed under. Ages like
+"3.2h ago" are the same in any zone.
