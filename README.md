@@ -104,7 +104,8 @@ ruff check . && ruff format --check . && pytest
 ```
 
 Edit `config.yaml` to change feeds, PubMed queries, company list, keywords,
-cadences, the score threshold, or the scoring model.
+cadences, the score threshold, the scoring model, or `timezone:` (see
+[Display time zone](#display-time-zone)).
 
 ### Windows
 
@@ -289,8 +290,10 @@ python run_verify.py --no-auto-revise  # one run without the loop
 
 `run_publish.py` reads approved drafts through `publish/store.py:fetch_approved`
 and posts them to X via tweepy (`publish/client.py`, the only module that
-imports tweepy). Slots, timezone, daily cap, minimum gap between posts and
-the breaking-news rules live in `publish/config.yaml`. With `slots: []` (the
+imports tweepy). Slots, daily cap, minimum gap between posts and the
+breaking-news rules live in `publish/config.yaml`, along with its own
+`timezone:` — the zone the slot hours are read in (behaviour, not display; keep
+it equal to the root `timezone:`, see [Display time zone](#display-time-zone)). With `slots: []` (the
 shipped value) there are no windows: every run posts the top candidate once
 `min_gap_minutes` has passed and the daily cap is not reached.
 
@@ -669,6 +672,37 @@ SQLite (`db_path` in config). Tables: `items`, `clusters`, `scores`,
 `health_checks`, `alerts_sent` (step 5). Every score is kept, so re-scoring
 after a prompt change is additive. Each step creates only its own tables and
 reads the others through adapter functions in its `store.py`.
+
+## Display time zone
+
+Storage never changes: every timestamp in SQLite is an aware-UTC ISO string, and
+every comparison, window and API payload is UTC. Conversion happens only when a
+datetime becomes text for a person.
+
+`timeutil.py` is the single place that does it. `timezone_name()` reads
+`timezone:` from the root `config.yaml` (shipped value `America/Los_Angeles`,
+Seattle; it is the only reader of that key, cached, falling back to the default
+when the name is unknown), `display_tz()` returns the tzinfo, `to_display()`
+takes a datetime or a stored ISO string and returns it in that zone,
+`fmt_datetime()` renders `2026-06-01 08:30 PDT`, `fmt_date()` renders the
+calendar date, and `install_jinja_filters(env)` registers the `|localtime` and
+`|localdate` filters used by the panel and approval-queue templates.
+
+Converted: the panel's dashboard, publishing and feedback pages, the approval
+queue's draft detail and voice pages, `panel/feed.py`, `digest.py`,
+`run_ops.py status`, the `ops/health.py` report heading, the `ops/alert.py`
+alert body, the `feedback/report.py` heading, and the window line and edit
+headings in `draft/voice_report.py`.
+
+Deliberately still UTC, because they are sort/parse keys rather than something
+to read: the backup filenames `backups/pipeline-<UTC stamp>.sqlite`, the
+`run_id` stamps, and the `captured_on` day bucket from
+`feedback/store.py:day_of`. Relative ages ("3.2h ago") are zone-independent.
+
+`publish/config.yaml` and `feedback/config.yaml` keep separate `timezone:` keys
+because they drive behaviour — the posting slots and the report's "hour posted"
+column — not display. All three ship as `America/Los_Angeles` and should be
+changed together.
 
 ## Known source caveats
 
