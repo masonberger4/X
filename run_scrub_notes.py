@@ -5,7 +5,7 @@ A chart's or table's `note` is printed under the picture, so a caption like "ver
 cell against current FDA labels before posting" — an aside meant for the reviewer — goes
 out with the post. draft/chart.py:note_problems now fails such a caption at drafting time;
 this command is the one-off pass over drafts that were made before it existed. For every
-draft still in the queue (pending, snoozed or approved but not yet posted) it blanks the
+draft still in the queue (pending, or approved but not yet posted) it blanks the
 offending caption, leaves the numbers, rows and text untouched, and re-renders the picture
 so the file on disk matches. A table is redrawn through verify/render.py, with the cell
 verdicts it already has; one still waiting on the fact-checker keeps no picture and is
@@ -13,7 +13,7 @@ picked up by the next `run_verify.py`.
 
 usage: python run_scrub_notes.py [--status STATUS ...] [--dry-run] [-v]
   --status STATUS  scrub only these draft statuses (repeatable; default pending,
-                   snoozed, approved)
+                   approved)
   --dry-run        print the captions that would be cleared, change nothing
   -v               debug logging
 """
@@ -32,7 +32,6 @@ log = logging.getLogger("run_scrub_notes")
 
 DEFAULT_STATUSES = (
     queue_store.STATUS_PENDING,
-    queue_store.STATUS_SNOOZED,
     queue_store.STATUS_APPROVED,
 )
 NOTE = "caption addressed the operator"

@@ -222,7 +222,7 @@ source only when it is due, and score only scores what is new.
    to list them, then without the flag to blank those captions and redraw the
    pictures. It touches nothing else: the numbers, rows and post text stay as
    they are, each change is logged as an edit on the draft, and a draft that
-   is already posted is left alone. By default it covers pending, snoozed and
+   is already posted is left alone. By default it covers pending and
    approved drafts; `--status STATUS` (repeatable) narrows it, `-v` shows per
    draft detail.
 
@@ -305,8 +305,9 @@ source only when it is due, and score only scores what is new.
    Then open http://localhost:8000/queue in a browser (the front page is the
    dashboard; part 8 explains it). `python run_queue.py` still opens the
    approval page on its own if that is all you want. For each draft: approve,
-   revise, reject or snooze. Press Ctrl+C in the window to stop the server
-   when done.
+   revise or reject. An approve is not final: "Reopen" on the approved page
+   brings a draft that has not gone out yet back here as pending. Press Ctrl+C
+   in the window to stop the server when done.
    To change a post, do not retype it: write what should change in the
    "what should change?" box (on the list next to each draft, or under
    "Revise" on the draft's page) and press Revise. The drafter rewrites the
@@ -351,8 +352,8 @@ source only when it is due, and score only scores what is new.
    the text alone and records why, so a picture is never attached after you
    stopped looking. A Revise keeps the verdict of every cell whose row label,
    column and text did not change.
-   While a draft still awaits your decision (pending, or snoozed and back on
-   the pending page) every cell is a text box: retype a cell to correct it,
+   While a draft still awaits your decision (pending, which a reopened draft
+   is again) every cell is a text box: retype a cell to correct it,
    clear it to blank it in the picture, then press "Save cells". Saving counts
    as checking every cell by hand ("supported (typed in)", no web call): the
    ones you changed, and the ones you left standing that the fact-checker
@@ -602,7 +603,18 @@ to stop it. Four pages:
   shows a number box next to each waiting draft: number them 1, 2, 3 for the
   order the scheduled slots should post them and press "Save order". A
   draft without a number follows the numbered ones by score. The order is
-  kept on the draft (shown as #1, #2) until it posts.
+  kept on the draft (shown as #1, #2) until it posts. "Reopen" next to a
+  waiting draft takes it back off the list and makes it pending again, so you
+  can revise, edit or reject it; the order you saved for it is forgotten
+  rather than coming back the next time you approve it, and the box beside the
+  button puts your reason in the draft's history. It is refused for anything
+  already on X — posted, or a thread that stopped halfway — and for a draft a
+  publish run has just claimed, because that run will not look at the draft
+  again before it posts (the draft's own page says which); reopening cannot
+  unpost a tweet, so reject it instead if it should not run again. A draft
+  whose last attempt failed or was refused can be reopened, and its failed
+  schedule row goes with it, though the posts log keeps the history. The same
+  button is on the draft's own page.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
   halfway is never retried for you). Posting happens from the approved page,
@@ -644,7 +656,7 @@ to stop it. Four pages:
   `ops/config.yaml`): a backlog of drafts can take an hour or more, and each
   claim's verdict is saved the moment it lands, so stopping the run keeps
   every claim already checked and only the one in flight is redone next time.
-- **Pending / Approved / Snoozed / Rejected / Failed / Voice report** — the
+- **Pending / Approved / Rejected / Failed / Voice report** — the
   approval pages from part 3. The Approved page is the waiting list for
   `run_publish.py`: each row says `waiting`, `posted` (a link to the tweet),
   `failed` or `partial thread`, and drafts already posted are hidden until you

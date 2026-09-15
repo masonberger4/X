@@ -132,7 +132,7 @@ def test_status_counts_edit_rate_and_by_source():
         draft_row(1, status="approved"),
         draft_row(2, status="approved"),
         draft_row(3, status="rejected", source="fda"),
-        draft_row(4, status="snoozed"),
+        draft_row(4, status="pending"),
         draft_row(5, status="failed"),
         draft_row(6, status="pending"),
         draft_row(7, status="approved", days_ago=60),  # outside the window
@@ -144,7 +144,7 @@ def test_status_counts_edit_rate_and_by_source():
     ]
     r = report(drafts, decisions)
     assert r.drafts_total == 6
-    assert (r.approved_unedited, r.edited, r.rejected, r.snoozed, r.failed) == (1, 1, 1, 1, 1)
+    assert (r.approved_unedited, r.edited, r.rejected, r.failed) == (1, 1, 1, 1)
     assert r.edit_rate == 1 / 3
     assert r.by_source == [("pubmed", 5, 1, 0), ("fda", 1, 0, 1)]
     assert r.by_category == [("not_newsworthy", 1), ("voice", 1)]

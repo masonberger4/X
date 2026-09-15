@@ -96,7 +96,6 @@ class VoiceReport:
     approved_unedited: int
     edited: int
     rejected: int
-    snoozed: int
     failed: int
     edit_rate: float | None
     by_source: list[tuple[str, int, int, int]] = field(default_factory=list)
@@ -352,7 +351,6 @@ def build_report(
         1 for d, s in status_of.items() if s == "approved" and d not in edited_draft_ids
     )
     rejected = sum(1 for s in status_of.values() if s == "rejected")
-    snoozed = sum(1 for s in status_of.values() if s == "snoozed")
     failed = sum(1 for s in status_of.values() if s == "failed")
     reviewed = approved_unedited + edited + rejected
     edit_rate = _rate(edited, reviewed)
@@ -430,7 +428,6 @@ def build_report(
         approved_unedited=approved_unedited,
         edited=edited,
         rejected=rejected,
-        snoozed=snoozed,
         failed=failed,
         edit_rate=edit_rate,
         by_source=by_source,
@@ -481,14 +478,13 @@ def render_markdown(report: VoiceReport) -> str:
         "",
     ]
     lines += _table(
-        ["Drafts", "Approved unedited", "Edited", "Rejected", "Snoozed", "Failed", "Edit rate"],
+        ["Drafts", "Approved unedited", "Edited", "Rejected", "Failed", "Edit rate"],
         [
             [
                 r.drafts_total,
                 r.approved_unedited,
                 r.edited,
                 r.rejected,
-                r.snoozed,
                 r.failed,
                 _pct(r.edit_rate),
             ]
