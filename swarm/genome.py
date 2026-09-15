@@ -141,10 +141,6 @@ DEEP_GENOME = Genome(
 SEED_GENOMES: list[Genome] = [DEFAULT_GENOME, WIDE_GENOME, DEEP_GENOME]
 
 
-def genome_dict(g: Genome) -> dict[str, Any]:
-    return asdict(g)
-
-
 # Bounds a bred child must stay inside (swarm/mutate.py validates against these).
 MIN_SLOTS, MAX_SLOTS = 3, 6
 MIN_FAN_OUT, MAX_FAN_OUT = 2, 12

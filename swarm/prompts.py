@@ -65,19 +65,6 @@ def cell_rules(max_chars: int = MAX_POST_CHARS) -> str:
 - Otherwise plain text: no other hashtags, no emoji, no "1/", no quotation of the whole abstract."""
 
 
-CELL_RULES = f"""RULES for this one post (a post that breaks one is discarded by code):
-- At most {MAX_POST_CHARS} characters; a URL counts as {URL_CHARS}. Aim under {MAX_POST_CHARS - 30}.
-- No medical advice or treatment recommendations. No investment advice: never buy, sell,
-  hold, short, a price target or a promised return. Describe; the reader decides.
-- Every number must appear verbatim in the source title or abstract. Do not round,
-  convert, subtract or compute. No number in the source means no number in the post.
-- An interpretation, not a restatement: say what it means, what to watch, what is overhyped.
-- Write an account whose handle the brief lists as @handle when you name it; never invent
-  a handle. Write every formal drug name (#Trastuzumab Deruxtecan, #cilta-cel) and every
-  named trial (#KEYNOTE-189, #DESTINY-Lung02) as a hashtag, spelled as the source spells it.
-- Otherwise plain text: no other hashtags, no emoji, no "1/", no quotation of the whole abstract."""
-
-
 def brief_block(brief: Brief) -> str:
     parts = [
         f"SOURCE: {brief.source}" + ("  (THIS IS A PREPRINT)" if brief.preprint else ""),

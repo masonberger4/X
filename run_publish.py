@@ -127,13 +127,6 @@ def choose(
     return pick_for_slot(approved, slot, policy), label, f"slot {label} open"
 
 
-def image_for(approved: Approved, cfg: dict) -> str | None:
-    """The PNG to attach to the first post, or None (no image, or media.attach_images false)."""
-    if not (cfg.get("media") or {}).get("attach_images", True):
-        return None
-    return approved.image_path or None
-
-
 def images_for(approved: Approved, cfg: dict) -> dict[int, list[tuple[str, str]]]:
     """Phase four: {post position: [(png path, alt), ...]} for every picture the draft
     carries, by the post each is anchored to. Empty when media.attach_images is false. A

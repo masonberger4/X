@@ -115,13 +115,6 @@ def checks_for_draft(conn: sqlite3.Connection, draft_id: int) -> list[CheckRow]:
     return [_row(r) for r in rows]
 
 
-def checks_by_draft(conn: sqlite3.Connection, draft_ids: list[int]) -> dict[int, list[CheckRow]]:
-    out: dict[int, list[CheckRow]] = {}
-    for did in draft_ids:
-        out[did] = checks_for_draft(conn, did)
-    return out
-
-
 def insert_check(conn: sqlite3.Connection, draft_id: int, check: ClaimCheck, model: str) -> int:
     ensure_schema(conn)
     now = datetime.now(UTC).replace(microsecond=0).isoformat()
