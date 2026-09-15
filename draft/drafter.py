@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 import claude_cli
+from draft.chart import note_problems
 from draft.prompt import (
     PREPRINT_LABEL,
     ClaimProblem,
@@ -309,7 +310,10 @@ def check_hard_rules(
                 f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
         problems += [f"{label} {p}" for p in tag_problems(post, handles, companies)]
+    if draft.chart is not None:
+        problems += note_problems(draft.chart.note, "chart note")
     if draft.table is not None:
+        problems += note_problems(draft.table.note, "table note")
         for text in [draft.table.title, draft.table.note, *(c for _, _, c in draft.table.cells())]:
             if _ADVICE_RE.search(text):
                 problems.append(f"table reads as medical advice: {text!r}")

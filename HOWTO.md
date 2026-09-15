@@ -212,6 +212,21 @@ source only when it is due, and score only scores what is new.
    a company that is not configured is drawn exactly as the drafter wrote
    it, and a private company listed without a ticker gets its logo only. The
    table header is drawn as a rounded navy bar with a shadow.
+   A picture's footnote (`note` in the chart or table spec) is a caption the
+   reader sees under the card: the n, the design, an as-of date, a caveat. A
+   caption that instructs you instead ("verify each cell against current FDA
+   labels before posting", "TODO") is a hard rule failure, so the drafter
+   retries. To clean up drafts made before that rule existed, run
+
+       python run_scrub_notes.py --dry-run
+
+   to list them, then without the flag to blank those captions and redraw the
+   pictures. It touches nothing else: the numbers, rows and post text stay as
+   they are, each change is logged as an edit on the draft, and a draft that
+   is already posted is left alone. By default it covers pending, snoozed and
+   approved drafts; `--status STATUS` (repeatable) narrows it, `-v` shows per
+   draft detail.
+
    The other kind of picture is a comparison table (a competitor landscape,
    a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
    first column naming the company, asset or trial. Unlike a chart its cells
