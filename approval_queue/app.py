@@ -54,7 +54,7 @@ from verify.autorevise import (  # noqa: F401  (re-exported)
     cell_problems,
     claim_problems,
 )
-from verify.verifier import trusted_hosts
+from verify.verifier import CONTRADICTED, trusted_hosts
 
 log = logging.getLogger(__name__)
 
@@ -630,13 +630,34 @@ async def trust_source(draft_id: int, request: Request, conn: Conn):
             "added to trusted_domains" if added else "already trusted",
             changed,
         )
-        if row.draft.table is not None and row.status == "pending":
+        if row.draft.table is not None and row.editable:
             cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
             hosts = trusted_hosts(cfg, verify_render.root_config()) | {host}
             verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
         return _detail_redirect(draft_id)
 
     return await run_in_threadpool(work)
+
+
+def _vouched_cells(table, changed, checks) -> list[tuple[int, int]]:
+    """The cells of a saved grid the reviewer vouches for without changing their text: a
+    non-empty cell the fact-checker could not verify, or verified from a source that is not
+    trusted, so it would be blanked in the picture. Saving the form is the reviewer saying
+    the grid is right, which is also what retyping a cell to exactly what was there already
+    means — that edit leaves no diff, so `changed` never sees it. A contradicted cell is
+    never vouched for: it has to be corrected (or the host trusted) before the picture is
+    drawn."""
+    done = set(changed)
+    by_pos = {(k.row, k.col): k for k in checks}
+    out: list[tuple[int, int]] = []
+    for r, row in enumerate(table.rows):
+        for c, cell in enumerate(row):
+            if (r, c) in done or not (cell or "").strip():
+                continue
+            k = by_pos.get((r, c))
+            if k is None or (not k.shown and k.verdict != CONTRADICTED):
+                out.append((r, c))
+    return out
 
 
 @app.post("/drafts/{draft_id}/table")
@@ -655,8 +676,10 @@ async def edit_table(draft_id: int, request: Request, conn: Conn):
             raise HTTPException(404, "no such draft")
         if row.draft.table is None:
             return _detail_redirect(draft_id, error="this draft has no table")
-        if row.status != store.STATUS_PENDING:
-            return _detail_redirect(draft_id, error="only a pending draft's table can be edited")
+        if not row.editable:
+            return _detail_redirect(
+                draft_id, error="only a draft still awaiting a decision can have its table edited"
+            )
         old = row.draft.table
         rows = [
             [form.get(f"cell_{r}_{c}", "") for c in range(len(old.columns))]
@@ -675,11 +698,14 @@ async def edit_table(draft_id: int, request: Request, conn: Conn):
             return _detail_redirect(draft_id, error="; ".join(problems))
         _, new, changed = store.edit_table(conn, draft_id, rows)
         verify_store.carry_over_table_checks(conn, draft_id, old, new)
-        recorded = verify_store.mark_cells_human(conn, draft_id, new, changed)
+        vouched = _vouched_cells(new, changed, verify_store.table_checks_for_draft(conn, draft_id))
+        recorded = verify_store.mark_cells_human(conn, draft_id, new, changed + vouched)
         log.info(
-            "draft %d: %d table cell(s) edited by the reviewer, %d recorded as human-supported",
+            "draft %d: %d table cell(s) edited by the reviewer, %d vouched for unchanged, "
+            "%d recorded as human-supported",
             draft_id,
             len(changed),
+            len(vouched),
             recorded,
         )
         fresh = store.get_draft(conn, draft_id)

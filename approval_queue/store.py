@@ -48,6 +48,9 @@ STATUS_REJECTED = "rejected"
 STATUS_SNOOZED = "snoozed"
 STATUS_FAILED = "failed"  # drafter produced output that broke a hard rule
 STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_SNOOZED, STATUS_FAILED)
+# Statuses a reviewer may still change a draft in. A snoozed draft is listed on the pending
+# page once its snooze expires (list_drafts), so its table and text stay editable too.
+EDITABLE_STATUSES = (STATUS_PENDING, STATUS_SNOOZED)
 
 ACTION_APPROVE = "approve"
 ACTION_EDIT = "edit"
@@ -388,6 +391,11 @@ class DraftRow:
     # Phase four: every rendered picture, [{index, path, alt, anchor}]; the first is the
     # same picture as image_path.
     images: list[dict] = field(default_factory=list)
+
+    @property
+    def editable(self) -> bool:
+        """Whether the reviewer may still change this draft (it awaits a decision)."""
+        return self.status in EDITABLE_STATUSES
 
 
 def _row_to_draft(r: sqlite3.Row) -> DraftRow:
