@@ -182,24 +182,25 @@ def test_reject(conn):
     assert store.list_drafts(conn) == []
 
 
-def test_snooze_hides_for_24h_then_reappears(conn):
+def test_reopen_moves_an_approved_draft_back_to_pending(conn):
     seed_item(conn, "i1")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.snooze(conn, did)
-    row = store.get_draft(conn, did)
-    assert row.status == store.STATUS_SNOOZED and row.snoozed_until is not None
+    store.approve(conn, did, note="ok")
     assert store.list_drafts(conn) == []
-    assert store.list_decisions(conn, did)[0]["action"] == "snooze"
-    # expire the snooze
-    conn.execute(
-        "UPDATE drafts SET snoozed_until = '2000-01-01T00:00:00+00:00' WHERE id = ?", (did,)
-    )
-    conn.commit()
+    store.reopen(conn, did, note="second thoughts")
+    row = store.get_draft(conn, did)
+    assert row.status == store.STATUS_PENDING
     assert [r.id for r in store.list_drafts(conn)] == [did]
+    dec = store.list_decisions(conn, did)[-1]
+    assert dec["action"] == "reopen"
+    assert dec["original_text"] == store._serialise_text(make_draft().thread)
+    # edited_text stays NULL: a reopen is not an edit and must never be taught as one
+    assert dec["edited_text"] is None
+    assert dec["note"] == "second thoughts" and dec["category"] is None
 
 
 def test_actions_on_missing_draft_raise(conn):
-    for fn in (store.approve, store.reject, store.snooze):
+    for fn in (store.approve, store.reject, store.reopen):
         with pytest.raises(KeyError):
             fn(conn, 42)
     with pytest.raises(KeyError):
@@ -292,6 +293,45 @@ def test_connect_drops_a_not_null_single_post_column_and_inserts_still_work(tmp_
     store.connect(path).close()  # idempotent
 
 
+def test_connect_turns_a_snoozed_draft_back_into_a_pending_one(tmp_path):
+    path = tmp_path / "snoozed.db"
+    conn = store.connect(path)
+    did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
+    conn.execute("UPDATE drafts SET status = 'snoozed' WHERE id = ?", (did,))
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(path)  # _migrate runs again on this handle
+    assert store.get_draft(conn, did).status == store.STATUS_PENDING
+    assert [r.id for r in store.list_drafts(conn)] == [did]
+    conn.close()
+
+
+def test_the_snooze_migration_moves_nothing_else(tmp_path):
+    """It runs on every connect, so a WHERE clause lost here would quietly un-approve and
+    un-reject every draft in a live database."""
+    path = tmp_path / "mixed.db"
+    conn = store.connect(path)
+    ids = {}
+    for name in ("snoozed", "approved", "rejected", "failed", "pending"):
+        did = store.insert_draft(conn, item_id=f"i_{name}", model="m", draft=make_draft())
+        conn.execute("UPDATE drafts SET status = ? WHERE id = ?", (name, did))
+        ids[name] = did
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(path)
+    after = {name: store.get_draft(conn, did).status for name, did in ids.items()}
+    assert after == {
+        "snoozed": store.STATUS_PENDING,  # the only one that moves
+        "approved": store.STATUS_APPROVED,
+        "rejected": store.STATUS_REJECTED,
+        "failed": store.STATUS_FAILED,
+        "pending": store.STATUS_PENDING,
+    }
+    conn.close()
+
+
 def test_connect_is_idempotent_on_new_database(tmp_path):
     path = tmp_path / "new.db"
     store.connect(path).close()
@@ -332,7 +372,7 @@ def test_edit_with_category_and_blank_category_is_none(conn):
 
 
 def test_actions_without_category_still_work(conn):
-    for i, fn in enumerate((store.approve, store.reject, store.snooze)):
+    for i, fn in enumerate((store.approve, store.reject, store.reopen)):
         seed_item(conn, f"i{i}")
         did = store.insert_draft(conn, item_id=f"i{i}", model="m", draft=make_draft())
         fn(conn, did)

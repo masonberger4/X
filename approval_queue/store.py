@@ -4,7 +4,7 @@ Owns four tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline
 
   drafts(id INTEGER PK, item_id TEXT UNIQUE, cluster_id, model, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
-         snoozed_until, created_at, updated_at,
+         created_at, updated_at,
          chart_json, image_path)   -- added by guarded migrations: the drafter's chart spec
             -- (draft/chart.py) and the PNG rendered from it, relative to image_dir()
   decisions(id INTEGER PK, draft_id FK, action, original_text, edited_text, note, created_at,
@@ -47,21 +47,17 @@ DEFAULT_DB_PATH = "./pipeline.db"
 STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
-STATUS_SNOOZED = "snoozed"
 STATUS_FAILED = "failed"  # drafter produced output that broke a hard rule
-STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_SNOOZED, STATUS_FAILED)
-# Statuses a reviewer may still change a draft in. A snoozed draft is listed on the pending
-# page once its snooze expires (list_drafts), so its table and text stay editable too.
-EDITABLE_STATUSES = (STATUS_PENDING, STATUS_SNOOZED)
+STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_FAILED)
+# Statuses a reviewer may still change a draft in: only a draft still awaiting a decision.
+EDITABLE_STATUSES = (STATUS_PENDING,)
 
 ACTION_APPROVE = "approve"
 ACTION_EDIT = "edit"
 ACTION_REJECT = "reject"
-ACTION_SNOOZE = "snooze"
+ACTION_REOPEN = "reopen"  # an approved draft was moved back to pending
 ACTION_REVISE = "revise"  # the drafter rewrote the draft on the human's instructions
-ACTIONS = (ACTION_APPROVE, ACTION_EDIT, ACTION_REJECT, ACTION_SNOOZE, ACTION_REVISE)
-
-SNOOZE_HOURS = 24
+ACTIONS = (ACTION_APPROVE, ACTION_EDIT, ACTION_REJECT, ACTION_REOPEN, ACTION_REVISE)
 
 # Step 7: why a draft was edited or rejected. Stored in decisions.category (nullable).
 CATEGORY_VOICE = "voice"
@@ -93,7 +89,8 @@ CREATE TABLE IF NOT EXISTS drafts (
     claims_json      TEXT NOT NULL DEFAULT '[]',
     status           TEXT NOT NULL DEFAULT 'pending',
     rejection_reason TEXT,
-    snoozed_until    TEXT,
+    snoozed_until    TEXT,   -- unused: the snooze feature is gone. Kept so that old
+                             -- databases need no table rebuild; never read or written.
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
@@ -172,6 +169,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # not lost to the history: every decision row stored it in original_text.
     if "single_post" in _columns(conn, "drafts"):
         conn.execute("ALTER TABLE drafts DROP COLUMN single_post")
+    # The snooze feature is gone: a draft left snoozed in an older database becomes pending
+    # again, so it is reviewed rather than hidden forever. Idempotent, and a no-op on a
+    # fresh DB (no such row).
+    conn.execute("UPDATE drafts SET status = ? WHERE status = 'snoozed'", (STATUS_PENDING,))
     conn.commit()
 
 
@@ -380,7 +381,6 @@ class DraftRow:
     draft: Draft
     status: str
     rejection_reason: str | None
-    snoozed_until: str | None
     created_at: str
     updated_at: str
     # Joined from items/scores when available (None if step 1 tables are absent)
@@ -423,7 +423,6 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
         draft=draft,
         status=r["status"],
         rejection_reason=r["rejection_reason"],
-        snoozed_until=r["snoozed_until"],
         created_at=r["created_at"],
         updated_at=r["updated_at"],
         source=(r["source"] or "") if "source" in keys else "",
@@ -543,6 +542,12 @@ def get_draft(conn: sqlite3.Connection, draft_id: int) -> DraftRow | None:
     return _row_to_draft(r) if r else None
 
 
+#: Schedule states a draft may be reopened from: the only ones that mean nothing of it is
+#: on X and no publish run owns it. Posted, partial and claimed hold it, as does anything
+#: unrecognised.
+REOPENABLE_STATES = ("pending", "failed", "refused")
+
+
 @dataclass
 class PublishInfo:
     """What step 3 did with a draft, read from its schedule/posts tables (never written here)."""
@@ -556,6 +561,13 @@ class PublishInfo:
     @property
     def tweet_url(self) -> str:
         return f"https://x.com/i/web/status/{self.tweet_id}" if self.tweet_id else ""
+
+    @property
+    def reopenable(self) -> bool:
+        """Whether a human may still take this draft back. An allowlist, so a state a later
+        step 3 invents holds the draft instead of falling through. Both the button's
+        visibility and the route's refusal read this one property, so they cannot drift."""
+        return self.status in REOPENABLE_STATES
 
 
 def publish_states(conn: sqlite3.Connection, draft_ids: list[int]) -> dict[int, PublishInfo]:
@@ -593,27 +605,18 @@ def publish_states(conn: sqlite3.Connection, draft_ids: list[int]) -> dict[int, 
 
 
 def list_drafts(conn: sqlite3.Connection, status: str = STATUS_PENDING) -> list[DraftRow]:
-    """Drafts in a status. For 'pending', snoozed drafts whose snooze has expired are included."""
-    if status == STATUS_PENDING:
-        where = (
-            " WHERE d.status = 'pending'"
-            " OR (d.status = 'snoozed' AND d.snoozed_until IS NOT NULL AND d.snoozed_until <= ?)"
-        )
-        params: tuple[Any, ...] = (_now(),)
-    else:
-        where = " WHERE d.status = ?"
-        params = (status,)
+    """Drafts in a status, newest first."""
+    where = " WHERE d.status = ?"
+    params: tuple[Any, ...] = (status,)
     order = " ORDER BY d.created_at DESC, d.id DESC"
     rows = conn.execute(_select_drafts_sql(conn) + where + order, params).fetchall()
     return [_row_to_draft(r) for r in rows]
 
 
-def _set_status(
-    conn: sqlite3.Connection, draft_id: int, status: str, *, snoozed_until: str | None = None
-) -> None:
+def _set_status(conn: sqlite3.Connection, draft_id: int, status: str) -> None:
     conn.execute(
-        "UPDATE drafts SET status = ?, snoozed_until = ?, updated_at = ? WHERE id = ?",
-        (status, snoozed_until, _now(), draft_id),
+        "UPDATE drafts SET status = ?, updated_at = ? WHERE id = ?",
+        (status, _now(), draft_id),
     )
 
 
@@ -1062,15 +1065,14 @@ def reject(
     return did
 
 
-def snooze(
-    conn: sqlite3.Connection, draft_id: int, hours: float = SNOOZE_HOURS, note: str | None = None
-) -> int:
-    """Hide the draft for `hours`; it reappears in the pending list afterwards."""
+def reopen(conn: sqlite3.Connection, draft_id: int, note: str | None = None) -> int:
+    """Move an approved draft back to pending, so a reviewer may edit or reject it again.
+    Nothing is un-posted here: this only changes the draft's status and logs the decision.
+    The caller refuses a draft that is posted or already claimed by step 3."""
     row = _require(conn, draft_id)
-    until = (datetime.now(UTC) + timedelta(hours=hours)).replace(microsecond=0).isoformat()
-    _set_status(conn, draft_id, STATUS_SNOOZED, snoozed_until=until)
+    _set_status(conn, draft_id, STATUS_PENDING)
     did = _record_decision(
-        conn, draft_id, ACTION_SNOOZE, _serialise_text(row.draft.thread), None, note
+        conn, draft_id, ACTION_REOPEN, _serialise_text(row.draft.thread), None, note
     )
     conn.commit()
     return did

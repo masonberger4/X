@@ -36,7 +36,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | every run's log (whichever page started it) and the checkboxes to run any enabled step; stop the one in progress |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue (its Revise box sends a draft back through the drafter with your note); the pending page has "Draft" and "Verify" buttons |
-| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), and when automatic publishing is on, when its next run is due |
+| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), "Reopen" to send a draft that has not gone out back to pending (`POST /drafts/{id}/reopen`; refused for a posted, partial or claimed draft), and when automatic publishing is on, when its next run is due |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
@@ -316,7 +316,11 @@ Safety gates, all of which must hold before a single tweet is sent:
 - The human's order from the panel's approved page (`schedule.position`,
   `publish/store.py:set_order`) is honoured before breaking and score;
   `--draft ID` considers one approved draft only (the panel's "Publish now"
-  runs `--live --now --draft ID`).
+  runs `--live --now --draft ID`). Reopening a draft in the queue deletes its
+  `schedule` row when nothing of it went live — never claimed, or claimed and
+  failed or refused (`publish/store.py:forget`) — so a saved order never comes
+  back with it; a posted or partial row is left alone, and a draft with a tweet
+  to its name cannot be reopened at all.
 - A thread that fails at post k keeps posts 1..k-1 live, records the error on
   post k, marks the draft `partial`, and stops. It is not retried; a human
   finishes or deletes it.

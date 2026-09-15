@@ -140,7 +140,7 @@ def test_old_edits_are_skipped():
 
 
 def test_non_edit_rows_are_ignored():
-    rows = [row("approve"), row("reject", note="bad"), row("snooze")]
+    rows = [row("approve"), row("reject", note="bad"), row("reopen")]
     assert select_edit_examples(rows, CFG, now=NOW) == []
 
 
