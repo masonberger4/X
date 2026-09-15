@@ -21,8 +21,8 @@ STEP 2 SCHEMA (approval_queue/store.py, as merged on main; the kickoff prompt as
 simpler shape with source/url columns on drafts, which is reconciled here):
   drafts(id PK, item_id UNIQUE, cluster_id, model, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
-         snoozed_until, created_at, updated_at)
-  decisions(id PK, draft_id FK, action 'approve'|'edit'|'reject'|'snooze'|'revise',
+         created_at, updated_at)
+  decisions(id PK, draft_id FK, action 'approve'|'edit'|'reject'|'reopen'|'revise',
             original_text, edited_text, note, created_at)
       edited_text is JSON {"thread": [...]}; older rows ({"single_post", "thread"}, or a
       plain string) are read too.
@@ -424,6 +424,32 @@ def release_failed(conn: sqlite3.Connection, draft_ids: list[int] | None = None)
                   {where}
                 ORDER BY draft_id""",
             [SCHED_FAILED, SCHED_REFUSED, *(draft_ids or [])],
+        ).fetchall()
+    ]
+    if ids:
+        conn.execute(f"DELETE FROM schedule WHERE draft_id IN ({','.join('?' * len(ids))})", ids)
+        conn.commit()
+    return ids
+
+
+def release_unclaimed(conn: sqlite3.Connection, draft_ids: list[int]) -> list[int]:
+    """Delete the schedule rows of the given drafts that were never claimed (claimed_at IS
+    NULL) and never posted (no posts row carries a tweet_id), so a draft moved off the
+    approved list leaves no stale `position` behind to resurrect it on re-approval. A
+    claimed, posted or partial row is never touched: a live thread stays a human decision.
+    Returns the released draft ids."""
+    if not draft_ids:
+        return []
+    marks = ",".join("?" * len(draft_ids))
+    ids = [
+        int(r[0])
+        for r in conn.execute(
+            f"""SELECT draft_id FROM schedule
+                WHERE claimed_at IS NULL
+                  AND draft_id NOT IN (SELECT draft_id FROM posts WHERE tweet_id IS NOT NULL)
+                  AND draft_id IN ({marks})
+                ORDER BY draft_id""",
+            list(draft_ids),
         ).fetchall()
     ]
     if ids:

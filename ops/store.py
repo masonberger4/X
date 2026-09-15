@@ -215,7 +215,7 @@ def fetch_stage_activity(conn: sqlite3.Connection, now: datetime | None = None) 
       clusters(id, ..., created_at, prefilter_status 'pass'|'drop'|NULL, prefilter_reason)
       scores(id, cluster_id, model, prompt_version, ..., total, scored_at)
       drafts(id, item_id, cluster_id, model, thread_json, ..., status
-             'pending'|'approved'|'rejected'|'snoozed'|'failed', ..., snoozed_until,
+             'pending'|'approved'|'rejected'|'failed', ...,
              created_at, updated_at)
       decisions(id, draft_id, action, original_text, edited_text, note, created_at)
     tables_present requires step 1's items/clusters/scores; step 2's tables are optional.

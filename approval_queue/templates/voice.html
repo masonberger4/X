@@ -12,10 +12,10 @@
 
 <h2>Summary</h2>
 <table>
-  <thead><tr><th>Drafts</th><th>Approved unedited</th><th>Edited</th><th>Rejected</th><th>Snoozed</th><th>Failed</th><th>Edit rate</th></tr></thead>
+  <thead><tr><th>Drafts</th><th>Approved unedited</th><th>Edited</th><th>Rejected</th><th>Failed</th><th>Edit rate</th></tr></thead>
   <tbody><tr>
     <td>{{ r.drafts_total }}</td><td>{{ r.approved_unedited }}</td><td>{{ r.edited }}</td>
-    <td>{{ r.rejected }}</td><td>{{ r.snoozed }}</td><td>{{ r.failed }}</td>
+    <td>{{ r.rejected }}</td><td>{{ r.failed }}</td>
     <td>{{ "%.0f%%"|format(r.edit_rate * 100) if r.edit_rate is not none else "n/a" }}</td>
   </tr></tbody>
 </table>

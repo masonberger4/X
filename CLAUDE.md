@@ -190,6 +190,15 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
   tables are `drafts` and `decisions`; edits log original vs edited text.
+  An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
+  decision carrying the text and the optional note) puts an approved draft back to
+  `pending`, and is refused when `store.publish_states` says step 3 has posted,
+  partially posted or claimed it — nothing on X is ever unposted here. Before the
+  status flips, the route calls `publish/store.py:release_unclaimed` (step 3's only
+  write from step 2: it deletes that draft's `schedule` row when it was never claimed
+  and never posted), so a saved `position` cannot resurrect itself on re-approval.
+  There is no snooze: a draft left `snoozed` in an older database is migrated to
+  `pending` by `store.connect`.
   A human asks for changes in words, not by retyping: `POST /drafts/{id}/revise`
   calls `draft/drafter.py:revise_item` (same `call_anthropic`, same schema check and
   `check_hard_rules` loop as `draft_item`; the user prompt is
@@ -256,7 +265,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   idempotent via the claim; partial threads are never retried automatically.
   The queue reads those two tables back only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
-  missing) to label and hide posted drafts on the approved page.
+  missing) to label and hide posted drafts on the approved page, and writes them only
+  through `release_unclaimed` on a reopen (above).
   Texts are re-checked before posting and refused, never edited, on failure.
 - Step 4 reads other steps' tables only through `feedback/store.py:fetch_posted`
   (posts) and `fetch_post_context` (drafts/decisions/items/scores/ratings). Its
@@ -419,7 +429,8 @@ verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck
           mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop
           decision), render.py (finalize_table: decide, then draw or drop)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
-          fetch_approved), client.py (post_tweet, upload_media, verify_credentials)
+          fetch_approved, release_unclaimed), client.py (post_tweet, upload_media,
+          verify_credentials)
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
           store.py (tweet_metrics, follower_snapshots, feedback_reports,
           fetch_posted, fetch_post_context, due_for_snapshot), client.py

@@ -126,8 +126,9 @@ approve button until I fix the draft.
 ## 7. I approve every single post
 
 Nothing goes out without me. The drafts land in a small web page on my
-computer where I read each one and approve it, edit it, reject it, or snooze
-it for a day.
+computer where I read each one and approve it, edit it, or reject it. An
+approve is not a one-way door: as long as the post has not actually gone out I
+can reopen it and it comes back to the pile, waiting on me again.
 
 When I edit, it remembers both versions and why I changed it. Over time those
 edits get shown back to the AI as examples of how I actually want things

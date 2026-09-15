@@ -11,8 +11,9 @@ Routes:
                               and from every claim step 2b contradicted (or could not
                               verify); the draft stays pending, old claim checks are dropped
   POST /drafts/{id}/reject
-  POST /drafts/{id}/snooze    hides the draft for 24h
-  GET  /status/{status}       approved / rejected / snoozed / failed lists
+  POST /drafts/{id}/reopen    sends an approved draft back to pending, unless step 3 has
+                              already claimed or posted it
+  GET  /status/{status}       approved / rejected / failed lists
   GET  /voice                 voice report (step 7) from live data; ?weeks=N
 
 Step 7: the edit and reject forms take an optional category (why the draft was edited or
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -45,6 +47,7 @@ from draft.prompt import VOICE_PATH
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.settings import load_draft_config
 from draft.voice_report import build_report
+from publish import store as publish_store
 from verify import render as verify_render
 from verify import settings as verify_settings
 from verify import store as verify_store
@@ -729,12 +732,45 @@ async def reject(draft_id: int, request: Request, conn: Conn):
     return _redirect_home()
 
 
-@app.post("/drafts/{draft_id}/snooze")
-async def snooze(draft_id: int, request: Request, conn: Conn):
+@app.post("/drafts/{draft_id}/reopen")
+async def reopen(draft_id: int, request: Request, conn: Conn):
+    """Send an approved draft back to the pending queue so it can be edited or revised
+    again. Refused once step 3 has claimed it (run_publish.py never re-reads the status
+    after claiming) or already put it on X."""
     form = await read_form(request)
-    try:
-        store.snooze(conn, draft_id, note=_note(form))
-    except KeyError as exc:
-        raise HTTPException(404, "no such draft") from exc
-    log.info("draft %d snoozed for %dh", draft_id, store.SNOOZE_HOURS)
-    return _redirect_home()
+
+    def work() -> RedirectResponse:
+        row = store.get_draft(conn, draft_id)
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        if row.status != store.STATUS_APPROVED:
+            return _detail_redirect(
+                draft_id, error=f"only an approved draft can be reopened (this one is {row.status})"
+            )
+        info = store.publish_states(conn, [draft_id]).get(draft_id)
+        if info is not None and info.status in ("posted", "partial"):
+            return _detail_redirect(
+                draft_id,
+                error="this draft is already live on X and cannot be reopened; "
+                "reject it instead if it should not run again",
+            )
+        if info is not None and info.status == "claimed":
+            return _detail_redirect(
+                draft_id,
+                error="publishing has already claimed this draft and will not re-read its "
+                "status; wait until that run finishes before reopening it",
+            )
+        try:
+            released = publish_store.release_unclaimed(conn, [draft_id])
+        except sqlite3.OperationalError:  # no publish run yet: the schedule table is missing
+            released = []
+        try:
+            store.reopen(conn, draft_id, note=_note(form))
+        except KeyError as exc:
+            raise HTTPException(404, "no such draft") from exc
+        log.info(
+            "draft %d reopened for review (%d schedule row(s) released)", draft_id, len(released)
+        )
+        return RedirectResponse("/status/approved", status_code=303)
+
+    return await run_in_threadpool(work)
