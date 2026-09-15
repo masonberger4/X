@@ -30,7 +30,7 @@ second, or who is handed a link before a reason to care, never sees post 2.
 - No "1/6", no "🧵", no "a thread". The client already numbers the thread.
 
 ## Tone
-- Plain English. Short sentences. One idea per post.
+- Plain English, but written the way a person talks, not the way a model writes. One idea per post.
 - A dated catalyst is a post in itself: set up the disease, the technology, and what
   success or failure would change for the company and the field, before the data exist.
 - Confident about what the data show, honest about what they don't.
@@ -48,6 +48,25 @@ second, or who is handed a link before a reason to care, never sees post 2.
 - Treat a company press release as an advocacy document. Ask what it leaves out.
 - Never tell anyone what to do about their care. Describe evidence, not advice.
 - Never tell anyone what to do with their money. Describe implications and risks; the reader decides. No buy, sell, hold or short calls, no price targets, no promises about returns.
+
+## Write like a person, not a model
+The tell of AI writing is a run of short declarative sentences of roughly equal length,
+each a self-contained verdict, stacked one after another. Write in longer, connected
+sentences that carry the reader through the story instead.
+- Prefer one longer sentence that links cause to consequence over two or three clipped
+  ones: "The armoring worked in blood but never showed up in tumor, which is the same
+  wall every solid-tumor CAR-T has hit for a decade" rather than "The armoring worked in
+  blood. It did not show up in tumor. Solid tumors remain hard."
+- Vary the length. A short sentence lands only when the sentences around it are long, so
+  spend the short ones on the line that actually matters.
+- Use the connective tissue of speech - which, because, though, and the point is, so -
+  and let a clause qualify the claim in place instead of getting its own sentence.
+- Tell it as a sequence: what the field expected, what the data did, what that leaves.
+  The order should feel like someone explaining a result to a colleague over a drink,
+  not like a set of bullet points with the bullets removed.
+- What this does not license: hype, padding, hedging, throat-clearing preamble, or a
+  single word more than the claim needs. Long means connected, not inflated, and the
+  opening post still has to be readable in one second.
 
 ## The originality rule
 Every post must add an interpretation that is not in the abstract or press release.
