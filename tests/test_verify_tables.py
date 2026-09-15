@@ -570,7 +570,52 @@ def test_reviewer_cell_edit_is_validated(client, conn):
     assert store.get_draft(conn, did).draft.table.rows == TABLE["rows"]
     store.approve(conn, did)
     r = client.post(f"/drafts/{did}/table", data=_cell_form(TABLE["rows"]))
-    assert "pending" in r.headers["location"]
+    assert "awaiting%20a%20decision" in r.headers["location"]
     # a draft with no table
     did2 = _seed(conn, item_id="i2", table=None)
     assert "no%20table" in client.post(f"/drafts/{did2}/table", data={}).headers["location"]
+
+
+def test_unchanged_unverified_cell_counts_as_vouched_for(client, conn):
+    """Retyping a cell to exactly what was there already leaves no diff, so saving the
+    grid has to vouch for what the fact-checker could not verify. A supported cell keeps
+    its own verdict and a contradicted one still has to be corrected."""
+    did = _seed(conn)
+    for (r, c), (verdict, trusted) in {
+        (0, 0): ("supported", True),
+        (0, 1): ("supported", False),  # untrusted source: blanked in the picture
+        (0, 2): ("unverified", False),
+        (1, 2): ("contradicted", True),
+    }.items():
+        vstore.insert_table_check(
+            conn,
+            did,
+            r,
+            c,
+            TABLE["rows"][r][c],
+            ClaimCheck(0, "c", verdict, "https://example.org/x", "q", "n", trusted),
+            "m",
+        )
+    r = client.post(f"/drafts/{did}/table", data=_cell_form(TABLE["rows"]))
+    assert r.status_code == 303 and "error" not in r.headers["location"]
+    checks = {(k.row, k.col): k for k in vstore.table_checks_for_draft(conn, did)}
+    assert checks[(0, 0)].model == "m"  # already shown: untouched
+    for pos in [(0, 1), (0, 2), (1, 0), (1, 1), (2, 0), (2, 1), (2, 2)]:
+        assert checks[pos].model == "human" and checks[pos].shown, pos
+    assert checks[(1, 2)].verdict == "contradicted" and checks[(1, 2)].model == "m"
+
+
+def test_expired_snooze_draft_can_still_have_its_table_edited(client, conn):
+    """A snoozed draft whose snooze has run out is listed as pending, so its cells are
+    editable: the form is rendered and the post is accepted."""
+    did = _seed(conn)
+    store.snooze(conn, did, hours=-1)
+    row = store.get_draft(conn, did)
+    assert row.status == "snoozed" and row.editable
+    assert did in {d.id for d in store.list_drafts(conn, store.STATUS_PENDING)}
+    assert 'name="cell_1_2"' in client.get(f"/drafts/{did}").text
+    rows = [list(r) for r in TABLE["rows"]]
+    rows[1][2] = "Phase 3 (ROBBIN)"
+    r = client.post(f"/drafts/{did}/table", data=_cell_form(rows))
+    assert r.status_code == 303 and "error" not in r.headers["location"]
+    assert store.get_draft(conn, did).draft.table.rows[1][2] == "Phase 3 (ROBBIN)"
