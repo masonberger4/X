@@ -8,10 +8,10 @@
   · source <strong>{{ d.source or "?" }}</strong>
   · score <strong>{{ "%.1f"|format(d.total) if d.total is not none else "–" }}</strong>
   · model {{ d.model }}
-  · created {{ d.created_at }}
+  · created {{ d.created_at|localtime }}
   {% if d.url %}· <a href="{{ d.url }}" target="_blank" rel="noopener noreferrer">primary source</a>{% endif %}
   {% if publish %}· published
-    {% if publish.status == "posted" %}<a class="pill ok" href="{{ publish.tweet_url }}" target="_blank" rel="noopener noreferrer">posted{% if publish.posted_at %} {{ publish.posted_at[:16] }}{% endif %}</a>
+    {% if publish.status == "posted" %}<a class="pill ok" href="{{ publish.tweet_url }}" target="_blank" rel="noopener noreferrer">posted{% if publish.posted_at %} {{ publish.posted_at|localtime }}{% endif %}</a>
     {% elif publish.status == "partial" %}<span class="pill fail">partial thread</span>{% if publish.tweet_url %} <a href="{{ publish.tweet_url }}" target="_blank" rel="noopener noreferrer">first post</a>{% endif %} <span class="meta">{{ publish.error }}</span>
     {% else %}<span class="pill {{ 'warn' if publish.status == 'claimed' else 'fail' }}">{{ publish.status }}</span>{% if publish.error %} <span class="meta">{{ publish.error }}</span>{% endif %}{% endif %}
   {% endif %}
@@ -126,7 +126,7 @@
         {% if k.trustable %}· <form method="post" action="/drafts/{{ d.id }}/trust" class="inline"><input type="hidden" name="host" value="{{ k.host }}"><button type="submit" class="link" title="Add {{ k.host }} to trusted_domains in verify/config.yaml">trust {{ k.host }}</button></form>{% endif %}
         {% if k.quote %}<blockquote>{{ k.quote }}</blockquote>{% endif %}
         {% if k.note %}<div class="meta">{{ k.note }}</div>{% endif %}
-        <div class="meta">checked {{ k.checked_at }} by {{ k.model }}. Open the link and read the sentence before approving.</div>
+        <div class="meta">checked {{ k.checked_at|localtime }} by {{ k.model }}. Open the link and read the sentence before approving.</div>
       </div>
     {% else %}
       <div class="meta">not checked yet (run <code>python run_verify.py</code>)</div>
@@ -201,7 +201,7 @@
   <tbody>
   {% for x in decisions %}
     <tr>
-      <td class="meta">{{ x.created_at }}</td>
+      <td class="meta">{{ x.created_at|localtime }}</td>
       <td>{{ x.action }}</td>
       <td>{{ x.category }}</td>
       <td>{{ x.note }}</td>

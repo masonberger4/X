@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import timeutil
 from ops.models import (
     STATUS_FAIL,
     STATUS_OK,
@@ -366,7 +367,9 @@ def run_all(
 
 def format_report(report: Report) -> str:
     """Plain-text rendering for `run_ops.py health`."""
-    lines = [f"Pipeline health at {report.checked_at.isoformat()}: {report.overall.upper()}"]
+    lines = [
+        f"Pipeline health at {timeutil.fmt_datetime(report.checked_at)}: {report.overall.upper()}"
+    ]
     for c in report.checks:
         lines.append(f"  [{c.status:<4}] {c.name:<10} {c.summary}")
     return "\n".join(lines)

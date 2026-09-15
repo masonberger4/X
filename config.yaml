@@ -3,6 +3,15 @@
 
 db_path: pipeline.db
 
+# The clock every human-facing timestamp is rendered in: the control panel, the
+# approval queue, the digest, and the operator reports and alerts. Storage is
+# untouched -- every timestamp in SQLite stays UTC, and so does every comparison,
+# window and API payload. `timeutil.py` is the only reader of this key.
+# publish/config.yaml and feedback/config.yaml keep their own `timezone:` keys
+# (posting slots and the "hour posted" column, which are behaviour, not display);
+# they are set to the same zone.
+timezone: America/Los_Angeles   # Seattle, WA
+
 http:
   user_agent: "Mozilla/5.0 (X11; Linux x86_64) cancer-news-pipeline/0.1"
 

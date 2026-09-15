@@ -347,3 +347,16 @@ def test_approved_page_shows_failed_and_partial_but_keeps_them(client, conn, dra
     assert f"/drafts/{draft_id}" in body and "partial thread" in body
     # the pending list never shows publish pills
     assert "waiting" not in client.get("/queue").text
+
+
+def test_detail_shows_created_at_in_the_display_timezone(client, conn, draft_id):
+    """A reviewer reads a Seattle clock, not the UTC string the row is stored as."""
+    conn.execute(
+        "UPDATE drafts SET created_at = ? WHERE id = ?",
+        ("2026-06-01T15:30:00+00:00", draft_id),
+    )
+    conn.commit()
+    body = client.get(f"/drafts/{draft_id}").text
+    assert "created 2026-06-01 08:30 PDT" in body
+    # The raw stored UTC string is never what the page shows.
+    assert "2026-06-01T15:30:00+00:00" not in body

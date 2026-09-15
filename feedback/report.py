@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import timeutil
 from feedback.analysis import Analysis, GroupSummary, PostRow
 from feedback.suggest import Suggestion
 
@@ -72,8 +73,10 @@ def headline(a: Analysis) -> str:
         delta_s = f"{delta:+,d} (from {fd.start.followers:,} on {fd.start.captured_on})"
     heads = a.head_total
     replies = a.reply_total
+    start = timeutil.fmt_date(a.window_start)
+    end = timeutil.fmt_date(a.window_end)
     lines = [
-        f"# Feedback report {a.window_start.date()} to {a.window_end.date()}",
+        f"# Feedback report {start} to {end}",
         "",
         f"- Posts with metrics: **{a.n_posts}** ({a.n_threads} threads)",
         f"- KPI: **{a.kpi}** (head tweets); median {_fmt(a.median_kpi)}",
