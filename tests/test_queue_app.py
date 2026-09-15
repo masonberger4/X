@@ -8,6 +8,7 @@ from approval_queue import app as queue_app
 from approval_queue import store
 from approval_queue.app import app
 from draft import drafter
+from draft.chart import Table
 from draft.schema import Claim, Draft
 from publish import store as publish_store
 from tests.conftest import URL, seed_item
@@ -61,6 +62,39 @@ def test_approve_action(client, conn, draft_id):
     assert dec[0]["action"] == "approve" and dec[0]["note"] == "good"
     assert f"/drafts/{draft_id}" not in client.get("/queue").text
     assert f"/drafts/{draft_id}" in client.get("/status/approved").text
+
+
+def test_approve_action_no_table_has_no_notice(client, conn, draft_id):
+    r = client.post(f"/drafts/{draft_id}/approve", data={"note": "good"})
+    assert r.status_code == 303 and r.headers["location"] == "/queue"
+    assert "notice=" not in r.headers["location"]
+    row = store.get_draft(conn, draft_id)
+    assert row.status == "approved"
+
+
+def test_approve_action_drops_unrendered_table_with_notice(client, conn):
+    seed_item(conn, "i2", source="biorxiv")
+    d = Draft(
+        thread=["Preprint: ORR 88%. one", "two", f"three {URL}"],
+        suggested_visual="table",
+        why_it_matters="matters",
+        table=Table("T", ["a", "b"], [["x", "y"], ["z", "w"]]),
+    )
+    did = store.insert_draft(conn, item_id="i2", model="m", draft=d)
+    r = client.post(f"/drafts/{did}/approve", data={"note": "good"})
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/queue?notice=")
+    assert "not%20verified%20when%20the%20draft%20was%20approved" in r.headers["location"]
+    row = store.get_draft(conn, did)
+    assert row.status == "approved"
+    assert row.draft.table is None
+    dec = store.list_decisions(conn, did)
+    actions = {d["action"] for d in dec}
+    assert "approve" in actions and "edit" in actions
+    approve_dec = next(d for d in dec if d["action"] == "approve")
+    assert approve_dec["note"] == "good"
+    body = client.get(r.headers["location"]).text
+    assert "Table dropped" in body and "not verified when the draft was approved" in body
 
 
 def test_edit_action_saves_original_and_edited(client, conn, draft_id):

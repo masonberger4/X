@@ -759,6 +759,78 @@ def test_set_order_is_honoured_first_and_survives_a_second_open(conn, fake_x, mo
     assert store.get_schedule(conn, b)["status"] == "posted"
 
 
+def test_record_post_failure_after_a_real_post_marks_row_posted_not_claimed(
+    conn, monkeypatch, caplog
+):
+    """b006: record_post raises after the tweet is already live (disk error, DB
+    unreachable). The row must not stay stuck as 'claimed' forever — it lands in an
+    existing, visible terminal state — and the posts table still has the real tweet,
+    because the underlying write happened before the wrapper raised."""
+    fx = FakeX()
+    monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+
+    real_record_post = store.record_post
+
+    def flaky_record_post(*a, **kw):
+        real_record_post(*a, **kw)  # the write really happens
+        raise sqlite3.OperationalError("disk I/O error")  # then bookkeeping blows up
+
+    monkeypatch.setattr(store, "record_post", flaky_record_post)
+    with caplog.at_level(logging.CRITICAL):
+        assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
+    assert len(fx.calls) == 1  # the tweet really posted, exactly once
+    rows = store.list_posts(conn, did)
+    assert len(rows) == 1 and rows[0]["tweet_id"] == "tw1" and rows[0]["status"] == "posted"
+    row = store.get_schedule(conn, did)
+    assert row["status"] in ("posted", "partial")  # a visible, non-'claimed' terminal state
+    assert row["claimed_at"] is not None
+    assert "recording it failed" in caplog.text
+
+
+def test_stuck_row_is_never_returned_by_fetch_approved_again(conn, monkeypatch, caplog):
+    """The whole point: whatever terminal state the fix lands on, the draft is never
+    silently reconsidered and re-posted on a later run."""
+    fx = FakeX()
+    monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+
+    real_record_post = store.record_post
+
+    def flaky_record_post(*a, **kw):
+        real_record_post(*a, **kw)
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(store, "record_post", flaky_record_post)
+    with caplog.at_level(logging.CRITICAL):
+        assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
+    assert len(fx.calls) == 1
+
+    monkeypatch.setattr(store, "record_post", real_record_post)  # back to normal
+    assert run_publish.main(["--live", "--now"], now=OFF_SLOT + timedelta(hours=3)) == 0
+    assert len(fx.calls) == 1  # never reposted
+    assert [a.draft_id for a in store.fetch_approved(10, conn=conn)] == []
+    assert run_publish.main(["--release-failed"]) == 0
+    assert store.get_schedule(conn, did)["status"] in ("posted", "partial")  # not released
+
+
+def test_failure_before_any_post_still_takes_the_failed_path(conn, monkeypatch, keep_failed):
+    """Unaffected control: a failure with no tweet posted goes to the existing 'failed'
+    path (and remains eligible for --release-failed), not the new post-record handling."""
+    fx = FakeX(fail_at=1)
+    monkeypatch.setattr(client, "post_tweet", fx)
+    monkeypatch.setenv("BIO_DISCLOSURE_CONFIRMED", "1")
+    monkeypatch.setenv("PUBLISH_ENABLED", "1")
+    did = seed_draft(conn, "a")
+    assert run_publish.main(["--live", "--now", *keep_failed], now=OFF_SLOT) == 2
+    assert store.list_posts(conn, did) == [] or store.list_posts(conn, did)[0]["tweet_id"] is None
+    assert store.get_schedule(conn, did)["status"] == "failed"
+
+
 def test_draft_flag_posts_only_that_draft_and_reports_a_missing_one(
     conn, fake_x, monkeypatch, caplog
 ):

@@ -212,7 +212,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   its verdict). `check_hard_rules` scans table cells for advice phrases.
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
-  tables are `drafts` and `decisions`; edits log original vs edited text.
+  tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
   An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
   decision carrying the text and the optional note) puts an approved draft back to
   `pending`. `approval_queue/publishing.py` is the queue's one door to step 3 (as

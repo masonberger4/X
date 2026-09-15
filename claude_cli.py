@@ -99,7 +99,9 @@ def build_argv(
     effort: str | None = None,
     tools: list[str] | None = None,
 ) -> list[str]:
-    """Print mode, JSON envelope, no tools, no session files. The system prompt travels
+    """Print mode, JSON envelope, no session files. `tools` are made available and
+    pre-approved (empty by default, so no tools unless the caller passes some); the
+    claim verifier is the one caller that does, with WebSearch/WebFetch. The system prompt travels
     in a file: it is long and full of quotes, and on Windows the argv goes through a
     .cmd wrapper where that is not safe. No `--bare`: it also skips the stored login
     ("Not logged in" on every call). The project's CLAUDE.md is kept out of the prompt

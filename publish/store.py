@@ -153,7 +153,7 @@ def _image_for(
     image_alt: str | None = None,
 ) -> tuple[str | None, str]:
     """(absolute PNG path if it exists, alt text) for an approved draft. Images live in
-    <db folder>/images (approval_queue.store.image_dir); the row stores the relative path.
+    <db folder>/<draft.chart.IMAGES_DIRNAME>; the row stores the relative path.
     The stored alt text (written with the picture) wins; rows from before it existed get
     the alt text of their chart spec."""
     if not image_path or db_file is None:

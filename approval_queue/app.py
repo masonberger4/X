@@ -174,7 +174,7 @@ def root() -> RedirectResponse:
 
 
 @app.get("/queue", response_class=HTMLResponse)
-def index(request: Request, conn: Conn):
+def index(request: Request, conn: Conn, notice: str = ""):
     drafts = store.list_drafts(conn, store.STATUS_PENDING)
     return templates.TemplateResponse(
         request,
@@ -186,6 +186,7 @@ def index(request: Request, conn: Conn):
             "publish": {},
             "hidden_posted": 0,
             "show_posted": False,
+            "notice": notice,
         },
     )
 
@@ -339,8 +340,11 @@ def voice(request: Request, conn: Conn, weeks: int | None = None):
     return templates.TemplateResponse(request, "voice.html", {"r": report, "weeks": weeks})
 
 
-def _redirect_home() -> RedirectResponse:
-    return RedirectResponse("/queue", status_code=303)
+def _redirect_home(*, notice: str = "") -> RedirectResponse:
+    url = "/queue"
+    if notice:
+        url += f"?notice={quote(notice)}"
+    return RedirectResponse(url, status_code=303)
 
 
 @app.post("/drafts/{draft_id}/approve")
@@ -358,6 +362,7 @@ async def approve(draft_id: int, request: Request, conn: Conn):
     row = store.get_draft(conn, draft_id)
     if row is None:
         raise HTTPException(404, "no such draft")
+    notice = ""
     if row.draft.table is not None and store.resolve_image(row.image_path) is None:
         # The table's cells were never all verified (or one was contradicted and never
         # fixed), so its picture must never be attached after the human has stopped looking:
@@ -370,9 +375,10 @@ async def approve(draft_id: int, request: Request, conn: Conn):
         )
         store.drop_table(conn, draft_id, why)
         log.info("draft %d: unverified table dropped at approval", draft_id)
+        notice = f"Table dropped: {why}."
     store.approve(conn, draft_id, note=_note(form))
     log.info("draft %d approved%s", draft_id, " (override)" if form.get("override") else "")
-    return _redirect_home()
+    return _redirect_home(notice=notice)
 
 
 def _edit_problem(thread: list[str]) -> str | None:

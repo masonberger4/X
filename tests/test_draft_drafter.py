@@ -169,6 +169,15 @@ def test_missing_url_in_last_thread_post():
     assert "last thread post is missing the primary source URL" in problems
 
 
+def test_url_with_trailing_segment_does_not_satisfy_source_url():
+    # ".../study-2" must not satisfy a required ".../study": the URL has to end at a
+    # boundary, not be a prefix of a longer URL-shaped token.
+    base = "https://example.com/study"
+    draft = validate_output(good_json(thread=["a", "b", "see https://example.com/study-2 here"]))
+    problems = check_hard_rules(draft, url=base, source="pubmed")
+    assert "last thread post is missing the primary source URL" in problems
+
+
 def test_empty_thread_is_a_hard_rule_failure():
     from draft.schema import Draft
 
@@ -203,6 +212,29 @@ def test_medical_advice_is_rejected():
     )
     problems = check_hard_rules(draft, url=URL, source="pubmed")
     assert any("medical advice" in p for p in problems)
+
+
+def test_discuss_or_consult_your_doctor_is_medical_advice():
+    for lead in (
+        "Discuss this with your oncologist before your next visit.",
+        "Consult with your doctor about this CAR-T therapy.",
+    ):
+        draft = validate_output(good_json(lead=f"{lead} {URL}"))
+        problems = check_hard_rules(draft, url=URL, source="pubmed")
+        assert any("medical advice" in p for p in problems), lead
+
+
+def test_industry_discuss_consult_language_is_not_medical_advice():
+    draft = validate_output(
+        good_json(
+            lead=(
+                "The sponsor will discuss trial design with the FDA before the next "
+                "readout; investigators should consult the protocol for eligibility."
+            )
+        )
+    )
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert not any("medical advice" in p for p in problems)
 
 
 # --- investment advice rule ------------------------------------------------
@@ -264,6 +296,18 @@ def test_percent_must_be_percent_in_source():
     # '4' appears in the abstract but '4%' does not (it says 4.1%)
     draft = validate_output(good_json(lead="CRS in 4% of patients"))
     assert verify_numbers(draft, ABSTRACT) == ["4%"]
+
+
+def test_number_is_not_verified_as_substring_of_a_larger_number():
+    # ABSTRACT has "97 patients"; "9" and "7" must not verify as-is via substring match.
+    draft = validate_output(good_json(lead="Enrolled 7 patients."))
+    assert verify_numbers(draft, ABSTRACT) == ["7"]
+
+
+def test_percent_not_verified_by_neighbouring_percentile_word():
+    source = "an excellent essay about 88 percentile scores"
+    draft = validate_output(good_json(thread=["ORR 88%.", "no comparator", f"see {URL}"]))
+    assert verify_numbers(draft, source) == ["88%"]
 
 
 def test_unverified_numbers_become_low_confidence_claims():

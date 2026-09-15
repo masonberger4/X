@@ -147,6 +147,19 @@ def test_format_of_a_stored_draft():
     assert drafter.format_of(d) is None
 
 
+def test_format_of_preserves_where_each_picture_was_anchored():
+    # A single-visual draft anchored to post 1 is unchanged.
+    d = validate_output(out())
+    assert drafter.format_of(d) is None
+    fmt = Format(visuals=2, anchors=("first", "last"))
+    d = validate_output(out(visuals=[CHART2]), fmt)
+    assert d.anchors == [1, 3]  # resolved against this draft's own 3-post thread
+    rebuilt = drafter.format_of(d)
+    # The second picture was anchored to the LAST post, not literally post 3: re-resolving
+    # against a revision of a different length must still land it on the new last post.
+    assert rebuilt.resolve_anchors(6) == [1, 6]
+
+
 def test_draft_item_passes_the_format_to_the_checks():
     calls = []
 

@@ -130,6 +130,7 @@ source only when it is due, and score only scores what is new.
    ```
    python run_draft.py --dry-run                 # show what would be drafted
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
+   python run_draft.py --since-hours 24          # only stories from the last day
    python run_draft.py --retry-failed            # try again on stories whose draft failed
    python run_draft.py --retag                   # apply @handles and #tags to current drafts
    ```
@@ -243,6 +244,7 @@ source only when it is due, and score only scores what is new.
    python run_verify.py --dry-run     # list the claims, no calls
    python run_verify.py --redo        # check again, replacing old verdicts
    python run_verify.py --draft 12    # one draft
+   python run_verify.py --limit 3     # at most 3 drafts this run
    ```
    The same run then handles comparison tables: every cell that is not
    verbatim in the source article is one more web-search call (the row label
