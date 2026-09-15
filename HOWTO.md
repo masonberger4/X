@@ -417,6 +417,10 @@ source only when it is due, and score only scores what is new.
    python run_publish.py
    ```
    Run this a few times over a couple of days until the plan looks right.
+   The shipped caps are `max_posts_per_day: 100` and `min_gap_minutes: 15`,
+   which is a drain-the-queue pace: with continuous mode below, that is up to
+   four posts an hour. Lower them (16 a day and a 90 minute gap is a calmer
+   pair) if the account should post less often than the queue fills.
    The shipped `slots: []` is continuous mode: each run posts the top approved
    draft as soon as `min_gap_minutes` has passed since the last post and the
    daily cap allows, so a cron every 15 minutes drains the queue one draft per
@@ -628,7 +632,8 @@ to stop it. Four pages:
   else; switched on without it the page says "on, but not live" and nothing
   runs. The switch and the interval are kept in `publish\config.yaml`
   (`auto_publish_enabled`, `auto_publish_interval_minutes`), so the app
-  comes back up the way you left it; the approved page shows when the next
+  comes back up the way you left it; it ships switched on, so an approved
+  draft goes out on its own once `PUBLISH_ENABLED=1` is set; the approved page shows when the next
   run is due. Runs that found nothing to post leave no row on the runs page.
   The two limits at the top, posts per day and the
   minimum gap between posts in minutes, are the other settings the panel
