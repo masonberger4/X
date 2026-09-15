@@ -319,6 +319,14 @@ source only when it is due, and score only scores what is new.
    the picture from the same spec: a chart is rendered again through the
    grader loop, a table is redrawn from the cell verdicts already stored.
    No web call, no text change, and the table is kept (unlike "Drop image").
+   It runs while you wait, and the grader loop can take up to a minute, so a
+   bar at the top of the page says it is working and the button greys out
+   until the page reloads. When it is done the page says the picture was
+   redrawn and what the grader kept it at; a table that is still waiting on a
+   cell, or held back by a contradicted one, says that instead (the picture is
+   only redrawn once every cell has a verdict and none is contradicted). The
+   picture on the page is always the file on disk, never a copy your browser
+   kept from before the redraw.
    A table shows under "Table cells" with each cell's verdict and source link
    (green: kept; amber: blanked in the picture; red: contradicted). The
    picture appears once every cell is checked and none is contradicted; a

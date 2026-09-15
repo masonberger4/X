@@ -48,6 +48,7 @@ from draft.voice_report import build_report
 from verify import render as verify_render
 from verify import settings as verify_settings
 from verify import store as verify_store
+from verify import tables as verify_tables
 from verify.autorevise import (  # noqa: F401  (re-exported)
     auto_rounds_used,
     cell_problems,
@@ -225,8 +226,17 @@ def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
 
 
 @app.get("/drafts/{draft_id}", response_class=HTMLResponse)
-def detail(draft_id: int, request: Request, conn: Conn, error: str = "", revised: int = 0):
-    return _render_detail(request, conn, draft_id, error=error, revised=bool(revised))
+def detail(
+    draft_id: int,
+    request: Request,
+    conn: Conn,
+    error: str = "",
+    revised: int = 0,
+    redrawn: int = 0,
+):
+    return _render_detail(
+        request, conn, draft_id, error=error, revised=bool(revised), redrawn=bool(redrawn)
+    )
 
 
 def _render_detail(
@@ -236,6 +246,7 @@ def _render_detail(
     *,
     error: str = "",
     revised: bool = False,
+    redrawn: bool = False,
     edit_form: dict[str, str] | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
@@ -289,6 +300,7 @@ def _render_detail(
             "auto_rounds": auto_rounds_used(conn, draft_id),
             "error": error,
             "revised": revised,
+            "redrawn": redrawn,
         },
         status_code=status_code,
     )
@@ -479,12 +491,16 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     return await run_in_threadpool(work)
 
 
-def _detail_redirect(draft_id: int, *, error: str = "", revised: bool = False) -> RedirectResponse:
+def _detail_redirect(
+    draft_id: int, *, error: str = "", revised: bool = False, redrawn: bool = False
+) -> RedirectResponse:
     url = f"/drafts/{draft_id}"
     if error:
         url += f"?error={quote(error)}"
     elif revised:
         url += "?revised=1"
+    elif redrawn:
+        url += "?redrawn=1"
     return RedirectResponse(url, status_code=303)
 
 
@@ -576,12 +592,15 @@ async def redraw_image(draft_id: int, conn: Conn):
             hosts = trusted_hosts(cfg, verify_render.root_config())
             decision = verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
             log.info("draft %d: table redrawn by the reviewer (%s)", draft_id, decision.status)
+            # Only a RENDER decision draws: pending, blocked and dropped tables leave the
+            # picture alone, and the page's own flashes say why. Do not claim a redraw then.
+            return _detail_redirect(draft_id, redrawn=decision.status == verify_tables.RENDER)
         else:
             path = images.attach_chart(conn, draft_id, row.draft.chart, source_url=row.url)
             log.info("draft %d: chart redrawn by the reviewer -> %s", draft_id, path)
             if path is None:
                 return _detail_redirect(draft_id, error="the chart could not be rendered")
-        return _detail_redirect(draft_id)
+        return _detail_redirect(draft_id, redrawn=True)
 
     return await run_in_threadpool(work)
 
