@@ -489,11 +489,33 @@ def revise_item(
     )
 
 
+def _anchor_word(index: int, n_posts: int) -> str:
+    """Best-effort inverse of Format.resolve_anchors: turn a resolved 1-based post index
+    (against a draft's own thread length) back into the anchor word that produced it, so a
+    picture anchored to the last post is still "last" (not a fixed post number) once the
+    thread is revised to a different length."""
+    if n_posts <= 1 or index <= 1:
+        return "first"
+    if index >= n_posts:
+        return "last"
+    return "middle"
+
+
 def format_of(draft: Draft) -> Format | None:
     """The Format a stored draft was written to (phase four), so a revision keeps its shape
-    and visual count. None for a pre-phase-four thread with one visual (the default)."""
+    and visual count. None for a pre-phase-four thread with one visual (the default).
+
+    `Draft.anchors` holds the resolved 1-based post indices (against the draft's own thread
+    length), not the anchor words `Format.anchors` needs; `_anchor_word` re-derives each
+    word from its resolved index and the draft's current post count so that re-resolving
+    against a revision of a different length preserves where the author meant the picture
+    to sit (e.g. "last") rather than collapsing it back to post 1."""
     n = draft.wanted_visuals if draft.wanted_visuals is not None else 1
-    anchors = ("first",) * n  # the exact words are not stored; positions are re-resolved
+    n_posts = len(draft.thread)
+    if len(draft.anchors) == n:
+        anchors = tuple(_anchor_word(a, n_posts) for a in draft.anchors)
+    else:
+        anchors = ("first",) * n
     if draft.shape == "thread" and n == 1 and draft.max_chars == MAX_POST_CHARS:
         return None
     if draft.shape == "thread":
