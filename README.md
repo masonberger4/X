@@ -620,7 +620,10 @@ a long one; no cell carries a link. A single or long format is always two
 posts: the post itself, then a **link post** holding only the primary source
 URL, so rule 12's link ban covers every shape and the body post is never an
 outbound link (`draft/hook.py:link_post_problems`; `publish/thread.py` leaves
-those two posts unnumbered). Formats are scored with the same relative KPI, pruned only after
+those two posts unnumbered). A draft written before that rule keeps working
+and is split by `python run_relink.py` (`--status STATUS`, `--dry-run`, `-v`),
+the one-off pass that moves the URL out of the body into a link post as an
+`edit` decision, with no model call. Formats are scored with the same relative KPI, pruned only after
 `evolve.format_min_posts` posts (a coarse gene needs more evidence than a slot
 rule), and bred without a model by stepping one field (shape, picture count,
 an anchor, the post range) to a neighbour. The panel's `/swarm` page has a

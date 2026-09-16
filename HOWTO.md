@@ -122,6 +122,20 @@ source only when it is due, and score only scores what is new.
    `draft\hook.py` (`HOOK_MAX_CHARS`, `LINK_POST_MAX_CHARS`) if you want
    different lengths.
 
+   Drafts made before the link post existed still work (their one post carries
+   the URL), but they post with a link in the body. To move it, run
+
+       python run_relink.py --dry-run
+
+   to list them, then without the flag to take the URL out of each body and add
+   "Source: <URL>" as the second post. It is pure text: no model call, no
+   network, pictures untouched, the draft keeps its status, and each change is
+   logged as an edit holding the before and after. A draft already posted is
+   left alone, and one whose post is nothing but the URL is named in the log for
+   you to revise by hand in the queue. By default it covers pending and approved
+   drafts; `--status STATUS` (repeatable) narrows it, `-v` shows per draft
+   detail.
+
    Posts tag what X can link. A journal, society, regulator or company the
    pipeline knows the X account of is written as its @handle when a post names
    it (`@JCO_ASCO`, `@Merck`), and every formal drug name and named trial is a

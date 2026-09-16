@@ -123,3 +123,44 @@ def hook_rule(*, carries_url: bool, capped: bool = True) -> str:
         '   ("1/6"), no "thread", no emoji. It is the sharpest line of the draft, not a\n'
         "   summary of it: the setup, the caveats and the source URL come in the later posts."
     )
+
+
+# Lead-ins that exist only to introduce the link ("Source: <URL>", "Paper here:"). When the
+# URL moves to the link post they are left dangling at the end of the body, so the split
+# takes them with it.
+_LEAD_IN = re.compile(
+    r"(?:\b(?:full\s+)?(?:source|sources|paper|study|link|details|abstract|release|"
+    r"read\s+it|more|results|preprint)\b[^.\n]{0,20})$",
+    re.I,
+)
+_TRAILING_JUNK = " \t\r\n([{<\"'«—–-:;,."
+
+
+def split_link_post(text: str, url: str) -> tuple[str, str] | None:
+    """Turn a single or long post that carries the source URL into (body, link post).
+
+    The pure half of run_relink.py, the one-off pass over drafts written before the link
+    post existed. The URL (and the lead-in that only introduced it) comes out of the body
+    and the link post is written fresh. Returns None when there is nothing to move or when
+    the body would be left empty, which is the caller's signal to leave the draft alone.
+    """
+    if not url or url not in text:
+        return None
+    body = text.replace(f"({url})", " ").replace(f"[{url}]", " ").replace(url, " ")
+    lines = [re.sub(r"[ \t]{2,}", " ", ln).rstrip() for ln in body.splitlines()]
+    body = "\n".join(lines).strip(_TRAILING_JUNK)
+    # Only a URL that ended the post can have left a lead-in dangling; one in the middle of
+    # a sentence is followed by the writer's own words, which are never dropped.
+    if _ended_with(text, url):
+        body = _LEAD_IN.sub("", body).strip(_TRAILING_JUNK)
+    if not body:
+        return None
+    if body[-1].isalnum() or body[-1] in ")\u201d":
+        body += "."
+    return body, f"Source: {url}"
+
+
+def _ended_with(text: str, url: str) -> bool:
+    """True when the post's last words are the URL (bare, bracketed or punctuated)."""
+    tail = text.rstrip().rstrip(")]>»\"'.,;:")
+    return tail.endswith(url)
