@@ -93,12 +93,18 @@ SINGLE_SLOT = Slot(
 )
 
 
-def _slot_extras(slot: Slot, brief: Brief) -> str:
+def _slot_extras(slot: Slot, brief: Brief, needs_url: bool | None = None) -> str:
+    """`needs_url` overrides the slot-name default (the closer carries the URL): a single or
+    long post carries no link at all, its URL goes in the link post the assembler adds."""
     extras = []
     if (slot.name == HOOK or slot.name == SINGLE_SLOT.name) and brief.preprint:
         extras.append(f'The word "{PREPRINT_LABEL}" must appear in this post.')
-    if slot.name == CLOSER or slot.name == SINGLE_SLOT.name:
+    if needs_url is None:
+        needs_url = slot.name == CLOSER or slot.name == SINGLE_SLOT.name
+    if needs_url:
         extras.append(f"This post must contain the URL exactly as given: {brief.url}")
+    else:
+        extras.append("This post carries NO link of any kind.")
     return "\n".join(extras)
 
 
@@ -118,7 +124,9 @@ def cell_system_prompt(max_chars: int = MAX_POST_CHARS) -> str:
     )
 
 
-def propose_prompt(brief: Brief, slot: Slot, chosen: dict[str, str]) -> str:
+def propose_prompt(
+    brief: Brief, slot: Slot, chosen: dict[str, str], needs_url: bool | None = None
+) -> str:
     """Layer 1: write the slot's post from the brief alone."""
     parts = [
         brief_block(brief),
@@ -128,14 +136,20 @@ def propose_prompt(brief: Brief, slot: Slot, chosen: dict[str, str]) -> str:
         f"YOUR SLOT: {slot.name}",
         f"YOUR JOB: {slot.rule}",
     ]
-    extra = _slot_extras(slot, brief)
+    extra = _slot_extras(slot, brief, needs_url)
     if extra:
         parts.append(extra)
     parts += ["", "Write the post now."]
     return "\n".join(parts)
 
 
-def synthesise_prompt(brief: Brief, slot: Slot, chosen: dict[str, str], previous: list[str]) -> str:
+def synthesise_prompt(
+    brief: Brief,
+    slot: Slot,
+    chosen: dict[str, str],
+    previous: list[str],
+    needs_url: bool | None = None,
+) -> str:
     """Layer 2 and up (Mixture-of-Agents): every earlier layer's candidates are shown and the
     model writes a better one, free to merge the strongest parts."""
     parts = [
@@ -146,7 +160,7 @@ def synthesise_prompt(brief: Brief, slot: Slot, chosen: dict[str, str], previous
         f"YOUR SLOT: {slot.name}",
         f"YOUR JOB: {slot.rule}",
     ]
-    extra = _slot_extras(slot, brief)
+    extra = _slot_extras(slot, brief, needs_url)
     if extra:
         parts.append(extra)
     parts += ["", "CANDIDATES FROM THE PREVIOUS ROUND (other writers, same slot):"]
@@ -253,15 +267,17 @@ def assemble_prompt(
             parts.append(f"[{name}] {text}")
     if shape == SHAPE_SINGLE:
         how = (
-            'Assemble the draft JSON. "thread" holds exactly one string: this post, kept as '
-            "written (you may fix grammar or trim it under the limit; do not rewrite it). "
+            'Assemble the draft JSON. "thread" holds exactly two strings: this post, kept as '
+            "written (you may fix grammar or trim it under the limit; do not rewrite it), "
+            f"then a short link post carrying the source URL and nothing else: {brief.url} "
         )
     elif shape == SHAPE_LONG:
         how = (
-            'Assemble the draft JSON. "thread" holds exactly one string: these sections IN '
-            "THIS ORDER joined by blank lines, kept as written (fix grammar, trim a section "
-            "that runs over; do not rewrite, reorder or add sections). The whole post must "
-            f"stay under {fmt.max_chars if fmt else MAX_POST_CHARS} characters. "
+            'Assemble the draft JSON. "thread" holds exactly two strings: first these '
+            "sections IN THIS ORDER joined by blank lines, kept as written (fix grammar, "
+            "trim a section that runs over; do not rewrite, reorder or add sections) and "
+            f"under {fmt.max_chars if fmt else MAX_POST_CHARS} characters, then a short link "
+            f"post carrying the source URL and nothing else: {brief.url} "
         )
     else:
         lo, hi = (fmt.min_posts, fmt.max_posts) if fmt else (3, 6)

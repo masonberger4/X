@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 import claude_cli
 from draft.chart import note_problems
-from draft.hook import hook_problems
+from draft.hook import HOOK_MAX_CHARS, hook_problems, link_post_problems
 from draft.prompt import (
     PREPRINT_LABEL,
     ClaimProblem,
@@ -31,6 +31,7 @@ from draft.prompt import (
 )
 from draft.schema import (
     MAX_POST_CHARS,
+    SHAPE_THREAD,
     URL_CHARS,
     Claim,
     Draft,
@@ -295,8 +296,10 @@ def check_hard_rules(
     draft. `handles` (rule 11) are the accounts the story may mention: a post that names
     one without its @handle fails, and a trial or drug name without its # always fails.
     The first post is additionally held to draft.hook.hook_problems (rule 12: a link-free
-    one-claim opener), except in a single or long post, where that one post carries the
-    URL."""
+    one-claim opener); a single or long post opens the same way, without the hook's length
+    cap, and its primary source URL lives in a second post of its own
+    (draft.hook.link_post_problems). A one-post draft from before that rule keeps working:
+    its single post carries the URL and is exempt."""
     problems: list[str] = []
     companies = known_company_names()
     limit = fmt.max_chars if fmt is not None else (draft.max_chars or MAX_POST_CHARS)
@@ -326,10 +329,21 @@ def check_hard_rules(
     if not draft.thread:
         problems.append("thread is empty")
         return problems
+    shape = fmt.shape if fmt is not None else (draft.shape or SHAPE_THREAD)
+    is_thread = shape == SHAPE_THREAD
+    # A single or long post written before the link post existed: its one post carries the
+    # URL, so it stays exempt from rule 12's link ban rather than failing forever.
     carries_url = len(draft.thread) == 1
-    problems += hook_problems(draft.thread[0], url=url, carries_url=carries_url)
+    problems += hook_problems(
+        draft.thread[0],
+        url=url,
+        carries_url=carries_url,
+        max_chars=HOOK_MAX_CHARS if is_thread else None,
+    )
     if not _url_in(draft.thread[-1], url):
         problems.append("last thread post is missing the primary source URL")
+    elif not is_thread and not carries_url:
+        problems += link_post_problems(draft.thread[-1], url=url)
     if is_preprint(source):
         if PREPRINT_LABEL not in draft.thread[0].lower():
             problems.append("preprint not labelled in first thread post")

@@ -53,11 +53,16 @@ def number_posts(posts: list[str]) -> list[str]:
 
 
 def split_thread(
-    thread_json: str | list[str], *, url: str, max_chars: int = MAX_POST_CHARS
+    thread_json: str | list[str],
+    *,
+    url: str,
+    max_chars: int = MAX_POST_CHARS,
+    number: bool = True,
 ) -> list[str]:
     """Ordered posts ready to send. Raises ThreadError rather than editing content.
     `max_chars` is the per-post limit the draft was written to (a long post's, phase
-    four); a single post is a one-element thread and is never numbered."""
+    four). `number` is False for a single or long post: it is one post plus the post that
+    carries the source URL, not a thread a reader counts through."""
     posts = thread_json if isinstance(thread_json, list) else parse_thread_json(thread_json)
     problems = []
     for i, p in enumerate(posts, 1):
@@ -67,4 +72,4 @@ def split_thread(
         problems.append("last post: missing source URL")
     if problems:
         raise ThreadError("; ".join(problems))
-    return number_posts(posts)
+    return number_posts(posts) if number else list(posts)

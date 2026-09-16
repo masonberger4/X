@@ -113,9 +113,14 @@ source only when it is due, and score only scores what is new.
    minutes, and a reader who is handed a link, or a summary they cannot answer,
    never reaches post 2. The source URL goes in the last post only. A draft
    whose opener breaks this is sent back to the model and, if it keeps breaking
-   it, stored as failed. A single or long post carries its own URL and is
-   exempt from the link rule and the length cap. The cap lives in
-   `draft\hook.py` (`HOOK_MAX_CHARS`) if you want a different opener length.
+   it, stored as failed. A single or long post opens the same way: it carries no
+   link either, and its primary source URL is posted as a **second, threaded
+   post** of its own ("Source: <URL>"), so a single post is really two posts and
+   a long post is the long post plus that link post. Only the 220-character cap
+   is lifted there (the format's own limit applies instead). The link post holds
+   the URL, no other link and at most ~120 characters; the cap lives in
+   `draft\hook.py` (`HOOK_MAX_CHARS`, `LINK_POST_MAX_CHARS`) if you want
+   different lengths.
 
    Posts tag what X can link. A journal, society, regulator or company the
    pipeline knows the X account of is written as its @handle when a post names
@@ -579,6 +584,8 @@ source only when it is due, and score only scores what is new.
    thread or single or long post and how many pictures on which posts, need
    no model). Formats are judged only after `format_min_posts` posts. The
    control panel's **Swarm** page shows the family tree and every score.
+   Every single and long format is posted as two tweets: the post itself and
+   the link post that carries the source URL (neither is numbered "1/2").
    A long post needs X Premium on the account: without it X refuses the post
    and the draft shows as failed on the approved page; lower
    `formats: long_max_chars` in `swarm\config.yaml` or retire `long-1` on the

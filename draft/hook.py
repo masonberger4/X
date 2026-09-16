@@ -8,6 +8,10 @@ neither the source URL nor a position marker ("1/6", "a thread").
 `hook_problems` is applied by draft.drafter.check_hard_rules to the first post of a
 thread and by swarm.cells.cell_problems to a hook cell, so the single drafter and the
 swarm are held to the same opener.
+
+The same reasoning is why a single or long post is not exempt: it too opens with a
+link-free claim, and its source URL goes in a second, threaded post (`link_post_problems`)
+instead of in the body.
 """
 
 from __future__ import annotations
@@ -35,11 +39,23 @@ _MARKERS = (
 
 _OTHER_URL = re.compile(r"https?://\S+")
 
+# The link post (a single or long post's second post) holds the URL and nothing more than
+# a few words of attribution.
+LINK_POST_MAX_CHARS = 120
 
-def hook_problems(text: str, *, url: str = "", carries_url: bool = False) -> list[str]:
-    """Why this opener would be discarded. `carries_url` is True only when the opener is
-    also the post that must hold the source URL (a single or long post), which then exempts
-    it from the link rule and from the length cap."""
+
+def hook_problems(
+    text: str,
+    *,
+    url: str = "",
+    carries_url: bool = False,
+    max_chars: int | None = HOOK_MAX_CHARS,
+) -> list[str]:
+    """Why this opener would be discarded. `carries_url` is True only for an opener that is
+    itself the post holding the source URL (a draft written before the link post, kept
+    working), which exempts it from the link rule and from the length cap. `max_chars` is
+    the opener's cap, or None for a single or long post, whose body is capped by its own
+    format instead."""
     problems: list[str] = []
     t = text.strip()
     for pattern, label in _MARKERS:
@@ -54,21 +70,50 @@ def hook_problems(text: str, *, url: str = "", carries_url: bool = False) -> lis
         elif _OTHER_URL.search(t):
             problems.append("first post contains a link; links belong in the last post")
         n = tweet_length(t)
-        if n > HOOK_MAX_CHARS:
+        if max_chars is not None and n > max_chars:
             problems.append(
-                f"first post is {n} chars (> {HOOK_MAX_CHARS}); the opener is one claim, "
-                "not a summary"
+                f"first post is {n} chars (> {max_chars}); the opener is one claim, not a summary"
             )
     return problems
 
 
-def hook_rule(*, carries_url: bool) -> str:
-    """The prompt wording of the rule, so the model is told exactly what is enforced."""
+def link_post_problems(text: str, *, url: str) -> list[str]:
+    """Why the link post of a single or long post would be discarded. It exists only to
+    carry the primary source URL out of the body post, so it holds that URL, no other link,
+    and little else."""
+    problems: list[str] = []
+    t = text.strip()
+    if url and url not in t:
+        problems.append("the link post is missing the primary source URL")
+    others = [u for u in _OTHER_URL.findall(t) if not (url and u.startswith(url))]
+    if others:
+        problems.append(f"the link post contains another link: {others[0]}")
+    n = tweet_length(t)
+    if n > LINK_POST_MAX_CHARS:
+        problems.append(
+            f"the link post is {n} chars (> {LINK_POST_MAX_CHARS}); it carries the source "
+            "URL and at most a few words of attribution"
+        )
+    return problems
+
+
+def hook_rule(*, carries_url: bool, capped: bool = True) -> str:
+    """The prompt wording of the rule, so the model is told exactly what is enforced.
+    `capped` is False for a single or long post: it carries no link either, but its length
+    is the format's, not the hook cap."""
     if carries_url:
         return (
             "12. Open with the claim. The first sentence states the single most important\n"
             "   finding or consequence in words a specialist could answer or argue with; it\n"
             '   never says "thread", never numbers itself ("1/6") and carries no emoji.'
+        )
+    if not capped:
+        return (
+            "12. Open with the claim, and carry NO link of any kind in this post: the source\n"
+            "   URL goes in the second post (rule 2). The first sentence states the single\n"
+            "   most important finding or consequence in words a specialist could answer or\n"
+            '   argue with; it never says "thread", never numbers itself ("1/6") and carries\n'
+            "   no emoji."
         )
     return (
         f"12. The first post is the hook, and it decides whether anyone reads the rest: at\n"

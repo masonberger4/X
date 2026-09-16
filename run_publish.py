@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
+from draft.schema import SHAPE_THREAD
 from publish import client, store
 from publish.scheduler import (
     Policy,
@@ -86,7 +87,11 @@ def texts_for(approved: Approved) -> tuple[str, list[str]]:
     if not approved.thread:
         raise ThreadError("draft has no thread")
     return store.KIND_THREAD, split_thread(
-        approved.thread, url=approved.url, max_chars=approved.max_chars
+        approved.thread,
+        url=approved.url,
+        max_chars=approved.max_chars,
+        # A single or long post plus its link post is not a thread to number through.
+        number=approved.shape == SHAPE_THREAD,
     )
 
 

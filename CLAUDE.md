@@ -159,8 +159,15 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   position marker ("1/6"), no "thread" and no emoji, and it stays within `HOOK_MAX_CHARS`:
   X ranks a thread on its opening post, and an outbound link or an unanswerable summary
   there costs the rest of the thread its readers. The source URL stays in the last post
-  (rule 2). A single or long post is its own opener AND carries the URL, so it is exempt
-  from the link ban and the cap (`carries_url=True`).
+  (rule 2). A single or long post is its own opener and is NOT exempt from the link
+  ban: its primary source URL goes in a second, threaded post (the **link post**,
+  `hook.py:link_post_problems`, `LINK_POST_MAX_CHARS`), so `draft/schema.py:Format`
+  normalises every non-thread shape to exactly two posts (`LINK_POST_SHAPE_POSTS`), the
+  picture never anchors to the link post, no swarm cell carries a link
+  (`engine.run_swarm`'s `link_post`), and `publish/thread.py:split_thread(number=False)`
+  leaves the pair unnumbered. Only the hook's length cap is lifted there (the format's
+  `max_chars` applies). A one-post draft stored before this rule still passes
+  (`carries_url=True`).
 - **KPIs are weighted, not counted.** `feedback/models.py:CONVERSATION_WEIGHTS` defines the
   derived `conversation` KPI (reply/quote x3, bookmark/repost x2, like x1) beside the six
   stored counts; `Metrics.get` and `swarm/store.py:_metrics` both serve it, and it is the

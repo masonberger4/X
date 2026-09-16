@@ -616,7 +616,11 @@ shown on the queue's draft page, and attached by `run_publish.py` to that
 post; `publish/thread.py` checks each post against the draft's own limit, so
 a long post is never refused for being over 280. The swarm runs one cell for
 a single post and its slots as sections of `formats.long_section_chars` for
-a long one. Formats are scored with the same relative KPI, pruned only after
+a long one; no cell carries a link. A single or long format is always two
+posts: the post itself, then a **link post** holding only the primary source
+URL, so rule 12's link ban covers every shape and the body post is never an
+outbound link (`draft/hook.py:link_post_problems`; `publish/thread.py` leaves
+those two posts unnumbered). Formats are scored with the same relative KPI, pruned only after
 `evolve.format_min_posts` posts (a coarse gene needs more evidence than a slot
 rule), and bred without a model by stepping one field (shape, picture count,
 an anchor, the post range) to a neighbour. The panel's `/swarm` page has a
