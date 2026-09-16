@@ -26,6 +26,17 @@ PREPRINT_SOURCES = ("biorxiv", "medrxiv")
 PREPRINT_LABEL = "preprint"
 
 
+# A single or long post never carries the source URL itself: it is posted with a second,
+# threaded post that holds only the link, so the body post stays link-free (rule 12).
+_LINK_POST_RULE = (
+    '6. "thread" holds exactly two strings: first {what}, then the LINK POST, a short\n'
+    "   second post whose only job is to carry the primary source URL. Write the link post\n"
+    "   as the URL on its own, or a handful of words of attribution and the URL "
+    '("Source: <URL>");\n'
+    "   it never repeats the argument and never carries a second link."
+)
+
+
 def _shape_rules(fmt: Format | None) -> tuple[str, str, str]:
     """(rule 5, rule 6, rule 9's first sentence) for the format. None = phase-one physics."""
     if fmt is None or fmt.is_thread:
@@ -38,16 +49,18 @@ def _shape_rules(fmt: Format | None) -> tuple[str, str, str]:
     elif fmt.shape == SHAPE_SINGLE:
         r5 = (
             f"5. This is a SINGLE post of at most {MAX_POST_CHARS} characters (a URL counts as "
-            f"{URL_CHARS}); rules 2 and 3 apply to that one post."
+            f"{URL_CHARS}), followed by the link post below; rule 3 applies to the single "
+            "post and rule 2 to the link post."
         )
-        r6 = '6. "thread" holds exactly one string: the whole post.'
+        r6 = _LINK_POST_RULE.format(what="the whole post")
     else:
         r5 = (
             f"5. This is ONE long-form post of at most {fmt.max_chars} characters (a URL "
-            f"counts as {URL_CHARS}), written as short sections separated by blank lines; "
-            "rules 2 and 3 apply to that one post."
+            f"counts as {URL_CHARS}), written as short sections separated by blank lines and "
+            "followed by the link post below; rule 3 applies to the long post and rule 2 to "
+            "the link post."
         )
-        r6 = '6. "thread" holds exactly one string: the whole long post.'
+        r6 = _LINK_POST_RULE.format(what="the whole long post")
     n = 1 if fmt is None else fmt.visuals
     if n == 0:
         r9 = (
@@ -72,9 +85,10 @@ def hard_rules(fmt: Format | None = None) -> str:
     """The HARD RULES block for a format; hard_rules(None) is the pre-phase-four text."""
     r5, r6, r9 = _shape_rules(fmt)
     where = "the first post" if fmt is None or fmt.is_thread else "the post"
-    # A single or long post is its own opener AND the post that carries the URL, so rule 12
-    # asks for the claim-first sentence without the link ban or the length cap.
-    r12 = hook_rule(carries_url=not (fmt is None or fmt.is_thread))
+    is_thread = fmt is None or fmt.is_thread
+    # A single or long post is its own opener, and the source URL sits in its link post, so
+    # rule 12's link ban applies to it too; only the hook's length cap does not.
+    r12 = hook_rule(carries_url=False, capped=is_thread)
     return f"""HARD RULES. A draft that breaks any of these is discarded automatically.
 1. No medical advice and no treatment recommendations. Describe evidence; never tell
    anyone what they or their doctor should do.

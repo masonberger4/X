@@ -35,12 +35,23 @@ ANCHOR_WORDS = ("first", "last", "middle")
 MAX_VISUALS = 2
 DEFAULT_LONG_MAX_CHARS = 4000
 
+# A single or long post never carries the source URL itself: the link lives in a second,
+# threaded post so the opener stays link-free (X shows a post with an outbound link to
+# fewer non-followers). So every non-thread shape is exactly two posts: the post, then the
+# link post.
+LINK_POST_SHAPE_POSTS = 2
+
 
 @dataclass(frozen=True)
 class Format:
     """What a draft must look like. `anchors` has one word per visual (first | last |
     middle) resolved against the thread length by `resolve_anchors`; a single or long post
-    anchors everything to post 1. `max_chars` is the per-post limit (280 unless long)."""
+    anchors everything to post 1 (its second post is the link post, never a picture).
+    `max_chars` is the per-post limit (280 unless long).
+
+    A single or long shape is always two posts (`LINK_POST_SHAPE_POSTS`): whatever
+    min_posts/max_posts a caller or a stored format genome passes is normalised to that,
+    since the body post is followed by the post that holds the primary source URL."""
 
     shape: str = SHAPE_THREAD
     min_posts: int = THREAD_MIN
@@ -63,19 +74,32 @@ class Format:
                 raise ValueError("a thread needs 2 <= min_posts <= max_posts <= 6")
             if self.max_chars != MAX_POST_CHARS:
                 raise ValueError("thread posts are 280 characters")
-        elif self.shape == SHAPE_SINGLE:
-            if (self.min_posts, self.max_posts, self.max_chars) != (1, 1, MAX_POST_CHARS):
-                raise ValueError("a single post is one post of 280 characters")
-        elif (self.min_posts, self.max_posts) != (1, 1) or self.max_chars <= MAX_POST_CHARS:
-            raise ValueError("a long post is one post with max_chars above 280")
+        else:
+            # The body post plus the link post, whatever the caller asked for.
+            object.__setattr__(self, "min_posts", LINK_POST_SHAPE_POSTS)
+            object.__setattr__(self, "max_posts", LINK_POST_SHAPE_POSTS)
+            if self.shape == SHAPE_SINGLE:
+                if self.max_chars != MAX_POST_CHARS:
+                    raise ValueError("a single post is 280 characters")
+            elif self.max_chars <= MAX_POST_CHARS:
+                raise ValueError("a long post has max_chars above 280")
 
     @property
     def is_thread(self) -> bool:
         return self.shape == SHAPE_THREAD
 
+    @property
+    def has_link_post(self) -> bool:
+        """True when the last post is the link post: a single or long post keeps the source
+        URL out of the body and puts it in a second, threaded post of its own."""
+        return not self.is_thread
+
     def resolve_anchors(self, n_posts: int) -> list[int]:
         """1-based post index per visual for a thread of n_posts."""
         out = []
+        if self.has_link_post:
+            # Never the link post: every picture sits on the body post.
+            return [1] * self.visuals
         for a in self.anchors:
             if a == "first" or n_posts <= 1:
                 out.append(1)
@@ -113,11 +137,11 @@ DEFAULT_FORMAT = Format()  # the phase-one physics
 
 
 def single_format() -> Format:
-    return Format(shape=SHAPE_SINGLE, min_posts=1, max_posts=1)
+    return Format(shape=SHAPE_SINGLE)
 
 
 def long_format(max_chars: int = DEFAULT_LONG_MAX_CHARS) -> Format:
-    return Format(shape=SHAPE_LONG, min_posts=1, max_posts=1, max_chars=max_chars)
+    return Format(shape=SHAPE_LONG, max_chars=max_chars)
 
 
 _URL_RE = re.compile(r"https?://\S+")
@@ -285,8 +309,12 @@ def validate_output(data: Any, fmt: Format | None = None) -> Draft:
         raise SchemaError("'thread' contains an empty post")
     lo, hi = fmt.min_posts, fmt.max_posts
     if not lo <= len(thread) <= hi:
-        what = "'thread'" if fmt.is_thread else f"a {fmt.shape} post"
-        raise SchemaError(f"{what} must have {lo}-{hi} posts, got {len(thread)}")
+        if fmt.is_thread:
+            raise SchemaError(f"'thread' must have {lo}-{hi} posts, got {len(thread)}")
+        raise SchemaError(
+            f"a {fmt.shape} post is {lo} posts (the post, then a post holding only the "
+            f"primary source URL), got {len(thread)}"
+        )
 
     try:
         chart = validate_chart(data.get("chart"))

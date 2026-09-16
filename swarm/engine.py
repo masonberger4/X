@@ -65,21 +65,24 @@ def _candidates_for_slot(
     log_rows: list[dict],
     max_chars: int = MAX_POST_CHARS,
     single: bool = False,
+    link_post: bool = False,
 ) -> list[str]:
     """Layer 1 proposals, then `layers - 1` synthesis rounds that each see every earlier
     round (Mixture-of-Agents). Cells that fail the per-post rules are dropped as they land.
-    `max_chars` is the cell's limit; `single` means this one cell is the whole post and
-    must carry the URL (and the preprint label)."""
+    `max_chars` is the cell's limit; `single` means this one cell is the whole post (and
+    must carry the preprint label); `link_post` means the draft's URL goes in a link post
+    the assembler adds, so no cell carries a link and the body opener is not hook-capped."""
     system = prompts.cell_system_prompt(max_chars)
     all_rounds: list[str] = []
     survivors: list[str] = []
     for layer in range(1, layers + 1):
         round_out: list[str] = []
         for k in range(fan_out):
+            needs_url = False if link_post else (True if single else None)
             if layer == 1:
-                user = prompts.propose_prompt(brief, slot, chosen)
+                user = prompts.propose_prompt(brief, slot, chosen, needs_url)
             else:
-                user = prompts.synthesise_prompt(brief, slot, chosen, all_rounds)
+                user = prompts.synthesise_prompt(brief, slot, chosen, all_rounds, needs_url)
             try:
                 text = call(system, user, model).strip().strip('"')
             except Exception as exc:  # one failed cell never stops the slot
@@ -93,9 +96,11 @@ def _candidates_for_slot(
                 slot=slot.name,
                 is_preprint=brief.preprint,
                 max_chars=max_chars,
-                needs_url=True if single else None,
+                needs_url=needs_url,
                 needs_preprint=(brief.preprint if single else None),
                 handles=list(brief.handles),
+                is_hook=True if single else None,
+                hook_capped=not link_post,
             )
             log_rows.append({"slot": slot.name, "layer": layer, "text": text, "problems": problems})
             if problems:
@@ -121,7 +126,8 @@ def run_swarm(
     """Build one draft with the swarm. Raises SwarmFailed when a slot has no usable
     candidate or the assembly fails every hard rule. `fmt` (phase four): a single post runs
     ONE cell that is the whole post; a long post runs the genome's slots as sections of
-    `formats.long_section_chars` each; a thread is the genome's slots as posts."""
+    `formats.long_section_chars` each; a thread is the genome's slots as posts. A single or
+    long post is assembled with a second post that carries only the source URL."""
     model = _swarm_model(cfg)
     assembler_model = str(cfg.get("assembler_model") or "").strip() or model
     # The genome owns its topology; the config values are the fallback for a genome row
@@ -135,6 +141,9 @@ def run_swarm(
     judge_system = prompts.JUDGE_SYSTEM
     shape = fmt.shape if fmt is not None else "thread"
     single = shape == SHAPE_SINGLE
+    # A single or long post keeps its source URL out of the body: the assembly adds a second
+    # post that holds only the link, so no cell may carry one.
+    link_post = shape in (SHAPE_SINGLE, SHAPE_LONG)
     cell_chars = MAX_POST_CHARS
     if shape == SHAPE_LONG:
         cell_chars = int((cfg.get("formats") or {}).get("long_section_chars", 700))
@@ -153,6 +162,7 @@ def run_swarm(
             log_rows=log_rows,
             max_chars=cell_chars,
             single=single,
+            link_post=link_post,
         )
         cands = dedupe(cands, max_sim)
         if not cands:
