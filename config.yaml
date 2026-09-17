@@ -229,13 +229,16 @@ sources:
   # OncLive / Targeted Oncology (403), Evaluate Vantage (no feed).
 
   # --- structured / API sources ---
+  # api.biorxiv.org returns 200 with an empty body (Sept 2026); api.medrxiv.org
+  # serves /details for both servers. The API ignores ?category=, so the
+  # category is filtered in ingest/biorxiv.py -- hence the higher max_pages.
   - name: biorxiv_cancer_biology
     type: biorxiv
     server: biorxiv
-    api_url: https://api.biorxiv.org/details
+    api_url: https://api.medrxiv.org/details
     category: cancer_biology
     lookback_days: 2
-    max_pages: 5
+    max_pages: 8
     cadence_minutes: 180
   - name: medrxiv_oncology
     type: biorxiv
@@ -243,7 +246,7 @@ sources:
     api_url: https://api.medrxiv.org/details
     category: oncology
     lookback_days: 2
-    max_pages: 5
+    max_pages: 8
     cadence_minutes: 180
   - name: fda_oce_approvals
     type: fda_oce
@@ -325,7 +328,7 @@ companies:
     - {key: syndax,       name: Syndax,                  url: https://ir.syndax.com/rss/news-releases.xml, ticker: SNDX}
     - {key: tscan,        name: TScan Therapeutics,      url: https://ir.tscan.com/rss/news-releases.xml, ticker: TCRX}
     - {key: arvinas,      name: Arvinas,                 url: https://ir.arvinas.com/rss/news-releases.xml, ticker: ARVN, x: Arvinas}
-    - {key: cellectis,    name: Cellectis,               url: https://www.cellectis.com/en/rss/press-releases, ticker: CLLS, x: Cellectis}
+    - {key: cellectis,    name: Cellectis,               url: "https://www.cellectis.com/en/feed/?post_type=press_release", ticker: CLLS, x: Cellectis}
     - {key: blueprint,    name: Blueprint Medicines,     url: https://ir.blueprintmedicines.com/rss/news-releases.xml}
     - {key: bicycle,      name: Bicycle Therapeutics,    url: https://investors.bicycletherapeutics.com/rss/news-releases.xml, ticker: BCYC}
     - {key: tango,        name: Tango Therapeutics,      url: https://ir.tangotx.com/rss/news-releases.xml, ticker: TNGX}
