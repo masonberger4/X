@@ -487,7 +487,13 @@ source only when it is due, and score only scores what is new.
    python run_publish.py --release-failed        # every failed or refused draft
    python run_publish.py --release-failed 17     # just draft 17
    ```
-   This posts nothing and never touches a posted or partial draft.
+   This posts nothing and never touches a posted or partial draft. The panel's
+   approved page (part 8) has the same thing as a button: "Release". If a
+   publish run is killed part-way — the PC sleeps, the panel's Stop button, a
+   power cut — the draft it had taken can be left marked `claimed`, and a
+   claimed draft is skipped by every later run. That button is also what frees
+   one of those, once the claim is more than 30 minutes old (younger than that
+   a run may still be posting it, and the button says so).
 4. Pictures. A draft's chart (part 3) is uploaded and attached to its first
    post with alt text; the dry run prints the file and the alt text. If the
    upload fails nothing is posted and the draft is marked failed, since you
@@ -662,8 +668,16 @@ to stop it. Four pages:
   again before it posts (the draft's own page says which); reopening cannot
   unpost a tweet, so reject it instead if it should not run again. A draft
   whose last attempt failed or was refused can be reopened, and its failed
-  schedule row goes with it, though the posts log keeps the history. The same
-  button is on the draft's own page.
+  schedule row goes with it, though the posts log keeps the history.
+  "Release" next to a draft is the other half of that: it puts a draft whose
+  publish attempt posted nothing back in line *without* taking it off the
+  approved list, so the next run tries it again with the order you set kept.
+  It is offered when the attempt failed or was refused, and for a draft left
+  marked `claimed` by a run that died before it posted (a claim is releasable
+  only once it is more than 30 minutes old; younger than that a run may still
+  be posting the thread, and the button is not offered). It is refused for
+  anything already on X, posted or half-posted, since releasing that would
+  post the thread a second time. Both buttons are on the draft's own page too.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
   halfway is never retried for you). Posting happens from the approved page,
@@ -839,6 +853,7 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | Want a completely fresh start | delete `pipeline.db`, then `python run_ingest.py --force` |
 | The dashboard says `missing env: ANTHROPIC_API_KEY` but you use the Claude Code backend | it should not since the check follows `LLM_BACKEND`; make sure `.env` is in the folder you start `run_app.py` from |
 | A step keeps running after you closed the app (a `claude` window keeps reopening) | that was the behaviour before the Stop button; on an old checkout, `taskkill /F /IM pythonw.exe` ends it (or `python.exe` if you started the app from a command prompt) |
+| A draft sits on the approved page marked `claimed` and never posts | the run that claimed it died before it posted (a sleep, a power cut, the Stop button). Press "Release" beside it once the claim is over 30 minutes old, or run `python run_publish.py --release-failed`; check on the publishing page first that no part of it reached X |
 | The control panel says a run is already in progress | the scheduler (part 6) is mid-run; wait for it and press the button again |
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
 | `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |

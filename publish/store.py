@@ -36,7 +36,7 @@ import json
 import os
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from draft.chart import IMAGES_DIRNAME, alt_text, visual_from_json
@@ -51,6 +51,10 @@ SCHED_POSTED = "posted"
 SCHED_PARTIAL = "partial"
 SCHED_REFUSED = "refused"
 SCHED_FAILED = "failed"
+
+#: How old a claim must be before a human may release it (minutes). A publish attempt
+#: takes seconds, so anything older is a run that died, not one still posting.
+STALE_CLAIM_MINUTES = 30
 
 POST_POSTED = "posted"
 POST_FAILED = "failed"
@@ -456,6 +460,39 @@ def release_failed(conn: sqlite3.Connection, draft_ids: list[int] | None = None)
                   {where}"""
     params = [SCHED_FAILED, SCHED_REFUSED, *(draft_ids or [])]
     return _release(conn, guard, params)
+
+
+def release_claimed(
+    conn: sqlite3.Connection,
+    draft_ids: list[int],
+    *,
+    now: datetime | None = None,
+    older_than_minutes: int = STALE_CLAIM_MINUTES,
+) -> list[int]:
+    """Delete the schedule rows of the given drafts whose claim went stale: status
+    'claimed', claimed at least `older_than_minutes` ago, and no posts row carrying a
+    tweet_id. A run that died between claiming and finishing (the machine went down, the
+    panel's Stop killed it) leaves a claim nothing ever resolves, and `fetch_approved`
+    skips a claimed draft forever; this is the one way that claim is let go, so the draft
+    is considered again. The age is the guard against racing a run that is mid-thread:
+    `claim` writes `claimed_at` before the first tweet, and a publish attempt is over in
+    seconds, so a claim older than the cutoff is dead, not busy. Returns the released draft
+    ids; empty when the tables do not exist yet. Never touches a posted or partial row.
+    """
+    if not draft_ids:
+        return []
+    if not _has_table(conn, "schedule") or not _has_table(conn, "posts"):
+        return []
+    cutoff = ((now or datetime.now(UTC)) - timedelta(minutes=older_than_minutes)).replace(
+        microsecond=0
+    )
+    marks = ",".join("?" * len(draft_ids))
+    guard = f"""status = ?
+                  AND claimed_at IS NOT NULL
+                  AND claimed_at <= ?
+                  AND draft_id NOT IN (SELECT draft_id FROM posts WHERE tweet_id IS NOT NULL)
+                  AND draft_id IN ({marks})"""
+    return _release(conn, guard, [SCHED_CLAIMED, cutoff.isoformat(), *draft_ids])
 
 
 def release_unclaimed(conn: sqlite3.Connection, draft_ids: list[int]) -> list[int]:

@@ -1,11 +1,12 @@
 import json
+from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
 
 from approval_queue import app as queue_app
-from approval_queue import store
+from approval_queue import publishing, store
 from approval_queue.app import app
 from draft import drafter
 from draft.chart import Table
@@ -594,3 +595,100 @@ def test_detail_shows_created_at_in_the_display_timezone(client, conn, draft_id)
     assert "created 2026-06-01 08:30 PDT" in body
     # The raw stored UTC string is never what the page shows.
     assert "2026-06-01T15:30:00+00:00" not in body
+
+
+# --- release: a publish attempt that posted nothing ------------------------------------
+
+
+def _age_claim(conn, draft_id, minutes):
+    """Backdate a claim, as if the run that took it died `minutes` ago."""
+    when = (datetime.now(UTC) - timedelta(minutes=minutes)).replace(microsecond=0)
+    conn.execute(
+        "UPDATE schedule SET claimed_at = ? WHERE draft_id = ?", (when.isoformat(), draft_id)
+    )
+    conn.commit()
+
+
+STALE = publishing.STALE_CLAIM_MINUTES
+
+
+def test_release_puts_a_draft_with_a_dead_claim_back_in_line(client, conn, draft_id):
+    """The run that claimed this draft died without posting, so nothing will ever resolve
+    the claim and fetch_approved skips it forever. Release drops that row: the draft stays
+    approved and the next run considers it again."""
+    store.approve(conn, draft_id)
+    _claim_draft(conn, draft_id)
+    _age_claim(conn, draft_id, STALE + 1)
+    assert f'action="/drafts/{draft_id}/release"' in client.get("/status/approved").text
+
+    r = client.post(f"/drafts/{draft_id}/release")
+    assert r.status_code == 303 and r.headers["location"] == "/status/approved"
+    assert store.get_draft(conn, draft_id).status == "approved"  # never a reopen
+    assert _schedule_row(conn, draft_id) is None
+    assert [a.draft_id for a in publish_store.fetch_approved(conn=conn)] == [draft_id]
+    # and the page offers it again as waiting, not as releasable
+    body = client.get("/status/approved").text
+    assert "waiting" in body and f'action="/drafts/{draft_id}/release"' not in body
+
+
+def test_release_refused_while_the_claim_could_still_be_posting(client, conn, draft_id):
+    """A fresh claim is a run mid-thread, not a dead one: releasing it would post twice."""
+    store.approve(conn, draft_id)
+    _claim_draft(conn, draft_id)
+    assert f'action="/drafts/{draft_id}/release"' not in client.get("/status/approved").text
+
+    r = client.post(f"/drafts/{draft_id}/release")
+    assert r.status_code == 303 and r.headers["location"].startswith(f"/drafts/{draft_id}?error=")
+    assert f"less than {STALE} minutes ago" in unquote(r.headers["location"])
+    assert _schedule_row(conn, draft_id)["status"] == "claimed"
+
+
+@pytest.mark.parametrize("state", ["failed", "refused"])
+def test_release_retries_a_failed_or_refused_attempt(client, conn, draft_id, state):
+    """After retry.max_attempts the draft stays failed; this is the button for
+    `run_publish.py --release-failed`, without taking the draft off the approved list."""
+    store.approve(conn, draft_id)
+    _publish_draft(conn, draft_id, status=state, tweet_id=None, error="HTTP 403")
+    assert f'action="/drafts/{draft_id}/release"' in client.get("/status/approved").text
+
+    r = client.post(f"/drafts/{draft_id}/release")
+    assert r.status_code == 303 and r.headers["location"] == "/status/approved"
+    assert store.get_draft(conn, draft_id).status == "approved"
+    assert _schedule_row(conn, draft_id) is None
+    assert [a.draft_id for a in publish_store.fetch_approved(conn=conn)] == [draft_id]
+
+
+@pytest.mark.parametrize("state", ["posted", "partial"])
+def test_release_refused_for_anything_live_on_x(client, conn, draft_id, state):
+    """A partial thread is half on X; releasing it would post the whole thread again."""
+    store.approve(conn, draft_id)
+    _publish_draft(conn, draft_id, status=state, tweet_id="555")
+    assert (
+        f'action="/drafts/{draft_id}/release"' not in client.get("/status/approved?posted=1").text
+    )
+
+    r = client.post(f"/drafts/{draft_id}/release")
+    assert "live on X" in unquote(r.headers["location"])
+    assert _schedule_row(conn, draft_id)["status"] == state
+
+
+def test_release_says_so_when_nothing_is_holding_the_draft(client, conn, draft_id):
+    """A draft waiting with no claim (or only a saved publishing order) needs no release."""
+    store.approve(conn, draft_id)
+    body = client.get("/status/approved").text
+    assert f'action="/drafts/{draft_id}/release"' not in body
+    publish_store.set_order(conn, [draft_id])
+    assert f'action="/drafts/{draft_id}/release"' not in client.get("/status/approved").text
+
+    r = client.post(f"/drafts/{draft_id}/release")
+    assert "not holding this draft" in unquote(r.headers["location"])
+    assert _schedule_row(conn, draft_id)["position"] == 1  # the saved order survives
+
+
+def test_release_refused_for_a_draft_that_is_not_approved(client, conn, draft_id):
+    _claim_draft(conn, draft_id)
+    _age_claim(conn, draft_id, STALE + 1)
+    r = client.post(f"/drafts/{draft_id}/release")
+    assert "only an approved draft" in unquote(r.headers["location"])
+    assert _schedule_row(conn, draft_id)["status"] == "claimed"
+    assert client.post("/drafts/999/release").status_code == 404

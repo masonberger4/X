@@ -58,7 +58,9 @@ no fabricated numbers.
 ### 4. Approval queue (human step)
 Minimal web UI or Telegram/Slack bot showing draft, source, score.
 Actions: approve / edit / reject, plus reopen for an approved draft that has not
-posted yet. ~10 min per day.
+posted yet and release for one whose publish attempt posted nothing (a failure, or
+a claim left behind by a run that died), which puts it back in line without taking
+it off the approved list. ~10 min per day.
 Edit history is saved as voice-guide training data.
 
 ### 5. Publish (X API v2 via tweepy)

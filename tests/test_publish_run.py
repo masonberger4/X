@@ -7,7 +7,7 @@ import json
 import logging
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -1028,3 +1028,78 @@ def test_forget_is_empty_before_step_3_has_ever_run(tmp_path):
     assert store.forget(bare, [1]) == []
     assert store.is_live(bare, 1) is False
     bare.close()
+
+
+# --- release_claimed (the approved page's Release button) -------------------------------
+
+
+def _step3_tables(conn):
+    """Create step 3's tables on this connection (a claim alone does not)."""
+    store.set_order(conn, [])
+
+
+def _age_claim(conn, draft_id, minutes):
+    """Backdate a claim, as if the run that took it died `minutes` ago."""
+    when = (datetime.now(UTC) - timedelta(minutes=minutes)).replace(microsecond=0)
+    conn.execute(
+        "UPDATE schedule SET claimed_at = ? WHERE draft_id = ?", (when.isoformat(), draft_id)
+    )
+    conn.commit()
+
+
+def test_release_claimed_drops_a_dead_claim_so_the_draft_is_picked_up_again(conn):
+    """A run that died between claiming and posting leaves a claim nothing resolves, and
+    fetch_approved skips a claimed draft forever. Releasing it puts the draft back in line."""
+    did = seed_draft(conn, "a")
+    _step3_tables(conn)
+    assert store.claim(conn, did) is True
+    assert [a.draft_id for a in store.fetch_approved(conn=conn)] == []
+    _age_claim(conn, did, store.STALE_CLAIM_MINUTES + 1)
+
+    assert store.release_claimed(conn, [did]) == [did]
+    assert store.get_schedule(conn, did) is None
+    assert [a.draft_id for a in store.fetch_approved(conn=conn)] == [did]
+
+
+def test_release_claimed_never_touches_a_fresh_claim(conn):
+    """The age is the guard against a run that is mid-thread: a claim taken just now is a
+    run still posting, not a dead one."""
+    did = seed_draft(conn, "a")
+    _step3_tables(conn)
+    assert store.claim(conn, did) is True
+    assert store.release_claimed(conn, [did]) == []
+    _age_claim(conn, did, store.STALE_CLAIM_MINUTES - 1)
+    assert store.release_claimed(conn, [did]) == []
+    assert store.get_schedule(conn, did)["status"] == "claimed"
+    # `now` is a parameter, so a caller may judge the same row from a later clock
+    later = datetime.now(UTC) + timedelta(minutes=store.STALE_CLAIM_MINUTES)
+    assert store.release_claimed(conn, [did], now=later) == [did]
+
+
+def test_release_claimed_never_releases_a_draft_that_reached_x(conn):
+    """A posts row with a tweet_id outranks any schedule row: a partial thread is live and
+    releasing it would post the whole thread a second time."""
+    did = seed_draft(conn, "a")
+    _step3_tables(conn)
+    assert store.claim(conn, did) is True
+    _age_claim(conn, did, store.STALE_CLAIM_MINUTES * 10)
+    store.record_post(
+        conn, draft_id=did, text="t", kind="thread", position=1, slot=None, tweet_id="9"
+    )
+    assert store.release_claimed(conn, [did]) == []
+    assert store.get_schedule(conn, did) is not None
+
+
+def test_release_claimed_only_the_drafts_asked_for_and_only_claimed_rows(conn):
+    a = seed_draft(conn, "a")
+    b = seed_draft(conn, "b")
+    c = seed_draft(conn, "c")
+    _step3_tables(conn)
+    for did in (a, b):
+        assert store.claim(conn, did) is True
+        _age_claim(conn, did, store.STALE_CLAIM_MINUTES + 5)
+    store.set_order(conn, [c])  # an unclaimed 'pending' row: nothing to release
+    assert store.release_claimed(conn, []) == []  # an empty list means no draft, never all
+    assert store.release_claimed(conn, [a, c]) == [a]
+    assert store.get_schedule(conn, b)["status"] == "claimed"
+    assert store.get_schedule(conn, c)["position"] == 1

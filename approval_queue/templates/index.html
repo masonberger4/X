@@ -53,6 +53,12 @@
             <button type="submit" {% if run %}disabled{% endif %}>Publish now</button>
           </form>
           {% endif %}
+          {% if releasable.get(d.id) %}
+          <form method="post" action="/drafts/{{ d.id }}/release" class="order-hide" style="margin-top:.3rem"
+                onsubmit="return confirm('Put draft {{ d.id }} back in line for the next publish run?')">
+            <button type="submit" title="the last attempt posted nothing: drop it and let the next run try again">Release</button>
+          </form>
+          {% endif %}
           {% if not p or p.reopenable %}
           <form method="post" action="/drafts/{{ d.id }}/reopen" class="order-hide" style="margin-top:.3rem">
             <input name="note" placeholder="why (optional)" size="14">
