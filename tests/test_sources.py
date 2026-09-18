@@ -26,6 +26,17 @@ def test_biorxiv_parse_fixture():
     assert it.abstract.startswith("Hepatocellular carcinoma")
 
 
+def test_biorxiv_parse_filters_category():
+    data = json.loads((FIX / "biorxiv_api.json").read_text())
+    extra = {"doi": "10.1101/2026.09.01.700001", "title": "Neuro", "category": "neuroscience"}
+    coll = [*data["collection"], extra]
+    # the API ignores ?category=, so "cancer_biology" is matched here against "cancer biology"
+    items = parse_collection(coll, "biorxiv_cancer_biology", "biorxiv", "cancer_biology")
+    assert len(items) == 18
+    others = parse_collection(coll, "b", "biorxiv", "neuroscience")
+    assert [i.title for i in others] == ["Neuro"]
+
+
 def test_biorxiv_fetch_paginates(monkeypatch):
     data = json.loads((FIX / "biorxiv_api.json").read_text())
     calls = []
@@ -42,18 +53,18 @@ def test_biorxiv_fetch_paginates(monkeypatch):
             "name": "b",
             "type": "biorxiv",
             "server": "biorxiv",
-            "api_url": "https://api.biorxiv.org/details",
+            "api_url": "https://api.medrxiv.org/details",
             "category": "cancer_biology",
             "lookback_days": 2,
-            "max_pages": 5,
+            "max_pages": 8,
         },
         GLOBAL,
     )
     items = src.fetch()
     assert len(calls) == 2
-    assert calls[0][0].startswith("https://api.biorxiv.org/details/biorxiv/")
+    assert calls[0][0].startswith("https://api.medrxiv.org/details/biorxiv/")
     assert calls[0][0].endswith("/0") and calls[1][0].endswith("/18")
-    assert calls[0][1] == {"category": "cancer_biology"}
+    assert calls[0][1] is None  # the API ignores ?category=; parse_collection filters
     assert len(items) == 36
 
 
@@ -124,7 +135,7 @@ def test_ct_fetch_params_and_pagination(monkeypatch):
             "phases": ["PHASE2", "PHASE3"],
             "statuses": ["RECRUITING"],
             "lookback_days": 2,
-            "max_pages": 5,
+            "max_pages": 8,
         },
         GLOBAL,
     )
