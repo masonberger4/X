@@ -146,6 +146,12 @@
     <button>Approve</button>
     {% if contradicted %}<label><input type="checkbox" name="override" value="1"> approve anyway</label>{% endif %}
   </form>
+  {% if d.status == "approved" and releasable %}
+  <form class="inline" method="post" action="/drafts/{{ d.id }}/release"
+        onsubmit="return confirm('Put this draft back in line for the next publish run?')">
+    <button title="the last attempt posted nothing: drop it and let the next run try again">Release</button>
+  </form>
+  {% endif %}
   {% if d.status == "approved" and (not publish or publish.reopenable) %}
   <form class="inline" method="post" action="/drafts/{{ d.id }}/reopen">
     <input name="note" placeholder="why reopen (optional)">

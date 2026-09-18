@@ -13,6 +13,10 @@ Routes:
   POST /drafts/{id}/reject
   POST /drafts/{id}/reopen    sends an approved draft back to pending, unless step 3 has
                               already claimed or posted it
+  POST /drafts/{id}/release   drops the dead schedule row of an approved draft whose
+                              publish attempt posted nothing (failed, refused, or a claim
+                              left behind by a run that died), so the next run tries it
+                              again; the draft stays approved
   GET  /status/{status}       approved / rejected / failed lists
   GET  /voice                 voice report (step 7) from live data; ?weeks=N
 
@@ -232,10 +236,23 @@ def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
             "status": status,
             "checks": _check_summaries(conn, drafts),
             "publish": publish,
+            "releasable": _releasable(conn, drafts, publish),
             "hidden_posted": hidden,
             "show_posted": bool(posted),
         },
     )
+
+
+def _releasable(conn, drafts, publish: dict) -> dict[int, bool]:
+    """Which of these drafts a human may put back in line (a dead publish attempt: failed,
+    refused, or a stale claim). Only drafts step 3 is holding are asked about, so the usual
+    page — every draft waiting with no schedule row, or a 'pending' one — costs nothing."""
+    now = datetime.now(UTC)
+    held = [d.id for d in drafts if publish.get(d.id) is not None]
+    return {
+        draft_id: not publishing.release_reason(conn, draft_id, publish[draft_id], now)
+        for draft_id in held
+    }
 
 
 @app.get("/drafts/{draft_id}", response_class=HTMLResponse)
@@ -276,13 +293,16 @@ def _render_detail(
     table_checks = {(k.row, k.col): k for k in verify_store.table_checks_for_draft(conn, draft_id)}
     cells_contradicted = len(cell_problems(row.draft.table, table_checks.values()))
     image_grades = store.list_image_grades(conn, draft_id)
+    publish_states = store.publish_states(conn, [draft_id])
+    publish_info = publish_states.get(draft_id)
     edit_form = edit_form or {}
     return templates.TemplateResponse(
         request,
         "detail.html",
         {
             "d": row,
-            "publish": store.publish_states(conn, [draft_id]).get(draft_id),
+            "publish": publish_info,
+            "releasable": _releasable(conn, [row], publish_states).get(draft_id, False),
             "table_checks": table_checks,
             "image_grades": image_grades,
             "table_unverified": row.draft.table is not None and not has_image,
@@ -776,6 +796,43 @@ async def reopen(draft_id: int, request: Request, conn: Conn):
         released = publishing.forget(conn, draft_id)
         log.info(
             "draft %d reopened for review (%d schedule row(s) released)", draft_id, len(released)
+        )
+        return RedirectResponse("/status/approved", status_code=303)
+
+    return await run_in_threadpool(work)
+
+
+@app.post("/drafts/{draft_id}/release")
+async def release(draft_id: int, request: Request, conn: Conn):
+    """Put an approved draft whose publish attempt posted nothing back in line, without
+    taking it off the approved list: step 3's schedule row goes, so the next run considers
+    it again. Refused for anything live on X and for a claim young enough that a run may
+    still be posting it (`publishing.release_reason`, the same gate the button reads)."""
+    await read_form(request)
+
+    def work() -> RedirectResponse:
+        row = store.get_draft(conn, draft_id)
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        if row.status != store.STATUS_APPROVED:
+            return _detail_redirect(
+                draft_id, error=f"only an approved draft can be released (this one is {row.status})"
+            )
+        now = datetime.now(UTC)
+        info = store.publish_states(conn, [draft_id]).get(draft_id)
+        blocked = publishing.release_reason(conn, draft_id, info, now)
+        if blocked:
+            return _detail_redirect(draft_id, error=blocked)
+        released = publishing.release(conn, draft_id, info, now)
+        if not released:
+            return _detail_redirect(
+                draft_id,
+                error="publishing took this draft while the page was open; nothing released",
+            )
+        log.info(
+            "draft %d released from a %s schedule row; the next publish run considers it again",
+            draft_id,
+            info.status if info else "?",
         )
         return RedirectResponse("/status/approved", status_code=303)
 

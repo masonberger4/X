@@ -240,7 +240,14 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
   An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
   decision carrying the text and the optional note) puts an approved draft back to
-  `pending`. `approval_queue/publishing.py` is the queue's one door to step 3 (as
+  `pending`. `POST /drafts/{id}/release` is the other half: a draft whose publish attempt
+  posted nothing goes back in line WITHOUT leaving the approved list (no decision row, the
+  saved order kept) by dropping step 3's dead schedule row — `failed`/`refused` through
+  `publish/store.py:release_failed`, and a `claimed` row left by a run that died through
+  `release_claimed`, which refuses a claim younger than `store.STALE_CLAIM_MINUTES` (a run
+  may still be posting that thread) and anything with a live `posts` row.
+  `publishing.release_reason` is the one gate, read by the route and by the button on both
+  templates, as `block_reason` is for reopen. `approval_queue/publishing.py` is the queue's one door to step 3 (as
   `panel/publishing.py` is the panel's): `block_reason` refuses the reopen when
   `publish/store.py:is_live` finds a `posts` row with a tweet id — the ground truth,
   asked before and independently of the schedule — or when the draft's
@@ -321,9 +328,9 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   idempotent via the claim; partial threads are never retried automatically.
   The queue touches those two tables only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
-  missing) to label and hide posted drafts on the approved page, and, on a reopen
-  (above), `publish/store.py:forget` and `is_live`, which read and delete step 3's rows
-  through step 3's own module.
+  missing) to label and hide posted drafts on the approved page, and, on a reopen or a
+  release (above), `publish/store.py:forget`, `release_failed`, `release_claimed` and
+  `is_live`, which read and delete step 3's rows through step 3's own module.
   Texts are re-checked before posting and refused, never edited, on failure.
 - Step 4 reads other steps' tables only through `feedback/store.py:fetch_posted`
   (posts) and `fetch_post_context` (drafts/decisions/items/scores/ratings). Its
@@ -489,7 +496,8 @@ verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck
           mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop
           decision), render.py (finalize_table: decide, then draw or drop)
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
-          fetch_approved, is_live, forget = release_unclaimed + release_failed),
+          fetch_approved, is_live, forget = release_unclaimed + release_failed,
+          release_claimed for a stale claim),
           client.py (post_tweet, upload_media,
           verify_credentials)
 feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,

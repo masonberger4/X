@@ -557,6 +557,7 @@ class PublishInfo:
     posted_at: str | None = None
     error: str | None = None
     position: int | None = None  # the human's publishing order (panel), 1 = next to post
+    claimed_at: str | None = None  # when a publish run took the draft (UTC), for a stale claim
 
     @property
     def tweet_url(self) -> str:
@@ -584,12 +585,14 @@ def publish_states(conn: sqlite3.Connection, draft_ids: list[int]) -> dict[int, 
     position = "position" if "position" in cols else "NULL AS position"
     out: dict[int, PublishInfo] = {}
     for r in conn.execute(
-        f"SELECT draft_id, status, error, {position} FROM schedule WHERE draft_id IN ({marks})",
+        f"SELECT draft_id, status, error, claimed_at, {position} FROM schedule"
+        f" WHERE draft_id IN ({marks})",
         draft_ids,
     ).fetchall():
         out[int(r["draft_id"])] = PublishInfo(
             status=str(r["status"]),
             error=r["error"],
+            claimed_at=r["claimed_at"],
             position=int(r["position"]) if r["position"] is not None else None,
         )
     for r in conn.execute(
