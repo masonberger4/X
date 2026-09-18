@@ -655,7 +655,7 @@ models:
   backend: claude_code     # default: api
 claude_code:
   binary: claude           # must be on PATH and logged in (`claude login`)
-  timeout_seconds: 300
+  timeout_seconds: 600
   extra_args: []
 ```
 

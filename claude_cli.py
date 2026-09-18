@@ -35,7 +35,7 @@ BACKENDS = (API, CLAUDE_CODE)
 
 DEFAULTS: dict[str, Any] = {
     "binary": "claude",
-    "timeout_seconds": 300,
+    "timeout_seconds": 600,
     "extra_args": [],
 }
 
