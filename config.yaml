@@ -45,7 +45,7 @@ models:
 
 claude_code:                      # only used when models.backend is claude_code
   binary: claude                  # CLI on PATH; it must be logged in (`claude login`)
-  timeout_seconds: 300            # per call
+  timeout_seconds: 600            # per call (a swarm cell can run several minutes)
   extra_args: []                  # appended verbatim, e.g. ["--fallback-model", "sonnet"]
 
 scoring:
