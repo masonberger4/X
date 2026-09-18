@@ -14,9 +14,9 @@ import json
 from dataclasses import dataclass
 
 from draft.prompt import PREPRINT_LABEL, is_preprint
-from draft.schema import MAX_POST_CHARS, SHAPE_LONG, SHAPE_SINGLE, URL_CHARS, Format
+from draft.schema import MAX_POST_CHARS, SHAPE_LONG, SHAPE_SINGLE, Format
 from draft.tags import Handle, handles_block
-from swarm.genome import CLOSER, HOOK, Genome, Slot
+from swarm.genome import HOOK, Genome, Slot
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,8 @@ def cell_rules(max_chars: int = MAX_POST_CHARS) -> str:
     """The per-cell rules; `max_chars` is 280, or a long post's section limit."""
     unit = "post" if max_chars == MAX_POST_CHARS else "section of a long post"
     return f"""RULES for this one {unit} (one that breaks a rule is discarded by code):
-- At most {max_chars} characters; a URL counts as {URL_CHARS}. Aim under {max_chars - 30}.
+- At most {max_chars} characters. Aim under {max_chars - 30}.
+- NEVER write a URL, a link or a bare domain. Name the source in words instead.
 - No medical advice or treatment recommendations. No investment advice: never buy, sell,
   hold, short, a price target or a promised return. Describe; the reader decides.
 - Every number must appear verbatim in the source title or abstract. Do not round,
@@ -68,7 +69,7 @@ def cell_rules(max_chars: int = MAX_POST_CHARS) -> str:
 def brief_block(brief: Brief) -> str:
     parts = [
         f"SOURCE: {brief.source}" + ("  (THIS IS A PREPRINT)" if brief.preprint else ""),
-        f"PRIMARY SOURCE URL: {brief.url}",
+        f"PRIMARY SOURCE URL (for your reference only; never write it in a post): {brief.url}",
         f"PUBLISHED: {brief.published_at or 'unknown'}",
         f"TITLE: {brief.title}",
         "",
@@ -93,18 +94,13 @@ SINGLE_SLOT = Slot(
 )
 
 
-def _slot_extras(slot: Slot, brief: Brief, needs_url: bool | None = None) -> str:
-    """`needs_url` overrides the slot-name default (the closer carries the URL): a single or
-    long post carries no link at all, its URL goes in the link post the assembler adds."""
+def _slot_extras(slot: Slot, brief: Brief) -> str:
+    """The extras for this slot: the preprint label where it belongs, and the link ban that
+    applies to every post."""
     extras = []
     if (slot.name == HOOK or slot.name == SINGLE_SLOT.name) and brief.preprint:
         extras.append(f'The word "{PREPRINT_LABEL}" must appear in this post.')
-    if needs_url is None:
-        needs_url = slot.name == CLOSER or slot.name == SINGLE_SLOT.name
-    if needs_url:
-        extras.append(f"This post must contain the URL exactly as given: {brief.url}")
-    else:
-        extras.append("This post carries NO link of any kind.")
+    extras.append("This post carries NO link of any kind.")
     return "\n".join(extras)
 
 
@@ -124,9 +120,7 @@ def cell_system_prompt(max_chars: int = MAX_POST_CHARS) -> str:
     )
 
 
-def propose_prompt(
-    brief: Brief, slot: Slot, chosen: dict[str, str], needs_url: bool | None = None
-) -> str:
+def propose_prompt(brief: Brief, slot: Slot, chosen: dict[str, str]) -> str:
     """Layer 1: write the slot's post from the brief alone."""
     parts = [
         brief_block(brief),
@@ -136,7 +130,7 @@ def propose_prompt(
         f"YOUR SLOT: {slot.name}",
         f"YOUR JOB: {slot.rule}",
     ]
-    extra = _slot_extras(slot, brief, needs_url)
+    extra = _slot_extras(slot, brief)
     if extra:
         parts.append(extra)
     parts += ["", "Write the post now."]
@@ -148,7 +142,6 @@ def synthesise_prompt(
     slot: Slot,
     chosen: dict[str, str],
     previous: list[str],
-    needs_url: bool | None = None,
 ) -> str:
     """Layer 2 and up (Mixture-of-Agents): every earlier layer's candidates are shown and the
     model writes a better one, free to merge the strongest parts."""
@@ -160,7 +153,7 @@ def synthesise_prompt(
         f"YOUR SLOT: {slot.name}",
         f"YOUR JOB: {slot.rule}",
     ]
-    extra = _slot_extras(slot, brief, needs_url)
+    extra = _slot_extras(slot, brief)
     if extra:
         parts.append(extra)
     parts += ["", "CANDIDATES FROM THE PREVIOUS ROUND (other writers, same slot):"]
@@ -267,17 +260,15 @@ def assemble_prompt(
             parts.append(f"[{name}] {text}")
     if shape == SHAPE_SINGLE:
         how = (
-            'Assemble the draft JSON. "thread" holds exactly two strings: this post, kept as '
-            "written (you may fix grammar or trim it under the limit; do not rewrite it), "
-            f"then a short link post carrying the source URL and nothing else: {brief.url} "
+            'Assemble the draft JSON. "thread" holds exactly one string: this post, kept as '
+            "written (you may fix grammar or trim it under the limit; do not rewrite it). "
         )
     elif shape == SHAPE_LONG:
         how = (
-            'Assemble the draft JSON. "thread" holds exactly two strings: first these '
-            "sections IN THIS ORDER joined by blank lines, kept as written (fix grammar, "
-            "trim a section that runs over; do not rewrite, reorder or add sections) and "
-            f"under {fmt.max_chars if fmt else MAX_POST_CHARS} characters, then a short link "
-            f"post carrying the source URL and nothing else: {brief.url} "
+            'Assemble the draft JSON. "thread" holds exactly one string: these sections IN '
+            "THIS ORDER joined by blank lines, kept as written (fix grammar, trim a section "
+            "that runs over; do not rewrite, reorder or add sections) and under "
+            f"{fmt.max_chars if fmt else MAX_POST_CHARS} characters. "
         )
     else:
         lo, hi = (fmt.min_posts, fmt.max_posts) if fmt else (3, 6)

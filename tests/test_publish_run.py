@@ -25,13 +25,13 @@ SLOT_TIME = datetime(2026, 6, 1, 8, 35, tzinfo=LA)  # inside the 08:30 slot wind
 OFF_SLOT = datetime(2026, 6, 1, 10, 0, tzinfo=LA)
 
 
-THREAD3 = [f"one {URL}", "two", f"three {URL}"]
+THREAD3 = ["one", "two", "three"]
 
 
 def seed_draft(conn, item_id, *, source="pubmed", approve=True, thread=None, edit_to=None):
     """A draft whose thread is one post by default; `thread=THREAD3` gives a three-post one."""
     cid = seed_item(conn, item_id, source=source)
-    thread = thread or [f"Post {item_id} {URL}"]
+    thread = thread or [f"Post {item_id}"]
     d = Draft(thread=thread, suggested_visual="", why_it_matters="")
     did = qstore.insert_draft(conn, item_id=item_id, cluster_id=cid, model="m", draft=d)
     if edit_to:
@@ -114,11 +114,11 @@ def test_tweepy_not_imported_at_module_import():
 def test_fetch_approved_uses_real_schema_and_prefers_edit(conn):
     seed_draft(conn, "a", approve=False)  # pending: excluded
     seed_draft(conn, "b")
-    seed_draft(conn, "c", source="fda_press", edit_to=f"Edited c {URL}")
+    seed_draft(conn, "c", source="fda_press", edit_to="Edited c")
     got = store.fetch_approved(10, conn=conn)
     assert [a.item_id for a in got] == ["b", "c"]
     assert got[0].source == "pubmed" and got[0].url == URL and got[0].score == 8.5
-    assert got[1].thread == [f"Edited c {URL}"] and got[1].edited
+    assert got[1].thread == ["Edited c"] and got[1].edited
     assert got[1].source == "fda_press"
 
 
@@ -147,7 +147,7 @@ def test_live_posts_one_post_thread_and_is_idempotent(conn, fake_x, monkeypatch,
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
     seed_draft(conn, "a")
     assert run_publish.main([*slotted, "--live"], now=SLOT_TIME) == 0
-    assert len(fake_x.calls) == 1 and fake_x.calls[0] == (f"Post a {URL}", None)
+    assert len(fake_x.calls) == 1 and fake_x.calls[0] == ("Post a", None)
     rows = store.list_posts(conn, 1)
     assert rows[0]["tweet_id"] == "tw1" and rows[0]["slot"] == "2026-06-01 08:30"
     assert store.get_schedule(conn, 1)["status"] == "posted"
@@ -206,7 +206,7 @@ def test_breaking_posts_outside_slots_but_respects_gap(conn, fake_x, monkeypatch
     seed_draft(conn, "a")  # regular
     seed_draft(conn, "b", source="fda_oce_approvals")
     assert run_publish.main(["--live", "--breaking"], now=OFF_SLOT) == 0
-    assert fake_x.calls == [(f"Post b {URL}", None)]
+    assert fake_x.calls == [("Post b", None)]
     # a second breaking item minutes later is blocked by min_gap
     seed_draft(conn, "c", source="fda_press")
     assert run_publish.main(["--live"], now=OFF_SLOT) == 0
@@ -239,7 +239,7 @@ def test_thread_posts_in_order_with_reply_chain(conn, fake_x, monkeypatch):
     seed_draft(conn, "a", thread=THREAD3)
     assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert [c[1] for c in fake_x.calls] == [None, "tw1", "tw2"]
-    assert fake_x.calls[0][0].endswith("(1/3)") and URL in fake_x.calls[2][0]
+    assert fake_x.calls[0][0].endswith("(1/3)") and fake_x.calls[2][0].endswith("(3/3)")
     rows = store.list_posts(conn, 1)
     assert [r["position"] for r in rows] == [1, 2, 3]
     assert all(r["kind"] == "thread" for r in rows)
@@ -268,11 +268,11 @@ def test_partial_thread_failure_is_recorded_and_not_retried(conn, monkeypatch, c
 
 def test_refuses_content_that_fails_hard_check(conn, fake_x, monkeypatch, caplog):
     monkeypatch.setenv("PUBLISH_ENABLED", "1")
-    seed_draft(conn, "a", edit_to="edited without the link")
+    seed_draft(conn, "a", edit_to="e" * 300)
     assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert fake_x.calls == []
     assert store.get_schedule(conn, 1)["status"] == "refused"
-    assert "missing source URL" in caplog.text
+    assert "300 chars > 280" in caplog.text
 
 
 def test_bio_warning_when_not_confirmed(conn, fake_x, monkeypatch, caplog):
@@ -484,9 +484,9 @@ def test_missing_keys_raise_without_network(monkeypatch):
 
 def test_fetch_approved_uses_ai_revision_over_older_human_edit(conn):
     seed_draft(conn, "a", approve=False)
-    qstore.edit(conn, 1, thread=["1", "2", f"3 {URL}"], approve_after=False)
+    qstore.edit(conn, 1, thread=["1", "2", "3"], approve_after=False)
     revised = Draft(
-        thread=["r1", "r2", f"r3 {URL}"],
+        thread=["r1", "r2", "r3"],
         suggested_visual="",
         why_it_matters="w",
         claims_to_verify=[],
@@ -494,7 +494,7 @@ def test_fetch_approved_uses_ai_revision_over_older_human_edit(conn):
     qstore.revise(conn, 1, draft=revised, model="m", note="tighter")
     qstore.approve(conn, 1)
     (got,) = store.fetch_approved(10, conn=conn)
-    assert got.thread == ["r1", "r2", f"r3 {URL}"]
+    assert got.thread == ["r1", "r2", "r3"]
 
 
 # --- images ------------------------------------------------------------------
@@ -575,7 +575,7 @@ def test_release_failed_reopens_failed_and_refused_only(
     args = ["--live", "--now", *keep_failed]
     assert run_publish.main(args, now=OFF_SLOT) == 2
     assert store.get_schedule(conn, failed)["status"] == "failed"
-    refused = seed_draft(conn, "b", edit_to="edited without the link")
+    refused = seed_draft(conn, "b", edit_to="e" * 300)
     assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 0
     assert store.get_schedule(conn, refused)["status"] == "refused"
     # neither is a candidate while claimed
@@ -715,7 +715,7 @@ def test_partial_and_refused_are_not_released_automatically(conn, monkeypatch):
     partial = seed_draft(conn, "a", thread=THREAD3)
     assert run_publish.main(["--live", "--now"], now=OFF_SLOT) == 2
     assert store.get_schedule(conn, partial)["status"] == "partial"
-    refused = seed_draft(conn, "b", edit_to="edited without the link")
+    refused = seed_draft(conn, "b", edit_to="e" * 300)
     later = OFF_SLOT + timedelta(hours=3)
     assert run_publish.main(["--live", "--now"], now=later) == 0
     assert store.get_schedule(conn, refused)["status"] == "refused"

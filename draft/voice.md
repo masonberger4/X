@@ -26,7 +26,8 @@ second, or who is handed a link before a reason to care, never sees post 2.
 - Leave an opening a specialist can answer: a claim they might contest, a question that
   is genuinely open in the field. A reply is worth more than a like; an unanswerable
   summary earns neither.
-- No link in the opening post. The source URL goes in the last post, once.
+- No link in any post. Name the source in words instead (the journal, the company, the
+  meeting), with its @handle where you have one.
 - No "1/6", no "🧵", no "a thread". The client already numbers the thread.
 
 ## Tone

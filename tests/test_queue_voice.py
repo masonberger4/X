@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from approval_queue import store
 from approval_queue.app import app, decision_diff
 from draft.schema import Draft
-from tests.conftest import URL, seed_item
+from tests.conftest import seed_item
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def _draft(conn, item_id="i1", source="pubmed"):
         thread=[
             "A game-changer: ORR 88% in 97 patients. Exciting.",
             "Single-arm.",
-            f"Source: {URL}",
+            "",
         ],
         suggested_visual="plot",
         why_it_matters="matters",
@@ -63,7 +63,7 @@ def test_edit_form_with_category_persists_and_detail_shows_diff(client, conn):
         data={
             "thread": (
                 "ORR 88% in 97 patients, single-arm. Sequencing is the question."
-                f"\n---\nSingle-arm.\n---\nSource: {URL}"
+                "\n---\nSingle-arm.\n---\n"
             ),
             "note": "less hype",
             "category": "voice",
@@ -115,7 +115,7 @@ def test_voice_page_with_data(client, conn):
         data={
             "thread": (
                 "Preprint: ORR 88% in 97 patients, single-arm, sequencing open."
-                f"\n---\nSingle-arm.\n---\nSource: {URL}"
+                "\n---\nSingle-arm.\n---\n"
             ),
             "note": "less hype",
             "category": "voice",

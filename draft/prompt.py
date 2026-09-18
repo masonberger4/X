@@ -15,7 +15,6 @@ from draft.schema import (
     SHAPE_SINGLE,
     THREAD_MAX,
     THREAD_MIN,
-    URL_CHARS,
     Format,
 )
 from draft.tags import Handle, handles_block
@@ -26,41 +25,21 @@ PREPRINT_SOURCES = ("biorxiv", "medrxiv")
 PREPRINT_LABEL = "preprint"
 
 
-# A single or long post never carries the source URL itself: it is posted with a second,
-# threaded post that holds only the link, so the body post stays link-free (rule 12).
-_LINK_POST_RULE = (
-    '6. "thread" holds exactly two strings: first {what}, then the LINK POST, a short\n'
-    "   second post whose only job is to carry the primary source URL. Write the link post\n"
-    "   as the URL on its own, or a handful of words of attribution and the URL "
-    '("Source: <URL>");\n'
-    "   it never repeats the argument and never carries a second link."
-)
-
-
 def _shape_rules(fmt: Format | None) -> tuple[str, str, str]:
     """(rule 5, rule 6, rule 9's first sentence) for the format. None = phase-one physics."""
     if fmt is None or fmt.is_thread:
         lo, hi = (THREAD_MIN, THREAD_MAX) if fmt is None else (fmt.min_posts, fmt.max_posts)
-        r5 = (
-            f"5. Every post is at most {MAX_POST_CHARS} characters. Count every URL as "
-            f"{URL_CHARS} characters."
-        )
+        r5 = f"5. Every post is at most {MAX_POST_CHARS} characters."
         r6 = f"6. The thread has {lo} to {hi} posts."
     elif fmt.shape == SHAPE_SINGLE:
-        r5 = (
-            f"5. This is a SINGLE post of at most {MAX_POST_CHARS} characters (a URL counts as "
-            f"{URL_CHARS}), followed by the link post below; rule 3 applies to the single "
-            "post and rule 2 to the link post."
-        )
-        r6 = _LINK_POST_RULE.format(what="the whole post")
+        r5 = f"5. This is a SINGLE post of at most {MAX_POST_CHARS} characters."
+        r6 = '6. "thread" holds exactly one string: the whole post.'
     else:
         r5 = (
-            f"5. This is ONE long-form post of at most {fmt.max_chars} characters (a URL "
-            f"counts as {URL_CHARS}), written as short sections separated by blank lines and "
-            "followed by the link post below; rule 3 applies to the long post and rule 2 to "
-            "the link post."
+            f"5. This is ONE long-form post of at most {fmt.max_chars} characters, written "
+            "as short sections separated by blank lines."
         )
-        r6 = _LINK_POST_RULE.format(what="the whole long post")
+        r6 = '6. "thread" holds exactly one string: the whole long post.'
     n = 1 if fmt is None else fmt.visuals
     if n == 0:
         r9 = (
@@ -86,16 +65,18 @@ def hard_rules(fmt: Format | None = None) -> str:
     r5, r6, r9 = _shape_rules(fmt)
     where = "the first post" if fmt is None or fmt.is_thread else "the post"
     is_thread = fmt is None or fmt.is_thread
-    # A single or long post is its own opener, and the source URL sits in its link post, so
-    # rule 12's link ban applies to it too; only the hook's length cap does not.
-    r12 = hook_rule(carries_url=False, capped=is_thread)
+    # A single or long post is its own opener; only the hook's length cap does not apply.
+    r12 = hook_rule(capped=is_thread)
     return f"""HARD RULES. A draft that breaks any of these is discarded automatically.
 1. No medical advice and no treatment recommendations. Describe evidence; never tell
    anyone what they or their doctor should do.
 1b. No investment advice. Never tell anyone to buy, sell, hold, short, or avoid a stock,
    never give a price target, never promise or predict a return. Describe what a result
    means for a company's thesis and the risks; the reader decides.
-2. The primary source URL must appear verbatim in the last thread post.
+2. NEVER write a URL, a link or a bare domain in any post. Not the source URL, not a
+   trial registry link, not a company page: a post with a link is shown to fewer readers
+   and costs an extra billed request. Name the source in words instead (the journal, the
+   company, the meeting), using its @handle when rule 11 gives you one.
 3. If the source is a preprint (bioRxiv / medRxiv), the word "{PREPRINT_LABEL}" must appear in
    the first thread post.
 4. Every number you write must appear verbatim in the source abstract or title. Do not
@@ -186,7 +167,7 @@ def build_user_prompt(
     abstract; with none the prompt is unchanged."""
     parts = [
         f"SOURCE: {source}" + ("  (THIS IS A PREPRINT)" if is_preprint(source) else ""),
-        f"PRIMARY SOURCE URL: {url}",
+        f"PRIMARY SOURCE URL (for your reference only; rule 2 forbids writing it): {url}",
         f"PUBLISHED: {published_at or 'unknown'}",
         f"TITLE: {title}",
         "",

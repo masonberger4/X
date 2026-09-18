@@ -6,7 +6,7 @@ import run_scrub_notes
 from approval_queue import store
 from draft.chart import Chart, Table
 from draft.schema import Draft
-from tests.conftest import URL, seed_item
+from tests.conftest import seed_item
 
 BAD = "Status as of Sept 2026; verify each cell against current FDA labels before posting"
 GOOD = "n=97, single arm"
@@ -14,7 +14,7 @@ GOOD = "n=97, single arm"
 
 def _draft(visual):
     kind = {"chart": visual} if isinstance(visual, Chart) else {"table": visual}
-    return Draft([f"ORR 88% {URL}", "b", f"c {URL}"], "v", "w", **kind)
+    return Draft(["ORR 88%", "b", "c"], "v", "w", **kind)
 
 
 class _NoClose:

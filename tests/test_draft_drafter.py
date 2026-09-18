@@ -38,7 +38,7 @@ def good_json(lead=None, **overrides):
         "thread": [
             "Phase 2 CAR-T data in relapsed myeloma: ORR 88%, median PFS 14.6 months.",
             "Single-arm, so no comparator. The sequencing question is open.",
-            f"Grade 3 CRS in 4 patients. Source: {URL}",
+            "Grade 3 CRS in 4 patients.",
         ],
         "suggested_visual": "bar chart of ORR and CRS",
         "why_it_matters": "Sequencing vs bispecifics is the real question.",
@@ -131,10 +131,10 @@ def test_retries_when_the_visual_is_missing():
 
 
 def test_280_rule_counts_url_as_23():
-    # 257 x + space + long URL: real length far over 280, t.co length exactly 280 -> OK
+    # no post may carry a URL, but where one slipped in the length still counts it as 23
     ok = "x" * 256 + " " + URL
     draft = validate_output(good_json(thread=["a", "b", ok]))
-    assert check_hard_rules(draft, url=URL, source="pubmed") == []
+    assert not [p for p in check_hard_rules(draft, url=URL, source="pubmed") if "chars" in p]
     too_long = "x" * 257 + " " + URL
     draft = validate_output(good_json(thread=["a", "b", too_long]))
     problems = check_hard_rules(draft, url=URL, source="pubmed")
@@ -142,7 +142,7 @@ def test_280_rule_counts_url_as_23():
 
 
 def test_280_rule_applies_to_every_thread_post():
-    thread = ["y" * 281, "ok", f"end {URL}"]
+    thread = ["y" * 281, "ok", "end"]
     draft = validate_output(good_json(thread=thread))
     problems = check_hard_rules(draft, url=URL, source="pubmed")
     assert any("thread[0] is 281 chars" in p for p in problems)
@@ -156,26 +156,22 @@ def test_over_280_draft_is_rejected_after_retries(caplog):
     assert "draft rejected" in caplog.text
 
 
-# --- URL rule --------------------------------------------------------------
+# --- link ban (rule 2) -----------------------------------------------------
 
 
-def test_missing_url_in_last_thread_post():
+def test_no_post_may_carry_a_link():
     draft = validate_output(good_json(thread=["a", "b", "c without url"]))
+    assert check_hard_rules(draft, url=URL, source="pubmed") == []
+    # the source URL is a link like any other, wherever it sits
+    draft = validate_output(good_json(thread=["a", f"b {URL}", "c"]))
     problems = check_hard_rules(draft, url=URL, source="pubmed")
-    assert "last thread post is missing the primary source URL" in problems
-    # the URL in an earlier post does not count
-    draft = validate_output(good_json(thread=[f"a {URL}", "b", "c without url"]))
-    problems = check_hard_rules(draft, url=URL, source="pubmed")
-    assert "last thread post is missing the primary source URL" in problems
+    assert any("thread[1] contains a link" in p for p in problems)
 
 
-def test_url_with_trailing_segment_does_not_satisfy_source_url():
-    # ".../study-2" must not satisfy a required ".../study": the URL has to end at a
-    # boundary, not be a prefix of a longer URL-shaped token.
-    base = "https://example.com/study"
+def test_a_link_to_anywhere_else_fails_too():
     draft = validate_output(good_json(thread=["a", "b", "see https://example.com/study-2 here"]))
-    problems = check_hard_rules(draft, url=base, source="pubmed")
-    assert "last thread post is missing the primary source URL" in problems
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert any("thread[2] contains a link" in p for p in problems)
 
 
 def test_empty_thread_is_a_hard_rule_failure():
@@ -194,7 +190,7 @@ def test_preprint_must_be_labelled(source):
     problems = check_hard_rules(draft, url=URL, source=source)
     assert "preprint not labelled in first thread post" in problems
 
-    labelled = good_json(thread=["New preprint.", "b", f"c {URL}"])
+    labelled = good_json(thread=["New preprint.", "b", "c"])
     assert check_hard_rules(validate_output(labelled), url=URL, source=source) == []
 
 
@@ -208,7 +204,7 @@ def test_preprint_label_not_required_for_pubmed():
 
 def test_medical_advice_is_rejected():
     draft = validate_output(
-        good_json(lead=f"Patients should ask their oncologist about this CAR-T. {URL}")
+        good_json(lead="Patients should ask their oncologist about this CAR-T.")
     )
     problems = check_hard_rules(draft, url=URL, source="pubmed")
     assert any("medical advice" in p for p in problems)
@@ -219,7 +215,7 @@ def test_discuss_or_consult_your_doctor_is_medical_advice():
         "Discuss this with your oncologist before your next visit.",
         "Consult with your doctor about this CAR-T therapy.",
     ):
-        draft = validate_output(good_json(lead=f"{lead} {URL}"))
+        draft = validate_output(good_json(lead=f"{lead}"))
         problems = check_hard_rules(draft, url=URL, source="pubmed")
         assert any("medical advice" in p for p in problems), lead
 
@@ -306,7 +302,7 @@ def test_number_is_not_verified_as_substring_of_a_larger_number():
 
 def test_percent_not_verified_by_neighbouring_percentile_word():
     source = "an excellent essay about 88 percentile scores"
-    draft = validate_output(good_json(thread=["ORR 88%.", "no comparator", f"see {URL}"]))
+    draft = validate_output(good_json(thread=["ORR 88%.", "no comparator", "so what"]))
     assert verify_numbers(draft, source) == ["88%"]
 
 
@@ -418,7 +414,7 @@ def test_draft_item_retries_with_the_violation_in_the_prompt():
     def call(system, user, model):
         seen.append(user)
         long = "x" * 281
-        good = f"ok {URL}"
+        good = "ok"
         thread = [long if len(seen) == 1 else "ok", good, good]
         return json.dumps(
             {

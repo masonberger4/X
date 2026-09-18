@@ -51,8 +51,6 @@ class FakeModel:
             ]
             if "joined by blank lines" in user:  # a long post: one string of sections
                 cells = ["\n\n".join(cells)]
-            if "link post carrying the source URL" in user:  # a single or long post
-                cells.append(f"Source: {URL}")
             return json.dumps(
                 {
                     "thread": cells,
@@ -72,10 +70,9 @@ class FakeModel:
         layer = "syn" if "CANDIDATES FROM THE PREVIOUS ROUND" in user else "prop"
         if self.bad_every and self.n % self.bad_every == 0:
             return f"{slot} {layer} claims ORR 99% which is invented"
-        tail = f" {URL}" if "contain the URL exactly as given" in user else ""
         # the counter is spelled with letters: a digit would fail the verbatim-number rule
         tag = "".join(chr(ord("a") + int(d)) for d in str(self.n))
-        return f"{slot} {layer} post {tag} reads the 88% ORR well{tail}"
+        return f"{slot} {layer} post {tag} reads the 88% ORR well"
 
 
 def test_run_swarm_builds_one_cell_per_slot_and_passes_hard_rules():
@@ -93,9 +90,9 @@ def test_run_swarm_builds_one_cell_per_slot_and_passes_hard_rules():
     assert len(syn) == 3 * len(names)
     # every synthesis prompt saw the three layer-1 proposals
     assert all(f"3. {n}" in c[1] or "3. " in c[1] for c, n in zip(syn, names, strict=False))
-    # the closer prompt carried the URL rule; the second slot saw the first slot's pick
+    # every cell prompt carried the link ban; the second slot saw the first slot's pick
     closer_prompt = next(c[1] for c in cell_calls if "YOUR SLOT: closer" in c[1])
-    assert f"contain the URL exactly as given: {URL}" in closer_prompt
+    assert "carries NO link of any kind" in closer_prompt
     mech_prompt = next(c[1] for c in cell_calls if "YOUR SLOT: mechanism" in c[1])
     assert f"[hook] {res.cells['hook']}" in mech_prompt
     assert res.calls == len(fake.calls)
@@ -117,17 +114,17 @@ def test_slot_with_no_survivor_raises_swarm_failed():
 
 
 def test_assembly_hard_rule_failure_is_swarm_failed():
-    class NoUrl(FakeModel):
+    class Linked(FakeModel):
         def __call__(self, system, user, model):
             out = super().__call__(system, user, model)
             if "Assemble the draft JSON" in user:
                 d = json.loads(out)
-                d["thread"] = ["a", "b", "c"]  # drops the URL
+                d["thread"] = ["a", "b", f"c {URL}"]  # writes a link back in (rule 2)
                 return json.dumps(d)
             return out
 
     with pytest.raises(engine.SwarmFailed, match="assembly failed"):
-        engine.run_swarm(BRIEF, DEFAULT_GENOME, CFG, call=NoUrl(), sleep=lambda s: None)
+        engine.run_swarm(BRIEF, DEFAULT_GENOME, CFG, call=Linked(), sleep=lambda s: None)
 
 
 def test_compare_majority_with_randomised_order_and_tie_to_control():

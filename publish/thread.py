@@ -1,7 +1,7 @@
 """Turn a draft thread into the ordered list of texts that will be posted.
 
 The only text change allowed here is appending " (n/N)" to a post, and only when it still
-fits. Anything else (trimming, rewording, adding a URL) belongs in the approval queue.
+fits. Anything else (trimming, rewording) belongs in the approval queue.
 """
 
 from __future__ import annotations
@@ -28,15 +28,13 @@ def parse_thread_json(thread_json: str) -> list[str]:
     return posts
 
 
-def check_post(text: str, *, url: str | None = None, max_chars: int = MAX_POST_CHARS) -> list[str]:
-    """Problems with one post: over the limit (280, or the long post's `max_chars`; URLs
-    count 23) or missing a required URL."""
+def check_post(text: str, *, max_chars: int = MAX_POST_CHARS) -> list[str]:
+    """Problems with one post: over the limit (280, or the long post's `max_chars`; a URL
+    counts 23, though no drafted post carries one)."""
     problems: list[str] = []
     n = tweet_length(text)
     if n > max_chars:
         problems.append(f"{n} chars > {max_chars}")
-    if url and url not in text:
-        problems.append("missing source URL")
     return problems
 
 
@@ -55,21 +53,18 @@ def number_posts(posts: list[str]) -> list[str]:
 def split_thread(
     thread_json: str | list[str],
     *,
-    url: str,
     max_chars: int = MAX_POST_CHARS,
     number: bool = True,
 ) -> list[str]:
     """Ordered posts ready to send. Raises ThreadError rather than editing content.
     `max_chars` is the per-post limit the draft was written to (a long post's, phase
-    four). `number` is False for a single or long post: it is one post plus the post that
-    carries the source URL, not a thread a reader counts through."""
+    four). `number` is False for a single or long post, which is not a thread a reader
+    counts through."""
     posts = thread_json if isinstance(thread_json, list) else parse_thread_json(thread_json)
     problems = []
     for i, p in enumerate(posts, 1):
         for prob in check_post(p, max_chars=max_chars):
             problems.append(f"post {i}: {prob}")
-    if url not in posts[-1]:
-        problems.append("last post: missing source URL")
     if problems:
         raise ThreadError("; ".join(problems))
     return number_posts(posts) if number else list(posts)

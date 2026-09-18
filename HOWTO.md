@@ -104,37 +104,38 @@ source only when it is due, and score only scores what is new.
    Writes one draft (a 3 to 6 post thread with a chart or a table) for up to 10
    stories from the last 48 hours scoring at or above the digest threshold
    (30 of 50, from `config.yaml`). Drafts that break a hard rule (advice,
-   made-up numbers, missing source link, too long, a missing @handle or #tag)
+   made-up numbers, a link in a post, too long, a missing @handle or #tag)
    are stored as failed, not shown.
 
-   The first post is held to its own rule (rule 12): it carries no link, no
-   thread position marker ("1/6"), no "thread" and no emoji, and it stays under
-   220 characters. X ranks a thread on what its opening post does in the first
-   minutes, and a reader who is handed a link, or a summary they cannot answer,
-   never reaches post 2. The source URL goes in the last post only. A draft
-   whose opener breaks this is sent back to the model and, if it keeps breaking
-   it, stored as failed. A single or long post opens the same way: it carries no
-   link either, and its primary source URL is posted as a **second, threaded
-   post** of its own ("Source: <URL>"), so a single post is really two posts and
-   a long post is the long post plus that link post. Only the 220-character cap
-   is lifted there (the format's own limit applies instead). The link post holds
-   the URL, no other link and at most ~120 characters; the cap lives in
-   `draft\hook.py` (`HOOK_MAX_CHARS`, `LINK_POST_MAX_CHARS`) if you want
-   different lengths.
+   No post carries a link of any kind (rule 2). Not the source URL, not a
+   registry link, not a company page: X shows a post with an outbound link to
+   fewer readers, and posting a URL is billed as an extra request through the
+   X API. The source is named in words instead (the journal, the company, the
+   meeting), with its @handle where the pipeline knows one. A draft with a URL
+   or a bare domain in any post is sent back to the model and, if it keeps
+   writing one, stored as failed.
 
-   Drafts made before the link post existed still work (their one post carries
-   the URL), but they post with a link in the body. To move it, run
+   The first post is held to its own rule on top of that (rule 12): no thread
+   position marker ("1/6"), no "thread", no emoji, and under 220 characters. X
+   ranks a thread on what its opening post does in the first minutes, and a
+   reader handed a summary they cannot answer never reaches post 2. A single or
+   long post opens the same way; only the 220-character cap is lifted there
+   (the format's own limit applies instead). The cap lives in `draft\hook.py`
+   (`HOOK_MAX_CHARS`) if you want a different length.
 
-       python run_relink.py --dry-run
+   Drafts written before the link ban still carry a URL in a post. To take it
+   out, run
 
-   to list them, then without the flag to take the URL out of each body and add
-   "Source: <URL>" as the second post. It is pure text: no model call, no
-   network, pictures untouched, the draft keeps its status, and each change is
-   logged as an edit holding the before and after. A draft already posted is
-   left alone, and one whose post is nothing but the URL is named in the log for
-   you to revise by hand in the queue. By default it covers pending and approved
-   drafts; `--status STATUS` (repeatable) narrows it, `-v` shows per draft
-   detail.
+       python run_unlink.py --dry-run
+
+   to list them, then without the flag to strip the link (and the lead-in that
+   only introduced it, "Full results:") from every post and drop a post that was
+   nothing but the link. It is pure text: no model call, no network, pictures
+   untouched, the draft keeps its status, and each change is logged as an edit
+   holding the before and after. A draft already posted is left alone, and one
+   whose every post is nothing but a link is named in the log for you to revise
+   by hand in the queue. By default it covers pending and approved drafts;
+   `--status STATUS` (repeatable) narrows it, `-v` shows per draft detail.
 
    Posts tag what X can link. A journal, society, regulator or company the
    pipeline knows the X account of is written as its @handle when a post names
@@ -604,8 +605,7 @@ source only when it is due, and score only scores what is new.
    thread or single or long post and how many pictures on which posts, need
    no model). Formats are judged only after `format_min_posts` posts. The
    control panel's **Swarm** page shows the family tree and every score.
-   Every single and long format is posted as two tweets: the post itself and
-   the link post that carries the source URL (neither is numbered "1/2").
+   Every single and long format is posted as exactly one tweet.
    A long post needs X Premium on the account: without it X refuses the post
    and the draft shows as failed on the approved page; lower
    `formats: long_max_chars` in `swarm\config.yaml` or retire `long-1` on the

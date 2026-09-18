@@ -1,4 +1,4 @@
-"""thread.py: splitting, the 280 rule (URLs = 23), numbering, URL in last post."""
+"""thread.py: splitting, the 280 rule (URLs = 23), numbering."""
 
 import json
 
@@ -20,13 +20,12 @@ def test_check_post_counts_urls_as_23():
     text = "x" * 257 + " " + URL  # 257 + 1 + 23 = 281
     assert check_post(text) == ["281 chars > 280"]
     assert check_post("x" * 256 + " " + URL) == []
-    assert check_post("no link here", url=URL) == ["missing source URL"]
 
 
 def test_split_thread_numbers_and_keeps_order():
-    posts = ["first", "second", f"third {URL}"]
-    out = split_thread(json.dumps(posts), url=URL)
-    assert out == ["first (1/3)", "second (2/3)", f"third {URL} (3/3)"]
+    posts = ["first", "second", "third"]
+    out = split_thread(json.dumps(posts))
+    assert out == ["first (1/3)", "second (2/3)", "third (3/3)"]
 
 
 def test_numbering_skipped_when_it_would_not_fit():
@@ -39,14 +38,13 @@ def test_numbering_skipped_when_it_would_not_fit():
 
 
 def test_split_thread_refuses_over_280_instead_of_trimming():
-    posts = ["z" * 281, f"end {URL}"]
+    posts = ["z" * 281, "end"]
     with pytest.raises(ThreadError, match="post 1: 281 chars"):
-        split_thread(posts, url=URL)
+        split_thread(posts)
 
 
-def test_split_thread_requires_url_in_last_post():
-    with pytest.raises(ThreadError, match="last post: missing source URL"):
-        split_thread([f"lead {URL}", "middle", "end without link"], url=URL)
-    # URL present in the last post is never stripped, even when numbering is added
-    out = split_thread(["a", f"b {URL}"], url=URL)
+def test_split_thread_never_asks_for_a_url():
+    # no post carries a link any more, and a human-approved text is never edited here
+    assert split_thread(["lead", "middle", "end"]) == ["lead (1/3)", "middle (2/3)", "end (3/3)"]
+    out = split_thread(["a", f"b {URL}"])
     assert URL in out[-1]

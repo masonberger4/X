@@ -32,7 +32,7 @@ CFG = {
 
 ORIG_LEAD = "A game-changing CAR-T result: ORR 88% in 97 patients. Exciting times."
 EDIT_LEAD = "ORR 88% in 97 patients, single-arm. Sequencing vs bispecifics is the question."
-REST = ["Single arm, no comparator.", f"Source: {URL}"]
+REST = ["Single arm, no comparator.", ""]
 ORIG_THREAD = [ORIG_LEAD, *REST]
 EDIT_THREAD = [EDIT_LEAD, *REST]
 
@@ -152,12 +152,12 @@ def test_newest_first_and_capped_at_max_examples():
 
 def test_edited_text_that_breaks_a_hard_rule_is_never_taught(caplog):
     advice = ["Patients should ask their oncologist about this.", *REST]
-    no_url = ["Dropped the link entirely, oops.", "a", "b"]
+    linked = ["Kept the link in, oops. https://doi.org/10.1000/xyz123", "a", "b"]
     with caplog.at_level(logging.WARNING, logger="draft.examples"):
-        out = select_edit_examples([row(edited=advice), row(edited=no_url)], CFG, now=NOW)
+        out = select_edit_examples([row(edited=advice), row(edited=linked)], CFG, now=NOW)
     assert out == []
     assert "medical advice" in caplog.text
-    assert "missing the primary source URL" in caplog.text
+    assert "contains a link" in caplog.text
 
 
 def test_edited_text_emptying_the_thread_is_never_taught(caplog):
@@ -167,8 +167,8 @@ def test_edited_text_emptying_the_thread_is_never_taught(caplog):
 
 
 def test_edited_text_cutting_the_thread_is_allowed_when_url_survives():
-    out = select_edit_examples([row(edited=[f"{EDIT_LEAD} {URL}"])], CFG, now=NOW)
-    assert len(out) == 1 and out[0].edited_thread == [f"{EDIT_LEAD} {URL}"]
+    out = select_edit_examples([row(edited=[f"{EDIT_LEAD}"])], CFG, now=NOW)
+    assert len(out) == 1 and out[0].edited_thread == [f"{EDIT_LEAD}"]
     assert out[0].thread_changed
 
 
@@ -178,7 +178,7 @@ def test_preprint_edit_must_keep_label():
     labelled = row(source="biorxiv", edited=[f"Preprint: {EDIT_LEAD}", *REST])
     assert len(select_edit_examples([labelled], CFG, now=NOW)) == 1
     # the label in a later post does not count
-    late = row(source="biorxiv", edited=[EDIT_LEAD, "Preprint.", f"c {URL}"])
+    late = row(source="biorxiv", edited=[EDIT_LEAD, "Preprint.", "c"])
     assert select_edit_examples([late], CFG, now=NOW) == []
 
 
@@ -259,9 +259,7 @@ def test_unchanged_thread_is_omitted_and_changed_thread_is_shown():
     same = select_edit_examples([row()], CFG, now=NOW)
     block = format_examples_block(same, [])
     assert "rest of thread" not in block.split("WHY:")[0]
-    changed = select_edit_examples(
-        [row(edited=[EDIT_LEAD, "Shorter.", f"Source: {URL}"])], CFG, now=NOW
-    )
+    changed = select_edit_examples([row(edited=[EDIT_LEAD, "Shorter.", ""])], CFG, now=NOW)
     block = format_examples_block(changed, [])
     assert "BEFORE rest of thread (model):" in block
     assert "AFTER rest of thread (human):" in block

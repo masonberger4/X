@@ -36,7 +36,7 @@ TABLE = {
 
 
 def _draft(table=None):
-    return Draft(["ORR 88%", "b", f"c {URL}"], "landscape", "w", table=table)
+    return Draft(["ORR 88%", "b", "c"], "landscape", "w", table=table)
 
 
 def _seed(conn, item_id="i1", table=TABLE):
@@ -387,7 +387,7 @@ def test_revise_keeps_cell_verdicts_for_unchanged_cells(client, conn, monkeypatc
             "m",
         )
     out = {
-        "thread": ["ORR 88%", "b", f"c {URL}"],
+        "thread": ["ORR 88%", "b", "c"],
         "suggested_visual": "landscape",
         "why_it_matters": "w",
         "claims_to_verify": [],

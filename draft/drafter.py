@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 import claude_cli
 from draft.chart import note_problems
-from draft.hook import HOOK_MAX_CHARS, hook_problems, link_post_problems
+from draft.hook import HOOK_MAX_CHARS, hook_problems, link_problems
 from draft.prompt import (
     PREPRINT_LABEL,
     ClaimProblem,
@@ -189,20 +189,6 @@ def parse_json_response(text: str) -> object:
 # ---------------------------------------------------------------------------
 
 
-def _url_in(text: str, url: str) -> bool:
-    """True if `url` appears in `text` as a whole URL: it must be followed by the end of
-    the string, whitespace, or a closing/terminal punctuation character that cannot be
-    part of a URL, not by more URL-shaped characters (so ".../study-2" does not satisfy a
-    required ".../study")."""
-    idx = text.find(url)
-    while idx != -1:
-        end = idx + len(url)
-        if end >= len(text) or text[end] in " \t\r\n.,;:!?)]}\"'":
-            return True
-        idx = text.find(url, idx + 1)
-    return False
-
-
 def numbers_in(text: str) -> list[str]:
     """Numbers as written, e.g. '88%', '14.6', '1,200'. URLs, @handles and #hashtags
     (a trial name such as #KEYNOTE-189 is a name, not a figure) are ignored."""
@@ -295,11 +281,10 @@ def check_hard_rules(
     fmt None the draft's own `max_chars` is used, which is 280 for every pre-phase-four
     draft. `handles` (rule 11) are the accounts the story may mention: a post that names
     one without its @handle fails, and a trial or drug name without its # always fails.
-    The first post is additionally held to draft.hook.hook_problems (rule 12: a link-free
-    one-claim opener); a single or long post opens the same way, without the hook's length
-    cap, and its primary source URL lives in a second post of its own
-    (draft.hook.link_post_problems). A one-post draft from before that rule keeps working:
-    its single post carries the URL and is exempt."""
+    No post carries a link of any kind (rule 2, draft.hook.link_problems): the source URL
+    is never written, since a link costs reach and an extra billed request. The first post
+    is additionally held to draft.hook.hook_problems (rule 12: a one-claim opener); a
+    single or long post opens the same way, without the hook's length cap."""
     problems: list[str] = []
     companies = known_company_names()
     limit = fmt.max_chars if fmt is not None else (draft.max_chars or MAX_POST_CHARS)
@@ -316,6 +301,7 @@ def check_hard_rules(
             problems.append(
                 f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
+        problems += [f"{label} {p}" for p in link_problems(post)]
         problems += [f"{label} {p}" for p in tag_problems(post, handles, companies)]
     if draft.chart is not None:
         problems += note_problems(draft.chart.note, "chart note")
@@ -331,19 +317,7 @@ def check_hard_rules(
         return problems
     shape = fmt.shape if fmt is not None else (draft.shape or SHAPE_THREAD)
     is_thread = shape == SHAPE_THREAD
-    # A single or long post written before the link post existed: its one post carries the
-    # URL, so it stays exempt from rule 12's link ban rather than failing forever.
-    carries_url = len(draft.thread) == 1
-    problems += hook_problems(
-        draft.thread[0],
-        url=url,
-        carries_url=carries_url,
-        max_chars=HOOK_MAX_CHARS if is_thread else None,
-    )
-    if not _url_in(draft.thread[-1], url):
-        problems.append("last thread post is missing the primary source URL")
-    elif not is_thread and not carries_url:
-        problems += link_post_problems(draft.thread[-1], url=url)
+    problems += hook_problems(draft.thread[0], max_chars=HOOK_MAX_CHARS if is_thread else None)
     if is_preprint(source):
         if PREPRINT_LABEL not in draft.thread[0].lower():
             problems.append("preprint not labelled in first thread post")

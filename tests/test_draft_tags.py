@@ -137,11 +137,11 @@ def _draft(*posts):
 
 def test_check_hard_rules_enforces_tags():
     hs = load_handles(CFG)[:1]
-    d = _draft("Merck data", "KEYNOTE-189 read", "third", f"last {URL}")
+    d = _draft("Merck data", "KEYNOTE-189 read", "third", "last")
     probs = drafter.check_hard_rules(d, url=URL, source="s", handles=hs)
     assert "thread[0] names Merck without its handle @Merck" in probs
     assert "thread[1] trial name(s) without a hashtag: KEYNOTE-189 -> #KEYNOTE-189" in probs
-    d = _draft("@Merck data", "#KEYNOTE-189 read", "third", f"last {URL}")
+    d = _draft("@Merck data", "#KEYNOTE-189 read", "third", "last")
     assert drafter.check_hard_rules(d, url=URL, source="s", handles=hs) == []
 
 
@@ -159,7 +159,7 @@ def test_story_handles_reads_root_config(monkeypatch):
 
 def test_swarm_cells_and_prompts():
     hs = load_handles(CFG)[:1]
-    kw = dict(source_text="Merck 88%", url=URL, slot=HOOK, is_preprint=False)
+    kw = dict(source_text="Merck 88%", slot=HOOK, is_preprint=False)
     assert cell_problems("Merck reports 88% ORR", handles=hs, **kw) == [
         "names Merck without its handle @Merck"
     ]

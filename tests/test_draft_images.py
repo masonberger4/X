@@ -28,7 +28,7 @@ TABLE = {"title": "Landscape", "columns": ["Asset", "Phase"], "rows": [["a", "1"
 
 
 def _draft(chart=None):
-    return Draft(["ORR 88%", "b", f"c {URL}"], "v", "w", chart=chart)
+    return Draft(["ORR 88%", "b", "c"], "v", "w", chart=chart)
 
 
 def test_store_round_trips_chart_and_image(conn, tmp_path):
@@ -76,7 +76,7 @@ def test_run_draft_renders_the_chart(conn, monkeypatch, tmp_path):
 
     seed_item(conn, "new", total=9.0)
     out = {
-        "thread": ["ORR 88% in 97 patients.", "b", f"c {URL}"],
+        "thread": ["ORR 88% in 97 patients.", "b", "c"],
         "suggested_visual": "v",
         "why_it_matters": "w",
         "claims_to_verify": [],
@@ -146,7 +146,7 @@ def test_revise_replaces_the_image(client, conn, monkeypatch):
     old = images.attach_chart(conn, did, chart, source_url=URL)
     old_bytes = old.read_bytes()
     out = {
-        "thread": ["ORR 88% in 97 patients.", "b", f"c {URL}"],
+        "thread": ["ORR 88% in 97 patients.", "b", "c"],
         "suggested_visual": "v",
         "why_it_matters": "w",
         "claims_to_verify": [],

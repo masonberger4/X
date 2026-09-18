@@ -186,6 +186,24 @@ snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
    window, as markdown. `--rate` collects the editor's yes/no decisions and
    explanations (reason categories in `score/editorial.py`) for rubric tuning.
 
+## No links in posts
+
+No post the pipeline writes carries a link of any kind — not the primary source
+URL, not a registry link, not a company page. X shows a post with an outbound
+link to fewer non-followers, and posting a URL is billed as an extra request
+through the X API, so the source is named in words (the journal, the company,
+the meeting) with its @handle where the pipeline knows one. It is hard rule 2:
+`draft/hook.py:link_problems` (URLs and bare domains) is applied per post by
+`drafter.check_hard_rules` and per cell by `swarm/cells.py:cell_problems`, so a
+draft that writes one is retried and, if it keeps writing one, stored as
+`failed`. Rule 12 (`draft/hook.py:hook_problems`) adds the opener's own rules on
+top: no "1/6", no "thread", no emoji, and at most `HOOK_MAX_CHARS` characters
+for a thread's first post. Because nothing has to carry a URL, a single or long
+format is exactly one post. Drafts written before this rule are cleaned by
+`python run_unlink.py` (`--status STATUS`, `--dry-run`, `-v`), the one-off pass
+that strips the link and its lead-in from every queued draft's posts as an
+`edit` decision, with no model call and no network.
+
 ## Draft images (charts)
 
 Since step 9 phase four a draft may carry zero, one or two pictures, each
@@ -308,8 +326,8 @@ Safety gates, all of which must hold before a single tweet is sent:
 - The draft is claimed in a `BEGIN IMMEDIATE` transaction (table `schedule`)
   before the API call, so two overlapping cron runs cannot post it twice and a
   draft is never retried after a failure.
-- Every text is re-checked in code right before posting (<= 280 chars with
-  URLs as 23, source URL in the last thread post). Failures are
+- Every text is re-checked in code right before posting (<= 280 chars, or the
+  draft's own limit for a long post). Failures are
   logged as refusals and go back to the approval queue; nothing is auto-fixed.
 - Breaking items (`fda*` sources, `company_*` PRs whose title mentions an
   approval) may post outside slots but still respect the daily cap and gap.
@@ -524,7 +542,7 @@ genome names the slots (`hook`, `mechanism`, `thesis`, `catalyst`, `risk`,
 followed by `layers - 1` Mixture-of-Agents rounds where each cheap call sees
 every earlier candidate and writes a better one; cells that fail the per-post
 hard rules (280 chars, advice phrases, a number not verbatim in the source,
-the closer's URL, the hook's preprint label) are dropped in code; near twins
+a link of any kind, the hook's preprint label) are dropped in code; near twins
 are removed; a single-elimination tournament of pairwise cheap judges picks
 the slot's post, which becomes context for the next slot. One assembly call
 then turns the chosen cells into the step 2 JSON (visual, why_it_matters,
@@ -616,14 +634,9 @@ shown on the queue's draft page, and attached by `run_publish.py` to that
 post; `publish/thread.py` checks each post against the draft's own limit, so
 a long post is never refused for being over 280. The swarm runs one cell for
 a single post and its slots as sections of `formats.long_section_chars` for
-a long one; no cell carries a link. A single or long format is always two
-posts: the post itself, then a **link post** holding only the primary source
-URL, so rule 12's link ban covers every shape and the body post is never an
-outbound link (`draft/hook.py:link_post_problems`; `publish/thread.py` leaves
-those two posts unnumbered). A draft written before that rule keeps working
-and is split by `python run_relink.py` (`--status STATUS`, `--dry-run`, `-v`),
-the one-off pass that moves the URL out of the body into a link post as an
-`edit` decision, with no model call. Formats are scored with the same relative KPI, pruned only after
+a long one. A single or long format is exactly one post: no post of any shape
+carries a link, so there is nothing to put in a second one, and
+`publish/thread.py` leaves it unnumbered. Formats are scored with the same relative KPI, pruned only after
 `evolve.format_min_posts` posts (a coarse gene needs more evidence than a slot
 rule), and bred without a model by stepping one field (shape, picture count,
 an anchor, the post range) to a neighbour. The panel's `/swarm` page has a

@@ -88,9 +88,8 @@ def texts_for(approved: Approved) -> tuple[str, list[str]]:
         raise ThreadError("draft has no thread")
     return store.KIND_THREAD, split_thread(
         approved.thread,
-        url=approved.url,
         max_chars=approved.max_chars,
-        # A single or long post plus its link post is not a thread to number through.
+        # A single or long post is one post, not a thread to number through.
         number=approved.shape == SHAPE_THREAD,
     )
 
