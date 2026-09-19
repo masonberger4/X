@@ -39,7 +39,7 @@ CLIS = (
     "run_logos",
     "run_evolve",
     "run_scrub_notes",
-    "run_relink",
+    "run_unlink",
 )
 
 

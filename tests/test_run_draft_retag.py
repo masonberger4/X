@@ -5,7 +5,7 @@ from approval_queue import store
 from draft.drafter import DraftResult
 from draft.schema import validate_output
 from draft.tags import Handle
-from tests.conftest import URL, seed_item
+from tests.conftest import seed_item
 
 HANDLES = [Handle(handle="Merck", name="Merck")]
 
@@ -39,17 +39,15 @@ def _seed(conn, *posts, status=store.STATUS_PENDING):
 
 
 def test_retag_revises_only_offending_drafts(conn, monkeypatch):
-    bad = _seed(conn, "Merck in KEYNOTE-189", "two", "three", f"four {URL}")
-    good = _seed(conn, "@Merck in #KEYNOTE-189", "two", "three", f"four {URL}")
-    approved = _seed(
-        conn, "Merck again", "two", "three", f"four {URL}", status=store.STATUS_APPROVED
-    )
+    bad = _seed(conn, "Merck in KEYNOTE-189", "two", "three", "four")
+    good = _seed(conn, "@Merck in #KEYNOTE-189", "two", "three", "four")
+    approved = _seed(conn, "Merck again", "two", "three", "four", status=store.STATUS_APPROVED)
     monkeypatch.setattr(run_draft, "story_handles", lambda **kw: HANDLES)
     calls = []
 
     def fake_revise(*, current, instructions, **kw):
         calls.append((current.thread[0], instructions))
-        fixed = validate_output(_out("@Merck in #KEYNOTE-189", "two", "three", f"four {URL}"))
+        fixed = validate_output(_out("@Merck in #KEYNOTE-189", "two", "three", "four"))
         return DraftResult(draft=fixed, model="m2", attempts=1, flagged_numbers=[])
 
     monkeypatch.setattr(run_draft, "revise_item", fake_revise)

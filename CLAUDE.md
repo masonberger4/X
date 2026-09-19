@@ -48,8 +48,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   writer child),
   `python run_scrub_notes.py [--status STATUS] [--dry-run] [-v]` (operator command: blanks
   picture captions written to the operator in queued drafts and redraws them),
-  `python run_relink.py [--status STATUS] [--dry-run] [-v]` (operator command: moves a
-  queued single or long draft's source URL out of the body into its own link post),
+  `python run_unlink.py [--status STATUS] [--dry-run] [-v]` (operator command: strips the
+  source URL out of a queued draft's posts, since no post carries a link),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -139,7 +139,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   (no buy/sell/hold/short calls, price targets, or return promises; describing
   a thesis, a valuation or a risk is fine). Preprints are labelled as
   preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
-  after generation (plus 280 chars/post with URLs as 23, source URL placement,
+  after generation (plus 280 chars/post with URLs as 23, the link ban,
   and verbatim-number verification); drafts that fail are stored as `failed`.
 - **Mentions and hashtags are a hard rule** (rule 11 in `draft/prompt.py:hard_rules`,
   mirrored by `draft/tags.py:tag_problems`, called from `check_hard_rules` per post and
@@ -155,23 +155,27 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   `Brief.handles` for the swarm) and the only one enforced. `numbers_in` ignores
   `@`/`#` tokens so a trial name's digits are not a number to verify. Publish's re-check
   and human-approved texts are untouched.
-- **The first post is the hook** (`draft/hook.py`, pure; rule 12 in `draft/prompt.py:hook_rule`,
-  enforced by `hook_problems` from `check_hard_rules` on `thread[0]` and from
-  `swarm/cells.py:cell_problems` on a hook cell). It carries no link of any kind, no thread
-  position marker ("1/6"), no "thread" and no emoji, and it stays within `HOOK_MAX_CHARS`:
-  X ranks a thread on its opening post, and an outbound link or an unanswerable summary
-  there costs the rest of the thread its readers. The source URL stays in the last post
-  (rule 2). A single or long post is its own opener and is NOT exempt from the link
-  ban: its primary source URL goes in a second, threaded post (the **link post**,
-  `hook.py:link_post_problems`, `LINK_POST_MAX_CHARS`), so `draft/schema.py:Format`
-  normalises every non-thread shape to exactly two posts (`LINK_POST_SHAPE_POSTS`), the
-  picture never anchors to the link post, no swarm cell carries a link
-  (`engine.run_swarm`'s `link_post`), and `publish/thread.py:split_thread(number=False)`
-  leaves the pair unnumbered. Only the hook's length cap is lifted there (the format's
-  `max_chars` applies). A one-post draft stored before this rule still passes
-  (`carries_url=True`); `run_relink.py` is the one-off operator pass that splits those
-  queued drafts (`hook.split_link_post`, pure; `store.edit` with the status unchanged, no
-  model call), as `run_scrub_notes.py` is for captions.
+- **No post carries a link** (`draft/hook.py:link_problems`, pure; rule 2 in
+  `draft/prompt.py:hard_rules`, enforced per post from `check_hard_rules` and per cell from
+  `swarm/cells.py:cell_problems`). Not the source URL, not a registry link, not a bare
+  domain: X shows a post with an outbound link to fewer non-followers and posting a URL is
+  billed as an extra request through the X API, so the source is named in words (the
+  journal, the company, the meeting) with its @handle where rule 11 gives one. Nothing has
+  to carry a URL, so `draft/schema.py:Format` normalises every non-thread shape to exactly
+  one post (`SINGLE_SHAPE_POSTS`), `publish/thread.py:split_thread` neither requires a URL
+  nor numbers that one post, and the prompts hand the model the primary source URL for
+  reference only. `run_unlink.py` is the one-off operator pass over queued drafts written
+  before the rule (`hook.strip_links`, pure: the link and the lead-in that introduced it
+  come out, a post that was only a link is dropped; `store.edit` with the status unchanged,
+  no model call), as `run_scrub_notes.py` is for captions. Publish's re-check and
+  human-approved texts are untouched.
+- **The first post is the hook** (`draft/hook.py:hook_problems`, pure; rule 12 in
+  `draft/prompt.py:hook_rule`, enforced from `check_hard_rules` on `thread[0]` and from
+  `swarm/cells.py:cell_problems` on a hook cell). It carries no thread position marker
+  ("1/6"), no "thread" and no emoji, and it stays within `HOOK_MAX_CHARS`: X ranks a thread
+  on its opening post, and an unanswerable summary there costs the rest of the thread its
+  readers. A single or long post is its own opener and only the hook's length cap is lifted
+  there (the format's `max_chars` applies).
 - **KPIs are weighted, not counted.** `feedback/models.py:CONVERSATION_WEIGHTS` defines the
   derived `conversation` KPI (reply/quote x3, bookmark/repost x2, like x1) beside the six
   stored counts; `Metrics.get` and `swarm/store.py:_metrics` both serve it, and it is the
@@ -439,7 +443,7 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
   hands the same one to the swarm and the control. The engine runs ONE cell
   (`prompts.SINGLE_SLOT`) for a single post and the genome's slots as sections of
   `formats.long_section_chars` for a long post (`cells.cell_problems(max_chars=,
-  needs_url=, needs_preprint=)`), and `assemble_prompt(..., fmt)` says the shape. Formats
+  needs_preprint=)`), and `assemble_prompt(..., fmt)` says the shape. Formats
   are pruned with `evolve.format_min_posts` (a coarse gene needs more posts) and bred by
   pure code (`mutate.breed_format`: one field stepped to a neighbour, named by
   `format_name`); `evolve.format_population_size` is their population.
@@ -464,7 +468,8 @@ db.py     sqlite: items, clusters, scores, ratings, source_runs
 timeutil.py  display timezone: UTC storage -> one human-facing zone (root `timezone:`),
           fmt_datetime/fmt_date, Jinja |localtime / |localdate
 claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
-draft/    schema.py (Draft, Format, validate_output), hook.py (rule 12: the opening post),
+draft/    schema.py (Draft, Format, validate_output), hook.py (rule 2: the link ban;
+          rule 12: the opening post),
           chart.py (chart + table specs, verification, PNG rendering, Style
           knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,
           grade_image, call_grader), branding.py (tickers + logos for company cells),
@@ -510,5 +515,5 @@ assets/   logos/<company key>.png (human-supplied company logos for table cells)
 deploy/   crontab.example, pipeline.service, pipeline.timer, desktop.spec, README.md
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
 run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py
-run_logos.py  run_evolve.py  run_relink.py   (CLIs)
+run_logos.py  run_evolve.py  run_unlink.py   (CLIs)
 ```

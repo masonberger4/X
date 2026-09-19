@@ -7,8 +7,8 @@ from tests.conftest import URL, seed_item
 CHART = {"title": "Outcomes", "labels": ["ORR", "PFS"], "values": [88, 14.6], "unit": ""}
 
 
-def good_json(last=f"ORR 88% in 97 patients. {URL}"):
-    """A valid model output; `last` is the final thread post (the one that must carry the URL)."""
+def good_json(last="ORR 88% in 97 patients."):
+    """A valid model output; `last` is the final thread post."""
     return json.dumps(
         {
             "thread": ["a", "b", last],
@@ -65,7 +65,7 @@ def test_run_draft_stores_hard_rule_failures_as_failed(conn, monkeypatch):
         run_draft,
         "draft_item",
         lambda **kw: drafter.draft_item(
-            call=lambda s, u, m: good_json("no url at all"),
+            call=lambda s, u, m: good_json(f"a link sneaks in {URL}"),
             sleep=lambda s: None,
             max_attempts=2,
             **kw,
@@ -73,7 +73,7 @@ def test_run_draft_stores_hard_rule_failures_as_failed(conn, monkeypatch):
     )
     run_draft.main(["--min-score", "7"])
     failed = store.list_drafts(conn, store.STATUS_FAILED)
-    assert len(failed) == 1 and "missing the primary source URL" in failed[0].rejection_reason
+    assert len(failed) == 1 and "contains a link" in failed[0].rejection_reason
     assert failed[0].draft.thread == [] and failed[0].draft.visual is None
     assert store.list_drafts(conn) == []
 
@@ -130,14 +130,14 @@ def test_run_draft_feeds_recent_edits_into_the_prompt_and_records_them(conn, mon
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft(["A game-changer! ORR 88%.", "b", f"c {URL}"], "", ""),
+        draft=store.Draft(["A game-changer! ORR 88%.", "b", "c"], "", ""),
     )
     before = "A game-changer! ORR 88%."
     after = "ORR 88% in a single-arm study. The sequencing question is open."
     edit_id = store.edit(
         conn,
         old,
-        thread=[after, "b", f"c {URL}"],
+        thread=[after, "b", "c"],
         note="less hype",
         category="voice",
     )
@@ -145,7 +145,7 @@ def test_run_draft_feeds_recent_edits_into_the_prompt_and_records_them(conn, mon
         conn,
         item_id="rej",
         model="m",
-        draft=store.Draft(["Meh", "b", f"c {URL}"], "", ""),
+        draft=store.Draft(["Meh", "b", "c"], "", ""),
     )
     reject_id = store.reject(conn, reject_target, note="not news")
     seed_item(conn, "new", total=9.0)
@@ -180,12 +180,12 @@ def test_run_draft_no_examples_flag_sends_plain_prompt(conn, monkeypatch, caplog
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft(["A game-changer! ORR 88%.", "b", f"c {URL}"], "", ""),
+        draft=store.Draft(["A game-changer! ORR 88%.", "b", "c"], "", ""),
     )
     store.edit(
         conn,
         old,
-        thread=["ORR 88% in a single-arm study. Sequencing is open.", "b", f"c {URL}"],
+        thread=["ORR 88% in a single-arm study. Sequencing is open.", "b", "c"],
         note="less hype",
     )
     seed_item(conn, "new", total=9.0)
@@ -233,19 +233,19 @@ def test_run_draft_records_examples_for_failed_drafts_too(conn, monkeypatch):
         conn,
         item_id="old",
         model="m",
-        draft=store.Draft(["A game-changer! ORR 88%.", "b", f"c {URL}"], "", ""),
+        draft=store.Draft(["A game-changer! ORR 88%.", "b", "c"], "", ""),
     )
     edit_id = store.edit(
         conn,
         old,
-        thread=["ORR 88% in a single-arm study. Sequencing is open.", "b", f"c {URL}"],
+        thread=["ORR 88% in a single-arm study. Sequencing is open.", "b", "c"],
     )
     seed_item(conn, "bad", total=9.0)
     monkeypatch.setattr(
         run_draft,
         "draft_item",
         lambda **kw: drafter.draft_item(
-            call=lambda s, u, m: good_json("no url at all"),
+            call=lambda s, u, m: good_json(f"a link sneaks in {URL}"),
             sleep=lambda s: None,
             max_attempts=2,
             **kw,
@@ -262,7 +262,7 @@ def test_run_draft_retry_failed_redrafts_only_with_the_flag(conn, monkeypatch):
     from draft import drafter
 
     seed_item(conn, "bad", total=9.0)
-    replies = {"text": "no url at all"}
+    replies = {"text": f"a link sneaks in {URL}"}
     monkeypatch.setattr(
         run_draft,
         "draft_item",
@@ -282,7 +282,7 @@ def test_run_draft_retry_failed_redrafts_only_with_the_flag(conn, monkeypatch):
     assert store.list_drafts(conn) == []
 
     # --retry-failed replaces it with a good draft
-    replies["text"] = f"fixed {URL}"
+    replies["text"] = "fixed"
     run_draft.main(["--min-score", "7", "--retry-failed"])
     assert store.list_drafts(conn, store.STATUS_FAILED) == []
     assert len(store.list_drafts(conn)) == 1

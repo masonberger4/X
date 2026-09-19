@@ -35,23 +35,20 @@ ANCHOR_WORDS = ("first", "last", "middle")
 MAX_VISUALS = 2
 DEFAULT_LONG_MAX_CHARS = 4000
 
-# A single or long post never carries the source URL itself: the link lives in a second,
-# threaded post so the opener stays link-free (X shows a post with an outbound link to
-# fewer non-followers). So every non-thread shape is exactly two posts: the post, then the
-# link post.
-LINK_POST_SHAPE_POSTS = 2
+# No post carries a link of any kind (draft/hook.py), so a single or long post is exactly
+# what its name says: one post, with the source named in words rather than linked.
+SINGLE_SHAPE_POSTS = 1
 
 
 @dataclass(frozen=True)
 class Format:
     """What a draft must look like. `anchors` has one word per visual (first | last |
     middle) resolved against the thread length by `resolve_anchors`; a single or long post
-    anchors everything to post 1 (its second post is the link post, never a picture).
-    `max_chars` is the per-post limit (280 unless long).
+    anchors everything to its one post. `max_chars` is the per-post limit (280 unless
+    long).
 
-    A single or long shape is always two posts (`LINK_POST_SHAPE_POSTS`): whatever
-    min_posts/max_posts a caller or a stored format genome passes is normalised to that,
-    since the body post is followed by the post that holds the primary source URL."""
+    A single or long shape is always one post (`SINGLE_SHAPE_POSTS`): whatever
+    min_posts/max_posts a caller or a stored format genome passes is normalised to that."""
 
     shape: str = SHAPE_THREAD
     min_posts: int = THREAD_MIN
@@ -75,9 +72,9 @@ class Format:
             if self.max_chars != MAX_POST_CHARS:
                 raise ValueError("thread posts are 280 characters")
         else:
-            # The body post plus the link post, whatever the caller asked for.
-            object.__setattr__(self, "min_posts", LINK_POST_SHAPE_POSTS)
-            object.__setattr__(self, "max_posts", LINK_POST_SHAPE_POSTS)
+            # One post, whatever the caller asked for.
+            object.__setattr__(self, "min_posts", SINGLE_SHAPE_POSTS)
+            object.__setattr__(self, "max_posts", SINGLE_SHAPE_POSTS)
             if self.shape == SHAPE_SINGLE:
                 if self.max_chars != MAX_POST_CHARS:
                     raise ValueError("a single post is 280 characters")
@@ -88,17 +85,10 @@ class Format:
     def is_thread(self) -> bool:
         return self.shape == SHAPE_THREAD
 
-    @property
-    def has_link_post(self) -> bool:
-        """True when the last post is the link post: a single or long post keeps the source
-        URL out of the body and puts it in a second, threaded post of its own."""
-        return not self.is_thread
-
     def resolve_anchors(self, n_posts: int) -> list[int]:
         """1-based post index per visual for a thread of n_posts."""
         out = []
-        if self.has_link_post:
-            # Never the link post: every picture sits on the body post.
+        if not self.is_thread:
             return [1] * self.visuals
         for a in self.anchors:
             if a == "first" or n_posts <= 1:
@@ -234,7 +224,7 @@ OUTPUT_JSON_SCHEMA: dict[str, Any] = {
             "minItems": THREAD_MIN,
             "maxItems": THREAD_MAX,
             "items": {"type": "string"},
-            "description": "3-6 posts. Each <= 280 chars. Last post contains the source URL.",
+            "description": "3-6 posts. Each <= 280 chars. No post contains a URL.",
         },
         "suggested_visual": {
             "type": "string",
@@ -311,10 +301,7 @@ def validate_output(data: Any, fmt: Format | None = None) -> Draft:
     if not lo <= len(thread) <= hi:
         if fmt.is_thread:
             raise SchemaError(f"'thread' must have {lo}-{hi} posts, got {len(thread)}")
-        raise SchemaError(
-            f"a {fmt.shape} post is {lo} posts (the post, then a post holding only the "
-            f"primary source URL), got {len(thread)}"
-        )
+        raise SchemaError(f"a {fmt.shape} post is {lo} post, got {len(thread)}")
 
     try:
         chart = validate_chart(data.get("chart"))

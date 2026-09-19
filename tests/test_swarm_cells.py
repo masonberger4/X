@@ -6,7 +6,7 @@ URL = "https://doi.org/10.1000/xyz123"
 
 
 def problems(text, slot="mechanism", preprint=False):
-    return cells.cell_problems(text, source_text=SRC, url=URL, slot=slot, is_preprint=preprint)
+    return cells.cell_problems(text, source_text=SRC, slot=slot, is_preprint=preprint)
 
 
 def test_clean_cell_passes():
@@ -21,8 +21,8 @@ def test_length_advice_and_slot_rules():
     assert problems("x" * 281)[0].startswith("281 chars")
     assert "investment advice" in problems("Buy the stock now.")[0]
     assert "medical advice" in problems("Patients should ask their doctor.")[0]
-    assert problems("no link here", slot="closer") == ["closer is missing the primary source URL"]
-    assert problems("fine " + URL, slot="closer") == []
+    assert problems("no link here", slot="closer") == []
+    assert problems("fine " + URL, slot="closer")[0].startswith("contains a link")
     assert problems("no label", slot="hook", preprint=True) == ["preprint not labelled in the hook"]
     assert problems("a preprint says", slot="hook", preprint=True) == []
     assert problems("   ") == ["empty"]

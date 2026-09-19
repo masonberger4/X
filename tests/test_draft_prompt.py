@@ -21,7 +21,7 @@ def test_prompt_embeds_voice_guide_hard_rules_and_item():
     assert "No medical advice" in system
     assert '"thread"' in system and '"chart"' in system  # JSON schema embedded
     assert '"single_post"' not in system
-    assert "last thread post" in HARD_RULES and "first thread post" in HARD_RULES
+    assert "NEVER write a URL" in HARD_RULES and "first thread post" in HARD_RULES
     assert "exactly one visual" in HARD_RULES
     assert user.endswith("Draft the thread and its visual now. Output JSON only.")
     assert "A CAR-T trial" in user

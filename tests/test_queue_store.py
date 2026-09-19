@@ -9,7 +9,7 @@ from tests.conftest import URL, seed_item
 
 def make_draft(**kw):
     d = Draft(
-        thread=["ORR 88%.", "a", "b", f"c {URL}"],
+        thread=["ORR 88%.", "a", "b", "c"],
         suggested_visual="plot",
         why_it_matters="because",
         claims_to_verify=[Claim("ORR 88%", "high")],
@@ -156,14 +156,14 @@ def test_approve_records_decision_and_does_not_publish(conn):
 def test_edit_saves_original_and_edited_text(conn):
     seed_item(conn, "i1")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.edit(conn, did, thread=["Better.", "x", "y", f"z {URL}"])
+    store.edit(conn, did, thread=["Better.", "x", "y", "z"])
     row = store.get_draft(conn, did)
     assert row.status == store.STATUS_APPROVED
-    assert row.draft.thread == ["Better.", "x", "y", f"z {URL}"]
+    assert row.draft.thread == ["Better.", "x", "y", "z"]
     dec = store.list_decisions(conn, did)[0]
     assert dec["action"] == "edit"
     assert "ORR 88%" in dec["original_text"] and '"a"' in dec["original_text"]
-    assert "Better." in dec["edited_text"] and '"z ' in dec["edited_text"]
+    assert "Better." in dec["edited_text"] and '"z"' in dec["edited_text"]
 
 
 def test_edit_without_approve_stays_pending(conn):
@@ -361,7 +361,7 @@ def test_reject_with_category_stores_it_and_invalid_raises(conn):
 def test_edit_with_category_and_blank_category_is_none(conn):
     seed_item(conn, "i1")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.edit(conn, did, thread=["1", "2", f"3 {URL}"], category="Factual ")
+    store.edit(conn, did, thread=["1", "2", "3"], category="Factual ")
     assert store.list_decisions(conn, did)[0]["category"] == "factual"
     seed_item(conn, "i2")
     did2 = store.insert_draft(conn, item_id="i2", model="m", draft=make_draft())
@@ -384,7 +384,7 @@ def test_record_examples_writes_rows_per_kind(conn):
     seed_item(conn, "old")
     seed_item(conn, "new")
     old = store.insert_draft(conn, item_id="old", model="m", draft=make_draft())
-    e_id = store.edit(conn, old, thread=["edited", "a", "b", f"c {URL}"])
+    e_id = store.edit(conn, old, thread=["edited", "a", "b", "c"])
     r_id = store.reject(conn, old, note="meh")
     new = store.insert_draft(conn, item_id="new", model="m", draft=make_draft())
     assert store.record_examples(conn, new, [e_id], [r_id]) == 2
@@ -398,7 +398,7 @@ def test_record_examples_writes_rows_per_kind(conn):
 def test_fetch_decisions_for_voice_joins_items_source_and_url(conn):
     seed_item(conn, "i1", source="biorxiv")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.edit(conn, did, thread=["e ", "1", "2", f"3 {URL}"], category="voice")
+    store.edit(conn, did, thread=["e ", "1", "2", "3"], category="voice")
     store.reject(conn, did, note="later")
     rows = store.fetch_decisions_for_voice(conn, "2000-01-01T00:00:00+00:00")
     assert [r["action"] for r in rows] == ["edit", "reject"]  # oldest first
@@ -445,14 +445,14 @@ def test_fetch_draft_stats(conn):
 def test_revise_replaces_whole_draft_keeps_status_and_logs_decision(conn):
     seed_item(conn, "i1")
     d = Draft(
-        thread=["old", "a", "b", f"c {URL}"],
+        thread=["old", "a", "b", "c"],
         suggested_visual="v",
         why_it_matters="w",
         claims_to_verify=[Claim("old claim", "low")],
     )
     did = store.insert_draft(conn, item_id="i1", model="m1", draft=d)
     new = Draft(
-        thread=["new", "x", "y", f"z {URL}"],
+        thread=["new", "x", "y", "z"],
         suggested_visual="v2",
         why_it_matters="w2",
         claims_to_verify=[Claim("new claim", "medium")],
@@ -461,7 +461,7 @@ def test_revise_replaces_whole_draft_keeps_status_and_logs_decision(conn):
     row = store.get_draft(conn, did)
     assert row.status == "pending"
     assert row.model == "m2"
-    assert row.draft.thread == ["new", "x", "y", f"z {URL}"]
+    assert row.draft.thread == ["new", "x", "y", "z"]
     assert row.draft.why_it_matters == "w2" and row.draft.suggested_visual == "v2"
     assert [c.claim for c in row.draft.claims_to_verify] == ["new claim"]
     (dec,) = store.list_decisions(conn, did)

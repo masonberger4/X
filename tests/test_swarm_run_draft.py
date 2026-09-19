@@ -6,7 +6,7 @@ import json
 from approval_queue import store
 from swarm import store as swarm_store
 from swarm.prompts import JUDGE_SYSTEM, THREAD_JUDGE_SYSTEM
-from tests.conftest import URL, seed_item
+from tests.conftest import seed_item
 from tests.test_swarm_engine import FakeModel
 
 CFG = {
@@ -24,7 +24,7 @@ CFG = {
 def _control_json():
     return json.dumps(
         {
-            "thread": ["control one", "control two", f"control three {URL}"],
+            "thread": ["control one", "control two", "control three"],
             "suggested_visual": "v",
             "why_it_matters": "w",
             "claims_to_verify": [],

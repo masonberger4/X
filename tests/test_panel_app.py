@@ -9,7 +9,7 @@ from approval_queue import store as queue_store
 from draft.schema import Claim, Draft
 from panel import app as panel_app
 from panel.jobs import JobError
-from tests.conftest import URL, seed_item
+from tests.conftest import seed_item
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def client(db_file):
 def draft_id(conn):
     seed_item(conn, "i1", source="biorxiv")
     d = Draft(
-        thread=["Preprint: ORR 88%. one", "two", f"three {URL}"],
+        thread=["Preprint: ORR 88%. one", "two", "three"],
         suggested_visual="plot",
         why_it_matters="matters",
         claims_to_verify=[Claim("ORR 88% appears in the abstract", "low")],
@@ -237,7 +237,7 @@ def test_saving_the_order_shows_it_and_feeds_the_publisher(client, conn, draft_i
         conn,
         item_id="i2",
         model="m",
-        draft=Draft(thread=[f"Two {URL}"], suggested_visual="", why_it_matters=""),
+        draft=Draft(thread=["Two"], suggested_visual="", why_it_matters=""),
     )
     _approved(conn, d2)
     r = client.post(

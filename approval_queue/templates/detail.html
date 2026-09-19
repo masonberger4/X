@@ -26,7 +26,7 @@
 {% if d.draft.suggested_visual %}<p><strong>Suggested visual:</strong> {{ d.draft.suggested_visual }}</p>{% endif %}
 
 {% if d.draft.shape != 'thread' or d.draft.wanted_visuals == 0 or d.draft.wanted_visuals == 2 %}
-<p class="meta">Format: <strong>{{ 'single post + link post' if d.draft.shape == 'single' else ('long post (up to ' ~ d.draft.max_chars ~ ' chars) + link post' if d.draft.shape == 'long' else 'thread') }}</strong>{% if d.draft.wanted_visuals is not none %}, {{ d.draft.wanted_visuals }} picture{{ 's' if d.draft.wanted_visuals != 1 else '' }}{% endif %} (a step 9 format genome).</p>
+<p class="meta">Format: <strong>{{ 'single post' if d.draft.shape == 'single' else ('long post (up to ' ~ d.draft.max_chars ~ ' chars)' if d.draft.shape == 'long' else 'thread') }}</strong>{% if d.draft.wanted_visuals is not none %}, {{ d.draft.wanted_visuals }} picture{{ 's' if d.draft.wanted_visuals != 1 else '' }}{% endif %} (a step 9 format genome).</p>
 {% endif %}
 {% if image_url %}
 <h2>Image</h2>

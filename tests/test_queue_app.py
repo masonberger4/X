@@ -12,7 +12,7 @@ from draft import drafter
 from draft.chart import Table
 from draft.schema import Claim, Draft
 from publish import store as publish_store
-from tests.conftest import URL, seed_item
+from tests.conftest import seed_item
 from verify import store as verify_store
 from verify.verifier import ClaimCheck
 
@@ -27,7 +27,7 @@ def client(db_file):
 def draft_id(conn):
     seed_item(conn, "i1", source="biorxiv")
     d = Draft(
-        thread=["Preprint: ORR 88%. one", "two", f"three {URL}"],
+        thread=["Preprint: ORR 88%. one", "two", "three"],
         suggested_visual="plot",
         why_it_matters="matters",
         claims_to_verify=[Claim("Number '15' does not appear in the source abstract", "low")],
@@ -76,7 +76,7 @@ def test_approve_action_no_table_has_no_notice(client, conn, draft_id):
 def test_approve_action_drops_unrendered_table_with_notice(client, conn):
     seed_item(conn, "i2", source="biorxiv")
     d = Draft(
-        thread=["Preprint: ORR 88%. one", "two", f"three {URL}"],
+        thread=["Preprint: ORR 88%. one", "two", "three"],
         suggested_visual="table",
         why_it_matters="matters",
         table=Table("T", ["a", "b"], [["x", "y"], ["z", "w"]]),
@@ -102,14 +102,14 @@ def test_edit_action_saves_original_and_edited(client, conn, draft_id):
     r = client.post(
         f"/drafts/{draft_id}/edit",
         data={
-            "thread": f"Preprint, edited. first\n---\nsecond\n---\nlast {URL}",
+            "thread": "Preprint, edited. first\n---\nsecond\n---\nlast",
             "note": "tightened",
         },
     )
     assert r.status_code == 303
     row = store.get_draft(conn, draft_id)
     assert row.status == "approved"
-    assert row.draft.thread == ["Preprint, edited. first", "second", f"last {URL}"]
+    assert row.draft.thread == ["Preprint, edited. first", "second", "last"]
     dec = store.list_decisions(conn, draft_id)[0]
     assert dec["action"] == "edit"
     assert "ORR 88%" in dec["original_text"]
@@ -171,7 +171,7 @@ def test_actions_on_missing_draft_404(client):
 
 
 def test_edit_form_accepts_category_and_rejects_unknown(client, conn, draft_id):
-    data = {"thread": f"Preprint, edited. a\n---\nb {URL}"}
+    data = {"thread": "Preprint, edited. a\n---\nb"}
     assert (
         client.post(f"/drafts/{draft_id}/edit", data={**data, "category": "x"}).status_code == 400
     )
@@ -201,7 +201,7 @@ CHART = {
 def _revision_json(lead):
     return json.dumps(
         {
-            "thread": [lead, "r2", f"r3 {URL}"],
+            "thread": [lead, "r2", "r3"],
             "suggested_visual": "",
             "why_it_matters": "revised",
             "claims_to_verify": [{"claim": "new claim", "confidence": "medium"}],
@@ -372,7 +372,7 @@ def test_approved_page_hides_posted_drafts_and_links_the_tweet(client, conn, dra
         conn,
         item_id="i2",
         model="m",
-        draft=Draft(thread=[f"Second {URL}"], suggested_visual="", why_it_matters=""),
+        draft=Draft(thread=["Second"], suggested_visual="", why_it_matters=""),
     )
     store.approve(conn, other)
     # before any publish run: both listed as waiting, no tables yet
@@ -462,7 +462,7 @@ def test_reopen_allowed_while_only_scheduled_or_with_no_schedule_row(client, con
         conn,
         item_id="i2",
         model="m",
-        draft=Draft(thread=[f"Second {URL}"], suggested_visual="", why_it_matters=""),
+        draft=Draft(thread=["Second"], suggested_visual="", why_it_matters=""),
     )
     store.approve(conn, other)
     pstore.connect(conn.execute("PRAGMA database_list").fetchone()[2]).close()
@@ -508,7 +508,7 @@ def test_reopen_releases_an_unclaimed_schedule_row_but_never_a_live_one(client, 
         conn,
         item_id="i3",
         model="m",
-        draft=Draft(thread=[f"Third {URL}"], suggested_visual="", why_it_matters=""),
+        draft=Draft(thread=["Third"], suggested_visual="", why_it_matters=""),
     )
     store.approve(conn, other)
     _claim_draft(conn, other)

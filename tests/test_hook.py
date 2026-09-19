@@ -1,11 +1,11 @@
-"""Rule 12: the opening post is a link-free one-claim hook (draft/hook.py)."""
+"""Rule 2 (no post carries a link) and rule 12 (the one-claim opener), draft/hook.py."""
 
 from __future__ import annotations
 
 import pytest
 
 from draft.drafter import check_hard_rules
-from draft.hook import HOOK_MAX_CHARS, hook_problems, hook_rule
+from draft.hook import HOOK_MAX_CHARS, hook_problems, hook_rule, link_problems
 from draft.schema import Draft
 from swarm.cells import cell_problems
 from swarm.genome import CLOSER, HOOK
@@ -14,9 +14,7 @@ URL = "https://example.org/study"
 
 
 def test_clean_hook_passes():
-    assert (
-        hook_problems("The armoring worked in blood. It never showed up in tumor.", url=URL) == []
-    )
+    assert hook_problems("The armoring worked in blood. It never showed up in tumor.") == []
 
 
 @pytest.mark.parametrize(
@@ -30,73 +28,64 @@ def test_clean_hook_passes():
     ],
 )
 def test_position_markers_and_throat_clearing_fail(text):
-    assert any("first post contains" in p for p in hook_problems(text, url=URL))
+    assert any("first post contains" in p for p in hook_problems(text))
 
 
-def test_link_in_the_opener_fails():
-    problems = hook_problems(f"The armoring worked in blood. {URL}", url=URL)
-    assert any("source URL" in p for p in problems)
-    assert any("last post" in p for p in problems)
-
-
-def test_any_other_link_in_the_opener_fails():
-    assert hook_problems("Worth reading: https://elsewhere.test/x", url=URL) == [
-        "first post contains a link; links belong in the last post"
-    ]
+def test_any_link_in_any_post_fails():
+    assert any("contains a link" in p for p in link_problems(f"The armoring worked. {URL}"))
+    assert any("contains a link" in p for p in link_problems("Worth reading: nejm.org/doi/x"))
+    assert link_problems("The armoring worked in blood, not in tumor.") == []
+    # a ratio or a dose is not a domain
+    assert link_problems("2.5/3.0 mg/kg in 12 patients") == []
 
 
 def test_opener_longer_than_the_cap_fails():
     long = "The armoring worked in blood but not in tumor. " * 8
-    assert any("not a summary" in p for p in hook_problems(long, url=URL))
+    assert any("not a summary" in p for p in hook_problems(long))
     assert len(long) > HOOK_MAX_CHARS
 
 
-def test_a_single_post_carries_the_url_and_is_not_capped():
-    long = f"The armoring worked in blood but not in tumor. {'Detail. ' * 30}{URL}"
-    assert hook_problems(long, url=URL, carries_url=True) == []
+def test_a_single_post_is_not_hook_capped():
+    long = f"The armoring worked in blood but not in tumor. {'Detail. ' * 30}"
+    assert hook_problems(long, max_chars=None) == []
 
 
-def test_check_hard_rules_applies_the_hook_rule_to_a_thread():
+def test_check_hard_rules_applies_the_hook_rule_and_the_link_ban():
     draft = Draft(
-        thread=[f"1/3 Armoring worked in blood. {URL}", "The mechanism.", f"Takeaway. {URL}"],
+        thread=["1/3 Armoring worked in blood.", "The mechanism.", f"Takeaway. {URL}"],
         why_it_matters="",
         suggested_visual="",
     )
     problems = check_hard_rules(draft, url=URL, source="pubmed")
     assert any("position marker" in p for p in problems)
-    assert any("belongs in the last post" in p for p in problems)
+    assert any("thread[2] contains a link" in p for p in problems)
 
 
-def test_check_hard_rules_leaves_a_single_post_alone():
+def test_check_hard_rules_passes_a_link_free_single_post():
     draft = Draft(
-        thread=[f"Armoring worked in blood, not in tumor. {URL}"],
+        thread=["Armoring worked in blood, not in tumor."],
         why_it_matters="",
         suggested_visual="",
     )
     assert check_hard_rules(draft, url=URL, source="pubmed") == []
 
 
-def test_hook_cell_is_checked_and_the_closer_is_not():
-    kwargs = dict(source_text="", url=URL, is_preprint=False)
+def test_hook_cell_is_checked_and_no_cell_carries_a_link():
+    kwargs = dict(source_text="", is_preprint=False)
     assert any(
         "position marker" in p
         for p in cell_problems("1/6 Armoring worked in blood.", slot=HOOK, **kwargs)
     )
-    assert cell_problems(f"Takeaway. {URL}", slot=CLOSER, **kwargs) == []
-
-
-def test_hook_cell_that_must_carry_the_url_is_exempt():
-    text = f"Armoring worked in blood, not in tumor. {URL}"
-    assert (
-        cell_problems(text, slot=HOOK, source_text="", url=URL, is_preprint=False, needs_url=True)
-        == []
+    assert cell_problems("Takeaway for the thesis.", slot=CLOSER, **kwargs) == []
+    assert any(
+        "contains a link" in p for p in cell_problems(f"Takeaway. {URL}", slot=CLOSER, **kwargs)
     )
 
 
 def test_hook_rule_text_matches_what_is_enforced():
-    assert str(HOOK_MAX_CHARS) in hook_rule(carries_url=False)
-    assert "NO link" in hook_rule(carries_url=False)
-    assert "NO link" not in hook_rule(carries_url=True)
+    assert str(HOOK_MAX_CHARS) in hook_rule()
+    assert "1/6" in hook_rule()
+    assert str(HOOK_MAX_CHARS) not in hook_rule(capped=False)
 
 
 # --- the conversation KPI --------------------------------------------------

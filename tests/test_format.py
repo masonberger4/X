@@ -31,7 +31,7 @@ CHART2 = {"title": "Cohort", "labels": ["ORR", "n"], "values": [88, 97], "unit":
 
 def out(**over):
     d = {
-        "thread": ["one", "two", f"three {URL}"],
+        "thread": ["one", "two", "three"],
         "suggested_visual": "v",
         "why_it_matters": "w",
         "claims_to_verify": [],
@@ -59,9 +59,9 @@ def test_format_bounds():
         Format(min_posts=1)
     with pytest.raises(ValueError):
         Format(shape="long", max_chars=280)
-    # a single or long shape is always the body post plus the link post
-    assert (single_format().min_posts, single_format().max_posts) == (2, 2)
-    assert Format(shape="long", min_posts=1, max_posts=1, max_chars=2000).max_posts == 2
+    # a single or long shape is exactly one post: no post carries a link
+    assert (single_format().min_posts, single_format().max_posts) == (1, 1)
+    assert Format(shape="long", min_posts=3, max_posts=3, max_chars=2000).max_posts == 1
     assert Format.from_dict(Format(visuals=0, anchors=()).to_dict()) == Format(
         visuals=0, anchors=()
     )
@@ -92,66 +92,50 @@ def test_validate_output_reads_the_format():
     assert d.visuals == [] and d.anchors == [] and d.wanted_visuals == 0
     with pytest.raises(SchemaError, match="no visual"):
         validate_output(out(), none)
-    single = validate_output(out(thread=["all in one", f"Source: {URL}"]), single_format())
+    single = validate_output(out(thread=["all in one"]), single_format())
     assert single.shape == "single" and single.anchors == [1]
-    with pytest.raises(SchemaError, match="single post is 2 posts"):
+    with pytest.raises(SchemaError, match="single post is 1 post"):
         validate_output(out(), single_format())
-    long = validate_output(out(thread=["a\n\nb\n\nc", f"Source: {URL}"]), long_format(2000))
+    long = validate_output(out(thread=["a\n\nb\n\nc"]), long_format(2000))
     assert long.shape == "long" and long.max_chars == 2000
     with pytest.raises(SchemaError, match="empty chart"):
         validate_output(out(visuals=[None]), two)
 
 
-def test_a_single_or_long_post_puts_the_url_in_a_second_post():
-    """The body post of a single or long post carries no link: the primary source URL is
-    posted as a second, threaded post of its own."""
+def test_no_shape_carries_a_link():
+    """Rule 2: no post carries a link, so a single or long post is exactly one post and
+    the source is named in words."""
     fmt = single_format()
-    ok = validate_output(out(thread=["the claim, no link here", f"Source: {URL}"]), fmt)
+    ok = validate_output(out(thread=["the claim, no link here"]), fmt)
     assert drafter.check_hard_rules(ok, url=URL, source="pubmed", fmt=fmt) == []
 
-    in_body = validate_output(out(thread=[f"the claim {URL}", f"Source: {URL}"]), fmt)
-    problems = drafter.check_hard_rules(in_body, url=URL, source="pubmed", fmt=fmt)
-    assert any("first post contains the source URL" in p for p in problems)
+    linked = validate_output(out(thread=[f"the claim {URL}"]), fmt)
+    problems = drafter.check_hard_rules(linked, url=URL, source="pubmed", fmt=fmt)
+    assert any("thread[0] contains a link" in p for p in problems)
 
-    chatty = validate_output(
-        out(thread=["the claim", "Here is the whole argument again, at length, " * 3 + URL]),
-        fmt,
-    )
-    problems = drafter.check_hard_rules(chatty, url=URL, source="pubmed", fmt=fmt)
-    assert any("the link post is" in p and "chars" in p for p in problems)
-
-    other_link = validate_output(
-        out(thread=["the claim", f"Source: {URL} and https://example.com/x"]), fmt
-    )
+    other_link = validate_output(out(thread=["the claim, see example.com/x"]), fmt)
     problems = drafter.check_hard_rules(other_link, url=URL, source="pubmed", fmt=fmt)
-    assert any("another link" in p for p in problems)
+    assert any("thread[0] contains a link" in p for p in problems)
 
     # the long post's body is not held to the hook's 220-character cap
     long_body = "x" * 900
-    d = validate_output(out(thread=[long_body, f"Source: {URL}"]), long_format(4000))
+    d = validate_output(out(thread=[long_body]), long_format(4000))
     assert drafter.check_hard_rules(d, url=URL, source="pubmed", fmt=long_format(4000)) == []
-    # a picture never lands on the link post
-    assert long_format(4000).resolve_anchors(2) == [1]
-
-
-def test_a_one_post_draft_from_before_the_link_post_still_passes():
-    d = validate_output(out(thread=["all in one", f"Source: {URL}"]), single_format())
-    d.thread = [f"all in one {URL}"]  # the shape before the link post existed
-    assert drafter.check_hard_rules(d, url=URL, source="pubmed") == []
+    assert long_format(4000).resolve_anchors(1) == [1]
 
 
 # ---- hard rules and prompt --------------------------------------------------------
 
 
 def test_hard_rules_use_the_format_limit_and_check_every_chart():
-    d = validate_output(out(thread=["x" * 300, f"Source: {URL}"]), long_format(1000))
+    d = validate_output(out(thread=["x" * 300]), long_format(1000))
     assert drafter.check_hard_rules(d, url=URL, source="pubmed") == []
     # read as a thread instead, the same draft fails the per-post limit and the hook cap
     assert drafter.check_hard_rules(d, url=URL, source="pubmed", fmt=Format()) == [
         f"thread[0] is 300 chars (> {MAX_POST_CHARS})",
         "first post is 300 chars (> 220); the opener is one claim, not a summary",
     ]
-    over = validate_output(out(thread=["x" * 1200, f"Source: {URL}"]), long_format(1000))
+    over = validate_output(out(thread=["x" * 1200]), long_format(1000))
     assert drafter.check_hard_rules(over, url=URL, source="pubmed") == [
         "thread[0] is 1200 chars (> 1000)"
     ]
@@ -167,8 +151,8 @@ def test_hard_rules_text_per_format():
     assert hard_rules(None) == HARD_RULES
     assert "exactly one visual" in HARD_RULES and "3 to 6 posts" in HARD_RULES
     single = hard_rules(single_format())
-    assert "SINGLE post" in single and "exactly two strings" in single
-    assert "LINK POST" in single and "carry the primary source URL" in single
+    assert "SINGLE post" in single and "exactly one string" in single
+    assert "NEVER write a URL" in single
     long = hard_rules(long_format(4000))
     assert "long-form post of at most 4000" in long
     two = hard_rules(Format(visuals=2, anchors=("first", "last")))
@@ -183,7 +167,7 @@ def test_format_of_a_stored_draft():
     assert drafter.format_of(validate_output(out())) is None
     d = validate_output(out(chart=None), Format(visuals=0, anchors=()))
     assert drafter.format_of(d) == Format(visuals=0, anchors=())
-    d = validate_output(out(thread=["one", f"Source: {URL}"]), long_format(3000))
+    d = validate_output(out(thread=["one"]), long_format(3000))
     assert drafter.format_of(d).shape == "long" and drafter.format_of(d).max_chars == 3000
     # a table dropped by the reviewer does not change what the format asked for
     d = validate_output(out())
@@ -209,7 +193,7 @@ def test_draft_item_passes_the_format_to_the_checks():
 
     def call(system, user, model):
         calls.append(system)
-        return json.dumps(out(thread=["one post", f"Source: {URL}"]))
+        return json.dumps(out(thread=["one post"]))
 
     res = drafter.draft_item(
         title="T",
@@ -239,7 +223,7 @@ def test_draft_item_passes_the_format_to_the_checks():
 def test_store_round_trips_format_and_extra_visuals_and_images(conn):
     seed_item(conn, "i1")
     d = validate_output(
-        out(visuals=[CHART2], thread=["one", "two", "three", "four", f"five {URL}"]),
+        out(visuals=[CHART2], thread=["one", "two", "three", "four", "five"]),
         Format(visuals=2, anchors=("first", "last")),
     )
     did = qstore.insert_draft(conn, item_id="i1", model="m", draft=d)
@@ -285,7 +269,7 @@ def _two_picture_draft(conn, item="i1"):
     """A two-visual draft with both pictures on disk: (draft id, first path, second path)."""
     seed_item(conn, item)
     d = validate_output(
-        out(visuals=[CHART2], thread=["one", "two", "three", "four", f"five {URL}"]),
+        out(visuals=[CHART2], thread=["one", "two", "three", "four", "five"]),
         Format(visuals=2, anchors=("first", "last")),
     )
     did = qstore.insert_draft(conn, item_id=item, model="m", draft=d)
@@ -362,15 +346,11 @@ def test_queue_drops_one_picture_of_two(conn):
 
 def test_long_post_survives_publish_checks_and_single_is_not_numbered(conn):
     long_text = "x" * 900
-    link_post = f"Source: {URL}"
-    assert split_thread([long_text, link_post], url=URL, max_chars=4000, number=False) == [
-        long_text,
-        link_post,
-    ]
+    assert split_thread([long_text], max_chars=4000, number=False) == [long_text]
     with pytest.raises(ThreadError, match="> 280"):
-        split_thread([long_text, link_post], url=URL)
+        split_thread([long_text])
     seed_item(conn, "i2")
-    d = validate_output(out(thread=[long_text, link_post]), long_format(4000))
+    d = validate_output(out(thread=[long_text]), long_format(4000))
     did = qstore.insert_draft(conn, item_id="i2", model="m", draft=d)
     qstore.approve(conn, did)
     got = pstore.fetch_approved(10, conn=conn)[0]
@@ -378,7 +358,7 @@ def test_long_post_survives_publish_checks_and_single_is_not_numbered(conn):
     import run_publish
 
     kind, texts = run_publish.texts_for(got)
-    assert texts == [long_text, link_post]
+    assert texts == [long_text]
 
 
 def test_publish_attaches_each_picture_at_its_anchor(tmp_path):
@@ -445,7 +425,7 @@ def test_publish_attaches_each_picture_at_its_anchor(tmp_path):
 # ---- the swarm on a single and a long post -----------------------------------------
 
 
-def test_run_swarm_single_post_runs_one_cell_and_a_link_post():
+def test_run_swarm_single_post_runs_one_cell():
     fake = FakeModel()
     brief = Brief(title="T", abstract=ABSTRACT, url=URL, source="pubmed")
     res = engine.run_swarm(
@@ -454,8 +434,7 @@ def test_run_swarm_single_post_runs_one_cell_and_a_link_post():
     assert list(res.cells) == [SINGLE_SLOT.name]
     assert res.draft_result.draft.shape == "single"
     thread = res.draft_result.draft.thread
-    # the body post carries no link; the URL lives in the second post
-    assert len(thread) == 2 and URL not in thread[0] and URL in thread[1]
+    assert len(thread) == 1 and URL not in thread[0]
     cell_prompts = [u for s, u, _ in fake.calls if "YOUR SLOT: single" in u]
     assert cell_prompts and all("carries NO link of any kind" in u for u in cell_prompts)
 
@@ -469,7 +448,7 @@ def test_run_swarm_long_post_joins_sections_under_the_section_limit():
     )
     assert res.draft_result.draft.shape == "long"
     thread = res.draft_result.draft.thread
-    assert len(thread) == 2 and URL not in thread[0] and URL in thread[1]
+    assert len(thread) == 1 and URL not in thread[0]
     assert thread[0].count("\n\n") == len(DEFAULT_GENOME.slots) - 1
     closer = next(u for _, u, _ in fake.calls if "YOUR SLOT: closer" in u)
     assert "carries NO link of any kind" in closer
@@ -477,7 +456,7 @@ def test_run_swarm_long_post_joins_sections_under_the_section_limit():
     assert systems and all("At most 500 characters" in s for s in systems)
     assembly = next(u for _, u, _ in fake.calls if "Assemble the draft JSON" in u)
     assert "joined by blank lines" in assembly and "under 4000 characters" in assembly
-    assert "link post carrying the source URL" in assembly
+    assert "exactly one string" in assembly
 
 
 # ---- format genomes -----------------------------------------------------------------

@@ -154,7 +154,7 @@ def test_shipped_verify_config_is_sane():
 def _draft_with_claims(conn, item_id="i1", n=2):
     seed_item(conn, item_id)
     d = Draft(
-        thread=["a", "b", f"c {URL}"],
+        thread=["a", "b", "c"],
         suggested_visual="",
         why_it_matters="w",
         claims_to_verify=[Claim(f"claim {i}", "medium") for i in range(n)],
@@ -324,7 +324,7 @@ def _fake_reviser(revisions, *, fix=True):
 def _seed_problem_draft(conn, item_id="i1"):
     seed_item(conn, item_id)
     d = Draft(
-        thread=["a", "b", f"c {URL}"],
+        thread=["a", "b", "c"],
         suggested_visual="",
         why_it_matters="w",
         claims_to_verify=[Claim("good one", "high"), Claim("bad one", "low"), Claim("meh", "low")],
@@ -521,7 +521,7 @@ def test_mark_host_trusted_flips_stored_verdicts_from_that_host(conn):
 
     seed_item(conn, "i1")
     d = Draft(
-        thread=[f"post {URL}"],
+        thread=["post"],
         suggested_visual="",
         why_it_matters="",
         claims_to_verify=[Claim("a", "low"), Claim("b", "low")],
