@@ -7,6 +7,7 @@ picture starts from before the image grader turns its knobs."""
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -58,8 +59,33 @@ class Genome:
 HOOK = "hook"
 CLOSER = "closer"
 
+# A slot rule may never ask for a link: rule 2 bans them, so every candidate would be
+# discarded (or, if it complied, the rule would be dead text the judges score against).
+# A rule that FORBIDS one ("never a URL", "no link or URL") is fine. Only the word URL
+# counts ("link" is also a verb the voice rules use), and a negation counts only when it
+# governs the URL directly, so "no emoji, then the source URL" still asks for one.
+_URL_WORD = re.compile(r"\burls?\b", re.IGNORECASE)
+_NEGATED_URL = re.compile(
+    r"\b(?:no|never|not|without|nor|don't|do not)\s+"
+    r"(?:(?:paste|write|add|include|use|put|give|post)\s+)?"
+    r"(?:(?:a|an|the|any)\s+)?(?:[\w-]+\s+or\s+)?urls?\b",
+    re.IGNORECASE,
+)
+
+
+def asks_for_url(rule: str) -> bool:
+    """True when a slot rule asks for a link: a literal http(s) address, or the word URL
+    that no negation governs ("never a URL", "no link or URL", "do not paste URLs" pass;
+    "never skip the source URL" and "no emoji, then the URL" do not)."""
+    if re.search(r"https?://", rule, re.IGNORECASE):
+        return True
+    return len(_URL_WORD.findall(rule)) > len(_NEGATED_URL.findall(rule))
+
+
 # The closer's rule. It once ended "and then the primary source URL verbatim", which rule 2
 # then threw away; swarm/store.ensure_tables rewrites a live genome still carrying that.
+# What a closer that no longer names its source in a URL says instead.
+NAME_THE_SOURCE = "Name the source in words (the journal, the company or the meeting)."
 CLOSER_RULE = (
     "Close in one sentence: the question the data leave open, or the next dated catalyst "
     "the source names, and why it decides the story. Name the source in words (the "

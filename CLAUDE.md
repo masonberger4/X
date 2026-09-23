@@ -422,14 +422,19 @@ step carrying `--live`).
   (step 3 `posts` + step 4 `tweet_metrics`, read-only, empty when missing).
   `run_draft.draw_genomes` picks each story's writer, designer and format by Thompson
   sampling on their credited scores (`evolve.allocation: thompson`,
-  `swarm/store.py:thompson_next` over `fitness_scores`, pure `fitness.thompson_pick`; a
-  child's prior is its parent's posterior); a kind with no scored post, or
+  `swarm/store.py:thompson_next` over `fitness_scores`, pure `fitness.thompson_pick`;
+  `inherited_priors` gives a child its parent's posterior, the parent's own prior being
+  its parent's, halved every `evolve.dead_half_life` of the child's `dead_runs`, the runs
+  that can never be credited to it); a kind with no scored post, or
   `allocation: round_robin`, rotates instead (`next_genome`, then `next_format` and
   `next_designer(writer_id=, format_id=)`, counting runs since the newest live genome of
   that kind was born so a child joins an even rotation; the seeds are
   `swarm/genome.py:SEED_GENOMES`; `swarm_runs.designer_id`; `images.attach_chart(style=)`
-  is the Style the first render starts from, and `swarm_store.mark_styled` records that
-  it drew the chart). **A genome owns its topology**: `swarm/config.yaml` `fan_out`/`layers`
+  is the Style the first render starts from, recorded on the draft by
+  `approval_queue/store.py:set_style` (`drafts.style_json`, guarded migration) so every
+  later render without a `style` (a revision, the verifier's table, a scrubbed caption)
+  starts from it too, and `swarm_store.mark_styled` records that a chart, first or extra,
+  was drawn in it). **A genome owns its topology**: `swarm/config.yaml` `fan_out`/`layers`
   are only the fallback for a row without them. `swarm/fitness.py` is pure (relative
   KPI `(value + evolve.smoothing) / (baseline + smoothing)` against the trailing median,
   per-genome scores keyed by `genome_id`, `designer_id` or `format_id`, `bet_summary`,
@@ -444,8 +449,13 @@ step carrying `--live`).
   allocation and the panel count a genome's own posts only. `evolve.prune_rule:
   confidence` retires a genome only when its mean log relative is below the pooled
   rest's with probability `1 - (1 - retire_confidence) / k` (a t test, per look; nothing
-  while no genome has two posts), at most `max_retire_per_run` per kind per run;
-  `median` is the old coin-flip rule. `swarm/mutate.py` breeds: `breed_writer` is
+  while no genome has two posts), at most `max_retire_per_run` per kind per run; when
+  that retires nobody, a genome with no credited post after `evolve.max_dead_runs` dead
+  runs is retired instead (`run_evolve._never_credited`). `median` is the old coin-flip
+  rule. `swarm/genome.py:asks_for_url` is the one URL check: `validate_child` applies it
+  to a child's changed slots, and `ensure_tables` rewrites a live closer that still asks
+  for the source URL (`store.closer_without_url`: the old seed rule becomes
+  `CLOSER_RULE`, a reworded one loses only the URL clause). `swarm/mutate.py` breeds: `breed_writer` is
   the one strong-model call (through `call_anthropic`) and `validate_child` /
   `diff_count` enforce exactly one change inside the bounds in `swarm/genome.py`;
   `breed_designer` is pure code (one Style knob stepped, a flag flipped or the palette

@@ -188,3 +188,28 @@ def test_redraw_button_remakes_a_chart(conn, db_file):
     plain = store.insert_draft(conn, item_id="i2", model="m", draft=_draft())
     r = client.post(f"/drafts/{plain}/image/redraw")
     assert r.status_code == 303 and "error=" in r.headers["location"]
+
+
+def test_a_redraw_keeps_the_style_the_draft_was_first_drawn_in(conn, monkeypatch):
+    """run_draft records the designer's Style on the draft; a later render with no style (a
+    revision, the verifier's table, a scrubbed caption) starts from it, not from the house
+    style, so the picture keeps the look the designer is credited for."""
+    from draft.chart import Style
+
+    seed_item(conn, "i1")
+    chart = Chart("t", ["A", "B"], [88.0, 4.1], "%")
+    did = store.insert_draft(conn, item_id="i1", model="m", draft=_draft(chart))
+    seen = []
+    monkeypatch.setattr(
+        images, "render_chart", lambda c, path, style=None, **k: seen.append(style.palette)
+    )
+    monkeypatch.setattr(images, "_grade_loop", lambda *a, **k: None)
+    images.attach_chart(conn, did, chart, cfg={"images": {"enabled": True}})
+    assert seen[-1] == Style().palette  # nothing recorded: the house style
+    teal = Style().apply({"palette": "teal"})
+    store.set_style(conn, did, teal.to_dict())
+    images.attach_chart(conn, did, chart, cfg={"images": {"enabled": True}})
+    assert seen[-1] == "teal" and store.get_style(conn, did)["palette"] == "teal"
+    store.revise(conn, did, draft=_draft(chart), model="m", note="shorter")
+    images.attach_chart(conn, did, chart, cfg={"images": {"enabled": True}})
+    assert seen[-1] == "teal"  # a revision keeps it

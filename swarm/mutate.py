@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import random
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,6 +30,7 @@ from swarm.genome import (
     FormatGenome,
     Genome,
     Slot,
+    asks_for_url,
 )
 
 MAX_POST_CHARS_SHOWN = 300
@@ -77,24 +77,6 @@ def mutation_system(kpi: str = CONVERSATION) -> str:
 
 
 MUTATION_SYSTEM = mutation_system()
-
-# A slot rule may never ask for a link: rule 2 bans them, so every candidate would be
-# discarded (or, if it complied, the rule would be dead text the judges score against).
-# A rule that FORBIDS one ("never a URL", "no link or URL") is fine. Only the word URL
-# counts: "link" is also a verb the voice rules use ("link cause to consequence").
-_URL_WORD = re.compile(r"\burls?\b", re.IGNORECASE)
-_NEGATED_URL = re.compile(
-    r"\b(?:no|never|not|without|nor|don't|do not)\W+(?:[\w'-]+\W+){0,4}?urls?\b",
-    re.IGNORECASE,
-)
-
-
-def asks_for_url(rule: str) -> bool:
-    """True when a slot rule asks for a link: a literal http(s) address, or the word URL
-    not negated within a few words before it ("never a URL", "no link or URL" pass)."""
-    if re.search(r"https?://", rule, re.IGNORECASE):
-        return True
-    return len(_URL_WORD.findall(rule)) > len(_NEGATED_URL.findall(rule))
 
 
 def _fmt_genome(p: Parent) -> list[str]:

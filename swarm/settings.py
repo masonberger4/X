@@ -41,6 +41,9 @@ DEFAULTS: dict[str, Any] = {
         "prior_sd": 0.3,
         "post_log_sd": 0.9,
         "explore_floor": 0.1,
+        "dead_after_days": 7,
+        "dead_half_life": 3,
+        "max_dead_runs": 15,
     },
 }
 

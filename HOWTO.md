@@ -604,15 +604,21 @@ replies, since that hour decides how far X shows it.
    own second post is not counted as a reply to it (`subtract_self_reply`).
    A writer recipe is only credited with posts where the swarm's text was the
    one posted (not the single drafter's) and that were not single posts; a
-   picture style only with posts whose chart was drawn in that style (not a
-   table, which the fact-checker draws in the house style). The report's
+   picture style only with posts whose chart run_draft drew in that style
+   (a table is not counted). A picture keeps its style when it is redrawn: a
+   revision, the fact-checker's table or a scrubbed caption starts from the
+   style the draft was first drawn in, not the house style. The report's
    header says how many posts were credited to a writer.
    The recipes that have done better write more of the posts: each story's
    writer, picture style and format are drawn by chance weighted by how
    likely each is to be the best (`allocation: thompson`), so a recipe that
    keeps winning is used more while the others still get tried, and a new
-   child starts from its parent's record. Until a kind has a scored post,
-   its recipes simply take turns.
+   child starts from its parent's record. That head start wears off each
+   time the child's work cannot count (its text loses to the single
+   drafter, or its drafts are never posted), and a recipe that has had 15
+   such drafts without one post counted is retired (`max_dead_runs`) so a
+   new child can take its place. Until a kind has a scored post, its
+   recipes simply take turns.
    Retirement is deliberately slow: a recipe is retired only when it is
    well below the rest (`prune_rule: confidence`, `retire_confidence:
    0.9`), at most one per kind per run. At three posts a day most gaps are

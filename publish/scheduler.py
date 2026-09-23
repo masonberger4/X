@@ -52,6 +52,8 @@ def numbering_mode(value: Any) -> str:
     replies (the opening post stays marker-free, as rule 12 asks) with a warning."""
     if value is False:
         return "none"
+    if value is None or not str(value).strip():
+        return "replies"  # a blank `thread_numbering:` means the default, not "none"
     mode = str(value).strip().lower()
     if mode not in NUMBERING:
         log.warning("thread_numbering %r is not one of %s; using replies", value, NUMBERING)

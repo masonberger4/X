@@ -537,3 +537,112 @@ def test_designers_meet_every_format_when_the_rotations_share_a_factor(conn):
         )
         pairs.add((des.id, fmt.id))
     assert len(pairs) == 25
+
+
+def test_closer_without_url_keeps_a_childs_own_wording():
+    from swarm.genome import CLOSER_RULE, NAME_THE_SOURCE, asks_for_url
+
+    assert swarm_store.closer_without_url(swarm_store.LEGACY_CLOSER_RULE) == CLOSER_RULE
+    out = swarm_store.closer_without_url(
+        "Close with the key number, then the primary source URL verbatim."
+    )
+    assert out == f"Close with the key number. {NAME_THE_SOURCE}" and not asks_for_url(out)
+    assert swarm_store.closer_without_url("Give the URL.") == CLOSER_RULE
+    assert swarm_store.closer_without_url(out) == out  # idempotent
+
+
+def test_a_child_that_is_never_credited_loses_its_head_start_and_is_retired(conn):
+    """A child of the leading writer whose swarm keeps losing the jury is never credited:
+    its inherited head start wears off with every such run, and after max_dead_runs it is
+    retired so breeding can replace it."""
+    import random
+    from datetime import UTC, datetime
+
+    import run_evolve
+
+    ids = _setup(conn)
+    good, other = ids["default-6"], ids["wide-6"]
+    k = 0
+
+    def scored(gid, rel, winner="swarm"):
+        nonlocal k
+        k += 1
+        run = swarm_store.record_run(
+            conn,
+            item_id=f"z{k}",
+            cluster_id=None,
+            genome_id=gid,
+            winner=winner,
+            calls=0,
+            log=None,
+            draft_id=2000 + k,
+        )
+        swarm_store.upsert_fitness(
+            conn,
+            run_id=run,
+            draft_id=2000 + k,
+            genome_id=gid if winner == "swarm" else None,
+            winner=winner,
+            tweet_id=f"z{k}",
+            posted_at=f"2026-03-02T00:{k % 60:02d}:00+00:00",
+            kpi="conversation",
+            value=rel,
+            baseline=1.0,
+            relative=rel,
+        )
+
+    for _ in range(30):  # two scored writers the evidence cannot tell apart
+        scored(good, 1.8)
+        scored(other, 1.8)
+    kid = Genome(name="kid", slots=list(SEED_GENOMES[0].slots), fan_out=7, layers=2, parent_id=good)
+    swarm_store.insert_genome(conn, kid)
+    now = datetime.now(UTC)
+    fresh = swarm_store.inherited_priors(
+        conn, "writer", swarm_store.fitness_scores(conn, "writer"), prior_sd=0.3, post_sd=0.9
+    )
+    assert fresh[kid.id] > 0.3  # starts close to its parent's record
+    for _ in range(15):
+        scored(kid.id, 1.0, winner="control")  # the jury always posts the control's text
+    dead = swarm_store.dead_runs(conn, "writer", now=now, dead_after_days=7)
+    assert dead[kid.id] == 15 and dead.get(good, 0) == 0
+    worn = swarm_store.inherited_priors(
+        conn,
+        "writer",
+        swarm_store.fitness_scores(conn, "writer"),
+        prior_sd=0.3,
+        post_sd=0.9,
+        dead=dead,
+        dead_half_life=3,
+    )
+    assert worn[kid.id] < fresh[kid.id] / 20
+    rng = random.Random(2)
+    kw = {"prior_sd": 0.3, "post_sd": 0.9, "min_sd": 0.3, "explore_floor": 0.0, "now": now}
+    picks = [swarm_store.thompson_next(conn, "writer", rng=rng, **kw).name for _ in range(300)]
+    assert picks.count("kid") < picks.count("default-6") / 5
+    cfg = dict(run_evolve.load_swarm_config()["evolve"], kpi="conversation")
+    retired = run_evolve.cmd_prune(conn, cfg, run_evolve.observations(conn), dry_run=False, now=now)
+    assert kid.id in retired
+    reason = conn.execute(
+        "SELECT retired_reason FROM swarm_genomes WHERE id = ?", (kid.id,)
+    ).fetchone()[0]
+    assert "no credited post in 15" in reason
+
+
+def test_a_grandchild_starts_from_its_whole_line():
+    """A child's prior is its parent's posterior, where the parent's prior is ITS parent's:
+    a grandchild of a strong line starts near the line, not at the account average."""
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    swarm_store.ensure_tables(conn)
+    swarm_store.seed_default(conn)
+    g = swarm_store.live_genomes(conn)[0]
+    c = Genome(name="c", slots=list(g.slots), fan_out=7, layers=2, parent_id=g.id)
+    swarm_store.insert_genome(conn, c)
+    gc = Genome(name="gc", slots=list(g.slots), fan_out=8, layers=2, parent_id=c.id)
+    swarm_store.insert_genome(conn, gc)
+    from swarm import fitness
+
+    scores = {g.id: fitness.GenomeScore(g.id, 30, 1.8, [1.8] * 30)}
+    pri = swarm_store.inherited_priors(conn, "writer", scores, prior_sd=0.3, post_sd=0.9)
+    assert pri[c.id] > 0.4 and abs(pri[gc.id] - pri[c.id]) < 1e-9  # c has no posts of its own

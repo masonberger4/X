@@ -149,3 +149,15 @@ def test_a_rule_that_forbids_a_url_is_fine_and_inherited_slots_are_not_rechecked
     parent = Genome(name="old", slots=[Slot(**s) for s in legacy], fan_out=6, layers=2, id=9)
     c = mutate.validate_child(dict(child(fan_out=8), slots=legacy), parent, set())
     assert c.fan_out == 8
+
+
+def test_a_negation_counts_only_when_it_governs_the_url():
+    for asks in (
+        "No emoji; end with the URL.",
+        "Not a question: give the URL.",
+        "Close on the one-line takeaway, no emoji, then the source URL on its own.",
+        "Never skip the source URL.",
+    ):
+        assert mutate.asks_for_url(asks), asks
+    for forbids in ("Do not write a URL.", "without any link or URL at all"):
+        assert not mutate.asks_for_url(forbids), forbids

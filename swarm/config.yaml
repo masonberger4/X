@@ -75,6 +75,16 @@ evolve:
                             #   has 10 degrees of freedom to measure it
   explore_floor: 0.1        # this share of draws goes to the rotation's next genome
                             #   instead, so a recipe the leader crowds out is still judged
+  # A "dead" run can never be credited to a genome: its swarm text was not posted (the
+  # jury chose the control, or the swarm failed), a writer's single post, a designer's
+  # chart not drawn in its Style, or any run older than dead_after_days with no score
+  # (never approved or posted). A child's head start from its parent halves every
+  # dead_half_life dead runs, and a genome with no credited post after max_dead_runs dead
+  # runs is retired (0 = never), so a recipe that can never be judged does not keep a
+  # share of the stories or a place in the population.
+  dead_after_days: 7
+  dead_half_life: 3
+  max_dead_runs: 15
   format_min_posts: 8       # a format is a coarse gene: judged only after this many posts
   format_population_size: 5 # how many live formats breed keeps
   # Phase three (run_evolve.py breed): keep this many live writer genomes; each gap after

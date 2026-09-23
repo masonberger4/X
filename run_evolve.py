@@ -25,7 +25,9 @@ prune   `prune_rule: confidence` (shipped): among live genomes with at least `mi
         mean log relative is below the pooled rest's with probability at least
         1 - (1 - `retire_confidence`) / k (a t test; per look, and evolve looks again as
         posts accumulate), at most `max_retire_per_run` per kind per run, never below
-        `min_alive`. `prune_rule: median` is the old rule (below the population median).
+        `min_alive`. When that retires nobody, a genome with no credited post after
+        `max_dead_runs` runs that could never be credited to it is retired instead.
+        `prune_rule: median` is the old rule (below the population median).
         Retirement is swarm_genomes.retired_at and retired_reason. --dry-run prints and
         keeps.
 breed   Phase three. While fewer than `population_size` writer genomes (designers use
@@ -49,6 +51,7 @@ import argparse
 import logging
 import random
 import sys
+from datetime import UTC, datetime
 
 from dotenv import load_dotenv
 
@@ -199,13 +202,50 @@ def _decide(cfg: dict, kind: str, obs: list[fitness.Observation], live: list[int
     )
 
 
-def cmd_prune(conn, cfg: dict, obs: list[fitness.Observation], *, dry_run: bool) -> list[int]:
+def _never_credited(
+    conn, cfg: dict, obs: list[fitness.Observation], kind: str, live: list[int], now: datetime
+) -> fitness.PruneDecision:
+    """A live genome with no credited, scored post after `max_dead_runs` drafted runs that
+    can never be credited to it (its swarm keeps losing the jury, its chart is never drawn
+    in its Style, its drafts are never posted) can never be judged by the scores, and under
+    Thompson sampling would keep its inherited share of stories: retire it (the one with
+    most such runs; never below min_alive) so breeding can replace it."""
+    limit = int(_opt(cfg, "max_dead_runs") or 0)
+    room = len(live) - int(_opt(cfg, "min_alive"))
+    if limit <= 0 or room <= 0:
+        return fitness.PruneDecision([], {}, None)
+    credited = {s.genome_id for s in fitness.genome_scores(obs, _KEY[kind]) if s.n > 0}
+    dead = swarm_store.dead_runs(
+        conn, kind, now=now, dead_after_days=float(_opt(cfg, "dead_after_days"))
+    )
+    stuck = sorted(
+        (g for g in live if g not in credited and dead.get(g, 0) >= limit),
+        key=lambda g: -dead.get(g, 0),
+    )[:1]
+    reasons = {
+        g: f"no credited post in {dead[g]} drafted runs that could not be credited to it"
+        for g in stuck
+    }
+    return fitness.PruneDecision(stuck, reasons, None)
+
+
+def cmd_prune(
+    conn,
+    cfg: dict,
+    obs: list[fitness.Observation],
+    *,
+    dry_run: bool,
+    now: datetime | None = None,
+) -> list[int]:
     """Prune writers, designers and formats alike; returns every retired id."""
+    now = now or datetime.now(UTC)
     names = swarm_store.genome_names(conn)
     retired: list[int] = []
     for kind in _KEY:
         live = [g.id for g in swarm_store.live_genomes(conn, kind)]
         decision = _decide(cfg, kind, obs, live)
+        if not decision.retire:
+            decision = _never_credited(conn, cfg, obs, kind, live, now)
         if not decision.retire:
             log.info("prune: no %s to retire (%d live)", kind, len(live))
             continue

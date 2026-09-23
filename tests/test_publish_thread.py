@@ -67,3 +67,4 @@ def test_thread_numbering_setting_is_normalised():
     assert numbering_mode(False) == "none"  # YAML reads `off` / `no` as False
     assert numbering_mode(" ALL ") == "all" and numbering_mode("None") == "none"
     assert numbering_mode("bogus") == "replies"  # safe default for rule 12
+    assert numbering_mode(None) == "replies"  # a blank `thread_numbering:` is the default
