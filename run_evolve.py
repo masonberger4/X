@@ -339,10 +339,10 @@ def render_report(conn, cfg: dict, obs: list[fitness.Observation]) -> str:
     at = f"at {horizon:g}h after posting" if horizon > 0 else "on the newest snapshot"
     rule = str(_opt(cfg, "prune_rule"))
     confidence = float(_opt(cfg, "retire_confidence"))
+    gate = f" (retire at P(worse than the rest) >= 1 - {1 - confidence:.2f}/k)"
     lines = [
         f"{head} {at} (relative to the trailing {cfg['baseline_days']}-day median)",
-        f"Prune rule: {rule}"
-        + (f" (retire at P(worse than the rest) >= 1 - {1 - confidence:.2f}/k)" if rule != "median" else ""),
+        f"Prune rule: {rule}" + (gate if rule != "median" else ""),
     ]
     scored = [o for o in obs if o.relative is not None]
     credited = sum(o.genome_id is not None for o in scored)
