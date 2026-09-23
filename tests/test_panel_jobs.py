@@ -222,47 +222,9 @@ def test_config_steps_never_carry_the_live_flag_even_though_publish_now_does(tmp
         JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db").start(["publish"])
 
 
-def test_auto_publish_runs_the_publisher_live_and_a_quiet_run_leaves_no_trace(
-    tmp_path, monkeypatch
-):
-    """`run_publish.py --live` as its own run; one that found nothing to post is dropped
-    from the runs page and pipeline_runs, one that posted (or failed) is kept."""
+def test_the_panel_never_publishes_on_its_own():
+    """Posting is manual only: "Publish now" is the one publish run the manager builds."""
     from panel import jobs
 
-    monkeypatch.setattr(jobs, "PUBLISH_CLI", "-c")
-    cfg = _cfg(tmp_path, [_step("publish", "print('dry')")])
-    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
-    seen = {}
-
-    def fake_run_steps(steps, **kwargs):
-        seen["steps"] = list(steps)
-        for s in steps:
-            kwargs["on_start"](s)
-            kwargs["on_result"](
-                jobs.StepResult(
-                    name=s.name,
-                    argv=s.argv,
-                    started_at=jobs._now(),
-                    finished_at=jobs._now(),
-                    exit_code=0,
-                    stderr_tail=seen.get("log", ""),
-                )
-            )
-        return []
-
-    monkeypatch.setattr(jobs.runner, "run_steps", fake_run_steps)
-    seen["log"] = "INFO run_publish: nothing to post: continuous mode: min gap not met"
-    job = _wait(manager.start_publish_auto())
-    (step,) = seen["steps"]
-    assert step.argv == ["python", "-c", "--live"] and job.steps == [jobs.AUTO_PUBLISH]
-    assert job.quiet and manager.history() == []
-
-    seen["log"] = "INFO run_publish: claimed draft 3 for continuous"
-    job = _wait(manager.start_publish_auto())
-    assert not job.quiet and manager.history() == [job]
-    conn = store.connect(tmp_path / "t.db")
-    try:
-        rows = conn.execute("SELECT step FROM pipeline_runs").fetchall()
-    finally:
-        conn.close()
-    assert [r["step"] for r in rows] == [jobs.AUTO_PUBLISH]
+    assert not hasattr(JobManager, "start_publish_auto")
+    assert not hasattr(jobs, "AUTO_PUBLISH") and not hasattr(jobs, "is_quiet")

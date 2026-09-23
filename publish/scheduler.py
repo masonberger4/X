@@ -38,13 +38,10 @@ def load_publish_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg["retry"].setdefault("max_attempts", 3)
     cfg.setdefault("media", {})
     cfg["media"].setdefault("attach_images", True)
-    cfg.setdefault("auto_publish_enabled", False)
-    cfg.setdefault("auto_publish_interval_minutes", 15)
     return cfg
 
 
 CAPS = ("max_posts_per_day", "min_gap_minutes")
-AUTO_KEYS = ("auto_publish_enabled", "auto_publish_interval_minutes")
 
 
 def _save_lines(values: dict[str, Any], path: str | Path | None) -> None:
@@ -85,21 +82,6 @@ def save_caps(
         raise ValueError("max_posts_per_day must be at least 1")
     if values["min_gap_minutes"] < 0:
         raise ValueError("min_gap_minutes cannot be negative")
-    _save_lines(values, path)
-    return values
-
-
-def save_auto_publish(
-    enabled: bool, interval_minutes: int, path: str | Path | None = None
-) -> dict[str, Any]:
-    """Write the panel's automatic-publishing switch and its cadence back into
-    publish/config.yaml, the same way as the caps. The interval is at least one minute."""
-    values: dict[str, Any] = {
-        "auto_publish_enabled": bool(enabled),
-        "auto_publish_interval_minutes": int(interval_minutes),
-    }
-    if values["auto_publish_interval_minutes"] < 1:
-        raise ValueError("auto_publish_interval_minutes must be at least 1")
     _save_lines(values, path)
     return values
 

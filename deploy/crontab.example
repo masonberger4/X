@@ -4,9 +4,9 @@
 # config.yaml / ops/config.yaml (pipeline.db, pipeline.lock, backups/) resolve.
 # .env is read by python-dotenv from the repo root, so no secrets live here.
 #
-# Publishing stays a DRY RUN until you (1) set `enabled: true` on the publish
-# step in ops/config.yaml, (2) append "--live" to its argv there, and (3) set
-# PUBLISH_ENABLED=1 in .env. Nothing in the ops layer adds --live for you.
+# Publishing here is always a DRY RUN: posting is manual only (the control panel's
+# "Publish now", or run_publish.py --live run by hand). run_ops.py refuses to start
+# if any step in ops/config.yaml carries --live, so never add it there or below.
 #
 # Logs: append to logs/ops.log (create the directory once: mkdir -p logs).
 # Rotate with logrotate or `find logs -mtime +30 -delete` if it grows.

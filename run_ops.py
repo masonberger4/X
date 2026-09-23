@@ -6,8 +6,10 @@
   python run_ops.py status
   python run_ops.py prune --days N                 # ops-owned tables only
 
-Exit codes for `run`: 0 ok, 1 a required step failed, 2 the lock was held.
-Nothing here posts to X, calls the Anthropic API, or edits pipeline content.
+Exit codes for `run`: 0 ok, 1 a required step failed (or a step carries --live), 2 the lock
+was held. Nothing here posts to X, calls the Anthropic API, or edits pipeline content:
+posting is manual only, so `run` refuses to start when any selected step in
+ops/config.yaml carries run_publish.py's live flag.
 """
 
 from __future__ import annotations
@@ -32,6 +34,10 @@ from ops.config import load_ops_config
 log = logging.getLogger("run_ops")
 
 REPO_ROOT = Path(__file__).resolve().parent
+
+# Posting is manual only: a human presses "Publish now" on the panel or runs
+# run_publish.py --live by hand. A scheduled run never posts, however the config got edited.
+POSTING_FLAG = "--live"
 
 
 def _now() -> datetime:
@@ -114,6 +120,15 @@ def cmd_run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         if unknown:
             log.error("unknown step(s) in --only: %s", ", ".join(sorted(unknown)))
             return 1
+    posting = [s.name for s in steps if POSTING_FLAG in s.argv and (not only or s.name in only)]
+    if posting:
+        log.error(
+            "posting is manual only: step(s) %s carry %s; remove it from ops/config.yaml and "
+            "post from the panel's approved page (Publish now)",
+            ", ".join(posting),
+            POSTING_FLAG,
+        )
+        return 1
     tail = int(cfg.get("run_log_tail_chars", 4000))
 
     if args.dry_run:

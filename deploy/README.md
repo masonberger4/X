@@ -29,9 +29,12 @@ Where things live (all relative to the repo root, set in `ops/config.yaml`):
 Restore a backup (manual, on purpose): stop the timer/cron, `cp backups/pipeline-<stamp>.sqlite
 pipeline.db`, run `run_ops.py status` to confirm, start the timer again.
 
-Publishing is **off** and dry-run by default. Enable the `publish` step and add `--live` in
-`ops/config.yaml`, and set `PUBLISH_ENABLED=1` in `.env`, only after reading README's
-"Publishing (step 3)" section and confirming the bio disclosure.
+The scheduled `publish` step is a dry run and stays one: posting is **manual only**.
+`run_ops.py run` refuses to start when any step in `ops/config.yaml` carries `--live`, and
+the control panel has no automatic publisher. A post goes out only when a human presses
+"Publish now" on the approved page (or runs `run_publish.py --live` by hand), with
+`PUBLISH_ENABLED=1` in `.env`; read README's "Publishing (step 3)" section and confirm the
+bio disclosure first.
 
 ## Windows (Task Scheduler)
 

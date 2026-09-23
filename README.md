@@ -32,11 +32,11 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/` | health checks, the last outcome of every orchestrator step, row counts, database size, latest backup |
 | `/sources` | every configured ingest source with its freshness, last error and item counts |
 | `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline; one "Ingest and score" button |
-| `/publishing` | approved and waiting, what has posted, any partial thread needing a human, a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept) and the "Automatic publishing" switch (`auto_publish_enabled` / `auto_publish_interval_minutes`, `save_auto_publish`): while the app runs, `panel/autopublish.py` starts `run_publish.py --live` every interval through `JobManager.start_publish_auto`, still gated by `PUBLISH_ENABLED=1`; a run that posted nothing leaves no row |
+| `/publishing` | approved and waiting, what has posted, any partial thread needing a human, a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept); no post button and no automatic publishing: posting is manual only, from the approved page's "Publish now" |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | every run's log (whichever page started it) and the checkboxes to run any enabled step; stop the one in progress |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue (its Revise box sends a draft back through the drafter with your note); the pending page has "Draft" and "Verify" buttons |
-| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), "Reopen" to send a draft that has not gone out back to pending (`POST /drafts/{id}/reopen`; refused for a posted, partial or claimed draft), and when automatic publishing is on, when its next run is due |
+| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), and "Reopen" to send a draft that has not gone out back to pending (`POST /drafts/{id}/reopen`; refused for a posted, partial or claimed draft) |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
@@ -44,8 +44,8 @@ step 1's own `db.Database` API — the same one `digest.py` uses, and the run bu
 `ops/config.yaml`'s steps through `ops/runner.py` under the same `ops/lock.py` lock
 cron takes, so a run started in the browser is the run cron would have started. A step
 disabled in `ops/config.yaml` is skipped, never run; the shipped `publish` step runs
-`run_publish.py` as a dry run (no `--live`), so nothing posts on a schedule until the
-human enables it. The run buttons sit on the pages they affect (feed, pending, approved)
+`run_publish.py` as a dry run (no `--live`), and posting is manual only: nothing posts on a
+schedule, and `run_ops.py run` refuses any configured step that carries `--live`. The run buttons sit on the pages they affect (feed, pending, approved)
 and every log stays on `/runs`. The one argv the panel builds itself is the approved
 page's "Publish now" (`panel/jobs.py:start_publish_now`): `run_publish.py --live --now
 --draft ID` for the draft the human pointed at, which still posts nothing unless
@@ -142,7 +142,7 @@ pythonw run_desktop.py          # the same panel in a native window, no console 
 pyinstaller deploy/desktop.spec # build dist/Pipeline: Pipeline.exe + pipeline-cli.exe, no Python needed
 python pipeline_cli.py run_ops.py status   # what the exe runs steps with; works from a checkout too
 python run_publish.py           # DRY RUN (default): print what would post and when
-python run_publish.py --live    # posts only if PUBLISH_ENABLED=1 is also set
+python run_publish.py --live    # by hand only; posts only if PUBLISH_ENABLED=1 is also set
 python run_publish.py --live --breaking   # only FDA / company-approval items
 python run_publish.py --live --now        # ignore slots, post the top candidate once
 ```
@@ -153,8 +153,8 @@ Common flags: `--config PATH` picks another root `config.yaml` (`run_ingest`,
 on DEBUG logging everywhere.
 
 Suggested cron: `run_ingest.py` every 30 min, `run_score.py` hourly, read
-`digest.py` daily, `run_publish.py --live` every 15 min, `run_feedback.py
-snapshot` daily. Or let `run_ops.py run` drive the whole sequence (step 5).
+`digest.py` daily, `run_feedback.py snapshot` daily; never schedule
+`run_publish.py --live`, posting is manual only. Or let `run_ops.py run` drive the whole sequence (step 5).
 
 ## How it works
 
@@ -317,7 +317,9 @@ breaking-news rules live in `publish/config.yaml`, along with its own
 `timezone:` — the zone the slot hours are read in (behaviour, not display; keep
 it equal to the root `timezone:`, see [Display time zone](#display-time-zone)). With `slots: []` (the
 shipped value) there are no windows: every run posts the top candidate once
-`min_gap_minutes` has passed and the daily cap is not reached.
+`min_gap_minutes` has passed and the daily cap is not reached. Posting is manual only:
+a human runs `run_publish.py --live` or presses the panel's "Publish now"; the panel has no
+automatic publisher and `run_ops.py run` refuses a configured step that carries `--live`.
 
 Safety gates, all of which must hold before a single tweet is sent:
 
@@ -406,9 +408,8 @@ python run_ops.py prune --days 90     # ops-owned tables only (pipeline_runs, he
 
 Settings live in `ops/config.yaml` (step order, per-step `timeout_seconds` where 0 means
 no limit, as `verify` uses, health thresholds and budget caps, backup dir/keep, alert channels and cooldown). The `publish` step is
-disabled there and its argv is the dry-run default; enable it and add `--live`
-yourself, together with `PUBLISH_ENABLED=1`, after reading the publishing section
-above. Steps whose CLI has not merged yet are skipped with a warning.
+a dry run and stays one: posting is manual only, so `run_ops.py run` refuses to start when
+any step carries `--live` (post from the panel's approved page instead). Steps whose CLI has not merged yet are skipped with a warning.
 
 Health checks: sources (error / never ran / stale), staleness of ingest, score
 and draft, unscored backlog and pending-draft age, per-day scoring and drafting
