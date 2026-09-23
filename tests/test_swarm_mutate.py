@@ -120,3 +120,17 @@ def test_breed_designer_swaps_palettes_and_flips_multi_colour():
         if changed[0] == "palette":
             assert after["palette"] in PALETTES and after["palette"] != "navy"
     assert {"palette", "multi_colour"} <= seen
+
+
+def test_a_child_may_not_ask_for_a_url():
+    slots = [s.__dict__ for s in G.slots]
+    slots[-1] = {"name": "closer", "rule": "End on the source URL verbatim."}
+    with pytest.raises(mutate.ChildError, match="URL"):
+        mutate.validate_child(child(slots=slots), G, set())
+
+
+def test_the_breeder_is_told_the_real_kpi_and_that_only_the_head_counts():
+    system = mutate.mutation_system("conversation")
+    assert "impressions" not in system and "replies x3" in system
+    assert "FIRST post" in system
+    assert "median likes" in mutate.mutation_system("likes")

@@ -433,8 +433,9 @@ def fetch_latest_feedback_report(conn: sqlite3.Connection) -> dict[str, Any] | N
 
 def fetch_swarm_population(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """Step 9's swarm_genomes with each row's fitness (swarm_fitness: one row per posted
-    run with a `relative` score, credited to genome_id for writers and designer_id for
-    designers). Read-only; [] when swarm_genomes is absent. One dict per genome:
+    run with a `relative` score, credited to genome_id for writers, designer_id for
+    designers and format_id for formats; a NULL id means that genome did not shape the
+    post). Read-only; [] when swarm_genomes is absent. One dict per genome:
     id, name, kind, parent_id, parent_name, created_at, retired_at, retired_reason, notes,
     posts (scored), median_relative, fan_out, layers, slots (writers), style (designers),
     shape, visuals, anchors, min_posts, max_posts (formats)."""
@@ -462,6 +463,8 @@ def fetch_swarm_population(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 rel.setdefault(("writer", int(f["genome_id"])), []).append(float(f["relative"]))
             if f["designer_id"] is not None:
                 rel.setdefault(("designer", int(f["designer_id"])), []).append(float(f["relative"]))
+            if f["format_id"] is not None:
+                rel.setdefault(("format", int(f["format_id"])), []).append(float(f["relative"]))
     out = []
     for r in rows:
         try:

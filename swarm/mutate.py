@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from draft.chart import Style
 from draft.drafter import CallFn, call_anthropic, parse_json_response
 from draft.schema import ANCHOR_WORDS, MAX_VISUALS, SHAPES, THREAD_MAX
+from feedback.models import CONVERSATION, CONVERSATION_WEIGHTS
 from swarm.genome import (
     CLOSER,
     HOOK,
@@ -42,23 +44,43 @@ class Parent:
     threads: list[tuple[float, list[str]]]  # (relative, thread) best first
 
 
-MUTATION_SYSTEM = (
-    "You breed writing recipes for an X account on the business and investing side of "
-    "immuno-oncology biotech, written as a hedge-fund immuno-oncology analyst. A recipe "
-    "(genome) is a list of SLOTS, one per post of a thread, each with a one-line rule for "
-    "the cheap model that writes that post, plus fan_out (how many candidates per slot) and "
-    "layers (1 = candidates only; 2+ = rounds where writers see and improve each other's "
-    "candidates). You are shown the current best genomes with their scores (median "
-    "impressions relative to the account's trailing median; 1.0 is average) and their "
-    "best posts. Write ONE child of the parent named in the request that varies EXACTLY ONE "
-    "thing: reword one slot's rule, or split one slot into two, or merge two adjacent "
-    "slots, or change fan_out, or change layers. Everything else stays identical. Never "
-    "add a rule that asks for advice, price targets, hype or numbers not in the source; "
-    "the hard rules are enforced in code and a child that fights them just loses. "
-    'Answer with JSON only: {"name": "<short-kebab-name>", "change": "<one line>", '
-    '"fan_out": <int>, "layers": <int>, "slots": [{"name": "...", "rule": '
-    '"..."}, ...]}.'
-)
+def kpi_description(kpi: str) -> str:
+    """What the score measures, in words, for the breeder."""
+    if kpi == CONVERSATION:
+        parts = ", ".join(f"{name} x{w:g}" for name, w in CONVERSATION_WEIGHTS.items())
+        return f"weighted conversation ({parts})"
+    return kpi
+
+
+def mutation_system(kpi: str = CONVERSATION) -> str:
+    """The breeder's system prompt, naming the KPI the genomes are actually selected on."""
+    return (
+        "You breed writing recipes for an X account on the business and investing side of "
+        "immuno-oncology biotech, written as a hedge-fund immuno-oncology analyst. A recipe "
+        "(genome) is a list of SLOTS, one per post of a thread, each with a one-line rule "
+        "for the cheap model that writes that post, plus fan_out (how many candidates per "
+        "slot) and layers (1 = candidates only; 2+ = rounds where writers see and improve "
+        "each other's candidates). You are shown the current best genomes with their scores "
+        f"(median {kpi_description(kpi)} of the thread's FIRST post relative to the "
+        "account's trailing median; 1.0 is average) and their best posts. Only the first "
+        "post is measured, and it is the only one X shows people who do not follow the "
+        "account, so the hook slot matters most. Write ONE child of the parent named in the "
+        "request that varies EXACTLY ONE thing: reword one slot's rule, or split one slot "
+        "into two, or merge two adjacent slots, or change fan_out, or change layers. "
+        "Everything else stays identical. Never add a rule that asks for advice, price "
+        "targets, hype, links or numbers not in the source; the hard rules are enforced in "
+        "code and a child that fights them just loses. "
+        'Answer with JSON only: {"name": "<short-kebab-name>", "change": "<one line>", '
+        '"fan_out": <int>, "layers": <int>, "slots": [{"name": "...", "rule": '
+        '"..."}, ...]}.'
+    )
+
+
+MUTATION_SYSTEM = mutation_system()
+
+# A slot rule may never ask for a link: rule 2 bans them, so every candidate would be
+# discarded (or, if it complied, the rule would be dead text the judges score against).
+_URL_RULE = re.compile(r"\burls?\b|https?://", re.IGNORECASE)
 
 
 def _fmt_genome(p: Parent) -> list[str]:
@@ -156,6 +178,8 @@ def validate_child(data: Any, parent: Genome, taken_names: set[str]) -> Genome:
         raise ChildError(f"first slot must be {HOOK!r} and last {CLOSER!r}")
     if len({s.name for s in slots}) != len(slots):
         raise ChildError("slot names must be unique")
+    if linked := [s.name for s in slots if _URL_RULE.search(s.rule)]:
+        raise ChildError(f"slot rule asks for a URL, which no post may carry: {linked}")
     child = Genome(
         name=name,
         slots=slots,
@@ -180,12 +204,15 @@ def breed_writer(
     model: str,
     call: CallFn = call_anthropic,
     attempts: int = 3,
+    kpi: str = CONVERSATION,
 ) -> Genome:
-    """One strong-model call (retried on an invalid child) -> a validated child Genome."""
+    """One strong-model call (retried on an invalid child) -> a validated child Genome.
+    `kpi` is what the scores shown to the model measure (evolve.kpi)."""
     user = mutation_prompt(parents, target, taken_names)
+    system = mutation_system(kpi)
     last: Exception | None = None
     for _ in range(attempts):
-        raw = call(MUTATION_SYSTEM, user, model)
+        raw = call(system, user, model)
         try:
             return validate_child(parse_json_response(raw), target.genome, taken_names)
         except (ChildError, ValueError, json.JSONDecodeError) as exc:

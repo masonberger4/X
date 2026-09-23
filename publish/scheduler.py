@@ -38,6 +38,7 @@ def load_publish_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg["retry"].setdefault("max_attempts", 3)
     cfg.setdefault("media", {})
     cfg["media"].setdefault("attach_images", True)
+    cfg.setdefault("thread_numbering", "replies")
     return cfg
 
 

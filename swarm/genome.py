@@ -53,9 +53,18 @@ class Genome:
 
 
 # Slot names the engine gives special hard rules to (cells.py): the first post must carry
-# the preprint label for a preprint, the last must carry the source URL.
+# the preprint label for a preprint and is held to the opener rule (rule 12). The closer
+# ends the thread; like every post it carries no link (rule 2).
 HOOK = "hook"
 CLOSER = "closer"
+
+# The closer's rule. It once ended "and then the primary source URL verbatim", which rule 2
+# then threw away; swarm/store.ensure_tables rewrites a live genome still carrying that.
+CLOSER_RULE = (
+    "Close in one sentence: the question the data leave open, or the next dated catalyst "
+    "the source names, and why it decides the story. Name the source in words (the "
+    "journal, the company or the meeting). If the source is a preprint, say so here too."
+)
 
 
 DEFAULT_GENOME = Genome(
@@ -96,12 +105,7 @@ DEFAULT_GENOME = Genome(
             "choice, safety signal, or what is overhyped. One post, specific, no "
             "moralising.",
         ),
-        Slot(
-            CLOSER,
-            "Close in one sentence with the one-line takeaway and then the primary "
-            "source URL verbatim on its own. If the source is a preprint, say so here "
-            "too.",
-        ),
+        Slot(CLOSER, CLOSER_RULE),
     ],
 )
 

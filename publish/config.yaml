@@ -39,6 +39,11 @@ policy:
 media:
   attach_images: true
 
+# " (n/N)" after the posts of a thread. replies (shipped): every post but the opening one,
+# which X shows to people who do not follow the account and which rule 12 keeps free of a
+# position marker (the client already shows the thread). all: every post. none: no numbers.
+thread_numbering: replies
+
 # A draft whose attempt posted nothing (the image upload or the first tweet failed, and
 # the error was not a permission or content problem) goes back to approved on its own, so
 # the next publish run you start tries it again; after max_attempts failed attempts it

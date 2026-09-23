@@ -478,6 +478,11 @@ replies, since that hour decides how far X shows it.
    python run_publish.py --live --limit 1    # at most one post this run
    python run_publish.py --live --now --draft 17  # post draft 17 now (what the panel's "Publish now" runs)
    ```
+   A thread's replies are numbered " (2/4)", " (3/4)" and so on; its first post goes out
+   exactly as approved, with no " (1/4)", because the drafter keeps a position
+   marker off the opening post (rule 12) and the first post is the one X shows
+   people who do not follow the account (`thread_numbering` in
+   `publish\config.yaml`: `replies`, `all` or `none`).
    Every draft is a thread and is posted as one. When several drafts wait for one
    slot, the order you set on the panel's approved page (part 8) goes first;
    drafts you did not number follow it by the policy in `publish\config.yaml`.
@@ -593,6 +598,20 @@ replies, since that hour decides how far X shows it.
    python run_evolve.py breed --dry-run     # see what children would be bred
    python run_evolve.py breed --force       # breed before any post is scored
    ```
+   Each post is scored on its metrics about two days after it went out
+   (`horizon_hours: 48` in `swarm\config.yaml`), so a post from this morning
+   is not compared with week-old ones; until then it has no score. A thread's
+   own second post is not counted as a reply to it (`subtract_self_reply`).
+   A writer recipe is only credited with posts where the swarm's text was the
+   one posted (not the single drafter's) and that were not single posts; a
+   picture style only with posts that had a picture. The report's header
+   says how many posts were credited to a writer.
+   Retirement is deliberately slow: a recipe is retired only when it is
+   clearly worse than the rest (`prune_rule: confidence`,
+   `retire_confidence: 0.9`), at most one per kind per run. At three posts a
+   day most gaps are luck, and the old rule (`prune_rule: median`) retired
+   whichever recipe happened to sit below the middle, which is how the
+   population churned without getting better.
    The report's last two lines are the swarm-vs-control measurement: whether
    the posts the AI jury gave to the swarm did better on X than the ones it
    gave to the single strong drafter. `breed` replaces each retired recipe

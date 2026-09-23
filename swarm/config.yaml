@@ -37,8 +37,30 @@ evolve:
   baseline_days: 30         # a post's score is its KPI / the median KPI of the posts in
                             #   the trailing window before it, so a slow week prunes nobody
   min_baseline_posts: 3     # fewer earlier posts in the window -> no relative score yet
+  # Every post is read at the same age: its first metrics snapshot at least this many hours
+  # after posting (snapshots are daily, so in practice 48-72h). A younger post is not
+  # scored yet and is nobody's baseline, instead of a few-hours-old count being compared
+  # with week-old ones. 0 = the newest snapshot, whatever its age (the old behaviour).
+  horizon_hours: 48
+  # X counts a thread's own post 2 as a reply to the head; subtract it, so a thread head
+  # does not out-score a single post by a reply the account wrote itself.
+  subtract_self_reply: true
+  # relative = (value + smoothing) / (baseline + smoothing): a small account's zero
+  # baseline still scores, and 1 against 0 is not an infinite win. 0 = plain ratio.
+  smoothing: 1
   min_posts: 5              # a genome is judged only after this many scored posts
   min_alive: 2              # pruning never leaves fewer live genomes than this
+  # confidence (shipped): retire a genome only when its mean log score is below the rest
+  # of the population's with probability at least 1 - (1 - retire_confidence) / k (k =
+  # genomes being compared), given how noisy one post is (the spread is measured, never
+  # taken below min_log_sd), and at most max_retire_per_run per kind per run. At a few
+  # posts a day five posts rarely settle it, so expect few retirements, each one deserved.
+  # median: the old rule, retire whatever sits below the population median, which at
+  # this sample size is a coin flip.
+  prune_rule: confidence
+  retire_confidence: 0.9
+  max_retire_per_run: 1
+  min_log_sd: 0.3
   format_min_posts: 8       # a format is a coarse gene: judged only after this many posts
   format_population_size: 5 # how many live formats breed keeps
   # Phase three (run_evolve.py breed): keep this many live writer genomes; each gap after

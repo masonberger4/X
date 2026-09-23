@@ -574,14 +574,22 @@ controls are "Publish now" and "Set schedule" on the approved page.
 **Phase two: fitness from X** (`run_evolve.py`, no network). Three seed
 genomes (`default-6`, `wide-6` with more proposals and no synthesis layer,
 `deep-4` with four slots and two synthesis layers) are drafted round-robin
-(`swarm.store.next_genome`: the live genome with the fewest runs). Once
-`run_feedback.py snapshot` has metrics, `run_evolve.py score` gives every
-posted swarm draft the head tweet's KPI (`evolve.kpi`), the median KPI of the
-posts in the trailing `baseline_days` before it, and their ratio (a slow week
-prunes nobody), stored in `swarm_fitness`. `prune` retires a live genome with
-at least `min_posts` scored posts whose median ratio is below the population
-median, never below `min_alive` live genomes (`swarm_genomes.retired_at`,
-`retired_reason`). `report` prints the per-genome table and the
+(`swarm.store.next_genome`: the live genome with the fewest runs since the
+newest one was born; designers and formats go to the one this writer has met
+least). Once `run_feedback.py snapshot` has metrics, `run_evolve.py score`
+gives every posted swarm draft the head tweet's KPI (`evolve.kpi`) read on its
+first snapshot at least `horizon_hours` old (48; younger posts wait), without
+the thread's own post-2 reply (`subtract_self_reply`), the median KPI of the
+posts in the trailing `baseline_days` before it, and their smoothed ratio
+`(value + smoothing) / (baseline + smoothing)` (a slow week prunes nobody),
+stored in `swarm_fitness`. Credit follows authorship: `swarm_fitness.genome_id`
+is NULL when the control's text was posted or the format was a single post, and
+`designer_id` when the format had no picture. `prune` (`prune_rule:
+confidence`) retires a live genome with at least `min_posts` credited, scored
+posts only when its mean log ratio is below the rest's with probability
+`1 - (1 - retire_confidence) / k`, at most `max_retire_per_run` per kind per run
+and never below `min_alive` live genomes (`swarm_genomes.retired_at`,
+`retired_reason`); `prune_rule: median` is the old below-the-median rule. `report` prints the per-genome table and the
 swarm-vs-control measurement: median ratio of posts the jury gave to the swarm
 against posts it gave to the control. `fetch_head_metrics` in `swarm/store.py`
 is the one read of step 3's `posts` and step 4's `tweet_metrics`, empty when

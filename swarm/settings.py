@@ -20,7 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "control": {"enabled": True},
     "formats": {"long_max_chars": 4000, "long_section_chars": 700},
     "evolve": {
-        "kpi": "impressions",
+        "kpi": "conversation",
         "baseline_days": 30,
         "min_baseline_posts": 3,
         "min_posts": 5,
@@ -30,6 +30,13 @@ DEFAULTS: dict[str, Any] = {
         "mutation_model": "",
         "format_min_posts": 8,
         "format_population_size": 5,
+        "horizon_hours": 48,
+        "subtract_self_reply": True,
+        "smoothing": 1.0,
+        "prune_rule": "confidence",
+        "retire_confidence": 0.9,
+        "max_retire_per_run": 1,
+        "min_log_sd": 0.3,
     },
 }
 

@@ -8,7 +8,11 @@ swarm_variants  the swarm and control drafts of a run as JSON, whether each pass
                 rules, so phase two can score the jury against X
 swarm_fitness   phase two: one row per posted run, the head tweet's KPI, the trailing
                 baseline and the relative score (run_evolve.py); phase three adds the
-                designer credited alongside the writer genome
+                designer credited alongside the writer genome. genome_id and designer_id
+                here are the genomes CREDITED with the post, NULL when that genome did not
+                shape it (the control's text was posted, a single post never ran the
+                writer's slots, a format with no picture never used the designer);
+                swarm_runs keeps what was drawn
 swarm_genomes.kind (phase three, guarded migration) is 'writer' or 'designer'; a designer
 row's genome_json is swarm.genome.Designer. swarm_runs.designer_id records which one drew
 the picture.
@@ -31,7 +35,16 @@ from typing import Any
 
 from draft.schema import Draft
 from feedback import models as feedback_models
-from swarm.genome import SEED_DESIGNERS, SEED_FORMATS, SEED_GENOMES, Designer, FormatGenome, Genome
+from swarm.genome import (
+    CLOSER,
+    CLOSER_RULE,
+    SEED_DESIGNERS,
+    SEED_FORMATS,
+    SEED_GENOMES,
+    Designer,
+    FormatGenome,
+    Genome,
+)
 
 ROLES = ("swarm", "control")
 KINDS = ("writer", "designer", "format")
@@ -111,7 +124,40 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE swarm_runs ADD COLUMN format_id INTEGER")
     if "format_id" not in _columns(conn, "swarm_fitness"):
         conn.execute("ALTER TABLE swarm_fitness ADD COLUMN format_id INTEGER")
+    _rewrite_url_closers(conn)
     conn.commit()
+
+
+def _rewrite_url_closers(conn: sqlite3.Connection) -> None:
+    """Rule 2 bans every link, but writer genomes seeded or bred before it still tell their
+    closer to end on the source URL, a job no candidate may do. Rewrite that one rule in
+    place on live writers (same id, so round-robin counts and fitness stay), noting it.
+    Idempotent: a closer that no longer mentions a URL is left alone."""
+    rows = conn.execute(
+        "SELECT id, genome_json FROM swarm_genomes WHERE retired_at IS NULL AND kind = 'writer'"
+    ).fetchall()
+    for gid, text in rows:
+        try:
+            d = json.loads(text)
+        except ValueError:
+            continue
+        slots = d.get("slots") or []
+        changed = False
+        for slot in slots:
+            if (
+                isinstance(slot, dict)
+                and slot.get("name") == CLOSER
+                and "url" in str(slot.get("rule", "")).lower()
+            ):
+                slot["rule"] = CLOSER_RULE
+                changed = True
+        if changed:
+            note = "closer rule rewritten without the source URL (rule 2)"
+            d["notes"] = f"{d.get('notes', '')} {note}".strip()
+            conn.execute(
+                "UPDATE swarm_genomes SET genome_json = ? WHERE id = ?",
+                (json.dumps(d, ensure_ascii=False), gid),
+            )
 
 
 def _kind_of(obj: Genome | Designer | FormatGenome) -> str:
@@ -171,35 +217,62 @@ def active_genome(conn: sqlite3.Connection) -> Genome:
     return _genome_row(row)
 
 
-def _next_row(conn: sqlite3.Connection, kind: str, run_column: str) -> sqlite3.Row | tuple:
+def _next_row(
+    conn: sqlite3.Connection, kind: str, run_column: str, writer_id: int | None = None
+) -> sqlite3.Row | tuple:
+    """The live row of `kind` with the fewest runs since the newest live row of that kind
+    was born (lowest id on a tie). Counting from the last birth restarts an even rotation
+    each time a child joins, instead of handing the child every story until it has caught
+    up with incumbents' lifetime counts. With `writer_id`, runs paired with that writer
+    are counted first, so each writer meets every designer and format in turn instead of
+    the same fixed few (the rotations would otherwise lock into step)."""
     seed_default(conn)
+    pair = (
+        f"(SELECT COUNT(*) FROM swarm_runs r WHERE r.{run_column} = g.id "
+        "AND r.genome_id = :writer AND r.created_at >= :since)"
+        if writer_id is not None
+        else "0"
+    )
     row = conn.execute(
         f"""SELECT g.id, g.genome_json,
-                   (SELECT COUNT(*) FROM swarm_runs r WHERE r.{run_column} = g.id) AS n
-            FROM swarm_genomes g WHERE g.retired_at IS NULL AND g.kind = ?
-            ORDER BY n ASC, g.id ASC LIMIT 1""",
-        (kind,),
+                   {pair} AS paired,
+                   (SELECT COUNT(*) FROM swarm_runs r WHERE r.{run_column} = g.id
+                      AND r.created_at >= :since) AS n
+            FROM swarm_genomes g WHERE g.retired_at IS NULL AND g.kind = :kind
+            ORDER BY paired ASC, n ASC, g.id ASC LIMIT 1""",
+        {"kind": kind, "writer": writer_id, "since": _newest_birth(conn, kind)},
     ).fetchone()
     if row is None:
         raise RuntimeError(f"every swarm {kind} is retired; add one or un-retire (swarm_genomes)")
     return row
 
 
+def _newest_birth(conn: sqlite3.Connection, kind: str) -> str:
+    row = conn.execute(
+        "SELECT MAX(created_at) FROM swarm_genomes WHERE retired_at IS NULL AND kind = ?",
+        (kind,),
+    ).fetchone()
+    return str(row[0] or "")
+
+
 def next_genome(conn: sqlite3.Connection) -> Genome:
-    """Round-robin: the unretired writer genome with the fewest swarm runs (lowest id on a
-    tie), so every live genome collects observations at the same rate. Seeds if empty."""
+    """Round-robin: the unretired writer genome with the fewest swarm runs since the newest
+    live writer was born (lowest id on a tie), so every live genome collects observations
+    at the same rate, a newborn included. Seeds if empty."""
     return _genome_row(_next_row(conn, "writer", "genome_id"))
 
 
-def next_designer(conn: sqlite3.Connection) -> Designer:
-    """Round-robin over the live designers, by runs they drew the picture for."""
-    row = _next_row(conn, "designer", "designer_id")
+def next_designer(conn: sqlite3.Connection, writer_id: int | None = None) -> Designer:
+    """Round-robin over the live designers, by runs they drew the picture for; with
+    `writer_id`, the designer this writer has been paired with least goes first."""
+    row = _next_row(conn, "designer", "designer_id", writer_id)
     return Designer.from_json(row[1], id=int(row[0]))
 
 
-def next_format(conn: sqlite3.Connection) -> FormatGenome:
-    """Round-robin over the live format genomes (phase four)."""
-    row = _next_row(conn, "format", "format_id")
+def next_format(conn: sqlite3.Connection, writer_id: int | None = None) -> FormatGenome:
+    """Round-robin over the live format genomes (phase four); with `writer_id`, the format
+    this writer has been paired with least goes first."""
+    row = _next_row(conn, "format", "format_id", writer_id)
     return FormatGenome.from_json(row[1], id=int(row[0]))
 
 
@@ -359,7 +432,7 @@ def _metrics(values: Sequence[Any]) -> dict[str, int]:
 
 @dataclass
 class HeadMetric:
-    """A posted swarm run: the thread's first tweet and its latest metric snapshot."""
+    """A posted swarm run: the thread's first tweet and the metric snapshot it is scored on."""
 
     run_id: int
     draft_id: int
@@ -371,32 +444,102 @@ class HeadMetric:
     metrics: dict[str, int]
     designer_id: int | None = None
     format_id: int | None = None
+    shape: str | None = None  # the run's format shape; None before phase four
+    visuals: int | None = None  # pictures the run's format asked for
+    captured_at: str = ""
+    own_replies: int = 0  # the account's own post 2, a reply to this head (0 or 1)
 
 
-def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
-    """Every swarm run whose draft was posted and has at least one metrics snapshot: the
-    head tweet (position 1, status 'posted') with its newest non-deleted snapshot. Read-only
-    on step 3's `posts` and step 4's `tweet_metrics`; [] when either is missing."""
+def _when(text: str) -> datetime:
+    """An ISO timestamp as an aware UTC datetime (a naive one is taken as UTC)."""
+    dt = datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def _format_fields(genome_json: str | None) -> tuple[str | None, int | None]:
+    if not genome_json:
+        return None, None
+    try:
+        d = json.loads(genome_json)
+        return str(d.get("shape", "thread")), int(d.get("visuals", 1))
+    except (ValueError, TypeError, AttributeError):
+        return None, None
+
+
+def pick_snapshot(snapshots: Sequence[Any], posted_at: str, horizon_hours: float) -> Any | None:
+    """The snapshot a head is scored on. With horizon_hours <= 0, the newest one. Otherwise
+    the EARLIEST one taken at least horizon_hours after posting, so every post is compared
+    at about the same age; None while the post is younger than that (it is not scored yet,
+    and it is nobody's baseline either). `snapshots` are oldest first and carry
+    captured_at."""
+    if not snapshots:
+        return None
+    if horizon_hours <= 0:
+        return snapshots[-1]
+    posted = _when(posted_at)
+    for snap in snapshots:
+        if (_when(snap["captured_at"]) - posted).total_seconds() >= horizon_hours * 3600:
+            return snap
+    return None
+
+
+def fetch_head_metrics(
+    conn: sqlite3.Connection,
+    *,
+    horizon_hours: float = 0.0,
+    subtract_self_reply: bool = False,
+) -> list[HeadMetric]:
+    """Every swarm run whose draft was posted and has a metrics snapshot to be scored on: the
+    head tweet (position 1, status 'posted') with the snapshot `pick_snapshot` chooses
+    among its non-deleted ones (`horizon_hours` 0: the newest, as before). With
+    `subtract_self_reply`, the head's reply count loses the account's own post 2, which X
+    counts as a reply to the head, so a thread does not out-score a single post by one
+    reply it wrote itself. Each head also carries its format's shape and picture count
+    (swarm_genomes via swarm_runs.format_id, this step's own tables) for crediting.
+    Read-only on step 3's `posts` and step 4's `tweet_metrics`; [] when either is
+    missing."""
     if not {"posts", "tweet_metrics"} <= _tables(conn):
         return []
     rows = conn.execute(
         """SELECT r.id AS run_id, r.draft_id, r.genome_id, r.winner,
-                  p.tweet_id, p.posted_at,
-                  m.captured_on, m.impressions, m.likes, m.reposts, m.replies, m.quotes,
-                  m.bookmarks, r.designer_id, r.format_id
+                  p.tweet_id, p.posted_at, r.designer_id, r.format_id,
+                  fg.genome_json AS format_json,
+                  (SELECT COUNT(*) FROM posts q
+                    WHERE q.draft_id = r.draft_id AND q.position = 2
+                      AND q.status = 'posted' AND q.tweet_id IS NOT NULL) AS own_replies
            FROM swarm_runs r
            JOIN posts p ON p.draft_id = r.draft_id AND p.position = 1
                         AND p.status = 'posted' AND p.tweet_id IS NOT NULL
                         AND p.posted_at IS NOT NULL
-           JOIN tweet_metrics m ON m.id = (
-                SELECT id FROM tweet_metrics
-                WHERE tweet_id = p.tweet_id AND deleted = 0
-                ORDER BY captured_on DESC, id DESC LIMIT 1)
+           LEFT JOIN swarm_genomes fg ON fg.id = r.format_id
            WHERE r.draft_id IS NOT NULL
            ORDER BY p.posted_at, r.id"""
     ).fetchall()
+    if not rows:
+        return []
+    snaps: dict[str, list[dict[str, Any]]] = {}
+    for m in conn.execute(
+        """SELECT m.tweet_id, m.captured_on, m.captured_at, m.impressions, m.likes, m.reposts,
+                  m.replies, m.quotes, m.bookmarks
+           FROM tweet_metrics m
+           WHERE m.deleted = 0 AND m.tweet_id IN (
+                SELECT tweet_id FROM posts WHERE position = 1 AND status = 'posted')
+           ORDER BY m.tweet_id, m.captured_on, m.id"""
+    ).fetchall():
+        snaps.setdefault(str(m[0]), []).append(
+            {"captured_on": str(m[1]), "captured_at": str(m[2]), "values": tuple(m[3:9])}
+        )
     out: list[HeadMetric] = []
     for r in rows:
+        snap = pick_snapshot(snaps.get(str(r[4]), []), str(r[5]), horizon_hours)
+        if snap is None:
+            continue
+        values = list(snap["values"])
+        own = int(r[9] or 0)
+        if subtract_self_reply and own:
+            i = METRIC_COLUMNS.index("replies")
+            values[i] = max(0, int(values[i] or 0) - own)
+        shape, visuals = _format_fields(r[8])
         out.append(
             HeadMetric(
                 run_id=int(r[0]),
@@ -405,10 +548,14 @@ def fetch_head_metrics(conn: sqlite3.Connection) -> list[HeadMetric]:
                 winner=r[3],
                 tweet_id=str(r[4]),
                 posted_at=str(r[5]),
-                captured_on=str(r[6]),
-                metrics=_metrics(r[7:13]),
-                designer_id=int(r[13]) if r[13] is not None else None,
-                format_id=int(r[14]) if r[14] is not None else None,
+                captured_on=snap["captured_on"],
+                metrics=_metrics(values),
+                designer_id=int(r[6]) if r[6] is not None else None,
+                format_id=int(r[7]) if r[7] is not None else None,
+                shape=shape,
+                visuals=visuals,
+                captured_at=snap["captured_at"],
+                own_replies=own,
             )
         )
     return out
@@ -418,13 +565,16 @@ def fetch_winning_threads(
     conn: sqlite3.Connection, genome_id: int, limit: int = 3
 ) -> list[tuple[float, list[str]]]:
     """The genome's best-scoring posted threads, (relative, thread) best first, from step 2's
-    drafts.thread_json. Read-only; [] when drafts is missing or nothing is scored yet."""
+    drafts.thread_json. Only posts the genome is credited with (swarm_fitness.genome_id),
+    and only ones the jury gave to the swarm, so the breeder never studies the control's
+    text as this genome's work. Read-only; [] when drafts is missing or nothing is scored
+    yet."""
     if "drafts" not in _tables(conn):
         return []
     rows = conn.execute(
         """SELECT f.relative, d.thread_json FROM swarm_fitness f
            JOIN drafts d ON d.id = f.draft_id
-           WHERE f.genome_id = ? AND f.relative IS NOT NULL
+           WHERE f.genome_id = ? AND f.relative IS NOT NULL AND f.winner = 'swarm'
            ORDER BY f.relative DESC, f.run_id DESC LIMIT ?""",
         (genome_id, limit),
     ).fetchall()

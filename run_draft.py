@@ -113,8 +113,9 @@ def draft_with_swarm(
         handles=tuple(handles),
     )
     genome = swarm_store.next_genome(conn)
-    designer = swarm_store.next_designer(conn)
-    format_genome = swarm_store.next_format(conn)
+    # paired with the writer, so each writer meets every designer and format in turn
+    designer = swarm_store.next_designer(conn, writer_id=genome.id)
+    format_genome = swarm_store.next_format(conn, writer_id=genome.id)
     long_max = int((swarm_cfg.get("formats") or {}).get("long_max_chars", 4000))
     fmt = format_genome.to_format(long_max)
     log.info(

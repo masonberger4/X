@@ -334,7 +334,9 @@ step carrying `--live`).
   `schedule` (claim row, one per draft) and `posts` (one row per tweet). Its
   settings live in `publish/config.yaml`, not the root config. Posting is
   manual only (see the top of this file) and idempotent via the claim; partial threads
-  are never retried automatically.
+  are never retried automatically. `publish/thread.py` appends " (n/N)" to a thread's
+  replies only (`thread_numbering: replies` in `publish/config.yaml`), never to the
+  opening post rule 12 keeps marker-free.
   The queue touches those two tables only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
   missing) to label and hide posted drafts on the approved page, and, on a reopen or a
@@ -418,12 +420,25 @@ step carrying `--live`).
   `swarm_fitness`; its one read of another step's tables is `fetch_head_metrics`
   (step 3 `posts` + step 4 `tweet_metrics`, read-only, empty when missing).
   `run_draft.py` drafts the live genomes round-robin (`next_genome`; the seeds are
-  `swarm/genome.py:SEED_GENOMES`) and picks a designer the same way (`next_designer`,
+  `swarm/genome.py:SEED_GENOMES`), counting runs since the newest live genome of that kind
+  was born so a child joins an even rotation, and picks the designer and format this
+  writer has met least (`next_designer` / `next_format(writer_id=)`,
   `swarm_runs.designer_id`; `images.attach_chart(style=)` is the Style the first render
   starts from). **A genome owns its topology**: `swarm/config.yaml` `fan_out`/`layers`
   are only the fallback for a row without them. `swarm/fitness.py` is pure (relative
-  KPI against the trailing median, per-genome scores keyed by `genome_id` or
-  `designer_id`, `bet_summary`, `prune`). `swarm/mutate.py` breeds: `breed_writer` is
+  KPI `(value + evolve.smoothing) / (baseline + smoothing)` against the trailing median,
+  per-genome scores keyed by `genome_id`, `designer_id` or `format_id`, `bet_summary`,
+  `prune_confident` and the old median `prune`). **Fitness measures what a genome
+  did**: `fetch_head_metrics` reads each head on its first snapshot at least
+  `evolve.horizon_hours` old (younger posts are not scored and are nobody's baseline)
+  and, with `evolve.subtract_self_reply`, without the thread's own post-2 reply;
+  `run_evolve.credit` blanks `swarm_fitness.genome_id` when the control's text was posted
+  or the format was a single post (`fitness.writer_credited`) and `designer_id` when the
+  format had no picture (`designer_credited`), so the report, breeding, pruning and the
+  panel count a genome's own posts only. `evolve.prune_rule: confidence` retires a genome
+  only when its mean log relative is below the pooled rest's with probability
+  `1 - (1 - retire_confidence) / k`, at most `max_retire_per_run` per kind per run;
+  `median` is the old coin-flip rule. `swarm/mutate.py` breeds: `breed_writer` is
   the one strong-model call (through `call_anthropic`) and `validate_child` /
   `diff_count` enforce exactly one change inside the bounds in `swarm/genome.py`;
   `breed_designer` is pure code (one Style knob stepped, a flag flipped or the palette
