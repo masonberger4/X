@@ -5,8 +5,10 @@ Usage: python run_publish.py [--dry-run | --live] [--now] [--breaking] [--limit 
        python run_publish.py --release-failed [DRAFT_ID ...]
 
 Default is --dry-run: prints what WOULD be posted and when, posts nothing. --live posts
-only if PUBLISH_ENABLED=1 is also set in the environment. Meant for cron every 15 min; a
-draft is claimed in a transaction before posting, so overlapping runs cannot post it twice.
+only if PUBLISH_ENABLED=1 is also set in the environment. Posting is manual only: --live is
+run by a human, by hand or through the panel's "Publish now"; nothing runs it on a timer
+(run_ops.py refuses a configured step that carries it). A draft is claimed in a transaction
+before posting, so overlapping runs cannot post it twice.
 
 --draft DRAFT_ID considers only that approved draft (the control panel's "Publish now"
 runs `--live --now --draft ID`; the caps in publish/config.yaml still apply). The order set
@@ -117,7 +119,7 @@ def choose(
         return None, None, "no breaking items"
     if not slots:
         # Continuous mode: no slots configured, so every run posts the top candidate as
-        # soon as the daily cap and the minimum gap allow (the cron cadence sets the pace).
+        # soon as the daily cap and the minimum gap allow (the human running it sets the pace).
         if blocked:
             return None, None, f"continuous mode: {blocked}"
         return rank(approved, policy)[0], "continuous", "continuous mode: top candidate"

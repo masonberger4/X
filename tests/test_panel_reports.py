@@ -159,13 +159,15 @@ def test_publishing_shows_posts_and_what_needs_a_human(client, conn):
 
 
 def test_publishing_never_offers_to_post(client):
-    """The forms on the page edit settings (the two caps, the automatic-publishing
-    switch); nothing here posts a draft itself."""
+    """The one form on the page edits the two caps; nothing here posts a draft itself, and
+    there is no automatic publishing to switch on (posting is manual only)."""
     body = client.get("/publishing").text
-    assert body.count("<form") == 2
-    assert 'action="/publishing/caps"' in body and 'action="/publishing/auto"' in body
+    assert body.count("<form") == 1
+    assert 'action="/publishing/caps"' in body
+    assert "/publishing/auto" not in body and "Automatic publishing" not in body
     assert "/publishing/now" not in body
     assert "--live" not in body
+    assert client.post("/publishing/auto", data={"enabled": "1"}).status_code in (404, 405)
 
 
 def test_feedback_charts_the_follower_trend_and_lists_the_proposals(client, conn):

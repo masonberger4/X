@@ -441,32 +441,37 @@ source only when it is due, and score only scores what is new.
 
 ## Part 5. Publishing
 
+Posting is **manual only**. A draft goes out when you press "Publish now" next
+to it on the panel's approved page (part 8), or when you run the publisher
+yourself with `--live`. Nothing posts on a timer: the panel has no automatic
+publisher, and the scheduler (part 6) refuses to run if any step in
+`ops\config.yaml` carries `--live`. So you choose the moment each post goes
+out; pick a time when you can stay with it for the first hour and answer
+replies, since that hour decides how far X shows it.
+
 1. Rehearse. With no flags nothing is sent; it prints what would post and
    when, based on approved drafts and the slots in `publish\config.yaml`.
    ```
    python run_publish.py
    ```
-   Run this a few times over a couple of days until the plan looks right.
-   The shipped caps are `max_posts_per_day: 3` and `min_gap_minutes: 15`, and
-   the shipped slots are `"05:30"`, `"06:30"` and `"12:30"` local time: US East
-   morning, London early afternoon, and the US afternoon. Both settings say the
-   same thing, which is that a post wants to land where its readers are awake to
-   reply to it in its first hour, and that three posts a day nobody answers
-   teach the ranker to skip the account. Raise the cap if the queue should drain
-   faster, and set `slots: []` for continuous mode: each run then posts the top
-   approved draft as soon as `min_gap_minutes` has passed since the last post
-   and the daily cap allows, so a cron every 15 minutes drains the queue one
-   draft per gap, day and night.
+   The shipped caps are `max_posts_per_day: 3` and `min_gap_minutes: 15`; they
+   are a safety limit on every post, "Publish now" included. Three a day is a
+   ceiling, not a target: three posts a day nobody answers teach the ranker to
+   skip the account. The shipped `slots: []` means a hand-run
+   `run_publish.py --live` (without `--now`) posts the top approved draft as
+   soon as the gap and the daily cap allow; list times under `slots:` (e.g.
+   `"08:30"`) to have it post only inside those windows. "Publish now" ignores
+   slots.
 2. Go live. Two things are required, so nothing posts by accident: in `.env`
    ```
    PUBLISH_ENABLED=1
    ```
-   and the `--live` flag:
+   and the `--live` flag, which only you ever pass (the panel's "Publish now"
+   passes it for the one draft you pressed it on):
    ```
-   python run_publish.py --live
+   python run_publish.py --live --now --draft 17
    ```
-   Start with a handful of approved drafts, not a backlog.
-3. Useful variants.
+3. Useful variants, all run by hand.
    ```
    python run_publish.py --live --now        # ignore slots, post the top candidate once
    python run_publish.py --live --breaking   # only FDA / company-approval items
@@ -531,19 +536,10 @@ source only when it is due, and score only scores what is new.
    logged on or not" and "Wake the computer to run this task". The PC must be
    on for them to fire.
 3. The scheduler runs the `publish` step as a dry run: it lists what it would
-   post and posts nothing. When ready, edit `ops\config.yaml` and change the
-   `publish` step from
-   ```
-     argv: ["python", "run_publish.py"]
-     enabled: true
-   ```
-   to
-   ```
-     argv: ["python", "run_publish.py", "--live"]
-     enabled: true
-   ```
-   with `PUBLISH_ENABLED=1` already in `.env`. Until then, publishing stays a
-   command you run by hand.
+   post and posts nothing, and it stays that way. Posting is manual only (part
+   5): `run_ops.py run` refuses to start if any step in `ops\config.yaml`
+   carries `--live`, so press "Publish now" on the approved page when you want
+   a draft to go out.
    The `feedback` and `evolve` steps are on in `ops\config.yaml`: the account
    has the paid X API read tier, so put the bearer token on `X_BEARER_TOKEN=`
    in `.env` (Part 7) and every scheduled run also snapshots metrics and
@@ -680,22 +676,12 @@ to stop it. Four pages:
   post the thread a second time. Both buttons are on the draft's own page too.
 - **Publishing** (`/publishing`) — how many drafts are approved and waiting,
   what has gone out, and anything that needs a human (a thread that stopped
-  halfway is never retried for you). Posting happens from the approved page,
-  on the schedule, or automatically: the "Automatic publishing" switch runs
-  the publisher every N minutes (15 by default) for as long as this app is
-  open, the same run cron would make, so approved drafts go out one per run
-  under the limits and the slots in `publish\config.yaml` with no button
-  pressed. It needs `PUBLISH_ENABLED=1` in `.env` (part 5) like everything
-  else; switched on without it the page says "on, but not live" and nothing
-  runs. The switch and the interval are kept in `publish\config.yaml`
-  (`auto_publish_enabled`, `auto_publish_interval_minutes`), so the app
-  comes back up the way you left it; it ships switched on, so an approved
-  draft goes out on its own once `PUBLISH_ENABLED=1` is set; the approved page shows when the next
-  run is due. Runs that found nothing to post leave no row on the runs page.
-  The two limits at the top, posts per day and the
-  minimum gap between posts in minutes, are the other settings the panel
-  edits ("Save limits" writes them into `publish\config.yaml`, and the next
-  publish run uses them).
+  halfway is never retried for you). Posting is manual only: a draft goes out
+  when you press "Publish now" next to it on the approved page, and at no
+  other time; there is no automatic publishing. The two limits at the top,
+  posts per day and the minimum gap between posts in minutes, are the one
+  setting the panel edits here ("Save limits" writes them into
+  `publish\config.yaml`, and the next "Publish now" uses them).
 - **Swarm** (`/swarm`) — step 9's recipes (writer genomes, designers and
   formats): live or retired, posts scored, median score, parent, and the
   swarm-vs-control line. A view only; `run_evolve.py` does the breeding and
@@ -870,8 +856,7 @@ before scoring, `enabled: false` turns it off),
 skips the chart), `verify\config.yaml`
 (the fact-checking model and the trusted source sites), `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules; `media: attach_images`
-attaches or skips the chart; `auto_publish_enabled` and
-`auto_publish_interval_minutes` are the panel's automatic-publishing switch), `feedback\config.yaml`,
+attaches or skips the chart; posting itself is manual only), `feedback\config.yaml`,
 `swarm\config.yaml` (step 9: the cheap model, how many cells per post, how many
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by

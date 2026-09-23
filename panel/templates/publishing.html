@@ -14,23 +14,7 @@ live flag and sets <code>PUBLISH_ENABLED=1</code>. This page cannot do any of th
   <label>Posts per day <input type="number" name="max_posts_per_day" min="1" value="{{ max_posts_per_day }}" class="order"></label>
   <label>Minimum gap (minutes) <input type="number" name="min_gap_minutes" min="0" value="{{ min_gap_minutes }}" class="order" style="width:4.5em"></label>
   <button type="submit">Save limits</button>
-  <span class="meta">Hard limits on every post, breaking news and "Publish now" included; kept in <code>publish/config.yaml</code>.</span>
-</form>
-
-{% set auto = auto_publish() %}
-<form method="post" action="/publishing/auto" class="runbar">
-  <strong>Automatic publishing</strong>
-  {% if auto.active %}<span class="pill ok">on</span>
-  {% elif auto.enabled %}<span class="pill warn">on, but not live</span>
-  {% else %}<span class="pill skip">off</span>{% endif %}
-  <label><input type="radio" name="enabled" value="1" {% if auto.enabled %}checked{% endif %}> on</label>
-  <label><input type="radio" name="enabled" value="0" {% if not auto.enabled %}checked{% endif %}> off</label>
-  <label>every <input type="number" name="interval_minutes" min="1" value="{{ auto.interval_minutes }}" class="order" style="width:4em"> minutes</label>
-  <button type="submit">Save</button>
-  <span class="meta">While this app is open, runs the publisher on that cadence: approved drafts post
-    under the limits above and the slots in <code>publish/config.yaml</code>, one draft per run.
-    {% if auto.enabled %}Last run started {{ auto.last_started }}; next due {{ auto.next_due }}.{% endif %}
-    {% if auto.enabled and not auto.live %}Nothing posts until <code>PUBLISH_ENABLED=1</code> is in <code>.env</code> and the app is restarted.{% endif %}</span>
+  <span class="meta">Hard limits on every post, "Publish now" included; kept in <code>publish/config.yaml</code>. Posting is manual only: a draft goes out when you press "Publish now" on the approved page.</span>
 </form>
 
 <div class="cards">

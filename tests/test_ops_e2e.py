@@ -190,6 +190,27 @@ def test_run_unknown_only_step(seeded, ops_cfg):
     assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "nope"]) == 1
 
 
+def test_run_refuses_a_step_that_would_post(seeded, ops_cfg, tmp_path):
+    """Posting is manual only: a configured step carrying --live stops the whole run before
+    anything is spawned, dry run included; --only on the other steps still runs them."""
+    marker = tmp_path / "ran"
+    cfg = yaml.safe_load(ops_cfg.read_text())
+    cfg["steps"] = [
+        {"name": "ingest", "argv": ["python", "-c", f"open({str(marker)!r}, 'w')"]},
+        {"name": "publish", "argv": ["python", "run_publish.py", "--live"]},
+    ]
+    ops_cfg.write_text(yaml.safe_dump(cfg))
+    assert run_ops.main(["--config", str(ops_cfg), "run"]) == 1
+    assert run_ops.main(["--config", str(ops_cfg), "run", "--dry-run"]) == 1
+    assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "publish"]) == 1
+    assert not marker.exists()
+    conn = store.connect(seeded)
+    assert conn.execute("SELECT COUNT(*) FROM pipeline_runs").fetchone()[0] == 0
+    conn.close()
+    assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "ingest"]) == 0
+    assert marker.exists()
+
+
 def test_backup_and_prune_subcommands(seeded, ops_cfg, capsys):
     rc = run_ops.main(["--config", str(ops_cfg), "backup", "--keep", "1"])
     out = capsys.readouterr().out.strip()

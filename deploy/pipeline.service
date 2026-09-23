@@ -3,7 +3,7 @@
 #   sudo systemctl daemon-reload && sudo systemctl enable --now pipeline.timer
 # Edit User, WorkingDirectory and the venv path first. Logs: journalctl -u pipeline.
 [Unit]
-Description=Cancer-research X pipeline: ingest, score, draft (publish stays dry-run until enabled)
+Description=Cancer-research X pipeline: ingest, score, draft (publish is always a dry run; posting is manual)
 After=network-online.target
 Wants=network-online.target
 
