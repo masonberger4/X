@@ -335,8 +335,9 @@ step carrying `--live`).
   settings live in `publish/config.yaml`, not the root config. Posting is
   manual only (see the top of this file) and idempotent via the claim; partial threads
   are never retried automatically. `publish/thread.py` appends " (n/N)" to a thread's
-  replies only (`thread_numbering: replies` in `publish/config.yaml`), never to the
-  opening post rule 12 keeps marker-free.
+  replies only under the shipped `thread_numbering: replies` in `publish/config.yaml`,
+  keeping the opening post marker-free as rule 12 asks (`all` numbers it too, `none`
+  numbers nothing; `scheduler.numbering_mode` normalises the value).
   The queue touches those two tables only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
   missing) to label and hide posted drafts on the approved page, and, on a reopen or a
@@ -419,12 +420,16 @@ step carrying `--live`).
   `swarm/store.py` owns `swarm_runs` / `swarm_variants` / `swarm_genomes` /
   `swarm_fitness`; its one read of another step's tables is `fetch_head_metrics`
   (step 3 `posts` + step 4 `tweet_metrics`, read-only, empty when missing).
-  `run_draft.py` drafts the live genomes round-robin (`next_genome`; the seeds are
-  `swarm/genome.py:SEED_GENOMES`), counting runs since the newest live genome of that kind
-  was born so a child joins an even rotation, and picks the designer and format this
-  writer has met least (`next_designer` / `next_format(writer_id=)`,
-  `swarm_runs.designer_id`; `images.attach_chart(style=)` is the Style the first render
-  starts from). **A genome owns its topology**: `swarm/config.yaml` `fan_out`/`layers`
+  `run_draft.draw_genomes` picks each story's writer, designer and format by Thompson
+  sampling on their credited scores (`evolve.allocation: thompson`,
+  `swarm/store.py:thompson_next` over `fitness_scores`, pure `fitness.thompson_pick`; a
+  child's prior is its parent's posterior); a kind with no scored post, or
+  `allocation: round_robin`, rotates instead (`next_genome`, then `next_format` and
+  `next_designer(writer_id=, format_id=)`, counting runs since the newest live genome of
+  that kind was born so a child joins an even rotation; the seeds are
+  `swarm/genome.py:SEED_GENOMES`; `swarm_runs.designer_id`; `images.attach_chart(style=)`
+  is the Style the first render starts from, and `swarm_store.mark_styled` records that
+  it drew the chart). **A genome owns its topology**: `swarm/config.yaml` `fan_out`/`layers`
   are only the fallback for a row without them. `swarm/fitness.py` is pure (relative
   KPI `(value + evolve.smoothing) / (baseline + smoothing)` against the trailing median,
   per-genome scores keyed by `genome_id`, `designer_id` or `format_id`, `bet_summary`,
@@ -433,11 +438,13 @@ step carrying `--live`).
   `evolve.horizon_hours` old (younger posts are not scored and are nobody's baseline)
   and, with `evolve.subtract_self_reply`, without the thread's own post-2 reply;
   `run_evolve.credit` blanks `swarm_fitness.genome_id` when the control's text was posted
-  or the format was a single post (`fitness.writer_credited`) and `designer_id` when the
-  format had no picture (`designer_credited`), so the report, breeding, pruning and the
-  panel count a genome's own posts only. `evolve.prune_rule: confidence` retires a genome
-  only when its mean log relative is below the pooled rest's with probability
-  `1 - (1 - retire_confidence) / k`, at most `max_retire_per_run` per kind per run;
+  or the format was a single post (`fitness.writer_credited`) and `designer_id` unless the
+  chart was drawn in its Style (`swarm_runs.styled`, `designer_credited`), and `cmd_score`
+  drops rows for runs it did not score (`keep_fitness`), so the report, breeding, pruning,
+  allocation and the panel count a genome's own posts only. `evolve.prune_rule:
+  confidence` retires a genome only when its mean log relative is below the pooled
+  rest's with probability `1 - (1 - retire_confidence) / k` (a t test, per look; nothing
+  while no genome has two posts), at most `max_retire_per_run` per kind per run;
   `median` is the old coin-flip rule. `swarm/mutate.py` breeds: `breed_writer` is
   the one strong-model call (through `call_anthropic`) and `validate_child` /
   `diff_count` enforce exactly one change inside the bounds in `swarm/genome.py`;

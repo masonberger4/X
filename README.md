@@ -582,12 +582,20 @@ first snapshot at least `horizon_hours` old (48; younger posts wait), without
 the thread's own post-2 reply (`subtract_self_reply`), the median KPI of the
 posts in the trailing `baseline_days` before it, and their smoothed ratio
 `(value + smoothing) / (baseline + smoothing)` (a slow week prunes nobody),
-stored in `swarm_fitness`. Credit follows authorship: `swarm_fitness.genome_id`
-is NULL when the control's text was posted or the format was a single post, and
-`designer_id` when the format had no picture. `prune` (`prune_rule:
+stored in `swarm_fitness` (rows for runs not scored under the current rules are
+dropped). Credit follows authorship: `swarm_fitness.genome_id` is NULL when the
+control's text was posted or the format was a single post (its fan-out and
+layers ran, but not its slot rules, which are what breeding mostly changes), and
+`designer_id` unless `run_draft.py` drew the chart in that designer's Style
+(`swarm_runs.styled`; a table, a failed render or no picture never used it).
+Which genome drafts the next story is drawn by Thompson sampling on those
+credited scores (`evolve.allocation: thompson`, `swarm.store.thompson_next`): a
+genome that has done better drafts more stories, one with little evidence still
+gets some, and a child starts from its parent's record; a kind with no scored
+post yet rotates evenly. `prune` (`prune_rule:
 confidence`) retires a live genome with at least `min_posts` credited, scored
 posts only when its mean log ratio is below the rest's with probability
-`1 - (1 - retire_confidence) / k`, at most `max_retire_per_run` per kind per run
+`1 - (1 - retire_confidence) / k` (a t test, per look), at most `max_retire_per_run` per kind per run
 and never below `min_alive` live genomes (`swarm_genomes.retired_at`,
 `retired_reason`); `prune_rule: median` is the old below-the-median rule. `report` prints the per-genome table and the
 swarm-vs-control measurement: median ratio of posts the jury gave to the swarm
@@ -618,8 +626,9 @@ relative KPI, pruned the same way, and bred without a model by stepping one
 knob at random inside its range, flipping a flag or swapping the palette
 (colour moves are drawn as often as every layout knob together). Children carry `parent_id`, so the family tree
 is readable on the panel's **/swarm** page (`ops/store.py:fetch_swarm_population`
-and `fetch_swarm_bet`, read-only; the page breeds and retires nothing). Without
-a scored genome nothing is bred unless `--force`. Because selection acts on the
+and `fetch_swarm_bet`, read-only; the page breeds and retires nothing). Until a
+genome has `min_posts` scored posts (`format_min_posts` for a format), nothing
+of its kind is bred unless `--force`. Because selection acts on the
 topology, the population can end up somewhere nobody designed, a single wide
 layer included, if that is what X rewards.
 

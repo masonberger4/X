@@ -37,6 +37,10 @@ DEFAULTS: dict[str, Any] = {
         "retire_confidence": 0.9,
         "max_retire_per_run": 1,
         "min_log_sd": 0.3,
+        "allocation": "thompson",
+        "prior_sd": 0.3,
+        "post_log_sd": 0.9,
+        "explore_floor": 0.1,
     },
 }
 

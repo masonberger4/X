@@ -59,3 +59,11 @@ def test_split_thread_never_asks_for_a_url():
     assert split_thread(["lead", "middle", "end"]) == ["lead (1/3)", "middle (2/3)", "end (3/3)"]
     out = split_thread(["a", f"b {URL}"])
     assert URL in out[-1]
+
+
+def test_thread_numbering_setting_is_normalised():
+    from publish.scheduler import numbering_mode
+
+    assert numbering_mode(False) == "none"  # YAML reads `off` / `no` as False
+    assert numbering_mode(" ALL ") == "all" and numbering_mode("None") == "none"
+    assert numbering_mode("bogus") == "replies"  # safe default for rule 12

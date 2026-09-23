@@ -19,8 +19,11 @@ with the swarm on (<code>swarm/config.yaml</code>).</p>
   control-won posts median <strong>{{ bet.control_median_fmt }}</strong> ({{ bet.control_posts }} scored)
   {% if bet.verdict %}<span class="pill {{ 'ok' if bet.verdict == 'swarm ahead' else 'skip' }}">{{ bet.verdict }}</span>{% endif %}
 </p>
-<p class="meta">A score is a post's impressions divided by the median of the account's posts in
-the 30 days before it: 1.00 is average. Under a few scored posts a side, read nothing into it.</p>
+<p class="meta">A score is a post's KPI (<code>evolve.kpi</code>, shipped as conversation) about two
+days after it went out (<code>horizon_hours</code>), plus 1, divided by the median of the swarm's
+posts in the 30 days before it, plus 1: 1.00 is average. A genome counts only the posts it
+shaped. Retirement and allocation go by the mean log of these scores, not the median shown
+here. Under a few scored posts a side, read nothing into it.</p>
 {% endif %}
 
 {% for kind, title in [("writer", "Writer genomes"), ("designer", "Designers"), ("format", "Formats")] %}

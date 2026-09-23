@@ -80,7 +80,21 @@ MUTATION_SYSTEM = mutation_system()
 
 # A slot rule may never ask for a link: rule 2 bans them, so every candidate would be
 # discarded (or, if it complied, the rule would be dead text the judges score against).
-_URL_RULE = re.compile(r"\burls?\b|https?://", re.IGNORECASE)
+# A rule that FORBIDS one ("never a URL", "no link or URL") is fine. Only the word URL
+# counts: "link" is also a verb the voice rules use ("link cause to consequence").
+_URL_WORD = re.compile(r"\burls?\b", re.IGNORECASE)
+_NEGATED_URL = re.compile(
+    r"\b(?:no|never|not|without|nor|don't|do not)\W+(?:[\w'-]+\W+){0,4}?urls?\b",
+    re.IGNORECASE,
+)
+
+
+def asks_for_url(rule: str) -> bool:
+    """True when a slot rule asks for a link: a literal http(s) address, or the word URL
+    not negated within a few words before it ("never a URL", "no link or URL" pass)."""
+    if re.search(r"https?://", rule, re.IGNORECASE):
+        return True
+    return len(_URL_WORD.findall(rule)) > len(_NEGATED_URL.findall(rule))
 
 
 def _fmt_genome(p: Parent) -> list[str]:
@@ -178,7 +192,10 @@ def validate_child(data: Any, parent: Genome, taken_names: set[str]) -> Genome:
         raise ChildError(f"first slot must be {HOOK!r} and last {CLOSER!r}")
     if len({s.name for s in slots}) != len(slots):
         raise ChildError("slot names must be unique")
-    if linked := [s.name for s in slots if _URL_RULE.search(s.rule)]:
+    inherited = {(s.name, s.rule) for s in parent.slots}
+    if linked := [
+        s.name for s in slots if (s.name, s.rule) not in inherited and asks_for_url(s.rule)
+    ]:
         raise ChildError(f"slot rule asks for a URL, which no post may carry: {linked}")
     child = Genome(
         name=name,

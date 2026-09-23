@@ -53,14 +53,28 @@ evolve:
   # confidence (shipped): retire a genome only when its mean log score is below the rest
   # of the population's with probability at least 1 - (1 - retire_confidence) / k (k =
   # genomes being compared), given how noisy one post is (the spread is measured, never
-  # taken below min_log_sd), and at most max_retire_per_run per kind per run. At a few
-  # posts a day five posts rarely settle it, so expect few retirements, each one deserved.
+  # taken below min_log_sd; a t test), and at most max_retire_per_run per kind per run. At
+  # a few posts a day five posts rarely settle it, so retirements are rare and far less
+  # often luck than under the old rule; the probability is per look, and the check runs
+  # again as posts arrive, so an equal genome can still be retired over months.
+  # Allocation (below), not retirement, is what moves posts towards better genomes.
   # median: the old rule, retire whatever sits below the population median, which at
   # this sample size is a coin flip.
   prune_rule: confidence
   retire_confidence: 0.9
   max_retire_per_run: 1
   min_log_sd: 0.3
+  # Which genome drafts the next story. thompson (shipped): draw each kind by Thompson
+  # sampling on its credited scores, so the recipes that have done better on X write more
+  # of the posts while the rest still get tried; a child starts from its parent's record.
+  # A kind with no scored post yet rotates evenly. round_robin: always rotate evenly.
+  allocation: thompson
+  prior_sd: 0.3             # how far apart genomes are believed to be before any post
+                            #   (log scale: 0.3 is about 1.35x either way)
+  post_log_sd: 0.9          # the spread of one post's log score assumed until the data
+                            #   has 10 degrees of freedom to measure it
+  explore_floor: 0.1        # this share of draws goes to the rotation's next genome
+                            #   instead, so a recipe the leader crowds out is still judged
   format_min_posts: 8       # a format is a coarse gene: judged only after this many posts
   format_population_size: 5 # how many live formats breed keeps
   # Phase three (run_evolve.py breed): keep this many live writer genomes; each gap after

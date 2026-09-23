@@ -16,14 +16,16 @@ score   Every posted swarm run gets the head tweet's KPI, read from its first sn
         `baseline_days` before it (the baseline); and (value + smoothing) / (baseline +
         smoothing) (relative), stored in swarm_fitness. Fewer than `min_baseline_posts`
         earlier posts: no relative score yet. Credit: a writer genome is credited only with
-        posts the jury gave the swarm in a format that ran its slots (not a single post), a
-        designer only with posts whose format carried a picture; swarm_fitness.genome_id /
-        designer_id are NULL otherwise.
+        posts the jury gave the swarm in a format that ran its slot rules (not a single
+        post), a designer only with posts whose chart run_draft drew in its Style;
+        swarm_fitness.genome_id / designer_id are NULL otherwise. The table is rewritten to
+        exactly what the current rules score (rows for runs not scored are dropped).
 prune   `prune_rule: confidence` (shipped): among live genomes with at least `min_posts`
         (`format_min_posts` for a format) credited, scored posts, retire the worst one whose
         mean log relative is below the pooled rest's with probability at least
-        1 - (1 - `retire_confidence`) / k, at most `max_retire_per_run` per kind per run,
-        never below `min_alive`. `prune_rule: median` is the old rule (below the population median).
+        1 - (1 - `retire_confidence`) / k (a t test; per look, and evolve looks again as
+        posts accumulate), at most `max_retire_per_run` per kind per run, never below
+        `min_alive`. `prune_rule: median` is the old rule (below the population median).
         Retirement is swarm_genomes.retired_at and retired_reason. --dry-run prints and
         keeps.
 breed   Phase three. While fewer than `population_size` writer genomes (designers use
@@ -117,6 +119,7 @@ def cmd_score(conn, cfg: dict) -> list[fitness.Observation]:
             format_id=h.format_id,
             shape=h.shape,
             visuals=h.visuals,
+            styled=h.styled,
         )
         for h in heads
     ]
@@ -145,6 +148,9 @@ def cmd_score(conn, cfg: dict) -> list[fitness.Observation]:
             designer_id=o.designer_id,
             format_id=o.format_id,
         )
+    dropped = swarm_store.keep_fitness(conn, [o.run_id for o in scored])
+    if dropped:
+        log.info("dropped %d fitness row(s) the current rules no longer score", dropped)
     n_rel = sum(o.relative is not None for o in scored)
     n_writer = sum(o.genome_id is not None and o.relative is not None for o in scored)
     log.info(
@@ -381,7 +387,9 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="prune/breed: print, retire and store nothing"
     )
     ap.add_argument(
-        "--force", action="store_true", help="breed even when no genome has a score yet"
+        "--force",
+        action="store_true",
+        help="breed even when no genome has min_posts scored posts yet",
     )
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)

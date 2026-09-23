@@ -138,3 +138,58 @@ def test_confident_prune_floors_the_spread():
         scores, [1, 2], min_posts=5, min_alive=1, confidence=0.9, min_sd=0.3
     )
     assert d.retire == []  # log(1.2) = 0.18 apart, se = 0.3 * sqrt(0.4) = 0.19
+
+
+def test_student_t_cdf_matches_the_tables():
+    assert round(fitness.student_t_cdf(2.179, 12), 3) == 0.975
+    assert round(fitness.student_t_cdf(-1.782, 12), 3) == 0.05
+    assert fitness.student_t_cdf(0, 5) == 0.5 and fitness.student_t_cdf(1e-200, 4) == 0.5
+    assert round(fitness.student_t_cdf(12.706, 1), 3) == 0.975
+
+
+def test_confident_prune_is_calibrated_per_look_with_a_t_test():
+    """With the spread estimated from few posts, a normal test retired an equal genome on
+    about 14% of looks; the t test keeps it near the 10% the setting promises."""
+    import math
+    import random
+
+    rng = random.Random(11)
+    looks, retired = 3000, 0
+    for _ in range(looks):
+        scores = [_scores(g, [math.exp(rng.gauss(0, 0.8)) for _ in range(5)]) for g in (1, 2, 3)]
+        d = fitness.prune_confident(
+            scores, [1, 2, 3], min_posts=5, min_alive=2, confidence=0.9, min_sd=0.3
+        )
+        retired += bool(d.retire)
+    assert retired / looks < 0.12
+
+
+def test_confident_prune_needs_a_measured_spread_and_never_divides_by_zero():
+    # one post each: nothing measured, nothing retired (it used to retire on one post)
+    scores = [_scores(1, [1.0]), _scores(2, [1.0]), _scores(3, [0.5])]
+    d = fitness.prune_confident(
+        scores, [1, 2, 3], min_posts=1, min_alive=2, confidence=0.9, min_sd=0.3
+    )
+    assert d.retire == []
+    # identical posts and no floor: no ZeroDivisionError
+    scores = [_scores(1, [1.0] * 5), _scores(2, [1.0] * 5)]
+    d = fitness.prune_confident(scores, [1, 2], min_posts=5, min_alive=1, confidence=0.9, min_sd=0)
+    assert d.retire == []
+
+
+def test_thompson_prefers_the_better_genome_and_still_explores():
+    import random
+
+    rng = random.Random(5)
+    good, bad = _scores(1, [2.0] * 15), _scores(2, [0.5] * 15)
+    scores = {1: good, 2: bad}
+    picks = [
+        fitness.thompson_pick([1, 2, 3], scores, rng=rng, prior_sd=0.3, post_sd=0.9)
+        for _ in range(2000)
+    ]
+    assert picks.count(1) > picks.count(3) > picks.count(2)
+    assert picks.count(3) > 100  # the unscored genome is still tried
+    mean_, sd = fitness.posterior(None, prior_mean=0.2, prior_sd=0.3, post_sd=0.9)
+    assert (mean_, sd) == (0.2, 0.3)
+    assert fitness.allocation_spread([good, bad], default=0.9, floor=0.3) == 0.3  # df 28 >= 10
+    assert fitness.allocation_spread([_scores(1, [1.0, 2.0])], default=0.9, floor=0.3) == 0.9
