@@ -40,7 +40,8 @@ images:
   # config.yaml `models.image_grader` override the model; an empty model disables it.
   grader:
     enabled: true
-    model: claude-sonnet-5
+    model: claude-opus-5-5
+    effort: low                   # low | medium | high | xhigh | max; blank = model default
     min_score: 8
     max_iterations: 4
 

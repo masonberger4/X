@@ -207,7 +207,13 @@ def _grade_loop(
     for iteration in range(1, settings.max_iterations + 1):
         try:
             grade = grader.grade_image(
-                path, visual, style, model=settings.model, iteration=iteration, previous=previous
+                path,
+                visual,
+                style,
+                model=settings.model,
+                iteration=iteration,
+                previous=previous,
+                effort=settings.effort,
             )
         except Exception:  # the grader is advisory: a failed call keeps the render
             log.exception("draft %d: image grader failed (render kept)", draft_id)
