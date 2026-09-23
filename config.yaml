@@ -22,18 +22,18 @@ ncbi:
 models:
   # Scoring is analyst triage over ~150 items/day: it needs reliable drug,
   # mechanism and sponsor knowledge (Haiku misidentified a T-cell engager as a
-  # menin inhibitor). Opus 5 on the claude_code backend; use claude-haiku-4-5
+  # menin inhibitor). Opus 5.5 on the claude_code backend; use claude-haiku-4-5
   # to cut cost on the API backend.
-  scorer: claude-opus-5
+  scorer: claude-opus-5-5
   scorer_effort: low              # low | medium | high | xhigh | max; blank = model default
   # Drafting writes the posts the account is judged on. DRAFT_MODEL in .env
   # overrides this; leave that blank to use this value.
-  drafter: claude-opus-5
+  drafter: claude-opus-5-5
   drafter_effort: low
   # Optional second opinion for `digest.py --auto-rate`: a stronger model rates
   # each digest entry 1-5 the way the human does with --rate. Stored with
   # rater='auto:<model>' so it never masquerades as a human decision.
-  rater: claude-opus-5
+  rater: claude-opus-5-5
   rater_effort: low               # low | medium | high | xhigh | max
   # Story linking (run_score.py, see `linking:` below): groups clusters that
   # report the same event. Headline matching, so a small model is enough.

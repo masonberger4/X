@@ -35,7 +35,7 @@ login (`LLM_BACKEND=claude_code` in `.env`); nothing posts to X until part 5.
    ```
    npm install -g @anthropic-ai/claude-code
    claude login
-   echo say ok | claude -p --output-format json --model claude-opus-5
+   echo say ok | claude -p --output-format json --model claude-opus-5-5
    ```
    The last line must print `"result":"ok"` inside the output.
 4. Confirm the install.
