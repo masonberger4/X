@@ -120,3 +120,32 @@ def test_breed_designer_swaps_palettes_and_flips_multi_colour():
         if changed[0] == "palette":
             assert after["palette"] in PALETTES and after["palette"] != "navy"
     assert {"palette", "multi_colour"} <= seen
+
+
+def test_a_child_may_not_ask_for_a_url():
+    slots = [s.__dict__ for s in G.slots]
+    slots[-1] = {"name": "closer", "rule": "End on the source URL verbatim."}
+    with pytest.raises(mutate.ChildError, match="URL"):
+        mutate.validate_child(child(slots=slots), G, set())
+
+
+def test_the_breeder_is_told_the_real_kpi_and_that_only_the_head_counts():
+    system = mutate.mutation_system("conversation")
+    assert "impressions" not in system and "replies x3" in system
+    assert "FIRST post" in system
+    assert "median likes" in mutate.mutation_system("likes")
+
+
+def test_a_rule_that_forbids_a_url_is_fine_and_inherited_slots_are_not_rechecked():
+    assert not mutate.asks_for_url("Name the source in words, never a URL.")
+    assert not mutate.asks_for_url("No link or URL, no emoji.")
+    assert not mutate.asks_for_url("Link cause to consequence in one sentence.")
+    assert mutate.asks_for_url("Then the primary source URL verbatim.")
+    assert mutate.asks_for_url("See https://example.org")
+    # a parent that already carries a URL rule can still breed a child that changes
+    # something else (the old check rejected every child of it)
+    legacy = [s.__dict__ for s in G.slots]
+    legacy[-1] = {"name": "closer", "rule": "End on the source URL."}
+    parent = Genome(name="old", slots=[Slot(**s) for s in legacy], fan_out=6, layers=2, id=9)
+    c = mutate.validate_child(dict(child(fan_out=8), slots=legacy), parent, set())
+    assert c.fan_out == 8

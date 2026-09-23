@@ -62,3 +62,134 @@ def test_prune_retires_below_population_median_but_keeps_min_alive():
     # a retired genome's score never counts: with 2 gone, 3 is now the weaker of the pair
     d = fitness.prune(scores, [1, 3], min_posts=5, min_alive=1)
     assert d.retire == [3] and d.population_median == 1.2
+
+
+def test_smoothing_scores_a_zero_baseline_and_keeps_the_order():
+    rows = [obs(1, 0, day=0), obs(2, 0, day=1), obs(3, 0, day=2), obs(4, 3, day=3)]
+    rows.append(obs(5, 1, day=4))
+    scored = fitness.score(rows, baseline_days=30, min_baseline_posts=3, smoothing=1)
+    assert scored[3].baseline == 0 and scored[3].relative == 4.0  # (3 + 1) / (0 + 1)
+    assert scored[4].relative == 2.0  # median(0, 0, 0, 3) = 0 -> (1 + 1) / 1
+    assert scored[3].relative > scored[4].relative
+
+
+def test_credit_predicates():
+    o = obs(1, 1)
+    assert fitness.writer_credited(o) and fitness.designer_credited(o)
+    assert not fitness.writer_credited(obs(2, 1, winner="control"))
+    single = obs(3, 1)
+    single.shape = "single"
+    assert not fitness.writer_credited(single)
+    nopic = obs(4, 1)
+    nopic.visuals = 0
+    assert not fitness.designer_credited(nopic)
+    rows = fitness.score(
+        [obs(i, 1) for i in range(1, 4)] + [obs(4, 2), obs(5, 2, winner="control")],
+        baseline_days=30,
+        min_baseline_posts=3,
+    )
+    gs = {s.genome_id: s for s in fitness.genome_scores(rows, include=fitness.writer_credited)}
+    assert gs[1].n == 1  # the control-won post is not the genome's
+
+
+def _scores(gid, rels):
+    return fitness.GenomeScore(gid, len(rels), sorted(rels)[len(rels) // 2], list(rels))
+
+
+def test_confident_prune_ignores_noise_and_retires_a_clear_loser():
+    import math
+    import random
+
+    rng = random.Random(7)
+
+    def draw(effect, n):
+        return [math.exp(rng.gauss(math.log(effect), 0.9)) for _ in range(n)]
+
+    # three genomes from ONE distribution, five posts each: nobody is retired
+    retired = 0
+    for _ in range(200):
+        scores = [_scores(g, draw(1.0, 5)) for g in (1, 2, 3)]
+        d = fitness.prune_confident(
+            scores, [1, 2, 3], min_posts=5, min_alive=2, confidence=0.9, min_sd=0.3
+        )
+        retired += len(d.retire)
+    assert retired / 200 < 0.2  # the median rule retires one every time
+    # a genome at a quarter of the others over 20 posts each is retired, one per call
+    scores = [_scores(1, draw(1.0, 20)), _scores(2, draw(1.0, 20)), _scores(3, draw(0.25, 20))]
+    d = fitness.prune_confident(
+        scores, [1, 2, 3], min_posts=5, min_alive=1, confidence=0.9, min_sd=0.3
+    )
+    assert d.retire == [3] and "P worse" in d.reason[3]
+    # min_alive and ineligible genomes still hold
+    d = fitness.prune_confident(
+        scores, [1, 2, 3], min_posts=5, min_alive=3, confidence=0.9, min_sd=0.3
+    )
+    assert d.retire == []
+    d = fitness.prune_confident(
+        scores, [1, 3], min_posts=25, min_alive=1, confidence=0.9, min_sd=0.3
+    )
+    assert d.retire == [] and d.population_median is None
+
+
+def test_confident_prune_floors_the_spread():
+    """Five identical posts are not certainty: the spread never drops below min_sd."""
+    scores = [_scores(1, [1.2] * 5), _scores(2, [1.0] * 5)]
+    d = fitness.prune_confident(
+        scores, [1, 2], min_posts=5, min_alive=1, confidence=0.9, min_sd=0.3
+    )
+    assert d.retire == []  # log(1.2) = 0.18 apart, se = 0.3 * sqrt(0.4) = 0.19
+
+
+def test_student_t_cdf_matches_the_tables():
+    assert round(fitness.student_t_cdf(2.179, 12), 3) == 0.975
+    assert round(fitness.student_t_cdf(-1.782, 12), 3) == 0.05
+    assert fitness.student_t_cdf(0, 5) == 0.5 and fitness.student_t_cdf(1e-200, 4) == 0.5
+    assert round(fitness.student_t_cdf(12.706, 1), 3) == 0.975
+
+
+def test_confident_prune_is_calibrated_per_look_with_a_t_test():
+    """With the spread estimated from few posts, a normal test retired an equal genome on
+    about 14% of looks; the t test keeps it near the 10% the setting promises."""
+    import math
+    import random
+
+    rng = random.Random(11)
+    looks, retired = 3000, 0
+    for _ in range(looks):
+        scores = [_scores(g, [math.exp(rng.gauss(0, 0.8)) for _ in range(5)]) for g in (1, 2, 3)]
+        d = fitness.prune_confident(
+            scores, [1, 2, 3], min_posts=5, min_alive=2, confidence=0.9, min_sd=0.3
+        )
+        retired += bool(d.retire)
+    assert retired / looks < 0.12
+
+
+def test_confident_prune_needs_a_measured_spread_and_never_divides_by_zero():
+    # one post each: nothing measured, nothing retired (it used to retire on one post)
+    scores = [_scores(1, [1.0]), _scores(2, [1.0]), _scores(3, [0.5])]
+    d = fitness.prune_confident(
+        scores, [1, 2, 3], min_posts=1, min_alive=2, confidence=0.9, min_sd=0.3
+    )
+    assert d.retire == []
+    # identical posts and no floor: no ZeroDivisionError
+    scores = [_scores(1, [1.0] * 5), _scores(2, [1.0] * 5)]
+    d = fitness.prune_confident(scores, [1, 2], min_posts=5, min_alive=1, confidence=0.9, min_sd=0)
+    assert d.retire == []
+
+
+def test_thompson_prefers_the_better_genome_and_still_explores():
+    import random
+
+    rng = random.Random(5)
+    good, bad = _scores(1, [2.0] * 15), _scores(2, [0.5] * 15)
+    scores = {1: good, 2: bad}
+    picks = [
+        fitness.thompson_pick([1, 2, 3], scores, rng=rng, prior_sd=0.3, post_sd=0.9)
+        for _ in range(2000)
+    ]
+    assert picks.count(1) > picks.count(3) > picks.count(2)
+    assert picks.count(3) > 100  # the unscored genome is still tried
+    mean_, sd = fitness.posterior(None, prior_mean=0.2, prior_sd=0.3, post_sd=0.9)
+    assert (mean_, sd) == (0.2, 0.3)
+    assert fitness.allocation_spread([good, bad], default=0.9, floor=0.3) == 0.3  # df 28 >= 10
+    assert fitness.allocation_spread([_scores(1, [1.0, 2.0])], default=0.9, floor=0.3) == 0.9

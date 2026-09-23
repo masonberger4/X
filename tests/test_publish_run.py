@@ -239,7 +239,8 @@ def test_thread_posts_in_order_with_reply_chain(conn, fake_x, monkeypatch):
     seed_draft(conn, "a", thread=THREAD3)
     assert run_publish.main(["--live"], now=SLOT_TIME) == 0
     assert [c[1] for c in fake_x.calls] == [None, "tw1", "tw2"]
-    assert fake_x.calls[0][0].endswith("(1/3)") and fake_x.calls[2][0].endswith("(3/3)")
+    # the opening post goes out exactly as approved (rule 12); the replies are numbered
+    assert "(1/3)" not in fake_x.calls[0][0] and fake_x.calls[2][0].endswith("(3/3)")
     rows = store.list_posts(conn, 1)
     assert [r["position"] for r in rows] == [1, 2, 3]
     assert all(r["kind"] == "thread" for r in rows)

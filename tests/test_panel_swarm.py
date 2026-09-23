@@ -184,3 +184,40 @@ def test_formats_appear_in_the_population_and_on_the_page(db_file, conn):
     client = TestClient(panel_app.app, follow_redirects=False)
     body = client.get("/swarm").text
     assert "Formats" in body and "<strong>long-1</strong>" in body
+
+
+def test_format_fitness_is_counted_on_the_page(db_file, conn):
+    """A format is credited with every post drawn in it, so the population shows its score
+    beside the writers' and designers' (it used to show 0 posts whatever had run)."""
+    swarm_store.ensure_tables(conn)
+    swarm_store.seed_default(conn)
+    fmt = {f.name: f.id for f in swarm_store.live_genomes(conn, "format")}["single-1"]
+    for i, rel in enumerate([0.5, 1.5, 2.5]):
+        run = swarm_store.record_run(
+            conn,
+            item_id=f"f{i}",
+            cluster_id=None,
+            genome_id=None,
+            winner="control",
+            calls=1,
+            log=None,
+            draft_id=10 + i,
+            format_id=fmt,
+        )
+        swarm_store.upsert_fitness(
+            conn,
+            run_id=run,
+            draft_id=10 + i,
+            genome_id=None,
+            winner="control",
+            tweet_id=f"f{i}",
+            posted_at=f"2026-05-0{i + 1}T00:00:00+00:00",
+            kpi="conversation",
+            value=rel,
+            baseline=1.0,
+            relative=rel,
+            format_id=fmt,
+        )
+    pop = {p["name"]: p for p in ops_store.fetch_swarm_population(conn)}
+    assert pop["single-1"]["posts"] == 3 and pop["single-1"]["median_relative"] == 1.5
+    assert pop["thread-0"]["posts"] == 0

@@ -84,15 +84,18 @@ def build_policy(conn, cfg: dict, now: datetime) -> Policy:
     )
 
 
-def texts_for(approved: Approved) -> tuple[str, list[str]]:
-    """(kind, ordered texts). Raises ThreadError if the content fails a hard check."""
+def texts_for(approved: Approved, numbering: str = "replies") -> tuple[str, list[str]]:
+    """(kind, ordered texts). Raises ThreadError if the content fails a hard check.
+    `numbering` is publish/config.yaml thread_numbering: "replies" numbers every post but
+    the opening one (rule 12 keeps a marker off it), "all" every post, "none" nothing."""
     if not approved.thread:
         raise ThreadError("draft has no thread")
     return store.KIND_THREAD, split_thread(
         approved.thread,
         max_chars=approved.max_chars,
         # A single or long post is one post, not a thread to number through.
-        number=approved.shape == SHAPE_THREAD,
+        number=approved.shape == SHAPE_THREAD and numbering != "none",
+        number_first=numbering == "all",
     )
 
 
@@ -382,7 +385,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
             return 0
         assert slot is not None
         try:
-            kind, texts = texts_for(cand)
+            kind, texts = texts_for(cand, str(cfg.get("thread_numbering", "replies")))
         except ThreadError as exc:
             log.warning("draft %d refused, fix it in the approval queue: %s", cand.draft_id, exc)
             if live and store.claim(conn, cand.draft_id, slot):

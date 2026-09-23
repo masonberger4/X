@@ -5,6 +5,7 @@ No DB and no network. Everything time-related takes an aware datetime.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -15,6 +16,9 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from publish.store import Approved
+from publish.thread import NUMBERING
+
+log = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).with_name("config.yaml")
 
@@ -38,7 +42,21 @@ def load_publish_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg["retry"].setdefault("max_attempts", 3)
     cfg.setdefault("media", {})
     cfg["media"].setdefault("attach_images", True)
+    cfg["thread_numbering"] = numbering_mode(cfg.get("thread_numbering", "replies"))
     return cfg
+
+
+def numbering_mode(value: Any) -> str:
+    """publish/config.yaml thread_numbering as one of publish.thread.NUMBERING. YAML reads
+    `off`/`no`/`false` as False, which means no numbers; anything unknown falls back to
+    replies (the opening post stays marker-free, as rule 12 asks) with a warning."""
+    if value is False:
+        return "none"
+    mode = str(value).strip().lower()
+    if mode not in NUMBERING:
+        log.warning("thread_numbering %r is not one of %s; using replies", value, NUMBERING)
+        return "replies"
+    return mode
 
 
 CAPS = ("max_posts_per_day", "min_gap_minutes")

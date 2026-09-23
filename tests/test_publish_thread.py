@@ -28,6 +28,17 @@ def test_split_thread_numbers_and_keeps_order():
     assert out == ["first (1/3)", "second (2/3)", "third (3/3)"]
 
 
+def test_the_opening_post_can_be_left_unnumbered():
+    """thread_numbering: replies (the shipped value) keeps the marker rule 12 bans off the
+    head, which is also what the drafter's hook check passed."""
+    from draft.hook import hook_problems
+
+    out = split_thread(["The armoring worked in blood.", "second", "third"], number_first=False)
+    assert out == ["The armoring worked in blood.", "second (2/3)", "third (3/3)"]
+    assert hook_problems(out[0]) == []
+    assert number_posts(["a", "b"], first=False) == ["a", "b (2/2)"]
+
+
 def test_numbering_skipped_when_it_would_not_fit():
     long = "y" * 278
     posts = [long, f"end {URL}"]
@@ -48,3 +59,11 @@ def test_split_thread_never_asks_for_a_url():
     assert split_thread(["lead", "middle", "end"]) == ["lead (1/3)", "middle (2/3)", "end (3/3)"]
     out = split_thread(["a", f"b {URL}"])
     assert URL in out[-1]
+
+
+def test_thread_numbering_setting_is_normalised():
+    from publish.scheduler import numbering_mode
+
+    assert numbering_mode(False) == "none"  # YAML reads `off` / `no` as False
+    assert numbering_mode(" ALL ") == "all" and numbering_mode("None") == "none"
+    assert numbering_mode("bogus") == "replies"  # safe default for rule 12

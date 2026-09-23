@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import random
 import sys
 from datetime import UTC, datetime, timedelta
 
@@ -89,6 +90,37 @@ def build_examples(
     return block, edits, rejections
 
 
+def draw_genomes(
+    conn: store.sqlite3.Connection, swarm_cfg: dict, rng: random.Random | None = None
+) -> tuple:
+    """(writer, designer, format) for the next story. `evolve.allocation: thompson`
+    (shipped) draws each by Thompson sampling on its credited X scores
+    (swarm_store.thompson_next), so the genomes that have done better draft more of the
+    stories; a kind with no scored post yet, or `allocation: round_robin`, rotates evenly
+    instead, the format before the designer so every designer meets every writer and
+    format in turn."""
+    ev = swarm_cfg.get("evolve") or {}
+    thompson = str(ev.get("allocation", "thompson")) == "thompson"
+    rng = rng or random.Random()
+    kwargs = {
+        "rng": rng,
+        "prior_sd": float(ev.get("prior_sd", 0.3)),
+        "post_sd": float(ev.get("post_log_sd", 0.9)),
+        "min_sd": float(ev.get("min_log_sd", 0.3)),
+        "explore_floor": float(ev.get("explore_floor", 0.1)),
+    }
+
+    def draw(kind: str):
+        return swarm_store.thompson_next(conn, kind, **kwargs) if thompson else None
+
+    genome = draw("writer") or swarm_store.next_genome(conn)
+    format_genome = draw("format") or swarm_store.next_format(conn, writer_id=genome.id)
+    designer = draw("designer") or swarm_store.next_designer(
+        conn, writer_id=genome.id, format_id=format_genome.id
+    )
+    return genome, designer, format_genome
+
+
 def draft_with_swarm(
     conn: store.sqlite3.Connection,
     c: store.Candidate,
@@ -112,9 +144,7 @@ def draft_with_swarm(
         rationale=c.rationale,
         handles=tuple(handles),
     )
-    genome = swarm_store.next_genome(conn)
-    designer = swarm_store.next_designer(conn)
-    format_genome = swarm_store.next_format(conn)
+    genome, designer, format_genome = draw_genomes(conn, swarm_cfg)
     long_max = int((swarm_cfg.get("formats") or {}).get("long_max_chars", 4000))
     fmt = format_genome.to_format(long_max)
     log.info(
@@ -483,6 +513,9 @@ def main(argv: list[str] | None = None) -> int:
                 conn, draft_id, result.draft.chart, source_url=c.url, cfg=draft_cfg, style=style
             ):
                 charts += 1
+                if run_id is not None and style is not None:
+                    # the designer drew this picture, so it may be credited with the post
+                    swarm_store.mark_styled(conn, run_id)
             if result.draft.extra_visuals:
                 images.attach_extra_charts(
                     conn,
