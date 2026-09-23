@@ -102,7 +102,7 @@ class FakeGrader:
         self.styles = []
         self.previous = []
 
-    def __call__(self, path, visual, style, *, model, iteration, previous):
+    def __call__(self, path, visual, style, *, model, iteration, previous, effort=None):
         self.styles.append(style)
         self.previous.append(previous)
         reply = self.replies.pop(0)
@@ -272,6 +272,9 @@ def test_call_grader_api_path_sends_the_png(monkeypatch, tmp_path):
     blocks = captured["messages"][0]["content"]
     assert blocks[0]["type"] == "image" and blocks[0]["source"]["media_type"] == "image/png"
     assert blocks[1] == {"type": "text", "text": "user"}
+    assert "output_config" not in captured
+    REAL_CALL_GRADER(png, "sys", "user", "m", "low")
+    assert captured["output_config"] == {"effort": "low"}
 
 
 def test_call_grader_cli_path_uses_read_tool(monkeypatch, tmp_path):
@@ -286,10 +289,12 @@ def test_call_grader_cli_path_uses_read_tool(monkeypatch, tmp_path):
     monkeypatch.setattr("claude_cli.llm_backend", lambda cfg: "claude_code")
     seen = {}
 
-    def fake_run(prompt, *, system, model, cfg, tools):
-        seen.update(prompt=prompt, tools=tools, model=model)
+    def fake_run(prompt, *, system, model, cfg, tools, effort=None):
+        seen.update(prompt=prompt, tools=tools, model=model, effort=effort)
         return '{"score": 9}'
 
     monkeypatch.setattr("claude_cli.run_claude", fake_run)
     assert REAL_CALL_GRADER(png, "sys", "user", "m") == '{"score": 9}'
     assert seen["tools"] == ["Read"] and str(png.resolve()) in seen["prompt"]
+    REAL_CALL_GRADER(png, "sys", "user", "m", "low")
+    assert seen["effort"] == "low"

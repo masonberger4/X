@@ -97,6 +97,7 @@ class GraderSettings:
     model: str = ""
     min_score: int = DEFAULT_MIN_SCORE
     max_iterations: int = DEFAULT_MAX_ITERATIONS
+    effort: str | None = None
 
 
 def grader_settings(cfg: dict | None = None) -> GraderSettings:
@@ -119,6 +120,7 @@ def grader_settings(cfg: dict | None = None) -> GraderSettings:
         model=model,
         min_score=int(section.get("min_score", DEFAULT_MIN_SCORE)),
         max_iterations=max(1, int(section.get("max_iterations", DEFAULT_MAX_ITERATIONS))),
+        effort=str(section.get("effort") or "").strip().lower() or None,
     )
 
 
@@ -207,7 +209,9 @@ def build_user_prompt(visual: Chart | Table, style: Style, previous: ImageGrade 
     return "\n\n".join(parts)
 
 
-def call_grader(image_path: Path, system: str, user: str, model: str) -> str:
+def call_grader(
+    image_path: Path, system: str, user: str, model: str, effort: str | None = None
+) -> str:
     """The single network call: the PNG plus the prompts to the model, its reply text back.
     On the claude_code backend the CLI reads the file itself (tools=["Read"])."""
     from dotenv import load_dotenv
@@ -221,7 +225,9 @@ def call_grader(image_path: Path, system: str, user: str, model: str) -> str:
         cfg = {}
     if claude_cli.llm_backend(cfg) == claude_cli.CLAUDE_CODE:
         prompt = f"{user}\n\nThe image is the file at: {image_path.resolve()}\nRead it first."
-        return claude_cli.run_claude(prompt, system=system, model=model, cfg=cfg, tools=["Read"])
+        return claude_cli.run_claude(
+            prompt, system=system, model=model, cfg=cfg, tools=["Read"], effort=effort
+        )
 
     import anthropic  # imported here so tests that mock this function never touch the SDK
 
@@ -229,6 +235,9 @@ def call_grader(image_path: Path, system: str, user: str, model: str) -> str:
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set (put it in .env)")
     client = anthropic.Anthropic(api_key=api_key)
+    kwargs: dict[str, Any] = {}
+    if effort:
+        kwargs["output_config"] = {"effort": effort}
     data = base64.standard_b64encode(image_path.read_bytes()).decode("ascii")
     resp = client.messages.create(
         model=model,
@@ -246,6 +255,7 @@ def call_grader(image_path: Path, system: str, user: str, model: str) -> str:
                 ],
             }
         ],
+        **kwargs,
     )
     return "".join(getattr(block, "text", "") for block in resp.content)
 
@@ -305,11 +315,12 @@ def grade_image(
     model: str,
     iteration: int = 1,
     previous: ImageGrade | None = None,
+    effort: str | None = None,
 ) -> ImageGrade:
     """One grader call for one render. Raises GraderError / whatever the backend raises;
     the caller (approval_queue.images) treats any failure as 'keep this render'."""
     user = build_user_prompt(visual, style, previous)
-    text = call_grader(Path(image_path), SYSTEM_PROMPT, user, model)
+    text = call_grader(Path(image_path), SYSTEM_PROMPT, user, model, effort)
     grade = parse_grade(text, style, model=model, iteration=iteration)
     log.info(
         "image %s: grader %s scored %d/10 (iteration %d)%s",
