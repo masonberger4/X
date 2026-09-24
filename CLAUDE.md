@@ -151,13 +151,13 @@ step carrying `--live`).
   given (`config.yaml`: `x:` on a `companies.feeds` / `branding.companies` entry, and the
   `mentions:` list of journals, societies and regulators with `domains:` and
   `match_names:`) must be written as @handle when a post names it, and a formal drug name
-  (INN stem regex, `-cel` short names) or trial name (`KEYNOTE-189` shape) must be a
-  hashtag; a configured company name (`tags.company_names`, `drafter.known_company_names`)
+  (INN stem regex, `-cel` short names) or ClinicalTrials.gov number (`NCT` + 8 digits,
+  `tags.nct_ids`) must be a hashtag, while a trial's name (KEYNOTE-189) stays plain text; a configured company name (`tags.company_names`, `drafter.known_company_names`)
   is never a drug, so Genmab is not `#Genmab`. Handles are never guessed: `drafter.story_handles` (`tags.load_handles` +
   `relevant_handles`: named in the source text, owning the URL host, or the
   `company_<key>` source) is the only list the model sees (`X HANDLES` in the user prompt,
   `Brief.handles` for the swarm) and the only one enforced. `numbers_in` ignores
-  `@`/`#` tokens so a trial name's digits are not a number to verify. Publish's re-check
+  `@`/`#` tokens so an NCT number's digits are not a number to verify. Publish's re-check
   and human-approved texts are untouched.
 - **No post carries a link** (`draft/hook.py:link_problems`, pure; rule 2 in
   `draft/prompt.py:hard_rules`, enforced per post from `check_hard_rules` and per cell from

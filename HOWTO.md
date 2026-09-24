@@ -139,9 +139,10 @@ source only when it is due, and score only scores what is new.
 
    Posts tag what X can link. A journal, society, regulator or company the
    pipeline knows the X account of is written as its @handle when a post names
-   it (`@JCO_ASCO`, `@Merck`), and every formal drug name and named trial is a
-   hashtag as the source spells it (`#Trastuzumab Deruxtecan`, `#cilta-cel`,
-   `#DESTINY-Lung02`, `#KEYNOTE-189`); nothing else is a hashtag. Handles come
+   it (`@JCO_ASCO`, `@Merck`), and every formal drug name and ClinicalTrials.gov
+   number is a hashtag as the source spells it (`#Trastuzumab Deruxtecan`,
+   `#cilta-cel`, `#NCT04487080`); a trial's name (KEYNOTE-189) stays plain text,
+   and nothing else is a hashtag. Handles come
    from `config.yaml` only: `x: Merck` on a company's line under
    `companies: feeds:` or `branding: companies:`, and the `mentions:` list for
    journals, societies and regulators (`name`, `handle`, `aliases`, `domains`

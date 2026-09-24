@@ -1,4 +1,4 @@
-"""Hard rule 11: @handles for accounts we know, #hashtags for drug and trial names."""
+"""Hard rule 11: @handles for accounts we know, #hashtags for drug names and NCT numbers."""
 
 from draft import drafter
 from draft.prompt import HARD_RULES, build_user_prompt
@@ -8,9 +8,9 @@ from draft.tags import (
     drug_names,
     handles_block,
     load_handles,
+    nct_ids,
     relevant_handles,
     tag_problems,
-    trial_names,
 )
 from swarm.cells import cell_problems
 from swarm.genome import HOOK, Slot
@@ -80,15 +80,13 @@ def test_relevant_handles_by_name_host_and_source():
     assert [h.handle for h in rel] == ["BloodJournal"]
 
 
-def test_trial_and_drug_names():
-    assert trial_names("Results of DESTINY-Lung02 and KEYNOTE-189, plus CARTITUDE-1.") == [
-        "DESTINY-Lung02",
-        "KEYNOTE-189",
-        "CARTITUDE-1",
+def test_nct_and_drug_names():
+    assert nct_ids("NCT04487080 and nct03215706, again NCT04487080.") == [
+        "NCT04487080",
+        "NCT03215706",
     ]
-    tagged = "#DESTINY-Lung02 is tagged; CTLA-4, PD-1, CD19 and COVID-19 are not trials"
-    assert trial_names(tagged) == []
-    assert trial_names("Phase 2 data, n=40, see https://x.org/KEYNOTE-189") == []
+    assert nct_ids("#NCT04487080 is tagged; KEYNOTE-189 and NCT123 are not numbers") == []
+    assert nct_ids("see https://clinicaltrials.gov/study/NCT04487080") == []
     assert drug_names("trastuzumab deruxtecan, cilta-cel and osimertinib") == [
         "trastuzumab",
         "cilta-cel",
@@ -103,13 +101,13 @@ def test_trial_and_drug_names():
 
 def test_tag_problems():
     hs = load_handles(CFG)[:1]
-    assert tag_problems("Merck's engager in #KEYNOTE-189 with #pembrolizumab", hs) == [
+    assert tag_problems("Merck's engager in KEYNOTE-189 with #pembrolizumab", hs) == [
         "names Merck without its handle @Merck"
     ]
-    assert tag_problems("@Merck's engager in #KEYNOTE-189 with #pembrolizumab", hs) == []
-    probs = tag_problems("KEYNOTE-189: pembrolizumab wins", None)
+    assert tag_problems("@Merck's engager in KEYNOTE-189 with #pembrolizumab", hs) == []
+    probs = tag_problems("KEYNOTE-189 (NCT04487080): pembrolizumab wins", None)
     assert probs == [
-        "trial name(s) without a hashtag: KEYNOTE-189 -> #KEYNOTE-189",
+        "trial number(s) without a hashtag: NCT04487080 -> #NCT04487080",
         "drug name(s) without a hashtag: pembrolizumab -> #pembrolizumab",
     ]
 
@@ -137,16 +135,16 @@ def _draft(*posts):
 
 def test_check_hard_rules_enforces_tags():
     hs = load_handles(CFG)[:1]
-    d = _draft("Merck data", "KEYNOTE-189 read", "third", "last")
+    d = _draft("Merck data", "KEYNOTE-189 (NCT04487080) read", "third", "last")
     probs = drafter.check_hard_rules(d, url=URL, source="s", handles=hs)
     assert "thread[0] names Merck without its handle @Merck" in probs
-    assert "thread[1] trial name(s) without a hashtag: KEYNOTE-189 -> #KEYNOTE-189" in probs
-    d = _draft("@Merck data", "#KEYNOTE-189 read", "third", "last")
+    assert "thread[1] trial number(s) without a hashtag: NCT04487080 -> #NCT04487080" in probs
+    d = _draft("@Merck data", "KEYNOTE-189 (#NCT04487080) read", "third", "last")
     assert drafter.check_hard_rules(d, url=URL, source="s", handles=hs) == []
 
 
 def test_numbers_in_ignores_tags():
-    assert drafter.numbers_in("#KEYNOTE-189 and @JCO_ASCO: ORR 88% in 40") == ["88%", "40"]
+    assert drafter.numbers_in("#NCT04487080 and @JCO_ASCO: ORR 88% in 40") == ["88%", "40"]
 
 
 def test_story_handles_reads_root_config(monkeypatch):
@@ -164,6 +162,6 @@ def test_swarm_cells_and_prompts():
         "names Merck without its handle @Merck"
     ]
     assert cell_problems("@Merck reports 88% ORR", handles=hs, **kw) == []
-    assert "#KEYNOTE-189" in cell_rules() and "never invent" in cell_rules()
+    assert "#NCT04487080" in cell_rules() and "never invent" in cell_rules()
     brief = Brief(title="t", abstract="a", url=URL, source="s", handles=tuple(hs))
     assert "- @Merck = Merck" in propose_prompt(brief, Slot("hook", "r"), {})

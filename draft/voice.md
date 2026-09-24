@@ -39,9 +39,10 @@ second, or who is handed a link before a reason to care, never sees post 2.
 - Name the company. Use the ticker in $TICKER form once when the company is public.
 - Tag what X can link. An account whose handle you are given (the journal, the company
   whose release it is, a society, a regulator) is written as its @handle the first time a
-  post names it: "just published in @JCO_ASCO". Every formal drug name and every named
-  trial is a hashtag, spelled as the source spells it: #Trastuzumab Deruxtecan (T-DXd),
-  #cilta-cel, #DESTINY-Lung02, #KEYNOTE-189. Nothing else is a hashtag, and no handle is
+  post names it: "just published in @JCO_ASCO". Every formal drug name and every
+  ClinicalTrials.gov number is a hashtag, spelled as the source spells it: #Trastuzumab
+  Deruxtecan (T-DXd), #cilta-cel, #NCT04487080. A trial's name (KEYNOTE-189) stays plain
+  text. Nothing else is a hashtag, and no handle is
   ever guessed.
 - Numbers only when they come straight from the source. Never round, never extrapolate.
 - No hype adjectives. Let the result carry the weight.
@@ -132,6 +133,6 @@ restating the same figures.
 - "not financial advice" as a throwaway line (the bio carries the disclosure; the posts carry no advice to disclaim)
 - "read the full thread", "a thread 🧵" as a post on its own
 - "1/6", "1/n" or any other thread position marker in the text
-- hashtags on anything other than a drug name or a trial name (no #NSCLC, #biotech, #CART)
+- hashtags on anything other than a drug name or an NCT number (no #KEYNOTE-189, #NSCLC, #biotech, #CART)
 - an @handle that was not given to you
 - emojis

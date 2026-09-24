@@ -39,15 +39,15 @@ def _seed(conn, *posts, status=store.STATUS_PENDING):
 
 
 def test_retag_revises_only_offending_drafts(conn, monkeypatch):
-    bad = _seed(conn, "Merck in KEYNOTE-189", "two", "three", "four")
-    good = _seed(conn, "@Merck in #KEYNOTE-189", "two", "three", "four")
+    bad = _seed(conn, "Merck in NCT04487080", "two", "three", "four")
+    good = _seed(conn, "@Merck in #NCT04487080", "two", "three", "four")
     approved = _seed(conn, "Merck again", "two", "three", "four", status=store.STATUS_APPROVED)
     monkeypatch.setattr(run_draft, "story_handles", lambda **kw: HANDLES)
     calls = []
 
     def fake_revise(*, current, instructions, **kw):
         calls.append((current.thread[0], instructions))
-        fixed = validate_output(_out("@Merck in #KEYNOTE-189", "two", "three", "four"))
+        fixed = validate_output(_out("@Merck in #NCT04487080", "two", "three", "four"))
         return DraftResult(draft=fixed, model="m2", attempts=1, flagged_numbers=[])
 
     monkeypatch.setattr(run_draft, "revise_item", fake_revise)
@@ -55,16 +55,16 @@ def test_retag_revises_only_offending_drafts(conn, monkeypatch):
 
     assert run_draft.retag_drafts(conn, dry_run=True) == 0 and calls == []
     assert run_draft.retag_drafts(conn) == 2
-    assert sorted(c[0] for c in calls) == ["Merck again", "Merck in KEYNOTE-189"]
+    assert sorted(c[0] for c in calls) == ["Merck again", "Merck in NCT04487080"]
     assert all(c[1] == run_draft.RETAG_INSTRUCTIONS for c in calls)
     for did in (bad, approved):
         row = store.get_draft(conn, did)
-        assert row.draft.thread[0] == "@Merck in #KEYNOTE-189"
+        assert row.draft.thread[0] == "@Merck in #NCT04487080"
         decisions = store.list_decisions(conn, did)
         assert decisions[-1]["action"] == store.ACTION_REVISE
         assert decisions[-1]["note"] == run_draft.RETAG_NOTE
     assert store.get_draft(conn, approved).status == store.STATUS_APPROVED
-    assert store.get_draft(conn, good).draft.thread[0] == "@Merck in #KEYNOTE-189"
+    assert store.get_draft(conn, good).draft.thread[0] == "@Merck in #NCT04487080"
     assert not store.list_decisions(conn, good)
     assert run_draft.retag_drafts(conn) == 0  # everything complies now
 
