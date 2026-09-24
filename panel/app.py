@@ -103,6 +103,13 @@ def current_run() -> dict[str, Any] | None:
     }
 
 
+def publish_running() -> bool:
+    """Whether a "Publish now" run is in flight (it has its own slot beside the pipeline's,
+    so the button stays live while an ingest or draft run is going)."""
+    job = JOBS.publishing()
+    return job is not None and job.running
+
+
 def publish_live() -> bool:
     """Whether "Publish now" would post: run_publish.py posts only with PUBLISH_ENABLED=1."""
     return os.environ.get("PUBLISH_ENABLED") == "1"
@@ -110,6 +117,7 @@ def publish_live() -> bool:
 
 templates.env.globals["current_run"] = current_run
 templates.env.globals["publish_live"] = publish_live
+templates.env.globals["publish_running"] = publish_running
 
 
 def _now() -> datetime:
@@ -429,8 +437,10 @@ async def publish_order(request: Request):
 
 
 @app.post("/runs/cancel")
-def cancel_run():
-    JOBS.cancel()
+async def cancel_run(request: Request):
+    """Stop the run whose button was pressed (`job_id`); without one, every run in flight."""
+    form = await read_form(request)
+    JOBS.cancel(job_id=_first(form, "job_id") or None)
     return RedirectResponse("/runs", status_code=303)
 
 
@@ -493,6 +503,7 @@ def _adopt_queue_routes() -> None:
     # whether a live post is possible, looked up at render time.
     queue_app.templates.env.globals["current_run"] = current_run
     queue_app.templates.env.globals["publish_live"] = publish_live
+    queue_app.templates.env.globals["publish_running"] = publish_running
     have = {getattr(r, "path", None) for r in app.router.routes}
     for route in queue_app.app.router.routes:
         path = getattr(route, "path", None)

@@ -1,4 +1,4 @@
-<span id="run-state" data-running="{{ 1 if jobs and jobs[0].running else 0 }}" hidden></span>
+<span id="run-state" data-running="{{ 1 if jobs|selectattr('running')|list else 0 }}" hidden></span>
 {% for j in jobs %}
 <details class="run" {% if loop.first %}open{% endif %}>
   <summary>
@@ -24,6 +24,7 @@
   {% endif %}
   {% if j.running %}
   <form method="post" action="/runs/cancel" class="inline">
+    <input type="hidden" name="job_id" value="{{ j.id }}">
     <button type="submit">Stop this run</button>
     <span class="meta">ends the current step and skips the rest; the next run picks up where it left off</span>
   </form>

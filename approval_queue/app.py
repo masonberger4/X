@@ -83,6 +83,7 @@ def install_standalone_globals() -> None:
     templates.env.globals["HAS_PANEL"] = False
     templates.env.globals["current_run"] = lambda: None
     templates.env.globals["publish_live"] = lambda: False
+    templates.env.globals["publish_running"] = lambda: False
 
 
 install_standalone_globals()
