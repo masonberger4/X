@@ -114,6 +114,7 @@ def build_argv(
         "-p",
         "--output-format",
         "json",
+        "--verbose",  # the whole transcript as a list, so a lost final answer is recoverable
         "--no-session-persistence",
         "--tools",
         tool_list,
@@ -129,13 +130,36 @@ def build_argv(
     return argv + settings["extra_args"]
 
 
+def recover_answer(events: list[Any]) -> str:
+    """The last non-empty assistant text in a --verbose transcript, else the input of
+    the last tool call it made (serialised as JSON); empty when there is neither."""
+    texts: list[str] = []
+    tool_inputs: list[str] = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("type") != "assistant":
+            continue
+        content = (event.get("message") or {}).get("content") or []
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text" and str(block.get("text") or "").strip():
+                texts.append(block["text"])
+            elif block.get("type") == "tool_use" and isinstance(block.get("input"), dict):
+                tool_inputs.append(json.dumps(block["input"]))
+    if texts:
+        return texts[-1]
+    return tool_inputs[-1] if tool_inputs else ""
+
+
 def parse_envelope(stdout: str) -> str:
     """Return the assistant text from `--output-format json` output."""
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError as exc:
         raise ClaudeCliError(f"CLI output is not JSON: {stdout[:200]!r}") from exc
-    if isinstance(data, list):  # stream-style array; the result event is last
+    events: list[Any] = []
+    if isinstance(data, list):  # --verbose: the transcript; the result event is last
+        events = data
         data = next((d for d in reversed(data) if d.get("type") == "result"), data[-1])
     if not isinstance(data, dict):
         raise ClaudeCliError(f"unexpected CLI output shape: {type(data).__name__}")
@@ -148,6 +172,10 @@ def parse_envelope(stdout: str) -> str:
         message = f"CLI reported {reason}: {str(data.get('result'))[:300]}"
         raise (ClaudeCliRefused if is_refusal(message) else ClaudeCliError)(message)
     result = data.get("result")
+    if not isinstance(result, str) or not result.strip():
+        # The model sometimes answers by calling the tool the prompt names; with no tools
+        # the call fails and turn 2 ends empty, while the answer sits in turn 1.
+        result = recover_answer(events)
     if not isinstance(result, str) or not result.strip():
         # Say why: a turn that ended on max_tokens (thinking used the budget) or a
         # refusal stop reads very differently from a plain empty reply.
@@ -262,13 +290,15 @@ def _failure_reason(proc: subprocess.CompletedProcess[str]) -> str:
     """The human-readable reason from a failed run: the envelope's `result` when stdout is
     the JSON envelope (its first 300 chars are all usage counters), else stderr/stdout."""
     out = (proc.stdout or "").strip()
-    if out.startswith("{"):
+    if out.startswith(("{", "[")):
         try:
             data = json.loads(out)
+            if isinstance(data, list):  # --verbose transcript: the result event is last
+                data = next((d for d in reversed(data) if d.get("type") == "result"), {})
             result = str(data.get("result") or "").strip()
             reason = data.get("terminal_reason") or data.get("subtype") or "error"
             if result:
                 return f"{reason}: {result[:300]}"
-        except ValueError:
+        except (ValueError, AttributeError):
             pass
     return (proc.stderr or out).strip()[:300]
