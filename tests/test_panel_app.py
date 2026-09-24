@@ -142,7 +142,7 @@ def test_the_runs_page_offers_stop_while_running_and_the_route_cancels(client, m
     assert 'action="/runs/cancel"' in body and "Stop this run" in body
 
     called = {}
-    monkeypatch.setattr(panel_app.JOBS, "cancel", lambda *a: called.setdefault("yes", True))
+    monkeypatch.setattr(panel_app.JOBS, "cancel", lambda *a, **k: called.setdefault("yes", True))
     r = client.post("/runs/cancel")
     assert r.status_code == 303 and r.headers["location"] == "/runs" and called["yes"]
 

@@ -50,7 +50,7 @@
                 onsubmit="return confirm('Post draft {{ d.id }} to X now?')">
             <input type="hidden" name="draft_id" value="{{ d.id }}">
             <input type="hidden" name="back" value="/status/approved">
-            <button type="submit" {% if run %}disabled{% endif %}>Publish now</button>
+            <button type="submit" {% if publish_running() %}disabled title="a publish is already running"{% endif %}>Publish now</button>
           </form>
           {% endif %}
           {% if releasable.get(d.id) %}

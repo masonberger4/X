@@ -6,7 +6,8 @@ import time
 import pytest
 
 from ops import lock, store
-from panel.jobs import STATE_DONE, STATE_LOCKED, JobError, JobManager
+from ops.runner import Step
+from panel.jobs import STATE_DONE, STATE_LOCKED, STATE_STOPPED, JobError, JobManager
 
 
 def _cfg(tmp_path, steps):
@@ -202,16 +203,11 @@ def test_publish_now_runs_the_publisher_live_for_one_draft(tmp_path, monkeypatch
     assert step.enabled and step.timeout_seconds == 77
 
 
-def test_publish_now_waits_for_the_run_in_progress_and_needs_a_draft(tmp_path):
+def test_publish_now_needs_a_draft(tmp_path):
     cfg = _cfg(tmp_path, [_step("slow", "import time; time.sleep(2)")])
     manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
     with pytest.raises(JobError, match="draft id"):
         manager.start_publish_now(0)
-    job = manager.start(["slow"])
-    with pytest.raises(JobError, match="already in progress"):
-        manager.start_publish_now(1)
-    manager.cancel()
-    _wait(job)
 
 
 def test_config_steps_never_carry_the_live_flag_even_though_publish_now_does(tmp_path):
@@ -228,3 +224,46 @@ def test_the_panel_never_publishes_on_its_own():
 
     assert not hasattr(JobManager, "start_publish_auto")
     assert not hasattr(jobs, "AUTO_PUBLISH") and not hasattr(jobs, "is_quiet")
+
+
+def test_publish_now_runs_beside_a_pipeline_run(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path, [_step("slow", "import time; time.sleep(30)")])
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    fast = Step("publish now", ["python", "-c", "print('posted')"], True, False, 30)
+    monkeypatch.setattr(
+        manager,
+        "_launch_publish",
+        lambda name, extra: manager._launch([name], [fast], publish=True),
+    )
+    pipeline = manager.start(["slow"])
+    pub = _wait(manager.start_publish_now(7))
+    assert pub.state == STATE_DONE and "posted" in pub.results[0].stdout_tail
+    assert pipeline.running and manager.current() is pipeline
+    with pytest.raises(JobError, match="already in progress"):
+        manager.start(["slow"])
+    assert manager.cancel("stopped by a test", job_id=pipeline.id)
+    _wait(pipeline)
+    assert pipeline.state == STATE_STOPPED
+
+
+def test_stopping_a_publish_leaves_the_pipeline_run_alone(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path, [_step("slow", "import time; time.sleep(3)")])
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    hang = Step("publish now", ["python", "-c", "import time; time.sleep(30)"], True, False, 30)
+    monkeypatch.setattr(
+        manager,
+        "_launch_publish",
+        lambda name, extra: manager._launch([name], [hang], publish=True),
+    )
+    pipeline = manager.start(["slow"])
+    pub = manager.start_publish_now(7)
+    with pytest.raises(JobError, match="a publish is already in progress"):
+        manager.start_publish_now(8)
+    deadline = time.monotonic() + 10
+    while pub.active_step is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert manager.cancel("stop the publish", job_id=pub.id)
+    _wait(pub)
+    assert pub.state == STATE_STOPPED
+    _wait(pipeline)
+    assert pipeline.state == STATE_DONE and not pipeline.results[0].failed

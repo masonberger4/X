@@ -1,5 +1,9 @@
 """Run orchestrator steps from the web UI, in a background thread, one at a time.
 
+"Publish now" has a slot of its own beside that one: it posts one draft and touches
+nothing the other steps run, so it can start while an ingest, score or draft run is in
+flight (one publish at a time, under its own lock file, never the pipeline lock).
+
 The panel never builds an argv of its own: a job names steps from `ops/config.yaml`
 and `ops/runner.py` runs exactly what that file says, under the same `ops/lock.py`
 lock cron takes. So a run started here is the same run cron would start, and a step
@@ -45,6 +49,7 @@ FORBIDDEN_ARGS = ("--live",)
 
 PUBLISH_NOW = "publish now"  # the step name of a start_publish_now() run
 PUBLISH_CLI = "run_publish.py"
+PUBLISH_LOCK_SUFFIX = ".publish"  # the publish slot's lock: <lock_path>.publish
 
 
 class JobError(RuntimeError):
@@ -66,6 +71,8 @@ class Job:
     active_since: datetime | None = None
     active_stdout: str = ""  # that step's log so far, refreshed as it writes
     active_stderr: str = ""
+    publish: bool = False  # a "Publish now" run, in the publish slot
+    stop_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     @property
     def running(self) -> bool:
@@ -93,7 +100,8 @@ def _now() -> datetime:
 
 
 class JobManager:
-    """Owns the single background slot. Thread-safe; keeps the last few jobs in memory."""
+    """Owns the background slots: one for pipeline runs, one for "Publish now". Thread-safe;
+    keeps the last few jobs in memory."""
 
     def __init__(
         self,
@@ -110,6 +118,7 @@ class JobManager:
         self._history_size = history_size
         self._mutex = threading.Lock()
         self._current: Job | None = None
+        self._publish: Job | None = None
         self._history: list[Job] = []
 
     # -- configuration -----------------------------------------------------
@@ -123,24 +132,36 @@ class JobManager:
     # -- state -------------------------------------------------------------
 
     def current(self) -> Job | None:
+        """The pipeline run in flight (not a "Publish now"; see `publishing()`)."""
         with self._mutex:
             return self._current
 
+    def publishing(self) -> Job | None:
+        """The "Publish now" run in flight, if any."""
+        with self._mutex:
+            return self._publish
+
     def history(self) -> list[Job]:
         with self._mutex:
-            jobs = ([self._current] if self._current else []) + self._history
+            live = [j for j in (self._publish, self._current) if j is not None]
+            jobs = live + self._history
         return jobs
 
-    def cancel(self, reason: str = "stopped by the operator") -> bool:
-        """End the run in progress: the live step and everything it launched are killed,
-        the remaining steps are skipped, and the job records why. False if none running."""
+    def cancel(self, reason: str = "stopped by the operator", job_id: str | None = None) -> bool:
+        """End a run in progress: the live step and everything it launched are killed,
+        the remaining steps are skipped, and the job records why. With `job_id`, only that
+        run; without it, every run in flight. False if none was running."""
         with self._mutex:
-            job = self._current
-            if job is None or not job.running:
-                return False
-            job.stopping = reason
-        runner.terminate_active()
-        return True
+            jobs = [
+                j
+                for j in (self._current, self._publish)
+                if j is not None and j.running and (job_id is None or j.id == job_id)
+            ]
+            for job in jobs:
+                job.stopping = reason
+        for job in jobs:
+            runner.terminate_active(job.stop_event)
+        return bool(jobs)
 
     # -- starting ----------------------------------------------------------
 
@@ -183,14 +204,21 @@ class JobManager:
             required=False,
             timeout_seconds=timeout,
         )
-        return self._launch([name], [step])
+        return self._launch([name], [step], publish=True)
 
-    def _launch(self, names: list[str], plan: list[Step]) -> Job:
+    def _launch(self, names: list[str], plan: list[Step], publish: bool = False) -> Job:
         with self._mutex:
-            if self._current is not None and self._current.running:
-                raise JobError("a run is already in progress")
-            job = Job(id=uuid.uuid4().hex[:8], steps=names, started_at=_now(), plan=plan)
-            self._current = job
+            slot = self._publish if publish else self._current
+            if slot is not None and slot.running:
+                what = "a publish" if publish else "a run"
+                raise JobError(f"{what} is already in progress")
+            job = Job(
+                id=uuid.uuid4().hex[:8], steps=names, started_at=_now(), plan=plan, publish=publish
+            )
+            if publish:
+                self._publish = job
+            else:
+                self._current = job
         thread = threading.Thread(target=self._execute, args=(job,), daemon=True)
         thread.start()
         return job
@@ -214,14 +242,22 @@ class JobManager:
             with self._mutex:
                 self._history.insert(0, job)
                 del self._history[self._history_size :]
-                self._current = None
+                if job.publish:
+                    self._publish = None
+                else:
+                    self._current = None
 
     def _run_under_lock(self, job: Job) -> None:
-        held = lock.acquire(self.cfg["lock_path"])
+        lock_path = str(self.cfg["lock_path"]) + (PUBLISH_LOCK_SUFFIX if job.publish else "")
+        held = lock.acquire(lock_path)
         if held is None:
             log.info("panel run %s: the pipeline lock is held (a cron run is in flight)", job.id)
             job.state = STATE_LOCKED
-            job.error = "another run holds the pipeline lock; try again when it finishes"
+            job.error = (
+                "another publish holds the publish lock; try again when it finishes"
+                if job.publish
+                else "another run holds the pipeline lock; try again when it finishes"
+            )
             return
         with held:
             tail = int(self.cfg.get("run_log_tail_chars", 4000))
@@ -248,6 +284,7 @@ class JobManager:
                 on_start=started,
                 on_result=finished,
                 on_output=output,
+                stop=job.stop_event,
             )
             self._record(job)
 
