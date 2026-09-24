@@ -30,7 +30,7 @@ SKIP_CANCELLED = "cancelled"
 
 # Live children of this process, so a caller (the control panel's Stop button, or the
 # desktop app closing) can end a run: each step's process and everything it launched.
-_ACTIVE: set[subprocess.Popen] = set()
+_ACTIVE: dict[subprocess.Popen, threading.Event] = {}  # live step -> its run's stop flag
 _ACTIVE_LOCK = threading.Lock()
 _STOP = threading.Event()
 
@@ -141,6 +141,7 @@ def run_steps(
     on_start: Callable[[Step], None] | None = None,
     on_result: Callable[[StepResult], None] | None = None,
     on_output: Callable[[Step, str, str], None] | None = None,
+    stop: threading.Event | None = None,
 ) -> list[StepResult]:
     """Run each enabled step in order. See module docstring for the skip/stop rules.
 
@@ -151,7 +152,11 @@ def run_steps(
     stdout/stderr tails every time the live process writes something, so a watcher can
     show a step's log while it runs rather than when it ends. It must be cheap and
     thread-safe.
+    `stop` is this run's own stop flag, so two runs in one process (the panel's pipeline
+    run and a "Publish now") can be stopped apart; without it the module's shared flag
+    is used, which `terminate_active()` with no argument sets.
     """
+    stop = _STOP if stop is None else stop
     workdir = Path(cwd) if cwd else Path.cwd()
     selected = set(only) if only is not None else None
     # Python children block-buffer stdout on a pipe, so without this a step's log would
@@ -159,7 +164,7 @@ def run_steps(
     child_env = {**os.environ, "PYTHONUNBUFFERED": "1", **(env or {})}
     results: list[StepResult] = []
     upstream_failed = False
-    _STOP.clear()
+    stop.clear()
 
     def add(result: StepResult) -> None:
         results.append(result)
@@ -171,7 +176,7 @@ def run_steps(
             continue
         argv = resolve_argv(step.argv, python)
         now = _now()
-        if _STOP.is_set():
+        if stop.is_set():
             log.warning("step %s: skipped, the run was stopped", step.name)
             add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_CANCELLED))
             continue
@@ -201,7 +206,9 @@ def run_steps(
 
         if on_start is not None:
             on_start(step)
-        result = _run_one(step, argv, workdir, child_env, tail_chars, on_output=on_output)
+        result = _run_one(
+            step, argv, workdir, child_env, tail_chars, on_output=on_output, stop=stop
+        )
         add(result)
         if result.failed and step.required:
             upstream_failed = True
@@ -246,12 +253,18 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             proc.kill()
 
 
-def terminate_active() -> int:
-    """Stop the run in progress: kill every live step (and its children) and make
-    run_steps skip whatever steps remain. Returns how many processes were ended."""
-    _STOP.set()
+def terminate_active(stop: threading.Event | None = None) -> int:
+    """Stop a run in progress: kill its live step (and its children) and make run_steps
+    skip whatever steps remain. With `stop`, only the run started with that flag; without
+    it, every run. Returns how many processes were ended."""
+    (stop or _STOP).set()
     with _ACTIVE_LOCK:
-        procs = list(_ACTIVE)
+        if stop is None:
+            procs = list(_ACTIVE)
+            for flag in set(_ACTIVE.values()):
+                flag.set()
+        else:
+            procs = [p for p, flag in _ACTIVE.items() if flag is stop]
     for proc in procs:
         log.warning("stopping step process %s", proc.pid)
         _kill_tree(proc)
@@ -290,7 +303,9 @@ def _run_one(
     env: dict[str, str] | None,
     tail_chars: int,
     on_output: Callable[[Step, str, str], None] | None = None,
+    stop: threading.Event | None = None,
 ) -> StepResult:
+    stop = _STOP if stop is None else stop
     started = _now()
     t0 = time.monotonic()
     log.info("step %s: starting %s", step.name, argv)
@@ -326,10 +341,10 @@ def _run_one(
         err_buf.append(f"{type(exc).__name__}: {exc}")
     else:
         with _ACTIVE_LOCK:
-            _ACTIVE.add(proc)
+            _ACTIVE[proc] = stop
             # A stop that landed between on_start and Popen found nothing to
             # kill; end the process here, not after its whole run.
-            stopped_early = _STOP.is_set()
+            stopped_early = stop.is_set()
         if stopped_early:
             _kill_tree(proc)
         # One reader per pipe: the process is never blocked on a full pipe, and the
@@ -352,7 +367,7 @@ def _run_one(
             for t in readers:
                 t.join()
             with _ACTIVE_LOCK:
-                _ACTIVE.discard(proc)
+                _ACTIVE.pop(proc, None)
         # A timed-out step records no exit code (it was killed); the status page shows
         # "timed out" instead. A stopped run's step keeps its (kill) code: it did fail.
         exit_code = None if timed_out else proc.returncode

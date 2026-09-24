@@ -731,7 +731,9 @@ to stop it. Four pages:
   want and press "Run selected steps"). The page updates as the run goes: the step in progress is shown
   with how long it has been running and its log so far, refreshed every few
   seconds as the step writes, each finished step keeps its final log, and the
-  steps still to come are listed. This runs exactly what
+  steps still to come are listed. "Publish now" has its own slot: it can run
+  while an ingest, score, draft or verify run is going (one publish at a time),
+  and each run's "Stop this run" button stops only that run. This runs exactly what
   the scheduler in part 6 runs; if the scheduler happens to be running at
   that moment the page says so and does nothing, rather than running twice.
   While a run is going there is a "Stop this run" button: it ends the

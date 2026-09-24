@@ -380,7 +380,10 @@ step carrying `--live`).
   renders them from the `current_run` / `publish_live` template globals the panel installs
   on both template envs, so the standalone queue shows none). The one argv the panel builds
   itself is `JobManager.start_publish_now(draft_id)` (`POST /publishing/now` from the
-  approved page): `run_publish.py --live --now --draft ID` as its own run, still gated by
+  approved page): `run_publish.py --live --now --draft ID` as its own run in a second slot beside the
+  pipeline's (so it can start mid-run; one publish at a time, under `<lock_path>.publish`
+  rather than the pipeline lock; each job has its own stop flag, `runner.run_steps(stop=)`,
+  so `cancel(job_id=)` stops one run), still gated by
   `PUBLISH_ENABLED=1` inside run_publish.py. It is the only argv that carries the flag
   (`_launch_publish`), and `FORBIDDEN_ARGS` still refuses it in any configured step.
   **Posting is manual only**: there is no automatic publisher (the timed
