@@ -29,10 +29,11 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from statistics import median
 from typing import Any
 
@@ -42,12 +43,14 @@ from swarm import fitness
 from swarm.genome import (
     CLOSER,
     CLOSER_RULE,
+    NAME_THE_SOURCE,
     SEED_DESIGNERS,
     SEED_FORMATS,
     SEED_GENOMES,
     Designer,
     FormatGenome,
     Genome,
+    asks_for_url,
 )
 
 ROLES = ("swarm", "control")
@@ -143,12 +146,37 @@ LEGACY_CLOSER_RULE = (
 )
 
 
+# The URL clause the old seed closer carried, as children that kept it still word it.
+_URL_CLAUSE = re.compile(
+    r",?\s*(?:and\s+)?then\s+(?:the\s+)?(?:primary\s+)?(?:source\s+)?url\b[^.;]*",
+    re.IGNORECASE,
+)
+
+
+def closer_without_url(rule: str) -> str:
+    """A closer rule with its request for the source URL taken out and the source named in
+    words instead, keeping the rest of a child's own wording (so a reworded closer never
+    collapses into its parent's). The exact old seed rule becomes CLOSER_RULE; a rule with
+    nothing left becomes CLOSER_RULE too."""
+    norm = " ".join(rule.split())
+    if norm == LEGACY_CLOSER_RULE:
+        return CLOSER_RULE
+    kept = _URL_CLAUSE.sub("", norm)
+    sentences = [x for x in re.split(r"(?<=[.!?])\s+", kept) if x.strip()]
+    sentences = [x for x in sentences if not asks_for_url(x)]
+    if not sentences:
+        return CLOSER_RULE
+    text = " ".join(x if x.rstrip().endswith((".", "!", "?")) else x + "." for x in sentences)
+    return text if NAME_THE_SOURCE in text else f"{text} {NAME_THE_SOURCE}"
+
+
 def _rewrite_url_closers(conn: sqlite3.Connection) -> None:
     """Rule 2 bans every link, but writer genomes seeded or bred before it still tell their
-    closer, word for word, to end on the source URL, a job no candidate may do. Rewrite
-    exactly that seed rule in place on live writers (same id, so rotation counts and
-    fitness stay), noting it. A closer a child reworded is its own gene and is left alone,
-    so two genomes never collapse into one. Idempotent."""
+    closer to end on the source URL, a job no candidate may do. Rewrite that closer in
+    place on live writers (same id, so rotation counts and fitness stay), noting the old
+    rule: the exact old seed rule becomes CLOSER_RULE, a child's reworded closer loses only
+    its URL request (closer_without_url). Idempotent: a closer that asks for no URL is left
+    alone."""
     rows = conn.execute(
         "SELECT id, genome_json FROM swarm_genomes WHERE retired_at IS NULL AND kind = 'writer'"
     ).fetchall()
@@ -163,12 +191,13 @@ def _rewrite_url_closers(conn: sqlite3.Connection) -> None:
             if (
                 isinstance(slot, dict)
                 and slot.get("name") == CLOSER
-                and " ".join(str(slot.get("rule", "")).split()) == LEGACY_CLOSER_RULE
+                and asks_for_url(str(slot.get("rule", "")))
             ):
-                slot["rule"] = CLOSER_RULE
+                old = " ".join(str(slot.get("rule", "")).split())
+                slot["rule"] = closer_without_url(old)
                 changed = True
         if changed:
-            note = "closer rule rewritten without the source URL (rule 2)"
+            note = f"closer rule rewritten without the source URL (rule 2); was: {old}"
             d["notes"] = f"{d.get('notes', '')} {note}".strip()
             conn.execute(
                 "UPDATE swarm_genomes SET genome_json = ? WHERE id = ?",
@@ -328,6 +357,89 @@ def fitness_scores(conn: sqlite3.Connection, kind: str) -> dict[int, fitness.Gen
     return {g: fitness.GenomeScore(g, len(v), float(median(v)), v) for g, v in by.items()}
 
 
+def dead_runs(
+    conn: sqlite3.Connection, kind: str, *, now: datetime, dead_after_days: float
+) -> dict[int, int]:
+    """Per genome of `kind`, how many of its drafted runs can no longer be credited to it: at
+    once for a writer whose swarm text was not posted (the jury chose the control, or the
+    swarm failed) or whose format was a single post, and for a designer whose chart was not
+    drawn in its Style; for any kind, a run older than `dead_after_days` with no credited
+    swarm_fitness row (never approved, never posted, or deleted). Only runs with a draft
+    count (a run whose drafting crashed never reached a human)."""
+    col = FITNESS_COLUMN[kind]
+    cutoff = (now - timedelta(days=dead_after_days)).isoformat()
+    at_once = "0"
+    if kind == "writer":
+        singles = [
+            int(i)
+            for i, text in conn.execute(
+                "SELECT id, genome_json FROM swarm_genomes WHERE kind = 'format'"
+            ).fetchall()
+            if _format_fields(text)[0] == "single"
+        ]
+        in_single = f"r.format_id IN ({','.join(str(i) for i in singles)})" if singles else "0"
+        at_once = f"(r.winner IS NOT 'swarm' OR {in_single})"
+    elif kind == "designer":
+        at_once = "(r.styled = 0)"
+    has_fitness = "swarm_fitness" in _tables(conn)
+    credited = (
+        f"EXISTS (SELECT 1 FROM swarm_fitness f WHERE f.run_id = r.id AND f.{col} = r.{col})"
+        if has_fitness
+        else "0"
+    )
+    rows = conn.execute(
+        f"""SELECT r.{col}, COUNT(*) FROM swarm_runs r
+            WHERE r.{col} IS NOT NULL AND r.draft_id IS NOT NULL
+              AND ({at_once} OR (r.created_at < :cutoff AND NOT {credited}))
+            GROUP BY r.{col}""",
+        {"cutoff": cutoff},
+    ).fetchall()
+    return {int(g): int(n) for g, n in rows}
+
+
+def inherited_priors(
+    conn: sqlite3.Connection,
+    kind: str,
+    scores: dict[int, fitness.GenomeScore],
+    *,
+    prior_sd: float,
+    post_sd: float,
+    dead: dict[int, int] | None = None,
+    dead_half_life: float = 0.0,
+) -> dict[int, float]:
+    """Each genome's starting belief: its parent's posterior, where the parent's own prior
+    is in turn its parent's (a grandchild of a strong line starts strong, not at 0), halved
+    for every `dead_half_life` of the genome's own runs that could never be credited, so a
+    child whose swarm keeps losing the jury drifts back to the account's average instead of
+    living off its parent's record. 0 for a seed."""
+    parent_of = {
+        int(i): (int(p) if p is not None else None)
+        for i, p in conn.execute(
+            "SELECT id, parent_id FROM swarm_genomes WHERE kind = ?", (kind,)
+        ).fetchall()
+    }
+    memo: dict[int, float] = {}
+
+    def prior(gid: int, seen: frozenset[int]) -> float:
+        if gid in memo:
+            return memo[gid]
+        pid = parent_of.get(gid)
+        if pid is None or gid in seen:
+            return 0.0
+        base = fitness.posterior(
+            scores.get(pid),
+            prior_mean=prior(pid, seen | {gid}),
+            prior_sd=prior_sd,
+            post_sd=post_sd,
+        )[0]
+        if dead and dead_half_life > 0:
+            base *= 0.5 ** (dead.get(gid, 0) / dead_half_life)
+        memo[gid] = base
+        return base
+
+    return {gid: prior(gid, frozenset()) for gid in parent_of}
+
+
 def thompson_next(
     conn: sqlite3.Connection,
     kind: str,
@@ -337,14 +449,19 @@ def thompson_next(
     post_sd: float,
     min_sd: float,
     explore_floor: float = 0.0,
+    now: datetime | None = None,
+    dead_after_days: float = 7.0,
+    dead_half_life: float = 3.0,
 ) -> Genome | Designer | FormatGenome | None:
     """A live genome of `kind` drawn by Thompson sampling on its credited scores
     (fitness.thompson_pick): the better a genome has done, the more stories it drafts,
-    while one with little evidence still gets some. A child starts from its parent's
-    posterior, so a winner's offspring is tried straight away. With probability
-    `explore_floor` the draw goes to the rotation's next genome instead (fewest runs since
-    the last birth), so a genome the leader has crowded out is still judged in time. None
-    while no live genome of the kind has a scored post: then the caller rotates evenly."""
+    while one with little evidence still gets some. A genome starts from its parent's
+    posterior (inherited_priors), so a winner's offspring is tried straight away, and that
+    head start wears off with every run that could never be credited to it (dead_runs).
+    With probability `explore_floor` the draw goes to the rotation's next genome instead
+    (fewest runs since the last birth), so a genome the leader has crowded out is still
+    judged in time. None while no live genome of the kind has a scored post: then the
+    caller rotates evenly."""
     seed_default(conn)
     live = live_genomes(conn, kind)
     if not live:
@@ -355,13 +472,16 @@ def thompson_next(
     if explore_floor > 0 and rng.random() < explore_floor:
         return _parse(kind, *_rotation_row(conn, kind))
     spread = fitness.allocation_spread(scores.values(), default=post_sd, floor=min_sd)
-    prior_means = {
-        g.id: fitness.posterior(
-            scores[g.parent_id], prior_mean=0.0, prior_sd=prior_sd, post_sd=spread
-        )[0]
-        for g in live
-        if g.parent_id is not None and g.parent_id in scores
-    }
+    dead = dead_runs(conn, kind, now=now or datetime.now(UTC), dead_after_days=dead_after_days)
+    prior_means = inherited_priors(
+        conn,
+        kind,
+        scores,
+        prior_sd=prior_sd,
+        post_sd=spread,
+        dead=dead,
+        dead_half_life=dead_half_life,
+    )
     pick = fitness.thompson_pick(
         [g.id for g in live],
         scores,

@@ -586,13 +586,19 @@ stored in `swarm_fitness` (rows for runs not scored under the current rules are
 dropped). Credit follows authorship: `swarm_fitness.genome_id` is NULL when the
 control's text was posted or the format was a single post (its fan-out and
 layers ran, but not its slot rules, which are what breeding mostly changes), and
-`designer_id` unless `run_draft.py` drew the chart in that designer's Style
-(`swarm_runs.styled`; a table, a failed render or no picture never used it).
+`designer_id` unless `run_draft.py` drew a chart in that designer's Style
+(`swarm_runs.styled`; a table, a failed render or no picture never used it). The
+Style is recorded on the draft (`drafts.style_json`), so a later redraw (a
+revision, the verifier's table) keeps it.
 Which genome drafts the next story is drawn by Thompson sampling on those
 credited scores (`evolve.allocation: thompson`, `swarm.store.thompson_next`): a
 genome that has done better drafts more stories, one with little evidence still
-gets some, and a child starts from its parent's record; a kind with no scored
-post yet rotates evenly. `prune` (`prune_rule:
+gets some, and a child starts from its parent's record (its parent's own prior
+included), a head start that halves every `dead_half_life` runs that can never
+be credited to it (`dead_runs`: its swarm text not posted, its drafts never
+posted within `dead_after_days`); a kind with no scored post yet rotates
+evenly. A genome with no credited post after `max_dead_runs` such runs is
+retired when the confidence rule retires nobody. `prune` (`prune_rule:
 confidence`) retires a live genome with at least `min_posts` credited, scored
 posts only when its mean log ratio is below the rest's with probability
 `1 - (1 - retire_confidence) / k` (a t test, per look), at most `max_retire_per_run` per kind per run

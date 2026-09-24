@@ -108,6 +108,8 @@ def draw_genomes(
         "post_sd": float(ev.get("post_log_sd", 0.9)),
         "min_sd": float(ev.get("min_log_sd", 0.3)),
         "explore_floor": float(ev.get("explore_floor", 0.1)),
+        "dead_after_days": float(ev.get("dead_after_days", 7)),
+        "dead_half_life": float(ev.get("dead_half_life", 3)),
     }
 
     def draw(kind: str):
@@ -509,6 +511,9 @@ def main(argv: list[str] | None = None) -> int:
             if result.flagged_numbers:
                 log.warning("%s: numbers flagged for review: %s", c.item_id, result.flagged_numbers)
             style = designer_style_for(conn, run_id)
+            if style is not None:
+                # every later redraw (a revision, the verifier's table) starts from it too
+                store.set_style(conn, draft_id, style.to_dict())
             if images.attach_chart(
                 conn, draft_id, result.draft.chart, source_url=c.url, cfg=draft_cfg, style=style
             ):
@@ -517,7 +522,7 @@ def main(argv: list[str] | None = None) -> int:
                     # the designer drew this picture, so it may be credited with the post
                     swarm_store.mark_styled(conn, run_id)
             if result.draft.extra_visuals:
-                images.attach_extra_charts(
+                extra = images.attach_extra_charts(
                     conn,
                     draft_id,
                     result.draft.extra_visuals,
@@ -525,6 +530,8 @@ def main(argv: list[str] | None = None) -> int:
                     cfg=draft_cfg,
                     style=style,
                 )
+                if extra and run_id is not None and style is not None:
+                    swarm_store.mark_styled(conn, run_id)
         log.info(
             "done: %d drafted (%d with a chart), %d failed hard rules", drafted, charts, failed
         )

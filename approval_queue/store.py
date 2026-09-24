@@ -153,6 +153,9 @@ _MIGRATIONS = (
     # Step 9 phase four: the draft's shape, its extra visuals and every rendered picture.
     ("drafts", "format_json", "ALTER TABLE drafts ADD COLUMN format_json TEXT"),
     ("drafts", "images_json", "ALTER TABLE drafts ADD COLUMN images_json TEXT"),
+    # Step 9 phase three: the Style the draft's pictures start from (its designer's), so a
+    # redraw after a revision or by the verifier keeps it instead of the house style.
+    ("drafts", "style_json", "ALTER TABLE drafts ADD COLUMN style_json TEXT"),
 )
 
 
@@ -737,6 +740,30 @@ def revise(
     did = _record_decision(conn, draft_id, ACTION_REVISE, original, revised, note, category)
     conn.commit()
     return did
+
+
+def set_style(conn: sqlite3.Connection, draft_id: int, style: dict | None) -> None:
+    """Record the Style (as Style.to_dict) every picture of this draft starts from; None
+    clears it (the house style)."""
+    conn.execute(
+        "UPDATE drafts SET style_json = ? WHERE id = ?",
+        (json.dumps(style) if style is not None else None, draft_id),
+    )
+    conn.commit()
+
+
+def get_style(conn: sqlite3.Connection, draft_id: int) -> dict | None:
+    """The Style set_style recorded for this draft, or None (the house style)."""
+    if "style_json" not in _columns(conn, "drafts"):
+        return None
+    row = conn.execute("SELECT style_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        data = json.loads(row[0])
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def set_image(

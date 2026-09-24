@@ -10,7 +10,9 @@ and every grade goes to `image_grades` with the kept one flagged.
 
 attach_chart is used by run_draft.py after insert_draft and by the queue's revise route
 after store.revise; a Table handed to it is NOT rendered (its cells are not verified yet).
-attach_table is used by run_verify.py once every cell has a verdict.
+attach_table is used by run_verify.py once every cell has a verdict. A render without an
+explicit `style` starts from the Style recorded on the draft (store.set_style, written by
+run_draft.py from its designer), so every redraw keeps the designer's look.
 Settings: `images` in draft/config.yaml (enabled, grader).
 """
 
@@ -166,7 +168,11 @@ def _render(
         log.info("draft %d: visual kept as spec only (images disabled in draft/config)", draft_id)
         return None
     path = store.image_file(draft_id, index)
-    style = style or Style()
+    if style is None:
+        # a redraw (a revision, the verifier's table, a scrubbed caption) starts from the
+        # Style the draft was first drawn in, its designer's, not the house style
+        stored = store.get_style(conn, draft_id)
+        style = Style().apply(stored) if stored else Style()
     try:
         draw(path, style)
     except ImportError:
