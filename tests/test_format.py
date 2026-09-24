@@ -98,8 +98,15 @@ def test_validate_output_reads_the_format():
         validate_output(out(), single_format())
     long = validate_output(out(thread=["a\n\nb\n\nc"]), long_format(2000))
     assert long.shape == "long" and long.max_chars == 2000
-    with pytest.raises(SchemaError, match="empty chart"):
+    with pytest.raises(SchemaError, match="carries 2 visual"):
         validate_output(out(visuals=[None]), two)
+    one_left = validate_output(out(), Format(visuals=1, anchors=("first",)))
+    one_left.wanted_visuals, one_left.anchors = 2, [1, 3]
+    assert drafter.format_of(one_left) is None  # never re-demands a dropped picture
+    two_kept = validate_output(out(visuals=[CHART2]), two)
+    assert drafter.format_of(two_kept).visuals == 2
+    assert "visuals" in drafter._as_output(two_kept)
+    assert "extra_visuals" not in drafter._as_output(two_kept)
 
 
 def test_no_shape_carries_a_link():

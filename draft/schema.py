@@ -309,11 +309,10 @@ def validate_output(data: Any, fmt: Format | None = None) -> Draft:
         extras_raw = data.get("visuals") or []
         if not isinstance(extras_raw, list):
             raise SchemaError("'visuals' must be a list")
-        extras = [validate_chart(v) for v in extras_raw]
+        # A null entry is an absent chart; the visual count below says what is missing.
+        extras = [c for c in (validate_chart(v) for v in extras_raw) if c is not None]
     except ChartError as exc:
         raise SchemaError(str(exc)) from exc
-    if any(v is None for v in extras):
-        raise SchemaError("'visuals' contains an empty chart")
     if chart is not None and table is not None:
         raise SchemaError("give a chart or a table, not both")
     n_visuals = (1 if chart is not None or table is not None else 0) + len(extras)
