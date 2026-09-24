@@ -149,7 +149,17 @@ def parse_envelope(stdout: str) -> str:
         raise (ClaudeCliRefused if is_refusal(message) else ClaudeCliError)(message)
     result = data.get("result")
     if not isinstance(result, str) or not result.strip():
-        raise ClaudeCliError("CLI returned an empty result")
+        # Say why: a turn that ended on max_tokens (thinking used the budget) or a
+        # refusal stop reads very differently from a plain empty reply.
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        details = {
+            "stop_reason": data.get("stop_reason"),
+            "terminal_reason": data.get("terminal_reason"),
+            "num_turns": data.get("num_turns"),
+            "output_tokens": usage.get("output_tokens"),
+        }
+        shown = ", ".join(f"{k}={v}" for k, v in details.items() if v is not None)
+        raise ClaudeCliError("CLI returned an empty result" + (f" ({shown})" if shown else ""))
     return result
 
 
