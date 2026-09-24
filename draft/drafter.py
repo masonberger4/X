@@ -467,7 +467,7 @@ def revise_item(
     )
     user = build_revision_user_prompt(
         base_user_prompt=base_user,
-        current=current.to_dict(),
+        current=_as_output(current),
         instructions=(instructions or "").strip() or None,
         claim_problems=claim_problems,
         cell_problems=cell_problems,
@@ -485,6 +485,18 @@ def revise_item(
         fmt=fmt,
         handles=handles,
     )
+
+
+def _as_output(draft: Draft) -> dict:
+    """The current draft in the output schema's own keys (`visuals`, not the stored
+    `extra_visuals`), so the model echoes back the shape it must return."""
+    d = draft.to_dict()
+    extras = d.pop("extra_visuals", None) or []
+    for key in ("shape", "anchors", "max_chars", "wanted_visuals"):
+        d.pop(key, None)
+    if extras:
+        d["visuals"] = extras
+    return d
 
 
 def _anchor_word(index: int, n_posts: int) -> str:
@@ -509,9 +521,14 @@ def format_of(draft: Draft) -> Format | None:
     against a revision of a different length preserves where the author meant the picture
     to sit (e.g. "last") rather than collapsing it back to post 1."""
     n = draft.wanted_visuals if draft.wanted_visuals is not None else 1
+    # A revision never asks for more pictures than the draft still carries (a reviewer or
+    # the verifier may have dropped one, or the source had numbers for only one chart);
+    # the first visual stays required as ever.
+    if n > 1:
+        n = max(1, min(n, len(draft.visuals)))
     n_posts = len(draft.thread)
-    if len(draft.anchors) == n:
-        anchors = tuple(_anchor_word(a, n_posts) for a in draft.anchors)
+    if len(draft.anchors) >= n and n:
+        anchors = tuple(_anchor_word(a, n_posts) for a in draft.anchors[:n])
     else:
         anchors = ("first",) * n
     if draft.shape == "thread" and n == 1 and draft.max_chars == MAX_POST_CHARS:
