@@ -455,3 +455,42 @@ def test_empty_result_names_the_stop_reason():
     )
     with pytest.raises(ClaudeCliError, match="stop_reason=max_tokens.*output_tokens=4096"):
         parse_envelope(out)
+
+
+def _transcript(first_turn):
+    import json
+
+    return json.dumps(
+        [
+            {"type": "system", "subtype": "init"},
+            {"type": "assistant", "message": {"content": first_turn}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "is_error": True}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}},
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": "",
+                "stop_reason": "end_turn",
+                "num_turns": 2,
+            },
+        ]
+    )
+
+
+def test_empty_result_recovers_text_from_an_earlier_turn():
+    from claude_cli import parse_envelope
+
+    out = _transcript(
+        [{"type": "text", "text": '{"scores": []}'}, {"type": "tool_use", "name": "x", "input": {}}]
+    )
+    assert parse_envelope(out) == '{"scores": []}'
+
+
+def test_empty_result_recovers_a_failed_tool_call_input():
+    import json
+
+    from claude_cli import parse_envelope
+
+    out = _transcript([{"type": "tool_use", "name": "score", "input": {"scores": [1]}}])
+    assert json.loads(parse_envelope(out)) == {"scores": [1]}
