@@ -433,3 +433,25 @@ def test_scorer_and_drafter_pass_effort_to_cli(monkeypatch):
     )
     drafter.call_anthropic("S", "U", "m")
     assert seen == ["low", "low"]
+
+
+def test_empty_result_names_the_stop_reason():
+    import json
+
+    import pytest
+
+    from claude_cli import ClaudeCliError, parse_envelope
+
+    out = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": "",
+            "stop_reason": "max_tokens",
+            "num_turns": 1,
+            "usage": {"output_tokens": 4096},
+        }
+    )
+    with pytest.raises(ClaudeCliError, match="stop_reason=max_tokens.*output_tokens=4096"):
+        parse_envelope(out)
