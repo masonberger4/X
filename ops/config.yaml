@@ -17,7 +17,9 @@ steps:
     argv: ["python", "run_score.py"]
     enabled: true
     required: true
-    timeout_seconds: 1200
+    # No time limit (0): a large backlog is ~25s per batch of 10 and can run past an hour.
+    # Scores are stored per batch, so the Stop button loses only the batch in flight.
+    timeout_seconds: 0
   # No time limit (0): on the claude_code backend every swarm cell is one CLI launch and
   # a story is ~110 of them at the planned fan_out and layers, so a run can take an hour
   # or more. Drafts are stored as they land, so the runs page's Stop button loses only the
