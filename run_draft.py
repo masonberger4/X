@@ -271,8 +271,9 @@ def designer_style_for(conn: store.sqlite3.Connection, run_id: int | None) -> St
 RETAG_NOTE = "apply mentions and hashtags (hard rule 11)"
 RETAG_INSTRUCTIONS = (
     "Apply HARD RULE 11 to every post: write each listed account as its @handle where the "
-    "post names it, and write every formal drug name and named trial as a hashtag, spelled "
-    "as the source spells it. Change nothing else: keep every sentence, number, claim and "
+    "post names it, write every formal drug name and ClinicalTrials.gov number (NCT...) as a "
+    "hashtag, spelled as the source spells it, and take the # off a trial's name "
+    "(#KEYNOTE-189 -> KEYNOTE-189). Change nothing else: keep every sentence, number, claim and "
     "the visual exactly as they are."
 )
 

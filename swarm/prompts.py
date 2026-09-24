@@ -62,7 +62,8 @@ def cell_rules(max_chars: int = MAX_POST_CHARS) -> str:
 - An interpretation, not a restatement: say what it means, what to watch, what is overhyped.
 - Write an account whose handle the brief lists as @handle when you name it; never invent
   a handle. Write every formal drug name (#Trastuzumab Deruxtecan, #cilta-cel) and every
-  named trial (#KEYNOTE-189, #DESTINY-Lung02) as a hashtag, spelled as the source spells it.
+  ClinicalTrials.gov number (#NCT04487080) as a hashtag, spelled as the source spells it.
+  A trial's name (KEYNOTE-189) is plain text, never a hashtag.
 - Otherwise plain text: no other hashtags, no emoji, no "1/", no quotation of the whole abstract."""
 
 

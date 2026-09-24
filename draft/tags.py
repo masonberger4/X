@@ -3,10 +3,12 @@
 The rule (HARD RULES 11 in draft/prompt.py, mirrored here in code): a post that names an
 account we know the X handle of (the journal or society that published the source, the
 company whose release it is, a regulator) writes it as @handle, and a formal drug name
-(#Trastuzumab Deruxtecan, #cilta-cel) or trial name (#DESTINY-Lung02, #KEYNOTE-189) is
-written as a hashtag. Handles are never guessed: they come from `config.yaml` only (`x:` on
-a `companies.feeds` or `branding.companies` entry, and the `mentions:` list for journals,
-societies and regulators), so a company without an `x:` is simply written by name.
+(#Trastuzumab Deruxtecan, #cilta-cel) is written as a hashtag. A trial is tagged by its
+ClinicalTrials.gov registry number (#NCT04487080), never by its name: the name
+(KEYNOTE-189) is written as plain text. Handles are never guessed: they come from
+`config.yaml` only (`x:` on a `companies.feeds` or `branding.companies` entry, and the
+`mentions:` list for journals, societies and regulators), so a company without an `x:` is
+simply written by name.
 
 Pure: no network, no database. `load_handles` reads the root config dict.
 """
@@ -19,12 +21,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 _URL_RE = re.compile(r"https?://\S+")
-# A formal trial name: an upper-case word of five or more letters, optionally a word after
-# a hyphen, then one to three digits (KEYNOTE-189, DESTINY-Lung02, CARTITUDE-1,
-# CheckMate-227, TROPION-Lung01). Four-letter targets such as CTLA-4 stay clear of it.
-_TRIAL_RE = re.compile(
-    r"(?<![#@$\w/.-])([A-Z][A-Za-z]{4,}(?:-[A-Za-z]{1,12})?-?\d{1,3}[A-Za-z]?)(?![\w-])"
-)
+# A ClinicalTrials.gov registry number: NCT and eight digits (NCT04487080).
+_NCT_RE = re.compile(r"(?<![#@$\w/.-])(NCT\d{8})(?!\w)", re.IGNORECASE)
 # A generic (INN) drug name by its stem: antibodies, kinase inhibitors, ADC payloads and
 # CAR-T short names (cilta-cel, ide-cel). "#Trastuzumab Deruxtecan" tags the first word.
 _INN_SUFFIXES = (
@@ -45,7 +43,6 @@ _INN_SUFFIXES = (
 _INN_RE = re.compile(
     r"(?<![#@$\w-])([A-Za-z]{3,}(?:" + "|".join(_INN_SUFFIXES) + r")|[A-Za-z]{2,}-cel)(?![\w-])"
 )
-_NOT_TRIALS = frozenset({"covid"})
 # Company names that end like an antibody. `company_names(cfg)` adds every configured
 # company on top, so a competitor mention is never tagged as a drug.
 _NOT_DRUGS = frozenset({"genmab", "alphamab", "i-mab", "biomab", "innovent"})
@@ -186,15 +183,15 @@ def handles_block(handles: list[Handle]) -> str:
     return "\n".join(lines)
 
 
-def trial_names(text: str) -> list[str]:
-    """Formal trial names written without a hashtag, in order, without repeats."""
+def nct_ids(text: str) -> list[str]:
+    """ClinicalTrials.gov numbers (NCT + eight digits) written without a hashtag, in order,
+    upper-cased, without repeats. One inside a URL does not count."""
     text = _URL_RE.sub(" ", text)
     found = []
-    for m in _TRIAL_RE.finditer(text):
-        name = m.group(1)
-        if name.split("-")[0].lower() in _NOT_TRIALS or name in found:
-            continue
-        found.append(name)
+    for m in _NCT_RE.finditer(text):
+        nct = m.group(1).upper()
+        if nct not in found:
+            found.append(nct)
     return found
 
 
@@ -227,16 +224,16 @@ def tag_problems(
     """Why one post breaks the mention/hashtag rule, worded for the retry prompt. Empty
     when it passes. `handles` are the accounts the post is allowed to know about (the
     relevant ones for the story); a name written without its @handle is a violation, as is
-    a trial or drug name without its #. `company_names` (from `company_names(cfg)`) are
+    an NCT number or drug name without its #. `company_names` (from `company_names(cfg)`) are
     never drug names."""
     problems: list[str] = []
     for h in handles or []:
         if h.named_in(text) and not h.mentioned_in(text):
             problems.append(f"names {h.name} without its handle @{h.handle}")
-    trials = trial_names(text)
-    if trials:
+    ncts = nct_ids(text)
+    if ncts:
         problems.append(
-            "trial name(s) without a hashtag: " + ", ".join(f"{t} -> #{t}" for t in trials)
+            "trial number(s) without a hashtag: " + ", ".join(f"{t} -> #{t}" for t in ncts)
         )
     drugs = drug_names(text, company_names)
     if drugs:

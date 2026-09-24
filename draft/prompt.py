@@ -106,9 +106,10 @@ def hard_rules(fmt: Format | None = None) -> str:
    society that published the source, the company whose release it is, a regulator) as its
    @handle the first time a post names it, e.g. "just published in @JCO_ASCO". Never invent
    a handle: an account not in the list is written by name. Write every formal drug name
-   (the generic or brand name, e.g. #Trastuzumab Deruxtecan, #cilta-cel) and every named
-   trial (#DESTINY-Lung02, #KEYNOTE-189) as a hashtag, exactly as the source spells it,
-   each time it appears. No other hashtags.
+   (the generic or brand name, e.g. #Trastuzumab Deruxtecan, #cilta-cel) and every
+   ClinicalTrials.gov number (#NCT04487080) as a hashtag, exactly as the source spells it,
+   each time it appears. A trial's name (KEYNOTE-189) is plain text, never a hashtag; tag
+   the trial by its NCT number when the source gives one. No other hashtags.
 {r12}
 """
 

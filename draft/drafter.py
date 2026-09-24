@@ -191,7 +191,7 @@ def parse_json_response(text: str) -> object:
 
 def numbers_in(text: str) -> list[str]:
     """Numbers as written, e.g. '88%', '14.6', '1,200'. URLs, @handles and #hashtags
-    (a trial name such as #KEYNOTE-189 is a name, not a figure) are ignored."""
+    (a trial number such as #NCT04487080 is a name, not a figure) are ignored."""
     text = _TAG_RE.sub(" ", _URL_RE.sub(" ", text))
     return [
         m.group(1) + (m.group(2).replace(" ", "") if m.group(2) else "")
@@ -280,7 +280,7 @@ def check_hard_rules(
     per-post limit is the format's `max_chars` (phase four: a long post), else 280; with
     fmt None the draft's own `max_chars` is used, which is 280 for every pre-phase-four
     draft. `handles` (rule 11) are the accounts the story may mention: a post that names
-    one without its @handle fails, and a trial or drug name without its # always fails.
+    one without its @handle fails, and an NCT number or drug name without its # always fails.
     No post carries a link of any kind (rule 2, draft.hook.link_problems): the source URL
     is never written, since a link costs reach and an extra billed request. The first post
     is additionally held to draft.hook.hook_problems (rule 12: a one-claim opener); a

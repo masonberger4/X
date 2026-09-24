@@ -38,7 +38,7 @@ def cell_problems(
     overrides the slot-name default (the hook carries the preprint label) for a
     single-post format. No cell carries a link (rule 2, draft.hook.link_problems).
     `handles` are the accounts the story may mention (rule 11: a name without its @handle
-    fails; a trial or drug name without its # always fails). `is_hook` overrides the
+    fails; an NCT number or drug name without its # always fails). `is_hook` overrides the
     slot-name default for rule 12 (draft.hook): a hook cell is a one-claim opener, and
     `hook_capped` is False where the hook's 220-character cap does not apply (a single or
     long post's body, capped by its own format instead)."""
