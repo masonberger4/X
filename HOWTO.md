@@ -582,9 +582,11 @@ replies, since that hour decides how far X shows it.
    Every table in it is ranked by one KPI, `kpi:` in `feedback\config.yaml`.
    The shipped value is `conversation`: not a number X reports, but a weighted
    sum of the ones it does (a reply or a quote counts 3, a bookmark or a repost
-   2, a like 1). Those are the signals the ranker pays for, and impressions are
-   what they buy, so ranking on impressions ranks posts by an outcome rather
-   than by anything a draft controls. Set `kpi: impressions` (or `likes`,
+   2, a like 1, an impression 0.05, so 20 impressions equal one like). The
+   engagement counts are the signals the ranker pays for; impressions are in at
+   a small weight because a small account's posts mostly get no engagement, and
+   without them nearly every post scores 0 and evolve cannot tell genomes apart.
+   Set `kpi: impressions` (or `likes`,
    `replies`, ...) to measure a raw count instead. `evolve.kpi` in
    `swarm\config.yaml` is the same setting for step 9 and ships the same way,
    so the genomes, designers and formats that survive are the ones that got

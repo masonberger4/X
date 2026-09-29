@@ -181,7 +181,7 @@ step carrying `--live`).
   readers. A single or long post is its own opener and only the hook's length cap is lifted
   there (the format's `max_chars` applies).
 - **KPIs are weighted, not counted.** `feedback/models.py:CONVERSATION_WEIGHTS` defines the
-  derived `conversation` KPI (reply/quote x3, bookmark/repost x2, like x1) beside the six
+  derived `conversation` KPI (reply/quote x3, bookmark/repost x2, like x1, impression x0.05) beside the six
   stored counts; `Metrics.get` and `swarm/store.py:_metrics` both serve it, and it is the
   shipped `kpi:` in `feedback/config.yaml` and `evolve.kpi` in `swarm/config.yaml`, so the
   report and the swarm's selection point at conversation rather than at reach. `swarm/`
