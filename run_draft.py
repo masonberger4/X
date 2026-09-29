@@ -33,11 +33,12 @@ import argparse
 import logging
 import random
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from dotenv import load_dotenv
 
-from approval_queue import images, store
+from approval_queue import choosing, images, store
 from draft.chart import Style
 from draft.drafter import (
     DraftRejected,
@@ -123,13 +124,27 @@ def draw_genomes(
     return genome, designer, format_genome
 
 
+@dataclass
+class HumanChoice:
+    """`jury: human`: both variants drafted; the human picks one on the queue's A/B page."""
+
+    swarm: object  # DraftResult
+    control: object  # DraftResult
+
+
+def human_jury(swarm_cfg: dict) -> bool:
+    return str(swarm_cfg.get("jury") or "model").strip().lower() == "human"
+
+
 def draft_with_swarm(
     conn: store.sqlite3.Connection,
     c: store.Candidate,
     swarm_cfg: dict,
     examples_block: str | None,
 ) -> tuple[object, int]:
-    """Step 9: swarm + control, jury, winner. Returns (DraftResult or DraftRejected, run id).
+    """Step 9: swarm + control, jury, winner. Returns (DraftResult or DraftRejected, run id),
+    or (HumanChoice, run id) under `jury: human` when both variants drafted: the run's
+    winner stays NULL until the human picks (approval_queue/choosing.py).
 
     The control is draft_item exactly as the pre-step-9 path; the swarm is
     swarm.engine.run_swarm. Both variants are recorded; the run row gets its draft_id once
@@ -196,7 +211,10 @@ def draft_with_swarm(
     calls = swarm_result.calls if swarm_result else 0
     winner: str | None
     verdict = None
-    if swarm_result and control_result:
+    if swarm_result and control_result and human_jury(swarm_cfg):
+        log_rows["jury"] = {"human": "awaiting pick"}
+        winner = None
+    elif swarm_result and control_result:
         verdict = swarm_engine.compare(
             swarm_result.draft_result.draft, control_result.draft, brief, swarm_cfg
         )
@@ -242,9 +260,11 @@ def draft_with_swarm(
         c.item_id,
         "ok" if swarm_result else "failed",
         "ok" if control_result else ("off" if control_problem is None else "failed"),
-        winner,
+        winner or ("human pick" if swarm_result and control_result else None),
         calls,
     )
+    if swarm_result and control_result and winner is None:
+        return HumanChoice(swarm_result.draft_result, control_result), run_id
     if winner == "swarm":
         return swarm_result.draft_result, run_id
     if winner == "control":
@@ -253,6 +273,45 @@ def draft_with_swarm(
     if swarm_problem:
         reasons.append(f"swarm: {swarm_problem}")
     return DraftRejected(reasons or ["no variant produced a draft"]), run_id
+
+
+def store_for_pick(
+    conn: store.sqlite3.Connection,
+    c: store.Candidate,
+    choice: HumanChoice,
+    run_id: int | None,
+    edit_ids: list[int],
+    rejection_ids: list[int],
+) -> int:
+    """Store both variants as one 'choosing' draft (the swarm's in the row, the control's in
+    choice_json, a coin flip for which is shown as A) and draw quick previews of their
+    charts. The real picture is drawn after the pick. Returns the draft id."""
+    draft_id = store.insert_draft(
+        conn,
+        item_id=c.item_id,
+        cluster_id=c.cluster_id,
+        model=choice.swarm.model,
+        draft=choice.swarm.draft,
+        status=store.STATUS_CHOOSING,
+    )
+    store.set_choice(
+        conn,
+        draft_id,
+        row_role="swarm",
+        alt_role="control",
+        alt=choice.control.draft,
+        alt_model=choice.control.model,
+        row_is_a=random.random() < 0.5,
+    )
+    store.record_examples(conn, draft_id, edit_ids, rejection_ids)
+    if run_id is not None:
+        swarm_store.set_run_draft(conn, run_id, draft_id)
+    style = designer_style_for(conn, run_id)
+    if style is not None:
+        store.set_style(conn, draft_id, style.to_dict())
+    choosing.render_previews(conn, draft_id, source_url=c.url, style=style)
+    log.info("%s: stored as draft %d, awaiting the A/B pick", c.item_id, draft_id)
+    return draft_id
 
 
 def designer_style_for(conn: store.sqlite3.Connection, run_id: int | None) -> Style | None:
@@ -497,6 +556,10 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             except Exception:
                 log.exception("API failure drafting %s; will retry next run", c.item_id)
+                continue
+            if isinstance(result, HumanChoice):
+                store_for_pick(conn, c, result, run_id, edit_ids, rejection_ids)
+                drafted += 1
                 continue
             draft_id = store.insert_draft(
                 conn,

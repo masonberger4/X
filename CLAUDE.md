@@ -397,7 +397,7 @@ step carrying `--live`).
   file it edits itself is `publish/config.yaml`, two keys only (the included queue routes
   add `trusted_domains` in `verify/config.yaml`, above): `POST /publishing/caps` calls
   `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
-  comments kept). It has no authentication: `run_app.py` binds localhost by default. `/publishing` and
+  comments kept). The dashboard's "Back up now" (`POST /backup`) calls `ops/backup.py:backup` into `backups.dir` with `backups.keep`, as `run_ops.py backup` does. It has no authentication: `run_app.py` binds localhost by default. `/publishing` and
   `/feedback` are otherwise views: no post button, and a report's suggestions are rendered,
   never applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
   changes no step: `panel/frozen.py` decides the data dir (exe folder when frozen, else
@@ -415,7 +415,16 @@ step carrying `--live`).
   `cell_problems` drops, `dedupe`, a pairwise-judge `tournament` per slot and one
   assembly through `draft/drafter.py:generate` (the public name of the draft_item
   attempt loop: schema, `check_hard_rules`, `chart_problems`, retries), and
-  `compare` is the jury against the control draft (ties go to the control). Every
+  `compare` is the jury against the control draft (ties go to the control). With `jury: human`
+  (`swarm/config.yaml`, shipped) `compare` is skipped: `run_draft.store_for_pick` stores the
+  swarm's draft in status `store.STATUS_CHOOSING` with the control's in `drafts.choice_json`
+  (guarded migration; `store.set_choice`/`get_choice`, a coin flip for which is shown as A)
+  and quick chart previews (`store.preview_file`); the queue's `/choose` pages show both
+  blind and `approval_queue/choosing.py` (the queue's one door to `swarm/store.py`) resolves
+  the pick: `store.resolve_choice` makes the row `pending` with the picked text,
+  `swarm_store.record_human_pick` sets the run's winner, then the picture is drawn. Nothing
+  downstream reads `choosing` (verify, the pending list and publish ask for `pending`);
+  approve/edit/revise refuse it (409) and `ops/store.py` counts it as waiting. Every
   call takes `call=` and defaults to `draft.drafter.call_anthropic`; no new network
   module and no `claude-*` ID in code (`swarm/config.yaml` holds the cheap model).
   `run_draft.py:draft_with_swarm` stores the winner through `store.insert_draft`

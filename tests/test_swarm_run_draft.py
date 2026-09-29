@@ -150,3 +150,119 @@ def test_run_records_the_format_and_both_variants_write_to_it(conn, monkeypatch)
     d = store.list_drafts(conn)[0]
     assert d.draft.wanted_visuals == 1 and d.draft.shape == "thread"
     assert conn.execute("SELECT format_json FROM drafts").fetchone()[0]
+
+
+# --- jury: human -------------------------------------------------------------
+
+
+def _wire_human(monkeypatch):
+    import run_draft
+
+    jury = _wire(monkeypatch, FakeModel(), jury_pick="swarm")
+    monkeypatch.setattr(run_draft, "load_swarm_config", lambda *a, **k: {**CFG, "jury": "human"})
+    return jury
+
+
+def _choosing(conn):
+    rows = store.list_drafts(conn, store.STATUS_CHOOSING)
+    assert len(rows) == 1
+    return rows[0]
+
+
+def test_human_jury_stores_one_draft_awaiting_the_pick_and_calls_no_judge(conn, monkeypatch):
+    import run_draft
+
+    seed_item(conn, "h1", total=9.0)
+    jury = _wire_human(monkeypatch)
+    assert run_draft.main(["--min-score", "7"]) == 0
+    assert store.list_drafts(conn) == []  # nothing pending: verify has nothing to check yet
+    d = _choosing(conn)
+    assert not any(c[0] == THREAD_JUDGE_SYSTEM for c in jury.calls)
+    choice = store.get_choice(conn, d.id)
+    roles = {choice.a.role, choice.b.role}
+    assert roles == {"swarm", "control"}
+    control = choice.a if choice.a.role == "control" else choice.b
+    assert control.draft.thread[0] == "control one"
+    assert control.draft.chart is not None and control.draft.chart.labels == ["ORR", "PFS"]
+    run = swarm_store.list_runs(conn)[0]
+    assert run.winner is None and run.draft_id == d.id
+
+
+def test_picking_the_control_makes_it_the_pending_draft_and_records_the_winner(conn, monkeypatch):
+    import run_draft
+    from approval_queue import choosing
+
+    seed_item(conn, "h2", total=9.0)
+    _wire_human(monkeypatch)
+    run_draft.main(["--min-score", "7"])
+    d = _choosing(conn)
+    choice = store.get_choice(conn, d.id)
+    label = "A" if choice.a.role == "control" else "B"
+    picked = choosing.pick(conn, d.id, label)
+    assert picked.role == "control"
+    row = store.get_draft(conn, d.id)
+    assert row.status == "pending" and row.draft.thread[0] == "control one"
+    assert row.draft.chart is not None and not row.model.startswith("swarm:")
+    assert store.get_choice(conn, d.id) is None
+    run = swarm_store.list_runs(conn)[0]
+    assert run.winner == "control"
+    log = json.loads(conn.execute("SELECT log_json FROM swarm_runs").fetchone()[0])
+    assert log["jury"] == {"human": "control"}
+    assert not list(store.image_dir().glob(f"choice_{d.id}_*.png"))  # previews gone
+
+
+def test_picking_the_swarm_keeps_its_text(conn, monkeypatch):
+    import run_draft
+    from approval_queue import choosing
+
+    seed_item(conn, "h3", total=9.0)
+    _wire_human(monkeypatch)
+    run_draft.main(["--min-score", "7"])
+    d = _choosing(conn)
+    choice = store.get_choice(conn, d.id)
+    label = "A" if choice.a.role == "swarm" else "B"
+    choosing.pick(conn, d.id, label)
+    row = store.get_draft(conn, d.id)
+    assert row.status == "pending" and row.draft.thread[0].startswith("hook ")
+    assert swarm_store.list_runs(conn)[0].winner == "swarm"
+
+
+def test_the_queue_pick_page_is_blind_and_the_pick_route_moves_on(conn, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import run_draft
+    from approval_queue.app import app
+
+    seed_item(conn, "h4", total=9.0)
+    seed_item(conn, "h5", total=9.0)
+    _wire_human(monkeypatch)
+    drawn = []
+    orig_draw = run_draft.draw_genomes
+
+    def same_format(*a, **k):  # the fakes write the first seed format only
+        drawn.append(drawn[0] if drawn else orig_draw(*a, **k))
+        return drawn[-1]
+
+    monkeypatch.setattr(run_draft, "draw_genomes", same_format)
+    run_draft.main(["--min-score", "7"])
+    first, second = store.list_drafts(conn, store.STATUS_CHOOSING)
+    client = TestClient(app)
+    page = client.get(f"/choose/{first.id}").text
+    assert "Pick A" in page and "Pick B" in page
+    assert "swarm:" not in page and "strong drafter" not in page  # blind: no roles or models
+    assert "control one" in page  # both texts are on the page
+    # the draft page, approve and revise refuse a draft awaiting its pick
+    assert client.get(f"/drafts/{first.id}", follow_redirects=False).headers["location"] == (
+        f"/choose/{first.id}"
+    )
+    assert client.post(f"/drafts/{first.id}/approve").status_code == 409
+    assert "waiting for your A/B pick" in client.get("/queue").text
+    r = client.post(f"/choose/{first.id}", data={"side": "A"}, follow_redirects=True)
+    assert r.status_code == 200 and f"/choose/{second.id}" in str(r.url)
+    assert "you picked A" in r.text
+    assert store.get_draft(conn, first.id).status == "pending"
+    r = client.post(f"/choose/{second.id}/reject", data={"note": "meh"}, follow_redirects=True)
+    assert store.get_draft(conn, second.id).status == "rejected"
+    assert str(r.url).endswith("/queue") or "/queue" in str(r.url)
+    runs = {r.draft_id: r.winner for r in swarm_store.list_runs(conn)}
+    assert runs[first.id] in ("swarm", "control") and runs[second.id] is None

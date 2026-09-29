@@ -47,6 +47,12 @@ lock cron uses. A disabled step is skipped, not run; the publish step is a dry r
   <div class="card"><div class="n">{{ backup_age }}</div><div class="meta">{{ backup_name or 'no backup yet' }}</div></div>
 </div>
 <p class="meta">{{ db_path }}</p>
+{% if backed_up %}<p class="flash">Backup saved: {{ backed_up }}</p>{% endif %}
+{% if backup_error %}<p class="flash over">Backup failed: {{ backup_error }}</p>{% endif %}
+<form method="post" action="/backup" class="actions">
+  <button type="submit">Back up now</button>
+  <span class="meta">Saves a verified copy of the database to the backups folder, next to the scheduled ones (the oldest past the keep limit are removed).</span>
+</form>
 
 <h2>Rows</h2>
 <div class="cards">

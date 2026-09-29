@@ -16,6 +16,7 @@ DEFAULTS: dict[str, Any] = {
     "fan_out": 6,
     "layers": 2,
     "judge_votes": 3,
+    "jury": "model",
     "max_similarity": 0.85,
     "control": {"enabled": True},
     "formats": {"long_max_chars": 4000, "long_section_chars": 700},

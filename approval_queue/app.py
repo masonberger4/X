@@ -43,7 +43,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 import timeutil
-from approval_queue import images, publishing, store
+from approval_queue import choosing, images, publishing, store
 from draft import drafter
 from draft.chart import ChartError, alt_text, validate_table
 from draft.examples import parse_decision_text
@@ -192,6 +192,7 @@ def index(request: Request, conn: Conn, notice: str = ""):
             "hidden_posted": 0,
             "show_posted": False,
             "notice": notice,
+            "choosing": len(store.list_drafts(conn, store.STATUS_CHOOSING)),
         },
     )
 
@@ -265,6 +266,9 @@ def detail(
     revised: int = 0,
     redrawn: int = 0,
 ):
+    row = store.get_draft(conn, draft_id)
+    if row is not None and row.status == store.STATUS_CHOOSING:
+        return RedirectResponse(f"/choose/{draft_id}", status_code=303)
     return _render_detail(
         request, conn, draft_id, error=error, revised=bool(revised), redrawn=bool(redrawn)
     )
@@ -340,6 +344,116 @@ def _render_detail(
     )
 
 
+# --- step 9 human jury: the blind A/B pick -------------------------------------
+
+
+def _awaiting_pick(conn, draft_id: int) -> None:
+    """Refuse a review action on a draft still awaiting its A/B pick."""
+    row = store.get_draft(conn, draft_id)
+    if row is not None and row.status == store.STATUS_CHOOSING:
+        raise HTTPException(409, "pick A or B first (/choose)")
+
+
+@app.get("/choose", response_class=HTMLResponse)
+def choose_index(conn: Conn, notice: str = ""):
+    """The oldest draft awaiting a pick, or the pending list when none is left."""
+    rows = store.list_drafts(conn, store.STATUS_CHOOSING)
+    if not rows:
+        return _redirect_home(notice=notice)
+    url = f"/choose/{rows[0].id}"
+    if notice:
+        url += f"?notice={quote(notice)}"
+    return RedirectResponse(url, status_code=303)
+
+
+@app.get("/choose/{draft_id}", response_class=HTMLResponse)
+def choose(draft_id: int, request: Request, conn: Conn, notice: str = ""):
+    row = store.get_draft(conn, draft_id)
+    if row is None:
+        raise HTTPException(404, "no such draft")
+    choice = store.get_choice(conn, draft_id)
+    if choice is None:
+        return RedirectResponse(f"/drafts/{draft_id}", status_code=303)
+    waiting = store.list_drafts(conn, store.STATUS_CHOOSING)
+    sides = []
+    for label in choosing.SIDES:
+        v = choice.side(label)
+        sides.append(
+            {
+                "label": label,
+                "draft": v.draft,
+                "previews": {
+                    k: f"/choose/{draft_id}/image/{label}/{k}"
+                    f"?v={_stamp(store.preview_file(draft_id, label, k))}"
+                    for k in choosing.preview_indexes(draft_id, label, v.draft)
+                },
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "choose.html",
+        {
+            "d": row,
+            "sides": sides,
+            "left": len(waiting),
+            "position": next((i + 1 for i, w in enumerate(waiting) if w.id == draft_id), 1),
+            "notice": notice,
+        },
+    )
+
+
+@app.get("/choose/{draft_id}/image/{label}/{index}", include_in_schema=False)
+def choose_image(draft_id: int, label: str, index: int):
+    if label not in choosing.SIDES:
+        raise HTTPException(404, "no such side")
+    path = store.preview_file(draft_id, label, index)
+    if not path.is_file():
+        raise HTTPException(404, "no preview")
+    return _image_response(path)
+
+
+@app.post("/choose/{draft_id}")
+async def choose_pick(draft_id: int, request: Request, conn: Conn):
+    """The human picked A or B: that variant becomes the pending draft, the swarm run
+    records who won, and the picture is drawn for it. Then on to the next pick."""
+    form = await read_form(request)
+    label = form.get("side", "")
+    if label not in choosing.SIDES:
+        raise HTTPException(400, "side must be A or B")
+
+    def work():
+        row = store.get_draft(conn, draft_id)
+        if row is None:
+            raise HTTPException(404, "no such draft")
+        try:
+            picked = choosing.pick(conn, draft_id, label, source_url=row.url)
+        except KeyError as exc:
+            raise HTTPException(409, "this draft is not awaiting a pick") from exc
+        who = (
+            "the swarm's (many cheap calls)"
+            if picked.role == "swarm"
+            else ("the control's (the single strong drafter)")
+        )
+        notice = f"Draft {draft_id}: you picked {label}, {who}. It is now pending."
+        return RedirectResponse(f"/choose?notice={quote(notice)}", status_code=303)
+
+    return await run_in_threadpool(work)
+
+
+@app.post("/choose/{draft_id}/reject")
+async def choose_reject(draft_id: int, request: Request, conn: Conn):
+    """Neither is worth posting: reject the story; the run has no winner."""
+    form = await read_form(request)
+    row = store.get_draft(conn, draft_id)
+    if row is None:
+        raise HTTPException(404, "no such draft")
+    if row.status != store.STATUS_CHOOSING:
+        raise HTTPException(409, "this draft is not awaiting a pick")
+    choosing.reject_both(conn, draft_id, _note(form), _category(form))
+    notice = f"Draft {draft_id}: both rejected."
+    return RedirectResponse(f"/choose?notice={quote(notice)}", status_code=303)
+
+
 @app.get("/voice", response_class=HTMLResponse)
 def voice(request: Request, conn: Conn, weeks: int | None = None):
     """Voice report (step 7) rendered from live drafts/decisions; nothing is changed."""
@@ -370,6 +484,7 @@ def _redirect_home(*, notice: str = "") -> RedirectResponse:
 
 @app.post("/drafts/{draft_id}/approve")
 async def approve(draft_id: int, request: Request, conn: Conn):
+    _awaiting_pick(conn, draft_id)
     form = await read_form(request)
     if verify_store.has_contradiction(conn, draft_id) and not form.get("override"):
         return _render_detail(
@@ -419,6 +534,7 @@ def _edit_problem(thread: list[str]) -> str | None:
 
 @app.post("/drafts/{draft_id}/edit")
 async def edit(draft_id: int, request: Request, conn: Conn):
+    _awaiting_pick(conn, draft_id)
     form = await read_form(request)
     thread = _split_thread(form.get("thread", ""))
     problem = _edit_problem(thread)
@@ -464,6 +580,7 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     supported verdict whose claim text is unchanged, which is carried over so run_verify
     only checks the claims that are new or changed; on failure nothing changes and the
     detail page shows why."""
+    _awaiting_pick(conn, draft_id)
     form = await read_form(request)
 
     def work():

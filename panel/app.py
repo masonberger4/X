@@ -44,6 +44,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import ChoiceLoader, FileSystemLoader
+from starlette.concurrency import run_in_threadpool
 
 import config as root_config
 import run_ops
@@ -147,7 +148,7 @@ async def read_form(request: Request) -> dict[str, list[str]]:
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, conn: Conn):
+def dashboard(request: Request, conn: Conn, backed_up: str = "", backup_error: str = ""):
     now = _now()
     db_path = ops_store.db_path()
     report = run_ops.build_report(conn, CONFIG, db_path, now)
@@ -168,8 +169,29 @@ def dashboard(request: Request, conn: Conn):
             "backup_name": latest_backup[0].name if latest_backup else None,
             "backup_age": views.fmt_age(now, latest_backup[1]) if latest_backup else "none yet",
             "job": JOBS.current(),
+            "backed_up": backed_up,
+            "backup_error": backup_error,
         },
     )
+
+
+@app.post("/backup")
+async def backup_now():
+    """The dashboard's "Back up now": the same verified online backup `run_ops.py backup`
+    makes, into the same folder (`backups.dir` in ops/config.yaml), rotated to
+    `backups.keep`."""
+
+    def work():
+        try:
+            path = ops_backup.backup(
+                ops_store.db_path(), CONFIG["backups"]["dir"], int(CONFIG["backups"]["keep"])
+            )
+        except Exception as exc:
+            log.exception("backup from the panel failed")
+            return RedirectResponse(f"/?{urlencode({'backup_error': str(exc)})}", status_code=303)
+        return RedirectResponse(f"/?{urlencode({'backed_up': path.name})}", status_code=303)
+
+    return await run_in_threadpool(work)
 
 
 def _disk_free_mb(db_path: Path) -> float | None:

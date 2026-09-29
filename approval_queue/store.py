@@ -7,6 +7,8 @@ Owns four tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline
          created_at, updated_at,
          chart_json, image_path)   -- added by guarded migrations: the drafter's chart spec
             -- (draft/chart.py) and the PNG rendered from it, relative to image_dir()
+         choice_json   -- guarded migration: while status is 'choosing', the other variant
+            -- of a swarm run (the row holds one, this the other) for the human A/B pick
   decisions(id INTEGER PK, draft_id FK, action, original_text, edited_text, note, created_at,
             category)   -- category added by step 7 through a guarded ALTER TABLE migration
             -- action 'revise': the drafter rewrote the text on the human's instructions
@@ -48,7 +50,11 @@ STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"  # drafter produced output that broke a hard rule
-STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_FAILED)
+# Step 9 with `jury: human`: the swarm and the control both drafted this story and a human
+# has not yet picked one. Nothing downstream reads it: verify, the queue's pending list and
+# publish all ask for 'pending' by name, so a draft waits here until the pick.
+STATUS_CHOOSING = "choosing"
+STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_FAILED, STATUS_CHOOSING)
 # Statuses a reviewer may still change a draft in: only a draft still awaiting a decision.
 EDITABLE_STATUSES = (STATUS_PENDING,)
 
@@ -156,6 +162,8 @@ _MIGRATIONS = (
     # Step 9 phase three: the Style the draft's pictures start from (its designer's), so a
     # redraw after a revision or by the verifier keeps it instead of the house style.
     ("drafts", "style_json", "ALTER TABLE drafts ADD COLUMN style_json TEXT"),
+    # Step 9 human jury: the other variant while a draft awaits the A/B pick.
+    ("drafts", "choice_json", "ALTER TABLE drafts ADD COLUMN choice_json TEXT"),
 )
 
 
@@ -740,6 +748,141 @@ def revise(
     did = _record_decision(conn, draft_id, ACTION_REVISE, original, revised, note, category)
     conn.commit()
     return did
+
+
+# ---------------------------------------------------------------------------
+# Step 9 human jury: one row per story holds one variant, choice_json the other.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Variant:
+    role: str  # 'swarm' | 'control'
+    model: str
+    draft: Draft
+
+
+@dataclass
+class Choice:
+    """A draft awaiting the human A/B pick. `a` and `b` are the two variants in the order
+    the pick page shows them; which is which was drawn at random when the row was stored."""
+
+    a: Variant
+    b: Variant
+
+    def side(self, label: str) -> Variant:
+        if label == "A":
+            return self.a
+        if label == "B":
+            return self.b
+        raise ValueError(f"unknown side {label!r}")
+
+
+def _variant_json(draft: Draft, model: str) -> dict[str, Any]:
+    return {
+        "model": model,
+        "thread": draft.thread,
+        "suggested_visual": draft.suggested_visual,
+        "why_it_matters": draft.why_it_matters,
+        "claims": [c.__dict__ for c in draft.claims_to_verify],
+        "chart_json": _chart_json(draft),
+        "format_json": _format_json(draft),
+    }
+
+
+def _variant_draft(d: dict[str, Any]) -> Draft:
+    draft = Draft(
+        thread=list(d.get("thread") or []),
+        suggested_visual=d.get("suggested_visual") or "",
+        why_it_matters=d.get("why_it_matters") or "",
+        claims_to_verify=[Claim(**c) for c in d.get("claims") or []],
+        chart=chart_from_json(d.get("chart_json")),
+        table=table_from_json(d.get("chart_json")),
+    )
+    _apply_format_json(draft, d.get("format_json"))
+    return draft
+
+
+def set_choice(
+    conn: sqlite3.Connection,
+    draft_id: int,
+    *,
+    row_role: str,
+    alt_role: str,
+    alt: Draft,
+    alt_model: str,
+    row_is_a: bool,
+) -> None:
+    """Store the variant the row does not hold, and which one the pick page shows as A."""
+    data = {
+        "row_role": row_role,
+        "row_is_a": bool(row_is_a),
+        "alt": {"role": alt_role, **_variant_json(alt, alt_model)},
+    }
+    conn.execute(
+        "UPDATE drafts SET choice_json = ? WHERE id = ?",
+        (json.dumps(data, ensure_ascii=False), draft_id),
+    )
+    conn.commit()
+
+
+def get_choice(conn: sqlite3.Connection, draft_id: int) -> Choice | None:
+    """The two variants of a draft awaiting the A/B pick; None when it is not awaiting one."""
+    row = get_draft(conn, draft_id)
+    if row is None or row.status != STATUS_CHOOSING:
+        return None
+    text = conn.execute("SELECT choice_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
+    if not text or not text[0]:
+        return None
+    data = json.loads(text[0])
+    alt = data["alt"]
+    mine = Variant(str(data["row_role"]), row.model, row.draft)
+    other = Variant(str(alt["role"]), str(alt.get("model") or ""), _variant_draft(alt))
+    return Choice(mine, other) if data.get("row_is_a") else Choice(other, mine)
+
+
+def resolve_choice(conn: sqlite3.Connection, draft_id: int, label: str) -> Variant:
+    """The human picked side `label` ('A' or 'B'): the row takes that variant's text,
+    visual and claims (unchanged when it already holds it), drops any preview picture,
+    forgets the other variant and becomes 'pending', so verify and the review take it from
+    here. No decision row: the pick is recorded on the swarm run. Returns the picked
+    variant; KeyError when the draft is not awaiting a pick."""
+    choice = get_choice(conn, draft_id)
+    if choice is None:
+        raise KeyError(f"draft {draft_id} is not awaiting an A/B pick")
+    picked = choice.side(label)
+    d = picked.draft
+    conn.execute(
+        """UPDATE drafts SET thread_json = ?, suggested_visual = ?, why_it_matters = ?,
+                             claims_json = ?, model = ?, chart_json = ?, format_json = ?,
+                             image_path = NULL, image_alt = NULL, images_json = NULL,
+                             choice_json = NULL, status = ?, updated_at = ?
+           WHERE id = ?""",
+        (
+            json.dumps(d.thread),
+            d.suggested_visual,
+            d.why_it_matters,
+            json.dumps([c.__dict__ for c in d.claims_to_verify]),
+            picked.model,
+            _chart_json(d),
+            _format_json(d),
+            STATUS_PENDING,
+            _now(),
+            draft_id,
+        ),
+    )
+    conn.commit()
+    return picked
+
+
+def preview_file(draft_id: int, label: str, index: int = 0) -> Path:
+    """Where the pick page's preview of side `label`'s picture `index` lives."""
+    return image_dir() / f"choice_{draft_id}_{label}_{index}.png"
+
+
+def drop_previews(draft_id: int) -> None:
+    for path in image_dir().glob(f"choice_{draft_id}_*.png"):
+        path.unlink(missing_ok=True)
 
 
 def set_style(conn: sqlite3.Connection, draft_id: int, style: dict | None) -> None:
