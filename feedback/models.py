@@ -8,8 +8,10 @@ from datetime import datetime
 METRICS = ("impressions", "likes", "reposts", "replies", "quotes", "bookmarks")
 
 # The ranker pays for conversation, not for reach: a reply, a quote or a bookmark is a
-# much stronger signal than a like, and impressions are the OUTCOME of those signals, not
-# a thing a draft can aim at. `conversation` is the weighted sum below, a derived KPI that
+# much stronger signal than a like. Impressions ride along at a small weight (20 of them
+# count as one like): a small account's posts mostly get no engagement at all, and
+# without a reach term every such post scores 0 and selection has nothing to tell apart.
+# `conversation` is the weighted sum below, a derived KPI that
 # can be selected on (feedback/config.yaml `kpi`, swarm/config.yaml `evolve.kpi`) exactly
 # like a raw metric; it is never stored, always computed from the stored counts.
 CONVERSATION = "conversation"
@@ -19,6 +21,7 @@ CONVERSATION_WEIGHTS = {
     "bookmarks": 2.0,
     "reposts": 2.0,
     "likes": 1.0,
+    "impressions": 0.05,
 }
 KPIS = (*METRICS, CONVERSATION)
 DIMENSIONS = (

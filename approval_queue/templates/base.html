@@ -77,7 +77,8 @@
   <a href="/feed">Feed</a>
   <a href="/runs">Runs</a>
   <span class="sep">|</span>
-  {% endif %}<a href="/queue">Pending</a>
+  {% endif %}<a href="/choose">Pick A/B</a>
+  <a href="/queue">Pending</a>
   <a href="/status/approved">Approved</a>
   <a href="/status/rejected">Rejected</a>
   <a href="/status/failed">Failed</a>
@@ -106,6 +107,7 @@
     var route = (button && button.hasAttribute("formaction")) ? button.getAttribute("formaction") : form.getAttribute("action") || "";
     var msg = null;
     WORKING.forEach(function (w) { if (route.slice(-w[0].length) === w[0]) msg = w[1]; });
+    if (/\/choose\/\d+$/.test(route)) msg = "Saving your pick… drawing the picture for it; the next pick loads when it is done (up to a minute when the picture is graded).";
     if (!msg) return;
     if (form.classList.contains("busy")) { ev.preventDefault(); return; }
     form.classList.add("busy");

@@ -215,7 +215,7 @@ def fetch_stage_activity(conn: sqlite3.Connection, now: datetime | None = None) 
       clusters(id, ..., created_at, prefilter_status 'pass'|'drop'|NULL, prefilter_reason)
       scores(id, cluster_id, model, prompt_version, ..., total, scored_at)
       drafts(id, item_id, cluster_id, model, thread_json, ..., status
-             'pending'|'approved'|'rejected'|'failed', ...,
+             'pending'|'approved'|'rejected'|'failed'|'choosing', ...,
              created_at, updated_at)
       decisions(id, draft_id, action, original_text, edited_text, note, created_at)
     tables_present requires step 1's items/clusters/scores; step 2's tables are optional.
@@ -243,12 +243,10 @@ def fetch_stage_activity(conn: sqlite3.Connection, now: datetime | None = None) 
     )
     if "drafts" in present:
         act.latest_draft_at = _parse(_scalar(conn, "SELECT MAX(created_at) FROM drafts"))
-        act.pending_drafts = int(
-            _scalar(conn, "SELECT COUNT(*) FROM drafts WHERE status = 'pending'") or 0
-        )
-        oldest = _parse(
-            _scalar(conn, "SELECT MIN(created_at) FROM drafts WHERE status = 'pending'")
-        )
+        # 'choosing' (step 9's A/B pick) waits on the human just like 'pending'
+        waiting = "status IN ('pending', 'choosing')"
+        act.pending_drafts = int(_scalar(conn, f"SELECT COUNT(*) FROM drafts WHERE {waiting}") or 0)
+        oldest = _parse(_scalar(conn, f"SELECT MIN(created_at) FROM drafts WHERE {waiting}"))
         if oldest is not None:
             act.oldest_pending_age_hours = max(0.0, (now - oldest).total_seconds() / 3600.0)
         act.approved_drafts = int(

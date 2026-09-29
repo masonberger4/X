@@ -579,6 +579,32 @@ def set_run_draft(conn: sqlite3.Connection, run_id: int, draft_id: int) -> None:
     conn.commit()
 
 
+def run_for_draft(conn: sqlite3.Connection, draft_id: int) -> int | None:
+    """The newest swarm run that produced this draft, or None."""
+    row = conn.execute(
+        "SELECT id FROM swarm_runs WHERE draft_id = ? ORDER BY id DESC LIMIT 1", (draft_id,)
+    ).fetchone()
+    return int(row[0]) if row else None
+
+
+def record_human_pick(conn: sqlite3.Connection, run_id: int, winner: str | None) -> None:
+    """`jury: human`: the run's winner is whoever the human picked ('swarm' | 'control'),
+    or None when they rejected both. The log's `jury` entry says a human decided, and
+    `styled` is cleared: the picture is drawn only now, for the pick (mark_styled again
+    once it is)."""
+    if winner is not None and winner not in ROLES:
+        raise ValueError(f"unknown winner {winner!r}")
+    row = conn.execute("SELECT log_json FROM swarm_runs WHERE id = ?", (run_id,)).fetchone()
+    log = json.loads(row[0]) if row and row[0] else {}
+    if isinstance(log, dict):
+        log["jury"] = {"human": winner or "neither"}
+    conn.execute(
+        "UPDATE swarm_runs SET winner = ?, styled = 0, log_json = ? WHERE id = ?",
+        (winner, json.dumps(log, ensure_ascii=False), run_id),
+    )
+    conn.commit()
+
+
 def mark_styled(conn: sqlite3.Connection, run_id: int) -> None:
     """run_draft drew this run's chart in its designer's Style, so the designer may be
     credited with the post (fitness.designer_credited). A picture redrawn later in the

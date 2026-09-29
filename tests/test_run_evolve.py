@@ -395,10 +395,10 @@ def test_posts_are_scored_at_a_fixed_age_and_without_their_own_reply(conn):
     assert [h.tweet_id for h in heads] == ["old"]
     assert heads[0].metrics["impressions"] == 1000  # the day-3 snapshot, not the day-1 one
     assert heads[0].metrics["replies"] == 0 and heads[0].own_replies == 1
-    assert heads[0].metrics["conversation"] == 0
+    assert heads[0].metrics["conversation"] == 50  # 1000 impressions x 0.05, reply removed
     raw = swarm_store.fetch_head_metrics(conn)  # the old reading: newest, reply counted
     assert {h.tweet_id for h in raw} == {"old", "young"}
-    assert next(h for h in raw if h.tweet_id == "old").metrics["conversation"] == 3
+    assert next(h for h in raw if h.tweet_id == "old").metrics["conversation"] == 53
 
 
 def test_designers_and_formats_rotate_through_every_writer(conn):

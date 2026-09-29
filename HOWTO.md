@@ -107,6 +107,18 @@ source only when it is due, and score only scores what is new.
    made-up numbers, a link in a post, too long, a missing @handle or #tag)
    are stored as failed, not shown.
 
+   You are the jury. Each story is written twice, once by the swarm (many
+   cheap calls) and once by the single strong drafter, and with `jury: human`
+   in `swarm\config.yaml` (the shipped value) both land on the queue's
+   **Pick A/B** page side by side, in random order and unlabelled. Press
+   "Pick A" or "Pick B" for the one you would rather post; it becomes the
+   pending draft and the next pick opens, and the page then tells you which
+   one you picked. "Reject both" rejects the story. Verify does not check a
+   draft until you have picked, and the pending page shows how many picks are
+   waiting. Your picks are what step 9 learns from: only a post you gave to
+   the swarm counts for the swarm's writer recipes. `jury: model` goes back to
+   the AI jury of `judge_votes` cheap judges.
+
    No post carries a link of any kind (rule 2). Not the source URL, not a
    registry link, not a company page: X shows a post with an outbound link to
    fewer readers, and posting a URL is billed as an extra request through the
@@ -582,9 +594,11 @@ replies, since that hour decides how far X shows it.
    Every table in it is ranked by one KPI, `kpi:` in `feedback\config.yaml`.
    The shipped value is `conversation`: not a number X reports, but a weighted
    sum of the ones it does (a reply or a quote counts 3, a bookmark or a repost
-   2, a like 1). Those are the signals the ranker pays for, and impressions are
-   what they buy, so ranking on impressions ranks posts by an outcome rather
-   than by anything a draft controls. Set `kpi: impressions` (or `likes`,
+   2, a like 1, an impression 0.05, so 20 impressions equal one like). The
+   engagement counts are the signals the ranker pays for; impressions are in at
+   a small weight because a small account's posts mostly get no engagement, and
+   without them nearly every post scores 0 and evolve cannot tell genomes apart.
+   Set `kpi: impressions` (or `likes`,
    `replies`, ...) to measure a raw count instead. `evolve.kpi` in
    `swarm\config.yaml` is the same setting for step 9 and ships the same way,
    so the genomes, designers and formats that survive are the ones that got
@@ -630,8 +644,8 @@ replies, since that hour decides how far X shows it.
    retired now and then; the chance weighting above, not retirement, is
    what moves the posts towards the better recipes.
    The report's last two lines are the swarm-vs-control measurement: whether
-   the posts the AI jury gave to the swarm did better on X than the ones it
-   gave to the single strong drafter. `breed` replaces each retired recipe
+   the posts the jury (you, under `jury: human`) gave to the swarm did better
+   on X than the ones it gave to the single strong drafter. `breed` replaces each retired recipe
    with a child of a winner that changes one thing (one strong-model call per
    writer child; a designer child, the picture style, and a format child,
    thread or single or long post and how many pictures on which posts, need
@@ -657,6 +671,9 @@ to stop it. Four pages:
   prints, worst first, plus the last outcome of every scheduled step, how
   many rows are in each table, the database size, free disk and the age of
   the latest backup. This is the page to open when something looks wrong.
+  "Back up now" under Storage saves a copy of the database right away, the
+  same verified copy `run_ops.py backup` makes, into the same `backups\`
+  folder (the oldest beyond `backups: keep` in `ops\config.yaml` are removed).
 - **Sources** (`/sources`) — every source from `config.yaml`: when it last
   ran, how many items it fetched, how many were new, and the last error if
   it failed. A source in red has been failing; one in amber has not run for

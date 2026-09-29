@@ -95,12 +95,14 @@ def test_conversation_weighs_replies_quotes_and_bookmarks_over_likes():
     from feedback.models import KPIS, Metrics
 
     m = Metrics(impressions=1000, likes=10, reposts=2, replies=3, quotes=1, bookmarks=4)
-    # 10*1 + 2*2 + 3*3 + 1*3 + 4*2
-    assert m.conversation == 34
-    assert m.get("conversation") == 34
+    # 10*1 + 2*2 + 3*3 + 1*3 + 4*2 + 1000*0.05
+    assert m.conversation == 84
+    assert m.get("conversation") == 84
     assert "conversation" in KPIS
-    # a post with reach and no conversation scores nothing
-    assert Metrics(impressions=100_000).conversation == 0
+    # reach counts a little: 20 impressions are one like, so a post nobody engaged
+    # with still differs from one fewer people saw
+    assert Metrics(impressions=20).conversation == Metrics(likes=1).conversation
+    assert Metrics(impressions=60).conversation < Metrics(impressions=80).conversation
     # likes are the cheapest signal: 10 likes are worth less than 4 replies
     assert Metrics(likes=10).conversation < Metrics(replies=4).conversation
 
@@ -109,4 +111,4 @@ def test_swarm_fitness_can_select_on_conversation():
     from swarm import store as swarm_store
 
     assert "conversation" in swarm_store.KPIS
-    assert swarm_store._metrics([1000, 10, 2, 3, 1, 4])["conversation"] == 34
+    assert swarm_store._metrics([1000, 10, 2, 3, 1, 4])["conversation"] == 84

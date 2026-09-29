@@ -290,3 +290,13 @@ def test_the_publishing_page_edits_the_two_caps(client, monkeypatch, tmp_path):
     r = client.post("/publishing/caps", data={"max_posts_per_day": "x", "min_gap_minutes": "45"})
     assert "whole number" in unquote_plus(r.headers["location"])
     assert "max_posts_per_day: 4" in cfg.read_text()
+
+
+def test_back_up_now_writes_to_the_backups_folder(client, monkeypatch, tmp_path):
+    monkeypatch.setitem(panel_app.CONFIG, "backups", {"dir": str(tmp_path / "bk"), "keep": 5})
+    assert "Back up now" in client.get("/").text
+    r = client.post("/backup")
+    assert r.status_code == 303 and "backed_up=pipeline-" in r.headers["location"]
+    saved = list((tmp_path / "bk").glob("pipeline-*.sqlite"))
+    assert len(saved) == 1
+    assert "Backup saved: " + saved[0].name in client.get(r.headers["location"]).text

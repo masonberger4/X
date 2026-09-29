@@ -14,6 +14,10 @@ assembler_model: ""
 fan_out: 6          # proposals per slot per layer
 layers: 2           # 1 = proposals only; 2 and up add Mixture-of-Agents synthesis layers
 judge_votes: 3      # odd; the swarm-vs-control jury size (ties go to the control)
+# Who picks between the swarm's draft and the control's: `model` (the judge_votes jury
+# above) or `human` (both land blind as A and B on the queue's "Pick A/B" page and the one
+# you pick becomes the pending draft; verify waits for the pick).
+jury: human
 max_similarity: 0.85  # difflib ratio at or above which a later candidate is a near twin and dropped
 
 control:

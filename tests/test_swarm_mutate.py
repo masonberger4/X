@@ -131,7 +131,7 @@ def test_a_child_may_not_ask_for_a_url():
 
 def test_the_breeder_is_told_the_real_kpi_and_that_only_the_head_counts():
     system = mutate.mutation_system("conversation")
-    assert "impressions" not in system and "replies x3" in system
+    assert "replies x3" in system and "impressions x0.05" in system
     assert "FIRST post" in system
     assert "median likes" in mutate.mutation_system("likes")
 

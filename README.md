@@ -553,7 +553,11 @@ model, carries the quality) is measured, not assumed: with `control.enabled`
 the single strong drafter also writes the story, a jury of `judge_votes`
 cheap judges compares the two threads with the A/B order randomised, and the
 winner is stored as the ordinary pending draft (`model` column `swarm:<model>`
-for a swarm win). A swarm that fails its rules loses to the control.
+for a swarm win). A swarm that fails its rules loses to the control. With
+`jury: human` (shipped) no judge runs: both variants are stored as one draft in
+status `choosing` (the other in `drafts.choice_json`) and the queue's `/choose`
+page shows them blind as A and B; the pick becomes the pending draft
+(`approval_queue/choosing.py`) and is recorded as the run's winner.
 
 ```bash
 python run_draft.py               # swarm on (swarm/config.yaml enabled: true)
@@ -561,7 +565,7 @@ python run_draft.py --no-swarm    # the single strong drafter only, as before st
 ```
 
 Settings live in `swarm/config.yaml` (cheap `model`, `assembler_model`,
-`fan_out`, `layers`, `judge_votes`, `max_similarity`, `control.enabled`).
+`fan_out`, `layers`, `judge_votes`, `jury`, `max_similarity`, `control.enabled`).
 Every call goes through `draft/drafter.py:call_anthropic`. Tables (step 9's
 own): `swarm_genomes` (the heritable slots and topology; phase three writes
 children), `swarm_runs` (genome, winner, call count and the full cell and
