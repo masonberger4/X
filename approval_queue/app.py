@@ -355,11 +355,15 @@ def _awaiting_pick(conn, draft_id: int) -> None:
 
 
 @app.get("/choose", response_class=HTMLResponse)
-def choose_index(conn: Conn, notice: str = ""):
-    """The oldest draft awaiting a pick, or the pending list when none is left."""
+def choose_index(request: Request, conn: Conn, notice: str = ""):
+    """The oldest draft awaiting a pick, or a page saying none is waiting."""
     rows = store.list_drafts(conn, store.STATUS_CHOOSING)
     if not rows:
-        return _redirect_home(notice=notice)
+        return templates.TemplateResponse(
+            request,
+            "choose_empty.html",
+            {"notice": notice, "pending": len(store.list_drafts(conn, store.STATUS_PENDING))},
+        )
     url = f"/choose/{rows[0].id}"
     if notice:
         url += f"?notice={quote(notice)}"

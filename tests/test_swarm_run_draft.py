@@ -263,6 +263,6 @@ def test_the_queue_pick_page_is_blind_and_the_pick_route_moves_on(conn, monkeypa
     assert store.get_draft(conn, first.id).status == "pending"
     r = client.post(f"/choose/{second.id}/reject", data={"note": "meh"}, follow_redirects=True)
     assert store.get_draft(conn, second.id).status == "rejected"
-    assert str(r.url).endswith("/queue") or "/queue" in str(r.url)
+    assert "Nothing to pick right now" in r.text and "both rejected" in r.text
     runs = {r.draft_id: r.winner for r in swarm_store.list_runs(conn)}
     assert runs[first.id] in ("swarm", "control") and runs[second.id] is None

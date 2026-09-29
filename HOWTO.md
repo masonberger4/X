@@ -115,7 +115,8 @@ source only when it is due, and score only scores what is new.
    pending draft and the next pick opens, and the page then tells you which
    one you picked. "Reject both" rejects the story. Verify does not check a
    draft until you have picked, and the pending page shows how many picks are
-   waiting. Your picks are what step 9 learns from: only a post you gave to
+   waiting; with none waiting the page says "Nothing to pick right now". Your
+   picks are what step 9 learns from: only a post you gave to
    the swarm counts for the swarm's writer recipes. `jury: model` goes back to
    the AI jury of `judge_votes` cheap judges.
 
