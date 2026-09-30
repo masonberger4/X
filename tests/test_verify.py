@@ -229,10 +229,10 @@ def test_run_verify_respects_limit_and_max_claims(conn, monkeypatch):
         ),
     )
     monkeypatch.setattr(run_verify, "_root_config", lambda: {})
-    run_verify.main(["--draft", str(a)])
+    run_verify.main(["--draft", str(a), "--no-auto-revise"])
     assert calls == list(range(50))  # max_claims_per_draft from the shipped config
     calls.clear()
-    run_verify.main(["--limit", "1"])
+    run_verify.main(["--limit", "1", "--no-auto-revise"])
     assert len(calls) == 1  # draft b, the only one with unchecked claims left
 
 

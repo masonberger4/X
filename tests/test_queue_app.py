@@ -27,7 +27,7 @@ def client(db_file):
 def draft_id(conn):
     seed_item(conn, "i1", source="biorxiv")
     d = Draft(
-        thread=["Preprint: ORR 88%. one", "two", "three"],
+        thread=["Preprint. ORR 88%. one", "two", "three"],
         suggested_visual="plot",
         why_it_matters="matters",
         claims_to_verify=[Claim("Number '15' does not appear in the source abstract", "low")],
@@ -47,7 +47,7 @@ def test_detail_shows_post_thread_claims_and_lengths(client, draft_id):
     r = client.get(f"/drafts/{draft_id}")
     assert r.status_code == 200
     body = r.text
-    assert "1/3 Preprint: ORR 88%. one" in body and "3/3 three" in body
+    assert "1/3 Preprint. ORR 88%. one" in body and "3/3 three" in body
     assert "Single post" not in body
     assert "[low]" in body and "does not appear" in body
     assert "/280" in body
@@ -76,7 +76,7 @@ def test_approve_action_no_table_has_no_notice(client, conn, draft_id):
 def test_approve_action_drops_unrendered_table_with_notice(client, conn):
     seed_item(conn, "i2", source="biorxiv")
     d = Draft(
-        thread=["Preprint: ORR 88%. one", "two", "three"],
+        thread=["Preprint. ORR 88%. one", "two", "three"],
         suggested_visual="table",
         why_it_matters="matters",
         table=Table("T", ["a", "b"], [["x", "y"], ["z", "w"]]),
@@ -228,14 +228,14 @@ def _stub_call(monkeypatch, responses):
 def test_revise_rewrites_draft_from_instructions_and_keeps_pending(
     client, conn, draft_id, monkeypatch
 ):
-    calls = _stub_call(monkeypatch, [_revision_json("Preprint: tighter. ORR 88%.")])
+    calls = _stub_call(monkeypatch, [_revision_json("Preprint. tighter. ORR 88%.")])
     r = client.post(
         f"/drafts/{draft_id}/revise", data={"instructions": "tighter opening", "category": "voice"}
     )
     assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}?revised=1"
     row = store.get_draft(conn, draft_id)
     assert row.status == "pending"
-    assert row.draft.thread[0].startswith("Preprint: tighter.")
+    assert row.draft.thread[0].startswith("Preprint. tighter.")
     assert row.draft.thread[1] == "r2" and row.draft.chart is not None
     assert [c.claim for c in row.draft.claims_to_verify] == ["new claim"]
     assert row.model == "stub-model"
@@ -243,11 +243,11 @@ def test_revise_rewrites_draft_from_instructions_and_keeps_pending(
     assert dec["action"] == "revise" and dec["note"] == "tighter opening"
     assert dec["category"] == "voice"
     system, user, model = calls[0]
-    assert "tighter opening" in user and "Preprint: ORR 88%. one" in user
+    assert "tighter opening" in user and "Preprint. ORR 88%. one" in user
     assert model == "stub-model"
     body = client.get(f"/drafts/{draft_id}?revised=1").text
     assert "Revised." in body and "revise" in body
-    assert "- post 1: Preprint: ORR 88%. one" in body  # diff of the AI rewrite is shown
+    assert "- post 1: Preprint. ORR 88%. one" in body  # diff of the AI rewrite is shown
 
 
 def test_revise_with_empty_box_fixes_failed_claims_and_resets_checks(
@@ -259,7 +259,7 @@ def test_revise_with_empty_box_fixes_failed_claims_and_resets_checks(
         ClaimCheck(0, "Number '15'...", "contradicted", "https://src", "it was 14", "wrong", True),
         "checker",
     )
-    calls = _stub_call(monkeypatch, [_revision_json("Preprint: fixed. ORR 88%.")])
+    calls = _stub_call(monkeypatch, [_revision_json("Preprint. fixed. ORR 88%.")])
     r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": ""})
     assert r.status_code == 303
     user = calls[0][1]
@@ -286,7 +286,7 @@ def test_revise_keeps_supported_verdicts_for_unchanged_claims(client, conn, draf
         ClaimCheck(2, "Phase 3", "supported", "https://src", "ph3", "", True),
         "checker",
     )
-    body = json.loads(_revision_json("Preprint: tighter. ORR 88%."))
+    body = json.loads(_revision_json("Preprint. tighter. ORR 88%."))
     body["claims_to_verify"] = [
         {"claim": "n=40", "confidence": "low"},
         {"claim": "orr was 88%", "confidence": "high"},  # same claim, new position and case
@@ -316,7 +316,7 @@ def test_revise_with_nothing_to_do_or_failed_model_leaves_draft_alone(
     r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
     assert r.status_code == 303 and "api%20down" in r.headers["location"]
     row = store.get_draft(conn, draft_id)
-    assert row.draft.thread[0] == "Preprint: ORR 88%. one"
+    assert row.draft.thread[0] == "Preprint. ORR 88%. one"
     assert store.list_decisions(conn, draft_id) == []
     assert client.post("/drafts/999/revise", data={"instructions": "x"}).status_code == 404
     body = client.get(f"/drafts/{draft_id}?error=api%20down").text

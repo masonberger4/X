@@ -173,6 +173,11 @@ step carrying `--live`).
   come out, a post that was only a link is dropped; `store.edit` with the status unchanged,
   no model call), as `run_scrub_notes.py` is for captions. Publish's re-check and
   human-approved texts are untouched.
+- **Posts talk like a human** (`draft/style.py:style_problems`, pure; rule 13 in
+  `draft/prompt.py:hard_rules`, enforced per post from `check_hard_rules` and per cell from
+  `swarm/cells.py:cell_problems`). No colon (one between digits, 8:30 or 2:1, is fine) and
+  no dash: em dash, en dash, `--` or a spaced ` - `. Publish's re-check and human-approved
+  texts are untouched.
 - **The first post is the hook** (`draft/hook.py:hook_problems`, pure; rule 12 in
   `draft/prompt.py:hook_rule`, enforced from `check_hard_rules` on `thread[0]` and from
   `swarm/cells.py:cell_problems` on a hook cell). It carries no thread position marker

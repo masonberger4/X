@@ -111,6 +111,10 @@ def hard_rules(fmt: Format | None = None) -> str:
    each time it appears. A trial's name (KEYNOTE-189) is plain text, never a hashtag; tag
    the trial by its NCT number when the source gives one. No other hashtags.
 {r12}
+13. Write like a human talking, not a press release or a slide. NO colons (a time or a
+   ratio such as 2:1 is fine) and NO em dashes, en dashes, "--" or " - " used as a dash.
+   Where you want one, end the sentence or use a comma. "Read-across: the comps got a
+   price" becomes "The read-across is simple. The comps just got a price."
 """
 
 

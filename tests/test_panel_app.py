@@ -22,7 +22,7 @@ def client(db_file):
 def draft_id(conn):
     seed_item(conn, "i1", source="biorxiv")
     d = Draft(
-        thread=["Preprint: ORR 88%. one", "two", "three"],
+        thread=["Preprint. ORR 88%. one", "two", "three"],
         suggested_visual="plot",
         why_it_matters="matters",
         claims_to_verify=[Claim("ORR 88% appears in the abstract", "low")],
@@ -90,7 +90,7 @@ def test_the_run_fragment_reports_whether_a_run_is_in_flight(client):
 def test_the_approval_queue_is_part_of_the_same_app(client, conn, draft_id):
     assert client.get("/").status_code == 200  # the dashboard, not the queue
     assert f"/drafts/{draft_id}" in client.get("/queue").text
-    assert "Preprint: ORR 88%." in client.get(f"/drafts/{draft_id}").text
+    assert "Preprint. ORR 88%." in client.get(f"/drafts/{draft_id}").text
     assert client.get("/voice").status_code == 200
     r = client.post(f"/drafts/{draft_id}/approve", data={"note": "good"})
     assert r.status_code == 303 and r.headers["location"] == "/queue"

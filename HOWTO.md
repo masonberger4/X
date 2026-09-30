@@ -128,6 +128,12 @@ source only when it is due, and score only scores what is new.
    or a bare domain in any post is sent back to the model and, if it keeps
    writing one, stored as failed.
 
+   No post uses a colon or a dash (rule 13, `draft/style.py`). The em dash, the
+   en dash, "--" and a spaced " - " all count; a colon between digits (8:30,
+   2:1) is fine. Posts should read like a person talking. A draft that breaks
+   this is sent back to the model like any other hard rule, and a human edit
+   that breaks it is never used as a voice example.
+
    The first post is held to its own rule on top of that (rule 12): no thread
    position marker ("1/6"), no "thread", no emoji, and under 220 characters. X
    ranks a thread on what its opening post does in the first minutes, and a

@@ -16,6 +16,7 @@ from draft.drafter import (
 from draft.hook import HOOK_MAX_CHARS, hook_problems, link_problems
 from draft.prompt import PREPRINT_LABEL
 from draft.schema import MAX_POST_CHARS, tweet_length
+from draft.style import style_problems
 from draft.tags import Handle, tag_problems
 from swarm.genome import HOOK
 
@@ -57,6 +58,7 @@ def cell_problems(
     if missing:
         problems.append("numbers not in the source: " + ", ".join(dict.fromkeys(missing)))
     problems += link_problems(t)
+    problems += style_problems(t)
     if needs_preprint is None:
         needs_preprint = slot == HOOK and is_preprint
     if needs_preprint and PREPRINT_LABEL not in t.lower():

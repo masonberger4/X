@@ -36,7 +36,7 @@ def good_json(lead=None, **overrides):
     advice rules look at); the last post keeps the URL."""
     data = {
         "thread": [
-            "Phase 2 CAR-T data in relapsed myeloma: ORR 88%, median PFS 14.6 months.",
+            "Phase 2 CAR-T data in relapsed myeloma show ORR 88% and median PFS 14.6 months.",
             "Single-arm, so no comparator. The sequencing question is open.",
             "Grade 3 CRS in 4 patients.",
         ],

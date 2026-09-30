@@ -30,7 +30,7 @@ CFG = {
     "skip_categories": ["factual", "hard_rule"],
 }
 
-ORIG_LEAD = "A game-changing CAR-T result: ORR 88% in 97 patients. Exciting times."
+ORIG_LEAD = "A game-changing CAR-T result. ORR 88% in 97 patients. Exciting times."
 EDIT_LEAD = "ORR 88% in 97 patients, single-arm. Sequencing vs bispecifics is the question."
 REST = ["Single arm, no comparator.", ""]
 ORIG_THREAD = [ORIG_LEAD, *REST]
@@ -175,7 +175,7 @@ def test_edited_text_cutting_the_thread_is_allowed_when_url_survives():
 def test_preprint_edit_must_keep_label():
     unlabelled = row(source="biorxiv", edited=EDIT_THREAD)
     assert select_edit_examples([unlabelled], CFG, now=NOW) == []
-    labelled = row(source="biorxiv", edited=[f"Preprint: {EDIT_LEAD}", *REST])
+    labelled = row(source="biorxiv", edited=[f"Preprint. {EDIT_LEAD}", *REST])
     assert len(select_edit_examples([labelled], CFG, now=NOW)) == 1
     # the label in a later post does not count
     late = row(source="biorxiv", edited=[EDIT_LEAD, "Preprint.", "c"])
