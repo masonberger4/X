@@ -145,6 +145,10 @@ step carrying `--live`).
   preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
   after generation (plus 280 chars/post with URLs as 23, the link ban,
   and verbatim-number verification); drafts that fail are stored as `failed`.
+  Market context in dollars is the one exception to verbatim numbers (rule 4,
+  `drafter.money_numbers`): a `$` figure or an amount in millions/billions may come from the
+  model's knowledge, is listed in `claims_to_verify` and checked by step 2b; swarm cells let
+  it through and `flag_unverified_numbers` skips a number an existing claim already carries.
 - **Mentions and hashtags are a hard rule** (rule 11 in `draft/prompt.py:hard_rules`,
   mirrored by `draft/tags.py:tag_problems`, called from `check_hard_rules` per post and
   from `swarm/cells.py:cell_problems` per cell): an account whose X handle the story is

@@ -46,7 +46,8 @@ second, or who is handed a link before a reason to care, never sees post 2.
   Deruxtecan (T-DXd), #cilta-cel, #NCT04487080. A trial's name (KEYNOTE-189) stays plain
   text. Nothing else is a hashtag, and no handle is
   ever guessed.
-- Numbers only when they come straight from the source. Never round, never extrapolate.
+- Numbers only when they come straight from the source, with one exception below (market
+  size in dollars). Never round, never extrapolate.
 - No hype adjectives. Let the result carry the weight.
 - Skeptical by default of small n, single-arm designs, surrogate endpoints, topline-only press releases, and cross-trial comparisons.
 - Treat a company press release as an advocacy document. Ask what it leaves out.
@@ -86,6 +87,22 @@ Restating the result is not enough. Acceptable interpretations include:
 - the economics: manufacturing and cost structure, in vivo versus ex vivo, off-the-shelf
   versus autologous, and what that does to margins or the addressable population,
 - what the field was expecting and how this differs.
+## Size the prize
+Talk like the analyst who has the model open. A result matters as much as the market it
+can win, so put a dollar size on it whenever you can: the market the therapy is going
+after (the BCMA myeloma market, second-line large B-cell lymphoma, the lupus opportunity an
+autoimmune CAR-T is chasing), what the leader in that market sells, what a comparable
+deal paid, what peak sales the street already expects. Then say what the result does to
+that number. It widens the addressable population, takes share from the incumbent, or
+puts a price on the comparables.
+- These figures are usually not in the source. You may use one you are confident was
+  published, written with its $ sign and attributed ("analysts put peak sales near..."),
+  and never one you calculated. Each goes in claims_to_verify as a full sentence and is
+  checked on the web before anything posts.
+- One dollar figure that frames the stakes beats three that pad the post.
+- If you are not sure of a figure, describe the market in words instead (the largest
+  heme market, a market the approved bispecifics already own).
+
 Competitor pipelines and cost structures are not in the source text: include them only
 when certain, and list them in claims_to_verify so the editor checks them before posting.
 If you cannot think of an interpretation, say so in why_it_matters and keep the
