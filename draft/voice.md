@@ -29,6 +29,8 @@ second, or who is handed a link before a reason to care, never sees post 2.
 - No link in any post. Name the source in words instead (the journal, the company, the
   meeting), with its @handle where you have one.
 - No "1/6", no "🧵", no "a thread". The client already numbers the thread.
+- No colons and no dashes (em dash, en dash, "--", " - "). Say it the way you would
+  say it out loud to a colleague, in plain sentences.
 
 ## Tone
 - Plain English, but written the way a person talks, not the way a model writes. One idea per post.
@@ -96,30 +98,31 @@ DCR, CRS grade, the mechanism readout, the partner's status. Prefer that over a 
 restating the same figures.
 
 ## Sample posts
-1. Phase 2 CAR-T data in relapsed myeloma: ORR 88%, median PFS 14.6 mo. Strong numbers,
-   but single-arm and BCMA-exposed patients were excluded. For $TICKER the question is
-   where this slots against the approved bispecifics that need no apheresis. Source: URL
-2. $TICKER's CD3xBCMA engager #examplimab: ORR 65% at the top dose, grade 3 CRS in 2 of
-   40 in #EXAMPLE-1. The efficacy is in line with the class. The differentiator the thesis needs is dosing
-   convenience, and the release says nothing about it. URL
+1. Phase 2 CAR-T data in relapsed myeloma show an ORR of 88% and a median PFS of 14.6 mo.
+   Strong numbers, but it is single-arm and BCMA-exposed patients were excluded. For
+   $TICKER the question is where this slots against the approved bispecifics that need
+   no apheresis.
+2. $TICKER's CD3xBCMA engager #examplimab hit an ORR of 65% at the top dose, with grade 3
+   CRS in 2 of 40 in #EXAMPLE-1. The efficacy is in line with the class. The thesis needs
+   dosing convenience, and the release says nothing about it.
 3. Pharma is paying $1.4B plus a CVR for a phase 2 T-cell engager. The CVR pays on
-   approval, which is the acquirer saying it is not sure. Read-across: the public
-   comparables with phase 2 engagers just got a price. URL
-4. #EXAMPLE-2, out today in @NEJM, hit its PFS endpoint but OS is immature. PFS wins that never turn into
-   OS wins are the recurring story of the last decade. The stock will trade on PFS
-   today; the label will be decided on OS. URL
-5. Allogeneic CAR-T update: durable responses in a subset, but a manufacturing hold
-   is buried in paragraph six. For an off-the-shelf thesis, manufacturing is the
-   product. That is the number to watch, not the ORR. URL
-6. Preprint: an in vivo CAR construct shows B-cell depletion in primates. Not
-   peer reviewed, no human data. The commercial logic is real, though: no apheresis,
-   no manufacturing slot, a cost structure closer to a biologic. Preprint: URL
+   approval, which is the acquirer saying it is not sure. The public comparables with
+   phase 2 engagers just got a price.
+4. #EXAMPLE-2, out today in @NEJM, hit its PFS endpoint but OS is immature. PFS wins that
+   never turn into OS wins are the recurring story of the last decade. The stock will
+   trade on PFS today, and the label will be decided on OS.
+5. The allogeneic CAR-T update shows durable responses in a subset, but a manufacturing
+   hold is buried in paragraph six. For an off-the-shelf thesis, manufacturing is the
+   product. That is the number to watch, not the ORR.
+6. A preprint shows an in vivo CAR construct depleting B cells in primates. Not peer
+   reviewed and no human data yet. The commercial logic is real, though. No apheresis,
+   no manufacturing slot, and a cost structure closer to a biologic.
 7. A negative trial is still news. Adding the checkpoint inhibitor did nothing for
-   OS in this setting. Saves patients toxicity, and removes a combination the
-   bull case for $TICKER was counting on. URL
+   OS in this setting. That saves patients toxicity, and removes a combination the
+   bull case for $TICKER was counting on.
 8. PDUFA for $TICKER's engager is in 6 weeks. The ODAC transcript flagged the
-   single-arm design and the surrogate endpoint. Approval is the base case; the
-   label wording on prior lines of therapy is what decides the market size. URL
+   single-arm design and the surrogate endpoint. Approval is the base case, and the
+   label wording on prior lines of therapy is what decides the market size.
 
 ## Banned phrases
 - game-changer, game changing

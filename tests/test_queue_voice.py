@@ -18,7 +18,7 @@ def _draft(conn, item_id="i1", source="pubmed"):
     seed_item(conn, item_id, source=source)
     d = Draft(
         thread=[
-            "A game-changer: ORR 88% in 97 patients. Exciting.",
+            "A game-changer. ORR 88% in 97 patients. Exciting.",
             "Single-arm.",
             "",
         ],
@@ -114,7 +114,7 @@ def test_voice_page_with_data(client, conn):
         f"/drafts/{did}/edit",
         data={
             "thread": (
-                "Preprint: ORR 88% in 97 patients, single-arm, sequencing open."
+                "Preprint. ORR 88% in 97 patients, single-arm, sequencing open."
                 "\n---\nSingle-arm.\n---\n"
             ),
             "note": "less hype",

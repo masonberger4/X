@@ -41,6 +41,7 @@ from draft.schema import (
     validate_output,
 )
 from draft.settings import load_draft_config
+from draft.style import style_problems
 from draft.tags import Handle, company_names, load_handles, relevant_handles, tag_problems
 
 log = logging.getLogger(__name__)
@@ -302,6 +303,7 @@ def check_hard_rules(
                 f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
         problems += [f"{label} {p}" for p in link_problems(post)]
+        problems += [f"{label} {p}" for p in style_problems(post)]
         problems += [f"{label} {p}" for p in tag_problems(post, handles, companies)]
     if draft.chart is not None:
         problems += note_problems(draft.chart.note, "chart note")

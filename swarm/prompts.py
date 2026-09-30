@@ -55,6 +55,8 @@ def cell_rules(max_chars: int = MAX_POST_CHARS) -> str:
     return f"""RULES for this one {unit} (one that breaks a rule is discarded by code):
 - At most {max_chars} characters. Aim under {max_chars - 30}.
 - NEVER write a URL, a link or a bare domain. Name the source in words instead.
+- No colons and no dashes (no em dash, no " - "). Write it the way a person talks, in
+  plain sentences.
 - No medical advice or treatment recommendations. No investment advice: never buy, sell,
   hold, short, a price target or a promised return. Describe; the reader decides.
 - Every number must appear verbatim in the source title or abstract. Do not round,
