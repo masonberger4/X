@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -165,7 +165,12 @@ def slots_between(last: datetime, now: datetime, times: list[str], tz: ZoneInfo)
     while day <= end:
         out += [s for s in _slots_on(day, times, tz) if last < s <= now]
         day += timedelta(days=1)
-    return sorted(out)
+    # On the night clocks go forward a time in the missing hour (02:00) is the same instant
+    # as the hour after it (03:00): one run, not a run and a false "missed".
+    by_instant: dict[datetime, datetime] = {}
+    for s in sorted(out):
+        by_instant.setdefault(s.astimezone(UTC), s)
+    return list(by_instant.values())
 
 
 def next_slot(now: datetime, times: list[str], tz: ZoneInfo) -> datetime | None:

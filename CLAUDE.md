@@ -441,7 +441,17 @@ carrying `--live`).
   `ops/backup.py:backup` as "Back up now"), noting "backup saved/failed" in the outcomes;
   `ops/backup.py` writes `<name>.part` and renames it after `integrity_check`, so a backup cut
   short never counts as the newest. The runs page shows it and posts `POST /runs/auto` (switch and times only);
-  the dashboard shows the state and `ops/store.py:last_auto_run`. `tests/conftest.py`
+  the dashboard shows the state and `ops/store.py:last_auto_run`. **A machine never writes over a
+  human's decision**: `verify/autorevise.py:revise_round` saves through
+  `store.revise(..., expect_status='pending')`, whose UPDATE carries the status (`NotPending`
+  when a human approved mid-revision: nothing is written, carried over or redrawn), and
+  `verify/render.py:finalize_table` draws or drops a table only if `still_pending_with` finds
+  the draft still pending with the same table. Every non-GET request to the panel passes
+  `panel/app.py:same_origin_posts` (an Origin or Referer naming another host is refused
+  with 403; none at all is a local caller). The lifespan's shutdown stops the timer and
+  cancels every run. `ingest/base.py:Source.is_due` allows `DUE_SLACK_SECONDS` (a twentieth
+  of the cadence, at most 5 min), so runs spaced exactly one cadence apart do not skip a
+  source; `kol.lookback_hours` exceeds the longest gap between `auto_run_times`. `tests/conftest.py`
   disables `AutoRunner.start` for every test; `tests/test_autorun.py` drives `tick`.
   "Set schedule" on the approved page (`POST /publishing/order`, `panel/publishing.py`)
   writes the human's order to step 3's `schedule.position` (guarded migration in

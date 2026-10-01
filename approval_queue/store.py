@@ -710,6 +710,10 @@ def edit(
     return did
 
 
+class NotPending(RuntimeError):
+    """The draft left the status a writer expected (a human approved it mid-revision)."""
+
+
 def revise(
     conn: sqlite3.Connection,
     draft_id: int,
@@ -718,21 +722,26 @@ def revise(
     model: str,
     note: str | None = None,
     category: str | None = None,
+    expect_status: str | None = None,
 ) -> int:
     """Replace the draft with one the drafter rewrote on the human's instructions (note) and
     log original vs revised as a 'revise' decision. The whole Draft is replaced, claims
     included, so the caller must drop step 2b's claim checks for it. The draft stays in its
-    current status: a revision is never an approval."""
+    current status: a revision is never an approval. With `expect_status` the write happens
+    only while the draft still has that status, checked in the same UPDATE, so a revision
+    that took a minute cannot land on a draft a human approved meanwhile (NotPending)."""
     category = validate_category(category)
     row = _require(conn, draft_id)
     original = _serialise_text(row.draft.thread)
     revised = _serialise_text(draft.thread)
-    conn.execute(
+    guard = " AND status = ?" if expect_status is not None else ""
+    cur = conn.execute(
         """UPDATE drafts SET thread_json = ?, suggested_visual = ?,
                              why_it_matters = ?, claims_json = ?, model = ?, updated_at = ?,
                              chart_json = ?, image_path = NULL, image_alt = NULL,
                              format_json = ?, images_json = NULL
-           WHERE id = ?""",
+           WHERE id = ?"""
+        + guard,
         (
             json.dumps(draft.thread),
             draft.suggested_visual,
@@ -743,8 +752,12 @@ def revise(
             _chart_json(draft),
             _format_json(draft),
             draft_id,
+            *([expect_status] if expect_status is not None else []),
         ),
     )
+    if cur.rowcount == 0:
+        conn.rollback()
+        raise NotPending(f"draft {draft_id} is no longer {expect_status}")
     did = _record_decision(conn, draft_id, ACTION_REVISE, original, revised, note, category)
     conn.commit()
     return did

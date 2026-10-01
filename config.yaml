@@ -525,7 +525,8 @@ kol:
   cadence_minutes: 120
   max_results: 100                # per page (API max)
   max_pages: 1
-  lookback_hours: 6               # must exceed cadence_minutes so runs overlap
+  lookback_hours: 14              # must exceed cadence_minutes and the longest gap between
+                                  # ops/config.yaml auto_run_times (12h) so runs overlap
   require_link: true              # skip posts with no link off x.com
   skip_retweets: true
   skip_replies: true

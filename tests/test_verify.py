@@ -540,3 +540,31 @@ def test_mark_host_trusted_flips_stored_verdicts_from_that_host(conn):
     assert after[0].trusted and after[0].label == "supported" and not after[0].trustable
     assert not after[1].trusted and after[1].trustable
     assert vstore.mark_host_trusted(conn, "learn.astct.org") == 0
+
+
+def test_auto_revise_never_rewrites_a_draft_approved_while_it_worked(conn, monkeypatch):
+    """The drafter call takes a minute; a human who approves meanwhile keeps the text they
+    approved, and Publish now posts that, not the machine revision."""
+    from draft import drafter
+    from publish import store as pub_store
+    from verify.autorevise import revise_round
+
+    did = _seed_problem_draft(conn)
+    for i, verdict in enumerate(("supported", "contradicted", "unverified")):
+        vstore.insert_check(
+            conn, did, verifier.ClaimCheck(i, f"c{i}", verdict, "https://s", "q", "n", True), "m"
+        )
+    inner = _fake_reviser([])
+
+    def approve_midway(**kw):
+        store.approve(conn, did)  # the human presses Approve while the model works
+        return inner(**kw)
+
+    monkeypatch.setattr(drafter, "revise_item", approve_midway)
+    result = revise_round(conn, did, lifetime_cap=0)
+    assert not result.revised and "left pending" in result.reason
+    row = store.get_draft(conn, did)
+    assert row.status == "approved" and row.draft.thread == ["a", "b", "c"]
+    (a,) = pub_store.fetch_approved(conn=conn)
+    assert a.thread[0] == "a"
+    assert [x["action"] for x in store.list_decisions(conn, did)] == ["approve"]

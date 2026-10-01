@@ -62,6 +62,7 @@ REASON_NO_TIMES = "on, but no run times are set"
 REASON_FOLLOWER = "another panel window runs the automatic runs"
 REASON_IDLE = "waiting for the next run time"
 REASON_STOPPED = "stopped (the app is closing)"
+REASON_STARTING = "starting (the timer picks the new settings up within half a minute)"
 
 
 @dataclass
@@ -168,9 +169,14 @@ class AutoRunner:
         if not cfg["times"]:
             self.pending = self.wait_reason = None
             return REASON_NO_TIMES
+        newly = self._held is None
         if not self._lead():
             self.pending = self.wait_reason = None
             return REASON_FOLLOWER
+        if newly:
+            # A window that has just taken over never looks back: the one it replaces may
+            # have started that run a moment before it closed.
+            self.last = now
 
         due = slots_between(self.last, now, cfg["times"], self._tz())
         if due:
@@ -184,7 +190,9 @@ class AutoRunner:
             return REASON_IDLE
 
         grace = cfg["grace_minutes"]
-        if (now - self.pending).total_seconds() > grace * 60:
+        # A time is first seen up to one poll after it passes, so lateness under two polls is
+        # never "late", whatever the grace (0 must not mean "never run").
+        if (now - self.pending).total_seconds() > max(grace * 60, 2 * self.poll_seconds):
             why = self.wait_reason or f"more than {grace} minutes late (the computer was asleep)"
             self._note(self.pending, now, f"skipped: {why}")
             self.pending = self.wait_reason = None
@@ -223,7 +231,7 @@ class AutoRunner:
         """Hold the leader lock, taking it if it is free. Logged only when it changes."""
         if self._held is not None:
             return True
-        held = lock.acquire(self.lock_path, trust_os_lock=True)
+        held = lock.acquire(self.lock_path, trust_os_lock=True, quiet=True)
         if held is None:
             if self.reason != REASON_FOLLOWER:
                 log.info("automatic runs: another panel process leads (%s)", self.lock_path)
@@ -241,12 +249,24 @@ class AutoRunner:
 
     def status(self, now: datetime | None = None) -> AutoStatus:
         now = now or datetime.now(UTC)
-        cfg = settings_of(self._settings())
+        try:
+            cfg = settings_of(self._settings())
+        except Exception as exc:  # a hand edit broke the file: show it, never a 500
+            cfg = {
+                "enabled": False,
+                "times": [],
+                "steps": [],
+                "grace_minutes": 0,
+                "backup_hours": 0.0,
+                "error": f"ops/config.yaml cannot be read: {exc}",
+            }
         names, dropped = plan(cfg["steps"], self.jobs.steps())
         on = cfg["enabled"] and bool(cfg["times"])
         with self._mutex:
             leader = self._held is not None
             pending, reason, outcomes = self.pending, self.reason, list(self.outcomes)
+        if on and not leader and reason in (REASON_OFF, REASON_NO_TIMES):
+            reason = REASON_STARTING  # just switched on; the next tick takes over
         return AutoStatus(
             enabled=cfg["enabled"],
             times=cfg["times"],

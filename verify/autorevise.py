@@ -133,7 +133,19 @@ def revise_round(conn, draft_id: int, *, lifetime_cap: int) -> RoundResult:
         # Nothing the checker could re-judge: the problems would come straight back. Keep
         # the draft and its verdicts as they are so the queue shows what is wrong.
         return RoundResult(False, total, reason="the drafter kept every claim and cell as it was")
-    queue_store.revise(conn, draft_id, draft=result.draft, model=result.model, note=AUTO_NOTE)
+    try:
+        queue_store.revise(
+            conn,
+            draft_id,
+            draft=result.draft,
+            model=result.model,
+            note=AUTO_NOTE,
+            expect_status=queue_store.STATUS_PENDING,
+        )
+    except queue_store.NotPending:
+        # A human approved (or otherwise moved) it while the drafter worked: what they
+        # approved stands, and nothing below may touch it.
+        return RoundResult(False, total, reason="draft left pending while it was revised")
     kept = store.carry_over_checks(conn, draft_id, [c.claim for c in result.draft.claims_to_verify])
     store.carry_over_table_checks(conn, draft_id, row.draft.table, result.draft.table)
     images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)

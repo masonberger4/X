@@ -12,10 +12,11 @@
   {{ auto.steps|join(', ') or 'nothing' }} at {{ auto.times_text }} ({{ auto.tz_name }}).
   {% if auto.next_due %}Next: <strong>{{ auto.next_due|localtime }}</strong> <span class="meta">(in {{ auto.next_in }})</span>.{% endif %}
   {% elif auto.error %}{{ auto.error }}
+  {% elif auto.enabled %}On, but no run times are set: add at least one time below.
   {% else %}Nothing runs on its own. Switch it on to run {{ auto.steps|join(', ') or 'the steps' }} at set times while this app is open.
   {% endif %}</p>
 {% if auto.on %}
-<p class="meta">{% if auto.leader %}This window runs them{% elif auto.holder %}Another panel window runs them (process {{ auto.holder.pid }}, since {{ auto.holder.since|localtime }}){% endif %}.
+<p class="meta">{% if auto.leader %}This window runs them. {% elif auto.holder %}Another panel window runs them (process {{ auto.holder.pid }}{% if auto.holder.since %}, since {{ auto.holder.since|localtime }}{% endif %}). {% endif %}
   Status: {{ auto.reason }}.
   {% if auto.pending %}The {{ auto.pending|localtime }} run is waiting.{% endif %}
   {% if auto.backup_hours %}The first run each day also backs up the database (when the newest backup is over {{ '%g'|format(auto.backup_hours) }} hours old).{% endif %}
@@ -81,6 +82,17 @@
       .catch(function () { setTimeout(poll, 5000); });
   }
   if (isRunning()) { setTimeout(poll, 2000); }
+  // Idle, the page still checks every half minute: the automatic runs start on their own,
+  // and a run they start should show up here (with its Stop button) without a reload.
+  setInterval(function () {
+    if (isRunning()) { return; }
+    fetch("/runs/current", {headers: {"Accept": "text/html"}})
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        if (html.indexOf('data-running="1"') !== -1) { window.location.reload(); }
+      })
+      .catch(function () {});
+  }, 30000);
 })();
 </script>
 {% endblock %}

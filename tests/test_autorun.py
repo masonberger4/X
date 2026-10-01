@@ -32,8 +32,8 @@ LA = ZoneInfo("America/Los_Angeles")
 REPO = Path(__file__).resolve().parents[1]
 
 
-def la(y, m, d, hh, mm=0):
-    return datetime(y, m, d, hh, mm, tzinfo=LA).astimezone(UTC)
+def la(y, m, d, hh, mm=0, ss=0):
+    return datetime(y, m, d, hh, mm, ss, tzinfo=LA).astimezone(UTC)
 
 
 # --------------------------------------------------------------------------- times
@@ -121,7 +121,7 @@ def test_the_shipped_config_runs_everything_but_publishing():
     s = autorun.settings_of(cfg)
     steps = steps_from_config(cfg)
     names, dropped = autorun.plan(s["steps"], steps)
-    assert s["error"] is None and s["times"] == ["06:00", "12:00", "18:00"]
+    assert s["error"] is None
     assert names == ["ingest", "score", "draft", "verify", "feedback", "evolve"] and not dropped
     assert "publish" not in s["steps"]
     assert "--live" not in (REPO / "ops" / "config.yaml").read_text(encoding="utf-8")
@@ -220,11 +220,24 @@ def _wait(job, timeout=20.0):
 
 
 def _manager(tmp_path, steps):
-    cfg = {"steps": steps, "lock_path": str(tmp_path / "p.lock"), "run_log_tail_chars": 4000}
+    path = tmp_path / "ops_cfg.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "steps": steps,
+                "lock_path": str(tmp_path / "p.lock"),
+                "backups": {"dir": str(tmp_path / "backups"), "keep": 3},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_ops_config(path)
     return JobManager(cfg, tmp_path, db_path=tmp_path / "t.db", python=sys.executable)
 
 
 def test_an_automatic_run_cannot_turn_posting_on(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr(run_ops.alert, "notify", lambda *a, **k: sent.append(1) or [])
     _fake_scripts(tmp_path)
     monkeypatch.setenv("PUBLISH_ENABLED", "1")  # as a .env with posting on would set it
     jobs = _manager(tmp_path, [{"name": "ingest", "argv": ["python", "run_ingest.py"]}])
@@ -234,9 +247,13 @@ def test_an_automatic_run_cannot_turn_posting_on(tmp_path, monkeypatch):
     conn = store.connect(tmp_path / "t.db")
     run = store.last_auto_run(conn)
     assert run is not None and store.AUTO_RUN_MARK in run["run_id"] and run["failed"] == []
-    # a human's run of the same step keeps the operator's environment
+    # like cron's run, it records a health report (and would alert on a failing check)
+    assert store.last_health(conn) is not None and sent == [1]
+    health_rows = conn.execute("SELECT COUNT(*) FROM health_checks").fetchone()[0]
+    # a human's run of the same step keeps the operator's environment and records no report
     _wait(jobs.start(["ingest"]))
     assert (tmp_path / "env.txt").read_text(encoding="utf-8") == "1"
+    assert conn.execute("SELECT COUNT(*) FROM health_checks").fetchone()[0] == health_rows
 
 
 def test_an_automatic_run_refuses_anything_but_the_pipeline_scripts(tmp_path):
@@ -519,6 +536,19 @@ def test_the_shipped_staleness_limits_cover_the_longest_gap_between_runs():
 # --------------------------------------------------------------------------- the pages
 
 
+PAGE_CONFIG = """steps:
+  - name: ingest
+    argv: ["python", "run_ingest.py"]
+  - name: publish
+    argv: ["python", "run_publish.py"]
+lock_path: ./pipeline.lock
+auto_run_enabled: true
+auto_run_times: ["06:00", "12:00", "18:00"]
+auto_run_steps: [ingest]
+auto_run_backup_hours: 20
+"""
+
+
 @pytest.fixture
 def panel_client(db_file, tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
@@ -526,7 +556,7 @@ def panel_client(db_file, tmp_path, monkeypatch):
     from panel import app as panel_app
 
     cfg_copy = tmp_path / "ops_config.yaml"
-    cfg_copy.write_text((REPO / "ops" / "config.yaml").read_text(encoding="utf-8"), "utf-8")
+    cfg_copy.write_text(PAGE_CONFIG, encoding="utf-8")
     monkeypatch.setattr(
         panel_app, "save_auto_run", lambda enabled, times: save_auto_run(enabled, times, cfg_copy)
     )
@@ -543,7 +573,7 @@ def test_the_runs_page_shows_and_saves_the_automatic_runs(panel_client):
     assert r.status_code == 303 and r.headers["location"] == "/runs?saved=auto"
     saved = load_ops_config(cfg_copy)
     assert saved["auto_run_enabled"] is False and saved["auto_run_times"] == ["07:00", "19:00"]
-    assert saved["auto_run_steps"] == ["ingest", "score", "draft", "verify", "feedback", "evolve"]
+    assert saved["auto_run_steps"] == ["ingest"]  # the step list is never written
     body = client.get("/runs?saved=auto").text
     assert "Automatic runs saved" in body and "Nothing runs on its own" in body
     r = client.post("/runs/auto", data={"enabled": "1", "times": "07:00, 07:30"})
@@ -659,3 +689,153 @@ def test_the_shipped_config_backs_up_daily():
     s = autorun.settings_of(cfg)
     assert 0 < s["backup_hours"] < 24
     assert Thresholds.from_config(cfg["health"]).backup_max_age_hours > 24
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+def test_the_switch_turns_on_and_the_dashboard_says_so(panel_client, conn):
+    client, cfg_copy = panel_client
+    client.post("/runs/auto", data={"times": "06:00"})
+    assert 'Automatic runs: <span class="pill skip">off</span>' in client.get("/").text
+    r = client.post("/runs/auto", data={"enabled": "1", "times": "06:00, 18:00"})
+    assert r.status_code == 303 and load_ops_config(cfg_copy)["auto_run_enabled"] is True
+    body = client.get("/").text
+    assert 'Automatic runs: <span class="pill ok">on</span>' in body
+    assert "next 20" in body  # the next run's date, in the display zone
+    # the last automatic run, read back from pipeline_runs
+    ops_conn = store.connect()
+    ops_conn.execute(
+        """INSERT INTO pipeline_runs (run_id, step, argv, started_at, finished_at, exit_code)
+           VALUES (?, 'draft', '[]', ?, ?, 1)""",
+        (
+            f"20261001T130000Z{store.AUTO_RUN_MARK}abc",
+            "2026-10-01T13:00:00+00:00",
+            "2026-10-01T13:05:00+00:00",
+        ),
+    )
+    ops_conn.commit()
+    body = client.get("/").text
+    assert "last automatic run" in body and "failed: draft" in body
+
+
+def test_a_cross_site_form_is_refused(panel_client):
+    client, cfg_copy = panel_client
+    before = cfg_copy.read_text(encoding="utf-8")
+    r = client.post(
+        "/runs/auto",
+        data={"enabled": "1", "times": "00:00"},
+        headers={"Origin": "https://evil.test"},
+    )
+    assert r.status_code == 403 and cfg_copy.read_text(encoding="utf-8") == before
+    r = client.post(
+        "/runs/auto", data={"times": "06:00"}, headers={"Referer": "https://evil.test/x"}
+    )
+    assert r.status_code == 403
+    # the panel's own pages (same host) and local callers with no Origin still work
+    assert (
+        client.post(
+            "/runs/auto", data={"times": "06:00"}, headers={"Origin": "http://testserver"}
+        ).status_code
+        == 303
+    )
+    assert client.post("/runs/auto", data={"times": "06:00"}).status_code == 303
+
+
+def test_a_broken_config_is_shown_not_a_500(panel_client, monkeypatch):
+    from panel import app as panel_app
+
+    def broken():
+        raise yaml.YAMLError("mapping values are not allowed here")
+
+    monkeypatch.setattr(panel_app.AUTO, "_settings", broken)
+    dash = panel_client[0].get("/")
+    assert dash.status_code == 200 and 'pill fail">error' in dash.text
+    runs = panel_client[0].get("/runs")
+    assert runs.status_code == 200 and "cannot be read" in runs.text
+
+
+def test_the_page_says_what_on_without_times_and_just_switched_on_mean(panel_client):
+    client, cfg_copy = panel_client
+    client.post("/runs/auto", data={"enabled": "1", "times": ""})
+    body = client.get("/runs").text
+    assert "no run times are set" in body and "Switch it on" not in body
+    client.post("/runs/auto", data={"enabled": "1", "times": "06:00"})
+    body = client.get("/runs").text
+    assert "Status: starting" in body and "Status: off" not in body
+    assert "setInterval" in body  # the page keeps watching for a run the timer starts
+
+
+def test_a_grace_of_zero_still_runs_on_time(tmp_path):
+    r = _runner(tmp_path, settings=_settings(auto_run_grace_minutes=0))
+    r.tick(la(2026, 10, 1, 5, 59, 50))
+    r.tick(la(2026, 10, 1, 6, 0) + timedelta(seconds=20))  # seen 20 s after it passed
+    assert len(r.jobs.started) == 1
+    r.tick(la(2026, 10, 1, 13, 0))  # an hour late with no grace: skipped
+    assert len(r.jobs.started) == 1 and r.outcomes[0].text.startswith("skipped")
+
+
+def test_a_window_taking_over_right_after_a_run_does_not_repeat_it(tmp_path):
+    a = _runner(tmp_path, FakeJobs())
+    b = _runner(tmp_path, FakeJobs())
+    a.tick(la(2026, 10, 1, 5, 59, 40))
+    b.tick(la(2026, 10, 1, 5, 59, 50))  # B's last look, before 06:00
+    a.tick(la(2026, 10, 1, 6, 0, 10))  # A starts the 06:00 run
+    a.stop()  # and closes at once
+    b.tick(la(2026, 10, 1, 6, 0, 20))  # B takes over: 06:00 is A's, not B's
+    assert len(a.jobs.started) == 1 and b.jobs.started == []
+    b.stop()
+
+
+def test_spring_forward_runs_a_missing_time_once_without_a_false_skip():
+    got = autorun.slots_between(la(2026, 3, 8, 0), la(2026, 3, 8, 6), ["02:00", "03:00"], LA)
+    assert len(got) == 1
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        'auto_run_times:\n- "06:00"\n- "18:00"\n',  # block list at column 0
+        'auto_run_times:\n  - "06:00"\n  # midday\n\n  - "18:00"\n',  # comment inside
+        'auto_run_times: ["06:00",\n  "18:00"\n]\n',  # wrapped flow list
+    ],
+)
+def test_save_auto_run_rewrites_every_valid_layout(tmp_path, layout):
+    path = tmp_path / "ops.yaml"
+    path.write_text(
+        f"steps: []\nauto_run_enabled: false\n{layout}# after\nlock_path: ./x\n", "utf-8"
+    )
+    save_auto_run(True, "07:00", path)
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert cfg["auto_run_times"] == ["07:00"] and cfg["lock_path"] == "./x"
+
+
+def test_save_auto_run_keeps_crlf_line_endings_and_the_file_mode(tmp_path):
+    import os
+    import stat
+
+    path = tmp_path / "ops.yaml"
+    path.write_bytes(b"steps: []\r\n# keep me\r\nauto_run_enabled: false\r\nauto_run_times: []\r\n")
+    os.chmod(path, 0o644)
+    save_auto_run(True, "07:00", path)
+    raw = path.read_bytes()
+    assert raw.count(b"\r\n") == 4 and b"\n" not in raw.replace(b"\r\n", b"")
+    if os.name == "posix":
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o644
+
+
+def test_a_follower_window_does_not_flood_the_log(tmp_path, caplog):
+    import logging
+
+    a = _runner(tmp_path, FakeJobs())
+    b = _runner(tmp_path, FakeJobs())
+    a.tick(la(2026, 10, 1, 5))
+    with caplog.at_level(logging.INFO):
+        for minute in range(10):
+            b.tick(la(2026, 10, 1, 5, minute + 1))
+    held = [r for r in caplog.records if "held by pid" in r.getMessage() and r.levelno >= 20]
+    assert (
+        held == []
+        and sum("another panel process leads" in r.getMessage() for r in caplog.records) == 1
+    )
+    a.stop()

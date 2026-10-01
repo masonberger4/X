@@ -123,9 +123,30 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         AUTO.stop()
+        # The server is going away (run_app.py stopped, or the desktop window closed): no
+        # step may keep running with nobody able to stop it.
+        JOBS.cancel("stopped: the control panel shut down")
 
 
 app = FastAPI(title="Pipeline control panel", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def same_origin_posts(request: Request, call_next):
+    """Refuse a state-changing request sent by another web page. The panel has no login,
+    so without this any site open in the same browser could post a form to it (start runs,
+    switch the automatic runs on, approve or publish). A browser names the page a form came
+    from in Origin (or Referer); one that names another host is refused. A request with
+    neither (the desktop window, curl, the test client) is a local caller and passes."""
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        sender = request.headers.get("origin") or request.headers.get("referer")
+        if sender and sender != "null":
+            from urllib.parse import urlsplit
+
+            if urlsplit(sender).netloc.lower() != (request.headers.get("host") or "").lower():
+                log.warning("refused a %s to %s from %s", request.method, request.url.path, sender)
+                return HTMLResponse("cross-site request refused", status_code=403)
+    return await call_next(request)
 
 
 def current_runs() -> list[dict[str, Any]]:
@@ -539,7 +560,7 @@ async def runs_auto(request: Request):
     enabled = _first(form, "enabled") == "1"
     try:
         save_auto_run(enabled, _first(form, "times"))
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         return RedirectResponse(f"/runs?{urlencode({'error': str(exc)})}", status_code=303)
     log.info("automatic runs %s", "on" if enabled else "off")
     return RedirectResponse("/runs?saved=auto", status_code=303)

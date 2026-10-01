@@ -142,19 +142,22 @@ def step_lock_path(lock_path: str | os.PathLike[str], name: str) -> Path:
     return Path(f"{lock_path}.{name}")
 
 
-def acquire(path: str | os.PathLike[str], *, trust_os_lock: bool = False) -> Lock | None:
+def acquire(
+    path: str | os.PathLike[str], *, trust_os_lock: bool = False, quiet: bool = False
+) -> Lock | None:
     """Take the lock or return None immediately if another live process holds it.
 
     `trust_os_lock` skips the recorded-pid check once the OS lock is ours. The OS releases
     msvcrt/flock locks when a process dies, so for a lock held for a process's whole life
     (the panel's automatic-run leader) a pid left behind by a crash, and later reused by an
-    unrelated process, must not block it forever."""
+    unrelated process, must not block it forever. `quiet` logs a held lock at DEBUG, for a
+    caller that retries every few seconds and logs changes itself."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fh = open(path, "a+", encoding="utf-8")  # noqa: SIM115 - closed by Lock.release
     if not _try_lock(fh):
         holder = read_holder(path) or {}
-        log.info(
+        (log.debug if quiet else log.info)(
             "lock %s held by pid %s since %s", path, holder.get("pid"), holder.get("started_at")
         )
         fh.close()

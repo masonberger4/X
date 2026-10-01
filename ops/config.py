@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -78,7 +79,9 @@ def save_auto_run(
         "auto_run_times": "[" + ", ".join(f'"{t}"' for t in values["auto_run_times"]) + "]",
     }
     target = Path(path) if path else DEFAULT_OPS_CONFIG_PATH
-    old_text = target.read_text(encoding="utf-8")
+    with open(target, encoding="utf-8", newline="") as fh:  # keep the file's line endings
+        old_text = fh.read()
+    eol = "\r\n" if "\r\n" in old_text else "\n"
     lines = old_text.splitlines(keepends=True)
     seen: set[str] = set()
     out: list[str] = []
@@ -91,21 +94,23 @@ def save_auto_run(
             i += 1
             continue
         comment = line.split("#", 1)[1].rstrip("\r\n") if "#" in line else ""
-        out.append(f"{key}: {rendered[key]}" + (f"  #{comment}" if comment else "") + "\n")
+        out.append(f"{key}: {rendered[key]}" + (f"  #{comment}" if comment else "") + eol)
         seen.add(key)
-        i += 1
-        # The rest of the old value (block "- 06:00" lines or a wrapped flow list) is
-        # indented under the key: drop it, stopping at a comment or the next key.
-        while i < len(lines) and re.match(r"^\s+[^\s#]", lines[i]):
-            i += 1
-    if out and not out[-1].endswith("\n"):
-        out[-1] += "\n"
+        i = _end_of_value(lines, i + 1)
+    if out and not out[-1].endswith(("\n", "\r")):
+        out[-1] += eol
     for key in AUTO_RUN_KEYS:
         if key not in seen:
-            out.append(f"{key}: {rendered[key]}\n")
+            out.append(f"{key}: {rendered[key]}{eol}")
     new_text = "".join(out)
-    before = yaml.safe_load(old_text) or {}
-    after = yaml.safe_load(new_text) or {}
+    try:
+        before = yaml.safe_load(old_text) or {}
+        after = yaml.safe_load(new_text) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(
+            f"could not edit {target.name} in place ({exc.__class__.__name__}); write "
+            'auto_run_times as one line, e.g. auto_run_times: ["06:00", "18:00"]'
+        ) from exc
     for key in AUTO_RUN_KEYS:
         before.pop(key, None)
         got = after.pop(key, None)
@@ -117,6 +122,30 @@ def save_auto_run(
     return values
 
 
+def _end_of_value(lines: list[str], i: int) -> int:
+    """Where the old value of a top-level key ends: past every line that belongs to it.
+    That is indented lines, a block list's `- ` items (YAML allows them at column 0), a
+    wrapped flow list's closing `]`, and blank or comment lines between such lines; a blank
+    or comment line followed by the next key stays."""
+
+    def part_of_value(line: str) -> bool:
+        return bool(re.match(r"^(\s+\S|-\s|\]\s*(#.*)?$)", line)) and not line.lstrip().startswith(
+            "#"
+        )
+
+    j = i
+    while j < len(lines):
+        if part_of_value(lines[j]):
+            j += 1
+            i = j
+            continue
+        if lines[j].strip() == "" or lines[j].lstrip().startswith("#"):
+            j += 1  # maybe inside the value; only counts if a value line follows
+            continue
+        break
+    return i
+
+
 def _replace(target: Path, text: str) -> None:
     """Write `text` to a temp file beside `target` and swap it in. Windows refuses the swap
     while another process has the file open for a moment, so retry briefly."""
@@ -124,6 +153,7 @@ def _replace(target: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
+        shutil.copymode(target, tmp)  # mkstemp makes it 0600; keep the file's own mode
         for attempt in range(10):
             try:
                 os.replace(tmp, target)

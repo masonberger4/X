@@ -52,6 +52,14 @@ def reindex(table, blanked: frozenset[tuple[int, int]]) -> frozenset[tuple[int, 
     return frozenset((new_row[r], c) for r, c in blanked if r in new_row)
 
 
+def still_pending_with(conn, draft_id: int, table) -> bool:
+    """Whether the draft is still pending and still carries this same table."""
+    row = queue_store.get_draft(conn, draft_id)
+    if row is None or row.status != queue_store.STATUS_PENDING or row.draft.table is None:
+        return False
+    return row.draft.table.rows == table.rows and row.draft.table.columns == table.columns
+
+
 def finalize_table(conn, d, *, cfg: dict, hosts: set[str]) -> tables.TableDecision:
     """Decide and act: a table with every cell checked is drawn to the draft's picture
     (unsupported cells blanked) or dropped on the record; one with an unchecked cell, or
@@ -64,6 +72,14 @@ def finalize_table(conn, d, *, cfg: dict, hosts: set[str]) -> tables.TableDecisi
     ratio = float(tcfg.get("min_supported_ratio", 0.6))
     max_cells = int(tcfg.get("max_cells_per_draft", 30))
     decision = decide(conn, d, table, ratio=ratio, max_cells=max_cells, hosts=hosts)
+    # The web checks behind `d` can take many minutes. If a human approved (or edited) the
+    # draft meanwhile, approval already dropped the table it had not seen drawn: a picture
+    # must never be attached to it now.
+    if decision.status in (tables.RENDER, tables.DROP) and not still_pending_with(
+        conn, d.id, table
+    ):
+        log.info("draft %d: no longer pending with this table; leaving it alone", d.id)
+        return decision
     if decision.status == tables.PENDING:
         log.info("draft %d: table still has %d unchecked cell(s)", d.id, len(decision.unchecked))
     elif decision.status == tables.BLOCKED:

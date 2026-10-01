@@ -32,8 +32,17 @@ def test_inside_window_uses_window_cadence():
     src = _src(windows=WINDOWS)
     now = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
     assert src.effective_cadence_minutes(now) == 60
-    assert not src.is_due(now - timedelta(minutes=59), now)
+    assert not src.is_due(now - timedelta(minutes=56), now)
     assert src.is_due(now - timedelta(minutes=60), now)
+
+
+def test_a_source_is_due_a_little_before_its_cadence():
+    # Runs spaced exactly one cadence apart (06:00 and 12:00 for a 360-minute source) must
+    # not skip a source whose last fetch was stamped a few seconds into the previous run.
+    src = Dummy({"name": "d", "cadence_minutes": 360}, {})
+    now = datetime(2026, 10, 1, 19, 0, 10, tzinfo=UTC)
+    assert src.is_due(now - timedelta(hours=5, minutes=59, seconds=45), now)
+    assert not src.is_due(now - timedelta(hours=5, minutes=50), now)  # at most 5 minutes
 
 
 def test_start_and_end_days_are_inclusive():

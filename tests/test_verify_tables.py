@@ -621,3 +621,24 @@ def test_reopened_draft_can_still_have_its_table_edited(client, conn):
     r = client.post(f"/drafts/{did}/table", data=_cell_form(rows))
     assert r.status_code == 303 and "error" not in r.headers["location"]
     assert store.get_draft(conn, did).draft.table.rows[1][2] == "Phase 3 (ROBBIN)"
+
+
+def test_a_table_approved_mid_check_never_gets_its_picture(conn, monkeypatch):
+    """The web checks take minutes; a human who approves meanwhile drops the table it never
+    saw drawn, and the verifier must not draw it onto the approved draft afterwards."""
+    did = _seed(conn)
+    seen = []
+
+    def verdict_for(claim):
+        seen.append(claim)
+        if len(seen) == 7:  # the last cell: the human approves now, as the route does
+            store.drop_table(conn, did, "approved before the table was checked")
+            store.approve(conn, did)
+        return "supported", "sec.gov"
+
+    _fake_verify(monkeypatch, verdict_for)
+    assert run_verify.main(["--no-auto-revise"]) == 0
+    row = store.get_draft(conn, did)
+    assert row.status == "approved" and row.image_path is None and row.draft.table is None
+    (a,) = pub_store.fetch_approved(conn=conn)
+    assert a.image_path is None and not a.images

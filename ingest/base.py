@@ -143,6 +143,9 @@ def parse_windows(raw: Any) -> list[tuple[date, date, int | None]]:
     return out
 
 
+DUE_SLACK_SECONDS = 300  # see Source.is_due
+
+
 class Source(ABC):
     """A configured source. Subclasses implement fetch(); network calls go through
     small, mockable methods so tests never touch the network.
@@ -203,4 +206,10 @@ class Source(ABC):
         if last_run is None:
             return True
         now = now or utcnow()
-        return (now - last_run).total_seconds() >= self.effective_cadence_minutes(now) * 60
+        cadence = self.effective_cadence_minutes(now) * 60
+        # A source stamps its run when its fetch finishes, minutes into the run, while the
+        # next run compares against its own start. With runs spaced exactly one cadence
+        # apart (the panel's automatic runs, 6h and 12h) that would skip the source a whole
+        # gap; a little slack (a twentieth of the cadence, at most 5 minutes) prevents it.
+        slack = min(DUE_SLACK_SECONDS, cadence / 20)
+        return (now - last_run).total_seconds() >= cadence - slack
