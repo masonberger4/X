@@ -136,6 +136,12 @@ def read_holder(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def step_lock_path(lock_path: str | os.PathLike[str], name: str) -> Path:
+    """The lock file for one step's lock name: `<lock_path>.<name>`. Steps lock one at a
+    time, so different steps run side by side while the same step never runs twice."""
+    return Path(f"{lock_path}.{name}")
+
+
 def acquire(path: str | os.PathLike[str]) -> Lock | None:
     """Take the lock or return None immediately if another live process holds it."""
     path = Path(path)

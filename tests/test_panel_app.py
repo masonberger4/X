@@ -184,20 +184,14 @@ def test_the_pending_page_offers_draft_and_verify_and_shows_the_run_in_flight(cl
     body = client.get("/queue").text
     assert ">Draft<" in body and ">Verify<" in body and 'value="verify"' in body
     assert "disabled" not in body.split('class="runbar"')[1].split("</div>")[0]
-    monkeypatch.setattr(
-        panel_app,
-        "current_run",
-        lambda: {
-            "id": "x",
-            "steps": ["draft"],
-            "active_step": "draft",
-            "active_for": "3s",
-            "started": "now",
-        },
-    )
-    panel_app._adopt_queue_routes()  # re-register the (patched) global on the queue's env
+    run = {"id": "x", "steps": ["draft"], "active_step": "draft", "active_for": "3s"}
+    monkeypatch.setattr(panel_app, "current_runs", lambda: [{**run, "started": "now"}])
+    monkeypatch.setattr(panel_app, "busy_steps", lambda: {"draft"})
+    panel_app._adopt_queue_routes()  # re-register the (patched) globals on the queue's env
     body = client.get("/queue").text
     bar = body.split('class="runbar"')[1].split("</div>")[0]
+    # only the busy step's button is disabled: Verify still starts beside the draft run
+    assert bar.count("disabled") == 1 and "draft is already running" in bar
     assert "running" in bar and "watch the log" in bar and "disabled" in bar
 
 

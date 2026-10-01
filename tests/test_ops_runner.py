@@ -308,3 +308,25 @@ def test_children_get_unbuffered_python_output(tmp_path):
     step = runner.Step("s", ["python", "-c", "import os; print(os.environ['PYTHONUNBUFFERED'])"])
     res = run_steps([step], env={"OTHER": "1"})
     assert res[0].ok and res[0].stdout_tail.strip() == "1"
+
+
+def test_a_step_whose_lock_is_held_is_skipped_and_the_run_goes_on(tmp_path):
+    from ops import lock
+    from ops.runner import SKIP_LOCKED, Step, run_steps
+
+    base = tmp_path / "p.lock"
+    steps = [
+        Step("score", ["python", "-c", "print('s')"], lock="stories"),
+        Step("draft", ["python", "-c", "print('d')"]),
+    ]
+    held = lock.acquire(lock.step_lock_path(base, "stories"))
+    try:
+        results = run_steps(steps, cwd=tmp_path, lock_path=base)
+    finally:
+        held.release()
+    assert [r.skipped_reason for r in results] == [SKIP_LOCKED, None]
+    assert results[1].ok
+    # released after the step: the lock is free again
+    again = lock.acquire(lock.step_lock_path(base, "draft"))
+    assert again is not None
+    again.release()

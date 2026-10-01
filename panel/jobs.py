@@ -1,8 +1,11 @@
-"""Run orchestrator steps from the web UI, in a background thread, one at a time.
+"""Run orchestrator steps from the web UI, each run in a background thread of its own.
 
-"Publish now" has a slot of its own beside that one: it posts one draft and touches
-nothing the other steps run, so it can start while an ingest, score or draft run is in
-flight (one publish at a time, under its own lock file, never the pipeline lock).
+Runs go side by side: every step takes its own lock (`ops.lock.step_lock_path` with the
+step's lock name, `lock:` in ops/config.yaml) while it runs, so a draft run and a verify
+run, here or in another desktop window or from cron, run at once, while the same step
+never runs twice. Starting a run whose step is already running in this window is refused
+up front; a step another window or cron is running is skipped as `locked` when its turn
+comes. "Publish now" takes the publish step's lock, so one publish at a time.
 
 The panel never builds an argv of its own: a job names steps from `ops/config.yaml`
 and `ops/runner.py` runs exactly what that file says, under the same `ops/lock.py`
@@ -31,7 +34,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ops import lock, runner, store
+from ops import runner, store
 from ops.runner import Step, StepResult
 
 log = logging.getLogger(__name__)
@@ -49,7 +52,7 @@ FORBIDDEN_ARGS = ("--live",)
 
 PUBLISH_NOW = "publish now"  # the step name of a start_publish_now() run
 PUBLISH_CLI = "run_publish.py"
-PUBLISH_LOCK_SUFFIX = ".publish"  # the publish slot's lock: <lock_path>.publish
+PUBLISH_LOCK = "publish"  # "Publish now" takes the publish step's lock: <lock_path>.publish
 
 
 class JobError(RuntimeError):
@@ -71,12 +74,17 @@ class Job:
     active_since: datetime | None = None
     active_stdout: str = ""  # that step's log so far, refreshed as it writes
     active_stderr: str = ""
-    publish: bool = False  # a "Publish now" run, in the publish slot
+    publish: bool = False  # a "Publish now" run
     stop_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     @property
     def running(self) -> bool:
         return self.state == STATE_RUNNING
+
+    @property
+    def lock_names(self) -> set[str]:
+        """The locks this run's steps take, so another run of the same step is refused."""
+        return {s.lock_name for s in self.plan}
 
     @property
     def duration_seconds(self) -> float | None:
@@ -100,7 +108,7 @@ def _now() -> datetime:
 
 
 class JobManager:
-    """Owns the background slots: one for pipeline runs, one for "Publish now". Thread-safe;
+    """Owns the background runs: any number at once, never two of the same step. Thread-safe;
     keeps the last few jobs in memory."""
 
     def __init__(
@@ -117,8 +125,7 @@ class JobManager:
         self._db_path = db_path
         self._history_size = history_size
         self._mutex = threading.Lock()
-        self._current: Job | None = None
-        self._publish: Job | None = None
+        self._live: list[Job] = []  # runs in flight, newest first
         self._history: list[Job] = []
 
     # -- configuration -----------------------------------------------------
@@ -131,32 +138,37 @@ class JobManager:
 
     # -- state -------------------------------------------------------------
 
-    def current(self) -> Job | None:
-        """The pipeline run in flight (not a "Publish now"; see `publishing()`)."""
+    def running(self) -> list[Job]:
+        """Every pipeline run in flight, newest first (not "Publish now"; see `publishing()`)."""
         with self._mutex:
-            return self._current
+            return [j for j in self._live if not j.publish]
+
+    def current(self) -> Job | None:
+        """The newest pipeline run in flight, if any."""
+        jobs = self.running()
+        return jobs[0] if jobs else None
 
     def publishing(self) -> Job | None:
         """The "Publish now" run in flight, if any."""
         with self._mutex:
-            return self._publish
+            return next((j for j in self._live if j.publish), None)
+
+    def busy_steps(self) -> set[str]:
+        """Step names that cannot start now: their lock is taken by a run in this window."""
+        with self._mutex:
+            held = {name for j in self._live for name in j.lock_names}
+        return {s.name for s in self.steps() if s.lock_name in held}
 
     def history(self) -> list[Job]:
         with self._mutex:
-            live = [j for j in (self._publish, self._current) if j is not None]
-            jobs = live + self._history
-        return jobs
+            return list(self._live) + self._history
 
     def cancel(self, reason: str = "stopped by the operator", job_id: str | None = None) -> bool:
         """End a run in progress: the live step and everything it launched are killed,
         the remaining steps are skipped, and the job records why. With `job_id`, only that
         run; without it, every run in flight. False if none was running."""
         with self._mutex:
-            jobs = [
-                j
-                for j in (self._current, self._publish)
-                if j is not None and j.running and (job_id is None or j.id == job_id)
-            ]
+            jobs = [j for j in self._live if j.running and (job_id is None or j.id == job_id)]
             for job in jobs:
                 job.stopping = reason
         for job in jobs:
@@ -203,22 +215,24 @@ class JobManager:
             enabled=True,
             required=False,
             timeout_seconds=timeout,
+            lock=PUBLISH_LOCK,
         )
         return self._launch([name], [step], publish=True)
 
     def _launch(self, names: list[str], plan: list[Step], publish: bool = False) -> Job:
+        wanted = {s.lock_name for s in plan}
         with self._mutex:
-            slot = self._publish if publish else self._current
-            if slot is not None and slot.running:
-                what = "a publish" if publish else "a run"
-                raise JobError(f"{what} is already in progress")
+            clash = [j for j in self._live if j.running and j.lock_names & wanted]
+            if clash:
+                if publish:
+                    raise JobError("a publish is already in progress")
+                held = {name for j in clash for name in j.lock_names}
+                busy = ", ".join(s.name for s in plan if s.lock_name in held)
+                raise JobError(f"{busy} is already running; wait for it to finish")
             job = Job(
                 id=uuid.uuid4().hex[:8], steps=names, started_at=_now(), plan=plan, publish=publish
             )
-            if publish:
-                self._publish = job
-            else:
-                self._current = job
+            self._live.insert(0, job)
         thread = threading.Thread(target=self._execute, args=(job,), daemon=True)
         thread.start()
         return job
@@ -242,51 +256,50 @@ class JobManager:
             with self._mutex:
                 self._history.insert(0, job)
                 del self._history[self._history_size :]
-                if job.publish:
-                    self._publish = None
-                else:
-                    self._current = None
+                self._live = [j for j in self._live if j is not job]
 
     def _run_under_lock(self, job: Job) -> None:
-        lock_path = str(self.cfg["lock_path"]) + (PUBLISH_LOCK_SUFFIX if job.publish else "")
-        held = lock.acquire(lock_path)
-        if held is None:
-            log.info("panel run %s: the pipeline lock is held (a cron run is in flight)", job.id)
+        """Run the job's steps; each takes its own lock as it starts (`run_steps(lock_path=)`),
+        and one that another window or cron is running is skipped as locked."""
+        tail = int(self.cfg.get("run_log_tail_chars", 4000))
+
+        # Results land on the job as each step finishes, so the runs page can show
+        # progress mid-run instead of one block when the whole list returns.
+        def started(step: Step) -> None:
+            job.active_stdout, job.active_stderr = "", ""
+            job.active_step, job.active_since = step.name, _now()
+
+        def output(step: Step, stdout: str, stderr: str) -> None:
+            job.active_stdout, job.active_stderr = stdout, stderr
+
+        def finished(result: StepResult) -> None:
+            job.active_step, job.active_since = None, None
+            job.active_stdout, job.active_stderr = "", ""
+            job.results.append(result)
+
+        runner.run_steps(
+            job.plan,
+            cwd=self.repo_root,
+            python=self.python,
+            tail_chars=tail,
+            on_start=started,
+            on_result=finished,
+            on_output=output,
+            stop=job.stop_event,
+            lock_path=self.cfg["lock_path"],
+        )
+        locked = [r.name for r in job.results if r.skipped_reason == runner.SKIP_LOCKED]
+        if locked and len(locked) == len(job.results):
+            log.info("panel run %s: every step is running elsewhere", job.id)
             job.state = STATE_LOCKED
             job.error = (
                 "another publish holds the publish lock; try again when it finishes"
                 if job.publish
-                else "another run holds the pipeline lock; try again when it finishes"
+                else f"{', '.join(locked)} is already running in another window or a cron "
+                "run; try again when it finishes"
             )
             return
-        with held:
-            tail = int(self.cfg.get("run_log_tail_chars", 4000))
-
-            # Results land on the job as each step finishes, so the runs page can show
-            # progress mid-run instead of one block when the whole list returns.
-            def started(step: Step) -> None:
-                job.active_stdout, job.active_stderr = "", ""
-                job.active_step, job.active_since = step.name, _now()
-
-            def output(step: Step, stdout: str, stderr: str) -> None:
-                job.active_stdout, job.active_stderr = stdout, stderr
-
-            def finished(result: StepResult) -> None:
-                job.active_step, job.active_since = None, None
-                job.active_stdout, job.active_stderr = "", ""
-                job.results.append(result)
-
-            runner.run_steps(
-                job.plan,
-                cwd=self.repo_root,
-                python=self.python,
-                tail_chars=tail,
-                on_start=started,
-                on_result=finished,
-                on_output=output,
-                stop=job.stop_event,
-            )
-            self._record(job)
+        self._record(job)
 
     def _record(self, job: Job) -> None:
         run_id = f"{job.started_at.strftime('%Y%m%dT%H%M%SZ')}-panel-{job.id}"

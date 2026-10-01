@@ -85,11 +85,25 @@ JOBS = JobManager(CONFIG, data_dir(), python=step_interpreter())
 app = FastAPI(title="Pipeline control panel")
 
 
-def current_run() -> dict[str, Any] | None:
-    """The run in flight, for the run buttons on the feed and queue pages (None when idle).
+def current_runs() -> list[dict[str, Any]]:
+    """Every run in flight, newest first, for the run bar on the feed and queue pages.
     Registered as a template global on both template envs, so the queue's own pages can
-    show it without their routes knowing about the panel."""
-    job = JOBS.current()
+    show them without their routes knowing about the panel."""
+    return [r for r in (_run_view(j) for j in JOBS.running()) if r is not None]
+
+
+def busy_steps() -> set[str]:
+    """Steps whose run button is disabled: a run in this window holds their lock. Runs of
+    other steps start alongside."""
+    return JOBS.busy_steps()
+
+
+def current_run() -> dict[str, Any] | None:
+    """The newest run in flight (None when idle)."""
+    return _run_view(JOBS.current())
+
+
+def _run_view(job: Any) -> dict[str, Any] | None:
     if job is None or not job.running:
         return None
     now = _now()
@@ -117,6 +131,8 @@ def publish_live() -> bool:
 
 
 templates.env.globals["current_run"] = current_run
+templates.env.globals["current_runs"] = current_runs
+templates.env.globals["busy_steps"] = busy_steps
 templates.env.globals["publish_live"] = publish_live
 templates.env.globals["publish_running"] = publish_running
 
@@ -524,6 +540,8 @@ def _adopt_queue_routes() -> None:
     # The pending and approved pages carry run buttons; they need the run in flight and
     # whether a live post is possible, looked up at render time.
     queue_app.templates.env.globals["current_run"] = current_run
+    queue_app.templates.env.globals["current_runs"] = current_runs
+    queue_app.templates.env.globals["busy_steps"] = busy_steps
     queue_app.templates.env.globals["publish_live"] = publish_live
     queue_app.templates.env.globals["publish_running"] = publish_running
     have = {getattr(r, "path", None) for r in app.router.routes}

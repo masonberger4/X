@@ -144,7 +144,9 @@ def cmd_run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     with held:
         run_id = f"{_now().strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
         log.info("run %s starting (%s)", run_id, ", ".join(only or [s.name for s in steps]))
-        results = runner.run_steps(steps, only=only, cwd=REPO_ROOT, tail_chars=tail)
+        results = runner.run_steps(
+            steps, only=only, cwd=REPO_ROOT, tail_chars=tail, lock_path=cfg["lock_path"]
+        )
         db_path = _db_path(args)
         conn = store.connect(db_path)
         try:
