@@ -97,10 +97,23 @@ def _leader_lock_path() -> Path:
     return Path(f"{base}{LEADER_SUFFIX}")
 
 
+def _backup_now(now: datetime | None = None) -> Path:
+    """One verified backup into `backups.dir`, rotated to `backups.keep`: the dashboard's
+    "Back up now" and the automatic runs' daily backup."""
+    return ops_backup.backup(
+        ops_store.db_path(), CONFIG["backups"]["dir"], int(CONFIG["backups"]["keep"]), now=now
+    )
+
+
+def _latest_backup_at() -> datetime | None:
+    latest = ops_backup.latest_backup(CONFIG["backups"]["dir"])
+    return latest[1] if latest else None
+
+
 # Automatic runs tick while the server runs (uvicorn drives the lifespan; a test client
 # that is not used as a context manager never starts it, and tests/conftest.py disables
 # AutoRunner.start for every test).
-AUTO = AutoRunner(JOBS, _leader_lock_path())
+AUTO = AutoRunner(JOBS, _leader_lock_path(), backup=_backup_now, latest_backup=_latest_backup_at)
 
 
 @asynccontextmanager
@@ -232,9 +245,7 @@ async def backup_now():
 
     def work():
         try:
-            path = ops_backup.backup(
-                ops_store.db_path(), CONFIG["backups"]["dir"], int(CONFIG["backups"]["keep"])
-            )
+            path = _backup_now()
         except Exception as exc:
             log.exception("backup from the panel failed")
             return RedirectResponse(f"/?{urlencode({'backup_error': str(exc)})}", status_code=303)

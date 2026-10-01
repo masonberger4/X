@@ -285,6 +285,7 @@ def auto_run_view(status: Any, now: datetime, tz_name: str) -> dict[str, Any]:
         "steps": status.steps,
         "dropped": [f"{name}: {why}" for name, why in status.dropped.items()],
         "grace_minutes": status.grace_minutes,
+        "backup_hours": status.backup_hours,
         "error": status.error,
         "next_due": status.next_due,
         "next_in": fmt_hours((status.next_due - now).total_seconds() / 3600.0)

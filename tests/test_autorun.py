@@ -566,3 +566,96 @@ def test_closing_the_window_stops_the_timer_before_cancelling_runs(monkeypatch):
     monkeypatch.setattr(panel_app.JOBS, "cancel", lambda reason: order.append("runs") or False)
     run_desktop.stop_run()
     assert order == ["timer", "runs"]
+
+
+# --------------------------------------------------------------------------- the daily backup
+
+
+def test_backup_due_is_daily_and_can_be_off():
+    now = la(2026, 10, 1, 6)
+    assert autorun.backup_due(None, now, 20)
+    assert autorun.backup_due(now - timedelta(hours=21), now, 20)
+    assert not autorun.backup_due(now - timedelta(hours=6), now, 20)
+    assert not autorun.backup_due(None, now, 0)
+
+
+def _backing_runner(tmp_path, settings=None, fail=False):
+    taken: list[datetime] = []
+
+    def backup(now):
+        if fail:
+            raise OSError("disk full")
+        taken.append(now)
+        return tmp_path / f"pipeline-{len(taken)}.sqlite"
+
+    r = AutoRunner(
+        FakeJobs(),
+        tmp_path / "p.lock.autorun",
+        settings=lambda: settings or _settings(auto_run_backup_hours=20),
+        tz=lambda: LA,
+        backup=backup,
+        latest_backup=lambda: taken[-1] if taken else None,
+    )
+    return r, taken
+
+
+def test_the_first_automatic_run_each_day_backs_up(tmp_path):
+    r, taken = _backing_runner(tmp_path)
+    r.tick(la(2026, 10, 1, 5, 59))
+    r.tick(la(2026, 10, 1, 6, 0))
+    assert taken == [la(2026, 10, 1, 6)] and len(r.jobs.started) == 1
+    assert r.outcomes[0].text == "backup saved: pipeline-1.sqlite"
+    r.tick(la(2026, 10, 1, 12, 0))
+    r.tick(la(2026, 10, 1, 18, 0))
+    assert len(taken) == 1 and len(r.jobs.started) == 3  # one backup a day
+    r.tick(la(2026, 10, 2, 6, 0))
+    assert len(taken) == 2
+    assert r.status(la(2026, 10, 2, 6, 1)).backup_hours == 20
+    r.stop()
+
+
+def test_no_backup_without_a_run_when_off_or_when_it_fails(tmp_path):
+    r, taken = _backing_runner(tmp_path, _settings(auto_run_backup_hours=0))
+    r.tick(la(2026, 10, 1, 5, 59))
+    r.tick(la(2026, 10, 1, 6, 0))
+    assert taken == [] and len(r.jobs.started) == 1
+    r.stop()
+    r, taken = _backing_runner(
+        tmp_path, _settings(auto_run_backup_hours=20, auto_run_enabled=False)
+    )
+    r.tick(la(2026, 10, 1, 5, 59))
+    r.tick(la(2026, 10, 1, 6, 0))
+    assert taken == []  # no run, no backup
+    r, _ = _backing_runner(tmp_path, fail=True)
+    r.tick(la(2026, 10, 1, 5, 59))
+    r.tick(la(2026, 10, 1, 6, 0))
+    assert len(r.jobs.started) == 1  # the run is not held back by a failed backup
+    assert r.outcomes[0].text == "backup failed: disk full"
+    r.stop()
+
+
+def test_a_backup_cut_short_never_looks_like_the_newest(tmp_path):
+    import sqlite3
+
+    from ops import backup as ops_backup
+
+    db = tmp_path / "pipeline.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE t (x)")
+    conn.commit()
+    conn.close()
+    dest = tmp_path / "backups"
+    (dest).mkdir()
+    (dest / "pipeline-20261001T130000Z.sqlite.part").write_text("half", encoding="utf-8")
+    path = ops_backup.backup(db, dest, keep=3)
+    assert path.suffix == ".sqlite" and path.exists()
+    assert not path.with_name(path.name + ".part").exists()  # renamed, not left behind
+    latest = ops_backup.latest_backup(dest)
+    assert latest is not None and latest[0] == path
+
+
+def test_the_shipped_config_backs_up_daily():
+    cfg = load_ops_config()
+    s = autorun.settings_of(cfg)
+    assert 0 < s["backup_hours"] < 24
+    assert Thresholds.from_config(cfg["health"]).backup_max_age_hours > 24

@@ -23,6 +23,7 @@ _DEFAULTS: dict[str, Any] = {
     "auto_run_times": [],
     "auto_run_steps": [],
     "auto_run_grace_minutes": DEFAULT_GRACE_MINUTES,
+    "auto_run_backup_hours": 0,  # 0: automatic runs take no backup
     "run_log_tail_chars": 4000,
     "health": {},
     "backups": {"dir": "./backups", "keep": 14},

@@ -9,6 +9,9 @@ says, so no spelling of a step can reach the publisher, run_ops.py or pipeline_c
 The panel's JobManager re-checks this for every automatic run and also starts those runs
 with posting switched off in their environment.
 
+With `auto_run_backup_hours` set, an automatic run that starts when the newest database
+backup is older than that also takes one (`backup_due`), so the day's first run backs up.
+
 Times are wall-clock times of day in the display timezone (the root config.yaml
 `timezone:`, read through timeutil), so they move with a DST change. At most MAX_TIMES a
 day, at least MIN_SPACING_MINUTES apart, which bounds what unattended runs can cost.
@@ -98,14 +101,27 @@ def settings_of(cfg: dict[str, Any]) -> dict[str, Any]:
         grace = max(0, int(cfg.get("auto_run_grace_minutes", DEFAULT_GRACE_MINUTES)))
     except (TypeError, ValueError):
         grace = DEFAULT_GRACE_MINUTES
+    try:
+        backup_hours = max(0.0, float(cfg.get("auto_run_backup_hours", 0) or 0))
+    except (TypeError, ValueError):
+        backup_hours = 0.0
     steps = cfg.get("auto_run_steps") or []
     return {
         "enabled": bool(cfg.get("auto_run_enabled")),
         "times": times,
         "steps": [str(s) for s in steps] if isinstance(steps, list) else [],
         "grace_minutes": grace,
+        "backup_hours": backup_hours,
         "error": error,
     }
+
+
+def backup_due(latest: datetime | None, now: datetime, hours: float) -> bool:
+    """Whether an automatic run should also back the database up: on (`hours` > 0) and the
+    newest backup is older than `hours`, or there is none."""
+    if hours <= 0:
+        return False
+    return latest is None or (now - latest).total_seconds() > hours * 3600
 
 
 def ineligible(step: Any) -> str | None:

@@ -18,6 +18,7 @@
 <p class="meta">{% if auto.leader %}This window runs them{% elif auto.holder %}Another panel window runs them (process {{ auto.holder.pid }}, since {{ auto.holder.since|localtime }}){% endif %}.
   Status: {{ auto.reason }}.
   {% if auto.pending %}The {{ auto.pending|localtime }} run is waiting.{% endif %}
+  {% if auto.backup_hours %}The first run each day also backs up the database (when the newest backup is over {{ '%g'|format(auto.backup_hours) }} hours old).{% endif %}
   Publishing never runs on its own: post from the approved page.</p>
 {% endif %}
 {% if auto.dropped %}<p class="meta">Left out: {{ auto.dropped|join('; ') }}.</p>{% endif %}

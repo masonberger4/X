@@ -413,7 +413,8 @@ python run_ops.py prune --days 90     # ops-owned tables only (pipeline_runs, he
 
 Settings live in `ops/config.yaml` (step order, per-step `timeout_seconds` where 0 means
 no limit, as `verify` uses, per-step `lock:` names, the control panel's automatic runs
-`auto_run_enabled` / `auto_run_times` / `auto_run_steps` / `auto_run_grace_minutes`,
+`auto_run_enabled` / `auto_run_times` / `auto_run_steps` / `auto_run_grace_minutes` /
+`auto_run_backup_hours` (the first automatic run each day also takes a verified backup),
 health thresholds and budget caps, backup dir/keep, alert channels and cooldown). The
 shipped staleness limits (13h, and `source_stale_min_hours`) fit three runs a day;
 tighten them if a scheduler runs every 30 minutes. The `publish` step is

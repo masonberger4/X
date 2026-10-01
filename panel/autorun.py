@@ -22,6 +22,10 @@ When a run time fires:
   human started), the time waits for it, retried every tick, until the grace runs out.
 - With several panel windows open, one runs the timer: it holds `<lock_path>.autorun`
   (the OS lock alone decides, so a crash never leaves it stuck); the others show who leads.
+- Daily backup: when a run starts and the newest backup is older than
+  `auto_run_backup_hours`, the database is backed up (`backup`, the dashboard's "Back up
+  now"). It runs in the timer thread after the run has started, outside the lock the pages
+  read the status under, so a page never waits for it.
 
 `tick(now)` is the whole decision and takes the clock as a parameter, so tests drive it
 without the thread. The app starts and stops the thread in its lifespan (`panel/app.py`),
@@ -43,7 +47,7 @@ from zoneinfo import ZoneInfo
 
 import timeutil
 from ops import lock
-from ops.autorun import next_slot, plan, settings_of, slots_between
+from ops.autorun import backup_due, next_slot, plan, settings_of, slots_between
 from ops.config import load_ops_config
 from panel.jobs import JobError, JobManager
 
@@ -79,6 +83,7 @@ class AutoStatus:
     steps: list[str]  # what a run would start
     dropped: dict[str, str]  # configured steps it leaves out, and why
     grace_minutes: int
+    backup_hours: float  # 0: no daily backup
     error: str | None
     next_due: datetime | None
     pending: datetime | None  # a run time waiting for a busy step
@@ -96,8 +101,13 @@ class AutoRunner:
         settings: Callable[[], dict[str, Any]] = load_ops_config,
         tz: Callable[[], ZoneInfo] = timeutil.display_tz,
         poll_seconds: float = POLL_SECONDS,
+        backup: Callable[[datetime], Path] | None = None,
+        latest_backup: Callable[[], datetime | None] | None = None,
     ) -> None:
         self.jobs = jobs
+        self._backup = backup
+        self._latest_backup = latest_backup
+        self._backup_wanted = False
         self.lock_path = Path(lock_path)
         self._settings = settings
         self._tz = tz
@@ -126,7 +136,23 @@ class AutoRunner:
                 self.reason = self._decide(now)
             finally:
                 self.last = now if self.last is None else max(self.last, now)
-            return self.reason
+            reason = self.reason
+            wanted, self._backup_wanted = self._backup_wanted, False
+        if wanted:
+            self._run_backup(now)
+        return reason
+
+    def _run_backup(self, now: datetime) -> None:
+        """The daily backup, outside the mutex (it takes seconds). Never raises: a failure is
+        logged and shown, and the health check's backup age flags it too."""
+        try:
+            path = self._backup(now)  # type: ignore[misc]
+            text = f"backup saved: {Path(path).name}"
+        except Exception as exc:
+            log.exception("automatic runs: the daily backup failed")
+            text = f"backup failed: {exc}"
+        with self._mutex:
+            self.outcomes.appendleft(Outcome(slot=now, at=now, text=text))
 
     def _decide(self, now: datetime) -> str:
         if self.last is None:
@@ -179,6 +205,8 @@ class AutoRunner:
         except JobError as exc:  # a human started one of the steps a moment ago
             self.wait_reason = str(exc)
             return f"waiting: {exc}"
+        if self._backup is not None and self._latest_backup is not None:
+            self._backup_wanted = backup_due(self._latest_backup(), now, cfg["backup_hours"])
         self._note(self.pending, now, f"started {', '.join(names)}", job.id)
         log.info("automatic run %s started: %s", job.id, ", ".join(names))
         self.pending = self.wait_reason = None
@@ -225,6 +253,7 @@ class AutoRunner:
             steps=names,
             dropped=dropped,
             grace_minutes=cfg["grace_minutes"],
+            backup_hours=cfg["backup_hours"] if self._backup is not None else 0.0,
             error=cfg["error"],
             next_due=next_slot(now, cfg["times"], self._tz()) if on else None,
             pending=pending,

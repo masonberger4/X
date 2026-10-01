@@ -435,7 +435,12 @@ carrying `--live`).
   counts only the unfinished steps of a live job, `Job.lock_names`) up to
   `auto_run_grace_minutes`, several missed times run once, and one leader per data dir
   (`<lock_path>.autorun`, `lock.acquire(trust_os_lock=True)`, path resolved against
-  `data_dir()`). The runs page shows it and posts `POST /runs/auto` (switch and times only);
+  `data_dir()`). **Daily backup**: when a run starts and `ops/autorun.py:backup_due` finds the
+  newest backup older than `auto_run_backup_hours` (20 shipped, 0 off), `tick` takes one after
+  releasing its mutex through the `backup` callable (`panel/app.py:_backup_now`, the same
+  `ops/backup.py:backup` as "Back up now"), noting "backup saved/failed" in the outcomes;
+  `ops/backup.py` writes `<name>.part` and renames it after `integrity_check`, so a backup cut
+  short never counts as the newest. The runs page shows it and posts `POST /runs/auto` (switch and times only);
   the dashboard shows the state and `ops/store.py:last_auto_run`. `tests/conftest.py`
   disables `AutoRunner.start` for every test; `tests/test_autorun.py` drives `tick`.
   "Set schedule" on the approved page (`POST /publishing/order`, `panel/publishing.py`)

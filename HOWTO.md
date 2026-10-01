@@ -548,9 +548,10 @@ already runs ingest, score, draft, verify, feedback and evolve on its own at
 Scheduler is the other way: it runs even with the app closed and can wake the
 PC, but it needs the tasks below. Pick one for `pipeline-run`. Running both is
 safe (a step that is already running is skipped, never run twice) but wasteful.
-The automatic runs do not take backups or send hourly health alerts; keep the
-`pipeline-backup` and `pipeline-health` tasks from step 2 for that, or press
-"Back up now" on the dashboard now and then. The health limits in
+The automatic runs also back the database up once a day (the first run each
+day), and each one records a health check and alerts when one fails, but they
+do not check health on the hour while nothing runs; keep the `pipeline-health`
+task from step 2 if you want that. `pipeline-backup` is not needed with them. The health limits in
 `ops\config.yaml` are sized for three runs a day; if `pipeline-run` runs every
 30 minutes, set `max_hours_since_ingest` back to 3, `max_hours_since_score` to 6
 and `source_stale_min_hours` to 0 for earlier warnings.
@@ -821,6 +822,14 @@ to stop it. Four pages:
   - Switching it on, or adding a time that is already past today, never starts
     a run straight away; the next time on the clock does.
   - With two windows open, only one of them runs the timer; the other says so.
+  - The first automatic run each day also backs up the database, the same
+    verified copy as the dashboard's "Back up now", into `backups\` (the
+    oldest past `backups.keep` are removed). It happens when a run starts and
+    the newest backup is more than 20 hours old (`auto_run_backup_hours` in
+    `ops\config.yaml`; 0 turns it off), so if the app was closed at 06:00 the
+    next run that day does it. The box lists "backup saved" or "backup failed"
+    with the reason; a failed backup never holds the run back, and the
+    dashboard's backup age turns red if backups stop.
   - When an automatic run finishes it records a health check and, if a check
     is failing, sends the alert from part 6 (webhook or email), since nobody
     was watching it.
