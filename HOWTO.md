@@ -542,6 +542,20 @@ replies, since that hour decides how far X shows it.
 
 ## Part 6. Running it on a schedule (Windows Task Scheduler)
 
+You may not need this part. While the control panel or desktop window is open it
+already runs ingest, score, draft, verify, feedback and evolve on its own at
+06:00, 12:00 and 18:00 (part 8, "Automatic runs"), and it never publishes. Task
+Scheduler is the other way: it runs even with the app closed and can wake the
+PC, but it needs the tasks below. Pick one for `pipeline-run`. Running both is
+safe (a step that is already running is skipped, never run twice) but wasteful.
+The automatic runs also back the database up once a day (the first run each
+day), and each one records a health check and alerts when one fails, but they
+do not check health on the hour while nothing runs; keep the `pipeline-health`
+task from step 2 if you want that. `pipeline-backup` is not needed with them. The health limits in
+`ops\config.yaml` are sized for three runs a day; if `pipeline-run` runs every
+30 minutes, set `max_hours_since_ingest` back to 3, `max_hours_since_score` to 6
+and `source_stale_min_hours` to 0 for earlier warnings.
+
 1. Try the orchestrator by hand first. It runs ingest, score, draft and
    verify in order and records each step. Each step takes its own lock
    (`<lock_path>.<lock name>`) while it runs, so a step the control panel is
@@ -783,6 +797,47 @@ to stop it. Four pages:
   `ops/config.yaml`): a backlog of drafts can take an hour or more, and each
   claim's verdict is saved the moment it lands, so stopping the run keeps
   every claim already checked and only the one in flight is redone next time.
+- **Automatic runs** (top of `/runs`) — while the panel or the desktop window
+  is open it runs ingest, score, draft, verify, feedback and evolve on its own,
+  at 06:00, 12:00 and 18:00 local time as shipped. Publishing is never one of
+  them: posting stays the approved page's "Publish now", and an automatic run
+  cannot post even if `.env` allows posting. The box says whether it is on,
+  when the next run is, and what happened at each recent time (started, or
+  skipped and why); automatic runs are marked `automatic` in the list below,
+  and the dashboard shows the next one and how the last one ended. Tick or
+  untick "On" and edit the times (HH:MM, at most 8 a day, at least an hour
+  apart), then Save; it takes effect within half a minute. That writes two
+  lines of `ops\config.yaml` (`auto_run_enabled` and `auto_run_times`) and
+  nothing else, so `git status` will show that file as changed. Which steps run
+  is `auto_run_steps` in the same file (edit it by hand, then restart the app).
+  How it behaves:
+  - It only runs while the app is open. A time that passed while the app was
+    closed is not made up: press the run buttons if you want a run then.
+  - A time missed while the computer slept runs when it wakes, if it is less
+    than an hour late (`auto_run_grace_minutes`); several missed at once run
+    once.
+  - If a step from the last run (or one you started) is still going, the next
+    time waits for it, up to that same hour, and is otherwise skipped with the
+    reason shown.
+  - Switching it on, or adding a time that is already past today, never starts
+    a run straight away; the next time on the clock does.
+  - With two windows open, only one of them runs the timer; the other says so.
+  - The first automatic run each day also backs up the database, the same
+    verified copy as the dashboard's "Back up now", into `backups\` (the
+    oldest past `backups.keep` are removed). It happens when a run starts and
+    the newest backup is more than 20 hours old (`auto_run_backup_hours` in
+    `ops\config.yaml`; 0 turns it off), so if the app was closed at 06:00 the
+    next run that day does it. The box lists "backup saved" or "backup failed"
+    with the reason; a failed backup never holds the run back, and the
+    dashboard's backup age turns red if backups stop.
+  - When an automatic run finishes it records a health check and, if a check
+    is failing, sends the alert from part 6 (webhook or email), since nobody
+    was watching it.
+  - Each automatic run costs what pressing the buttons costs. The verify step's
+    auto-revise has no lifetime cap per draft as shipped
+    (`max_rounds_per_draft: 0` in `verify\config.yaml`), so a draft with a
+    claim that never checks out is revised again at every run; set a number
+    there if that adds up.
 - **Pending / Approved / Rejected / Failed / Voice report** — the
   approval pages from part 3. The Approved page is the waiting list for
   `run_publish.py`: each row says `waiting`, `posted` (a link to the tweet),
@@ -796,10 +851,12 @@ browser from the desktop window, so the page you were on stays put.
 The one thing it writes outside its own pages is a decision on the feed page.
 Everything else is a view.
 
-Two things it deliberately will not do. It never posts to X: publishing is
-off in `ops\config.yaml` and stays off, and there is no publish button. And
-it never edits settings: change `config.yaml` or `draft\voice.md` on disk
-(ask me to commit it), not in the browser.
+Two things it deliberately will not do. It never posts to X on its own:
+posting is the approved page's "Publish now" and nothing else, and the
+automatic runs never include it. And it edits only a few settings: the posting
+caps on `/publishing`, the automatic runs' switch and times on `/runs`, and a
+trusted domain from a draft's page. Change `config.yaml` or `draft\voice.md`
+on disk (ask me to commit it), not in the browser.
 
 Anyone who can reach the page can run the pipeline, so keep it on
 `localhost`. `--host` and `--port` move it and `--reload` is for development;
@@ -903,6 +960,8 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | Symptom | What to do |
 |---|---|
 | `Not logged in` or `OAuth session expired` in a score, draft or rate run | `claude login`, then rerun the command |
+| An automatic run did not happen | the box at the top of `/runs` says why: off, the app was closed at that time (it is not made up), the computer slept more than an hour past it, its steps were still running from the last run, or another panel window runs the timer |
+| `/runs` says a time was skipped | the reason is on the same line; press the run buttons to run it now |
 | A run prints nothing for many minutes, then everything at once | the console was paused by a click (press Enter or Esc; untick "QuickEdit Mode" in the window's Properties) or the PC slept (`powercfg /change standby-timeout-ac 0`) |
 | `git pull` refuses because you edited a file | `git checkout <file>` to discard, or ask me to commit the change |
 | Scoring says `scoring 0 clusters` right after a keyword change | `python run_score.py --refilter` |
@@ -947,6 +1006,10 @@ is shown in one time zone, set by `timezone:` near the top of `config.yaml`. It
 ships as `America/Los_Angeles` (Seattle). To move it, edit that one line to
 another zone name (`America/New_York`, `Europe/London`, and so on) and restart
 whatever is running; nothing else changes.
+
+The automatic runs' times (`auto_run_times` in `ops\config.yaml`) are in this
+same zone, so 06:00 means 06:00 on the clock you see, before and after a daylight
+saving change; restart the app after moving the zone.
 
 Two other files have their own `timezone:` line, and you should set all three to
 the same zone: `publish\config.yaml` (which decides what "9am" means for the

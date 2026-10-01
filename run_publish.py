@@ -321,7 +321,9 @@ def auto_release(conn, draft_id: int, retry_cfg: dict) -> bool:
 
 def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     load_dotenv()
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # allow_abbrev=False: "--liv" must not mean the live flag, or a step could post while
+    # every check that looks for the flag spelled out lets it through.
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument(
         "--dry-run", action="store_true", help="(default) print the plan, post nothing"

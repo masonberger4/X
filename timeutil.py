@@ -9,7 +9,9 @@ approval queue, the digest, and the operator reports and alerts.
 The zone is config, not a constant in code: `timezone:` in the root
 `config.yaml`. `publish/config.yaml` and `feedback/config.yaml` keep their own
 `timezone:` keys, because those two drive behaviour (posting slots and the
-"hour posted" column) rather than display; they are set to the same zone.
+"hour posted" column) rather than display; they are set to the same zone. The one
+behaviour that follows this zone is the panel's automatic runs (`auto_run_times` in
+ops/config.yaml), because the human types and reads those times on the same page.
 """
 
 from __future__ import annotations

@@ -50,9 +50,12 @@ def backup(
         dest = dest_dir / f"{PREFIX}{now.astimezone(UTC).strftime(STAMP)}-{n}{SUFFIX}"
         n += 1
 
+    # Written under a .part name and renamed only once it checks out, so a backup cut short
+    # (the app closed mid-copy) never looks like the newest good backup to latest_backup().
+    part = dest.with_name(dest.name + ".part")
     src = sqlite3.connect(str(src_path))
     try:
-        dst = sqlite3.connect(str(dest))
+        dst = sqlite3.connect(str(part))
         try:
             src.backup(dst)
         finally:
@@ -60,10 +63,11 @@ def backup(
     finally:
         src.close()
 
-    result = integrity_check(dest)
+    result = integrity_check(part)
     if result != "ok":
-        dest.unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
         raise RuntimeError(f"backup {dest.name} failed integrity_check: {result}")
+    part.replace(dest)
     size_mb = dest.stat().st_size / (1024 * 1024)
     log.info("backup written: %s (%.1f MB, integrity ok)", dest, size_mb)
     removed = rotate(dest_dir, keep)
