@@ -379,8 +379,15 @@ step carrying `--live`).
   (`now` is a parameter; no DB, network or clock), and includes the step 2 queue's
   routes into the same app so the queue's own module stays unchanged apart from its
   index moving to `/queue`. `panel/jobs.py` never builds an argv: a job names steps
-  from `ops/config.yaml` and `ops/runner.py` runs them under `ops/lock.py`, one job
-  at a time, refusing any step whose argv contains `--live`. `JobManager.cancel()` ends a run:
+  from `ops/config.yaml` and `ops/runner.py` runs them, refusing any step whose argv
+  contains `--live`. **Runs go side by side, one step never twice**: `run_steps(lock_path=)`
+  takes `ops/lock.py:step_lock_path(lock_path, step.lock_name)` around each step (`lock:` in
+  `ops/config.yaml`, default the step's name; ingest and score share `stories` because
+  story linking deletes clusters ingest may be filling), and a held lock skips the step as
+  `runner.SKIP_LOCKED`. The panel keeps any number of live jobs (`JobManager.running()`,
+  `busy_steps()`), refuses a start whose lock a live job in the same window holds, and the
+  run bar disables only those steps' buttons (`current_runs` / `busy_steps` template
+  globals). `run_ops.py run` still takes `lock_path` itself so cron fires do not overlap. `JobManager.cancel()` ends a run:
   `ops/runner.terminate_active()` kills the live step's process tree (own process group on
   POSIX, `taskkill /T` on Windows) and the remaining steps are skipped as `cancelled`; the
   runs page's Stop button and `run_desktop.py` closing both call it. Run buttons sit on the
@@ -390,7 +397,7 @@ step carrying `--live`).
   on both template envs, so the standalone queue shows none). The one argv the panel builds
   itself is `JobManager.start_publish_now(draft_id)` (`POST /publishing/now` from the
   approved page): `run_publish.py --live --now --draft ID` as its own run in a second slot beside the
-  pipeline's (so it can start mid-run; one publish at a time, under `<lock_path>.publish`
+  pipeline's (so it can start mid-run; one publish at a time, under the publish step's lock `<lock_path>.publish`
   rather than the pipeline lock; each job has its own stop flag, `runner.run_steps(stop=)`,
   so `cancel(job_id=)` stops one run), still gated by
   `PUBLISH_ENABLED=1` inside run_publish.py. It is the only argv that carries the flag

@@ -8,12 +8,18 @@
 # A failing `required` step stops the run; a failing optional step is logged
 # and the run continues.
 steps:
+  # Each step runs under a lock of its own (<lock_path>.<lock name>), so different steps
+  # run at the same time from the panel, other desktop windows and cron, and the same step
+  # never runs twice at once. Ingest and score share the "stories" lock: story linking in
+  # score merges and deletes clusters that ingest may be adding items to.
   - name: ingest
+    lock: stories
     argv: ["python", "run_ingest.py"]
     enabled: true
     required: true
     timeout_seconds: 900
   - name: score
+    lock: stories
     argv: ["python", "run_score.py"]
     enabled: true
     required: true
@@ -65,7 +71,7 @@ steps:
     required: false
     timeout_seconds: 0             # breed makes one CLI call per writer child
 
-lock_path: ./pipeline.lock       # fcntl lock; overlapping cron fires exit 2
+lock_path: ./pipeline.lock       # overlapping cron fires exit 2; steps lock <lock_path>.<name>
 run_log_tail_chars: 4000         # stdout/stderr kept per step per run
 
 health:

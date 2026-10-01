@@ -20,6 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ops import lock
+
 log = logging.getLogger(__name__)
 
 SKIP_DISABLED = "disabled"
@@ -27,6 +29,7 @@ SKIP_NOT_MERGED = "not merged"
 SKIP_UPSTREAM = "upstream failed"
 SKIP_DRY_RUN = "dry run"
 SKIP_CANCELLED = "cancelled"
+SKIP_LOCKED = "locked"  # another run (another window, cron) is running this step
 
 # Live children of this process, so a caller (the control panel's Stop button, or the
 # desktop app closing) can end a run: each step's process and everything it launched.
@@ -42,6 +45,11 @@ class Step:
     enabled: bool = True
     required: bool = False
     timeout_seconds: int = 600  # 0 = no limit: the step runs until it exits or is stopped
+    lock: str = ""  # the step's lock name; empty means its own name
+
+    @property
+    def lock_name(self) -> str:
+        return self.lock or self.name
 
     @property
     def wait_timeout(self) -> float | None:
@@ -55,6 +63,7 @@ class Step:
             enabled=bool(raw.get("enabled", True)),
             required=bool(raw.get("required", False)),
             timeout_seconds=int(raw.get("timeout_seconds", 600)),
+            lock=str(raw.get("lock") or ""),
         )
 
 
@@ -142,6 +151,7 @@ def run_steps(
     on_result: Callable[[StepResult], None] | None = None,
     on_output: Callable[[Step, str, str], None] | None = None,
     stop: threading.Event | None = None,
+    lock_path: str | os.PathLike[str] | None = None,
 ) -> list[StepResult]:
     """Run each enabled step in order. See module docstring for the skip/stop rules.
 
@@ -155,6 +165,10 @@ def run_steps(
     `stop` is this run's own stop flag, so two runs in one process (the panel's pipeline
     run and a "Publish now") can be stopped apart; without it the module's shared flag
     is used, which `terminate_active()` with no argument sets.
+    `lock_path`, when given, makes each step take its own lock (`ops.lock.step_lock_path`
+    with the step's `lock_name`) for as long as it runs: a step whose lock another run
+    holds is skipped as `locked` and the run goes on, so different steps run side by side
+    across runs, windows and cron while one step never runs twice at once.
     """
     stop = _STOP if stop is None else stop
     workdir = Path(cwd) if cwd else Path.cwd()
@@ -204,11 +218,22 @@ def run_steps(
             add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_DRY_RUN))
             continue
 
-        if on_start is not None:
-            on_start(step)
-        result = _run_one(
-            step, argv, workdir, child_env, tail_chars, on_output=on_output, stop=stop
-        )
+        held = None
+        if lock_path is not None:
+            held = lock.acquire(lock.step_lock_path(lock_path, step.lock_name))
+            if held is None:
+                log.warning("step %s: another run holds its lock; skipping", step.name)
+                add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_LOCKED))
+                continue
+        try:
+            if on_start is not None:
+                on_start(step)
+            result = _run_one(
+                step, argv, workdir, child_env, tail_chars, on_output=on_output, stop=stop
+            )
+        finally:
+            if held is not None:
+                held.release()
         add(result)
         if result.failed and step.required:
             upstream_failed = True

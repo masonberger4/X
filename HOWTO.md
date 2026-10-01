@@ -543,7 +543,9 @@ replies, since that hour decides how far X shows it.
 ## Part 6. Running it on a schedule (Windows Task Scheduler)
 
 1. Try the orchestrator by hand first. It runs ingest, score, draft and
-   verify in order under a lock, and records each step.
+   verify in order and records each step. Each step takes its own lock
+   (`<lock_path>.<lock name>`) while it runs, so a step the control panel is
+   already running is skipped as `locked` and the rest carry on.
    The `verify` step runs after `draft` and is optional: if it fails, the
    claims show as "not checked yet" and the run carries on. The `draft` and
    `evolve` steps have no time limit: with the swarm on and the Claude Code
@@ -763,11 +765,17 @@ to stop it. Four pages:
   want and press "Run selected steps"). The page updates as the run goes: the step in progress is shown
   with how long it has been running and its log so far, refreshed every few
   seconds as the step writes, each finished step keeps its final log, and the
-  steps still to come are listed. "Publish now" has its own slot: it can run
-  while an ingest, score, draft or verify run is going (one publish at a time),
-  and each run's "Stop this run" button stops only that run. This runs exactly what
-  the scheduler in part 6 runs; if the scheduler happens to be running at
-  that moment the page says so and does nothing, rather than running twice.
+  steps still to come are listed. Runs of different steps go at the same
+  time: start a draft run and a verify run together, or open a second desktop
+  window and run something there. The one thing that never happens is the
+  same step running twice. Its button is greyed out while it runs in this
+  window, and a step another window or the scheduler (part 6) is already
+  running is skipped and marked `locked` in the log instead of running twice.
+  Ingest and score count as one step for this (they share the `stories` lock in
+  `ops/config.yaml`), because scoring merges stories that ingest may still be
+  adding articles to. "Publish now" is one publish at a time. Each run's "Stop
+  this run" button stops only that run. This runs exactly what the scheduler
+  in part 6 runs.
   While a run is going there is a "Stop this run" button: it ends the
   current step (and anything it started, such as the Claude window) and
   skips the rest. Nothing is lost; the next run picks up where it left off.
@@ -909,7 +917,7 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | The dashboard says `missing env: ANTHROPIC_API_KEY` but you use the Claude Code backend | it should not since the check follows `LLM_BACKEND`; make sure `.env` is in the folder you start `run_app.py` from |
 | A step keeps running after you closed the app (a `claude` window keeps reopening) | that was the behaviour before the Stop button; on an old checkout, `taskkill /F /IM pythonw.exe` ends it (or `python.exe` if you started the app from a command prompt) |
 | A draft sits on the approved page marked `claimed` and never posts | the run that claimed it died before it posted (a sleep, a power cut, the Stop button). Press "Release" beside it once the claim is over 30 minutes old, or run `python run_publish.py --release-failed`; check on the publishing page first that no part of it reached X |
-| The control panel says a run is already in progress | the scheduler (part 6) is mid-run; wait for it and press the button again |
+| The control panel says a step is already running, or a run's step is marked `locked` | that step is running in this window, another window or the scheduler (part 6); wait for it and press the button again. Other steps can run meanwhile |
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
 | `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |
 | Building the exe fails with `No module named PyInstaller` | `pip install -e ".[desktop]"` in the venv first |
