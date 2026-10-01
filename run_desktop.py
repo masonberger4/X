@@ -99,7 +99,10 @@ def open_window(url: str) -> None:
     """Block in the native window until it is closed."""
     import webview
 
-    webview.create_window(WINDOW_TITLE, url, width=WINDOW_SIZE[0], height=WINDOW_SIZE[1])
+    # text_select: pywebview blocks selecting text by default, so run logs could not be copied.
+    webview.create_window(
+        WINDOW_TITLE, url, width=WINDOW_SIZE[0], height=WINDOW_SIZE[1], text_select=True
+    )
     webview.start()
 
 
