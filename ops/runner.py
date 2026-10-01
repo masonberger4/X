@@ -178,7 +178,10 @@ def run_steps(
     child_env = {**os.environ, "PYTHONUNBUFFERED": "1", **(env or {})}
     results: list[StepResult] = []
     upstream_failed = False
-    stop.clear()
+    # Only the shared flag is reset here. A run's own flag is fresh, and clearing it would
+    # swallow a Stop pressed between the run being created and this line.
+    if stop is _STOP:
+        stop.clear()
 
     def add(result: StepResult) -> None:
         results.append(result)

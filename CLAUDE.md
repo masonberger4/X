@@ -23,8 +23,9 @@ many pictures on which posts, is a third bred population). The kickoff prompt th
 each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 `PUBLISH_ENABLED=1` **and** `--live`, and posting is **manual only**: a human presses
 "Publish now" on the approved page or runs `run_publish.py --live` by hand. Nothing posts on
-a timer (the panel has no automatic publisher and `run_ops.py run` refuses any configured
-step carrying `--live`).
+a timer (the panel has no automatic publisher, its automatic runs start only ingest, score,
+draft, verify, feedback and evolve, and `run_ops.py run` refuses any configured step
+carrying `--live`).
 
 ## Commands
 - Install: `pip install -e ".[dev]"`
@@ -135,7 +136,11 @@ step carrying `--live`).
   `feedback/store.py:day_of`'s `captured_on` bucket; relative ages are zone-independent.
   `publish/config.yaml` and `feedback/config.yaml` keep their own `timezone:` because
   those drive behaviour (posting slots, the "hour posted" column), not display; all
-  three are set to the same zone.
+  three are set to the same zone. The one behaviour that follows the root `timezone:` is
+  `auto_run_times` in `ops/config.yaml` (the panel's automatic runs): the human types and
+  reads those times on the same page, so `panel/autorun.py` reads the zone through
+  `timeutil.display_tz()` (never config.yaml itself) and `ops/autorun.py` takes it as a
+  parameter; a zone change needs a restart, as `timezone_name` is cached.
 - Read secrets from `.env` via python-dotenv; never commit `.env`.
 - Logging: stdlib `logging`. INFO for per-source counts, DEBUG for items.
 - Ask before adding a dependency not already in `pyproject.toml`.
@@ -368,7 +373,19 @@ step carrying `--live`).
   owns `pipeline_runs`, `health_checks`, `alerts_sent`. `ops/health.py` is pure
   (`now` is a parameter). The only network call in `ops/` is
   `alert.py:post_webhook` (plus `send_email` via smtplib); alerts carry check
-  names, summaries and counts, never secrets or post text.
+  names, summaries and counts, never secrets or post text. `ops/autorun.py` is pure (no
+  DB, network or clock): `parse_times` (HH:MM, at most `MAX_TIMES`, `MIN_SPACING_MINUTES`
+  apart round the clock, YAML's base-60 ints read back), `slots_between` / `next_slot`
+  (wall-clock times in a zone that is a parameter), `settings_of` and `plan` /
+  `ineligible`, the allowlist: a step may run automatically only as
+  `python <AUTO_SCRIPTS>` (ingest, score, draft, verify, feedback, evolve) with nothing
+  starting like the live flag (`posts_live`, which `run_ops.py` now uses too, so an
+  abbreviated flag is refused; `run_publish.py` parses with `allow_abbrev=False`).
+  `ops/config.py:save_auto_run` writes only `auto_run_enabled` / `auto_run_times` (top-level
+  line edits, times quoted, refused unless the parsed file is otherwise identical, swapped
+  in with `os.replace`). Health's `source_stale_min_hours` is a floor under
+  `source_stale_multiplier * cadence`, and the shipped staleness limits (13h) cover the
+  longest gap between the shipped `auto_run_times` (a test asserts it).
 - Step 8 (`panel/`) owns no tables, no config file of its own and no pipeline
   logic. It reads other steps only through `ops/store.py`'s read-only adapters plus
   `run_ops.build_report`; the one exception is `panel/feed.py`, which uses step 1's own
@@ -405,13 +422,36 @@ step carrying `--live`).
   **Posting is manual only**: there is no automatic publisher (the timed
   `panel/autopublish.py` loop, its `POST /publishing/auto` switch and the
   `auto_publish_*` keys were removed), so nothing posts unless a human pressed the button.
+  **Automatic runs are everything but publishing** (`panel/autorun.py:AutoRunner`, started
+  and stopped by the app's lifespan; `run_desktop.stop_run` stops it before cancelling runs):
+  at each `auto_run_times` it calls `JobManager.start(auto_run_steps, auto=True)`, and that
+  automatic mode re-checks `ops/autorun.ineligible` for every step (so no caller can skip
+  the allowlist), runs with `jobs.AUTO_ENV` (`PUBLISH_ENABLED=0`, which `.env` cannot
+  override) and records under `ops/store.py:AUTO_RUN_MARK` in the run_id, followed by
+  `run_ops.health_and_alert(send=True)` as cron's run does; `_launch` refuses `auto` with
+  `publish`. `tick(now)` is the whole decision: a watermark `last` that moves on every tick
+  whatever happens (so switching on, adding a past time, a leader handover or a clock set
+  back never fires), a pending time that waits for its busy steps (`busy_steps`, which
+  counts only the unfinished steps of a live job, `Job.lock_names`) up to
+  `auto_run_grace_minutes`, several missed times run once, and one leader per data dir
+  (`<lock_path>.autorun`, `lock.acquire(trust_os_lock=True)`, path resolved against
+  `data_dir()`). **Daily backup**: when a run starts and `ops/autorun.py:backup_due` finds the
+  newest backup older than `auto_run_backup_hours` (20 shipped, 0 off), `tick` takes one after
+  releasing its mutex through the `backup` callable (`panel/app.py:_backup_now`, the same
+  `ops/backup.py:backup` as "Back up now"), noting "backup saved/failed" in the outcomes;
+  `ops/backup.py` writes `<name>.part` and renames it after `integrity_check`, so a backup cut
+  short never counts as the newest. The runs page shows it and posts `POST /runs/auto` (switch and times only);
+  the dashboard shows the state and `ops/store.py:last_auto_run`. `tests/conftest.py`
+  disables `AutoRunner.start` for every test; `tests/test_autorun.py` drives `tick`.
   "Set schedule" on the approved page (`POST /publishing/order`, `panel/publishing.py`)
   writes the human's order to step 3's `schedule.position` (guarded migration in
   `publish/store.py`, `set_order`, unclaimed rows only); `scheduler.rank` puts ordered drafts
   first, then breaking, then policy; `store.publish_states` reads it back for the pill. The
-  panel never writes `config.yaml`, `draft/voice.md` or a draft's text. The one settings
-  file it edits itself is `publish/config.yaml`, two keys only (the included queue routes
-  add `trusted_domains` in `verify/config.yaml`, above): `POST /publishing/caps` calls
+  panel never writes `config.yaml`, `draft/voice.md` or a draft's text. The settings it
+  edits itself are two keys of `publish/config.yaml` and two of `ops/config.yaml`
+  (`auto_run_enabled`, `auto_run_times` through `ops/config.py:save_auto_run`, from
+  `POST /runs/auto`; the step list stays file-only), and the included queue routes add
+  `trusted_domains` in `verify/config.yaml`, above: `POST /publishing/caps` calls
   `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
   comments kept). The dashboard's "Back up now" (`POST /backup`) calls `ops/backup.py:backup` into `backups.dir` with `backups.keep`, as `run_ops.py backup` does. It has no authentication: `run_app.py` binds localhost by default. `/publishing` and
   `/feedback` are otherwise views: no post button, and a report's suggestions are rendered,
@@ -541,7 +581,8 @@ approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
           render-grade loop), app.py (/voice,
           /drafts/{id}/image), templates/
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
-          ratings), jobs.py (JobManager, background step runs, "Publish now"), frozen.py (data dir,
+          ratings), jobs.py (JobManager, background step runs, "Publish now", automatic mode),
+          autorun.py (AutoRunner: the timer for everything but publishing), frozen.py (data dir,
           step interpreter and bundle manifest for the desktop build),
           app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback, /swarm), templates/
 swarm/    config.yaml, settings.py, genome.py (Slot, Genome, DEFAULT_GENOME), prompts.py
@@ -565,6 +606,7 @@ feedback/ config.yaml, models.py, analysis.py, suggest.py, report.py,
           store.py (tweet_metrics, follower_snapshots, feedback_reports,
           fetch_posted, fetch_post_context, due_for_snapshot), client.py
 ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
+          autorun.py (pure: run times, slot clock, the automatic-run allowlist),
           backup.py, store.py (pipeline_runs, health_checks, alerts_sent +
           read-only adapters)
 assets/   logos/<company key>.png (human-supplied company logos for table cells)

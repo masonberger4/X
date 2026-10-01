@@ -5,7 +5,16 @@ step's lock name, `lock:` in ops/config.yaml) while it runs, so a draft run and 
 run, here or in another desktop window or from cron, run at once, while the same step
 never runs twice. Starting a run whose step is already running in this window is refused
 up front; a step another window or cron is running is skipped as `locked` when its turn
-comes. "Publish now" takes the publish step's lock, so one publish at a time.
+comes. "Publish now" takes the publish step's lock, so one publish at a time. A run holds
+only the steps it has not finished yet: once an automatic run's ingest is done, ingest can
+be started again by hand while that run drafts.
+
+Automatic runs (`start(..., auto=True)`, started by `panel/autorun.py` at the times in
+ops/config.yaml) may launch only the scripts in `ops.autorun.AUTO_SCRIPTS` (ingest, score,
+draft, verify, feedback, evolve; never the publisher, run_ops.py or pipeline_cli.py) and run
+with posting switched off in their environment, so even a publisher reached some other way
+would only rehearse. Their run_id carries `ops.store.AUTO_RUN_MARK`, and like cron's run
+they record a health report and may send an alert when they finish.
 
 The panel never builds an argv of its own: a job names steps from `ops/config.yaml`
 and `ops/runner.py` runs exactly what that file says, under the same `ops/lock.py`
@@ -19,8 +28,8 @@ manual only: nothing here starts a publish run on a timer, no other argv carries
 ops/config.yaml never does, and run_publish.py still posts nothing unless
 PUBLISH_ENABLED=1.
 
-Results are recorded in `pipeline_runs` through `ops/store.py` and a health report is
-recomputed afterwards. Manual runs never send alerts: a human is already watching.
+Results are recorded in `pipeline_runs` through `ops/store.py`. Manual runs never send
+alerts: a human is already watching.
 """
 
 from __future__ import annotations
@@ -34,7 +43,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ops import runner, store
+from ops import autorun, runner, store
 from ops.runner import Step, StepResult
 
 log = logging.getLogger(__name__)
@@ -53,6 +62,9 @@ FORBIDDEN_ARGS = ("--live",)
 PUBLISH_NOW = "publish now"  # the step name of a start_publish_now() run
 PUBLISH_CLI = "run_publish.py"
 PUBLISH_LOCK = "publish"  # "Publish now" takes the publish step's lock: <lock_path>.publish
+# An automatic run's environment: run_publish.py treats posting as off unless this is "1",
+# and load_dotenv never overrides a variable that is already set, so .env cannot turn it on.
+AUTO_ENV = {"PUBLISH_ENABLED": "0"}
 
 
 class JobError(RuntimeError):
@@ -75,6 +87,9 @@ class Job:
     active_stdout: str = ""  # that step's log so far, refreshed as it writes
     active_stderr: str = ""
     publish: bool = False  # a "Publish now" run
+    auto: bool = False  # started by the panel's timer (panel/autorun.py), not a human
+    env: dict[str, str] = field(default_factory=dict)  # overrides for the steps' environment
+    note: str | None = None  # what an automatic run left out, and why
     stop_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     @property
@@ -83,8 +98,11 @@ class Job:
 
     @property
     def lock_names(self) -> set[str]:
-        """The locks this run's steps take, so another run of the same step is refused."""
-        return {s.lock_name for s in self.plan}
+        """The locks of the steps this run has not finished (the live step and those still
+        to come), so another run of one of them is refused. A finished step is free again;
+        the runner's per-step lock still keeps two copies of a step from overlapping."""
+        done = {r.name for r in self.results}
+        return {s.lock_name for s in self.plan if s.name not in done}
 
     @property
     def duration_seconds(self) -> float | None:
@@ -177,7 +195,10 @@ class JobManager:
 
     # -- starting ----------------------------------------------------------
 
-    def start(self, step_names: list[str]) -> Job:
+    def start(self, step_names: list[str], *, auto: bool = False, note: str | None = None) -> Job:
+        """Run the named steps from ops/config.yaml in their configured order. With `auto`
+        (the panel's timer) every step must pass `ops.autorun.ineligible`, checked here so no
+        caller can skip it, and the run's environment switches posting off."""
         wanted = [n.strip() for n in step_names if n and n.strip()]
         if not wanted:
             raise JobError("select at least one step to run")
@@ -187,11 +208,20 @@ class JobManager:
             raise JobError(f"unknown step(s): {', '.join(sorted(unknown))}")
         for step in self.steps():
             if step.name in wanted:
-                bad = [a for a in step.argv if a in FORBIDDEN_ARGS]
-                if bad:
-                    raise JobError(f"step {step.name!r} carries {bad[0]}; refusing to run it")
+                if autorun.posts_live(step.argv):
+                    raise JobError(
+                        f"step {step.name!r} carries {FORBIDDEN_ARGS[0]}; refusing to run it"
+                    )
+                if auto and (why := autorun.ineligible(step)) is not None:
+                    raise JobError(f"step {step.name!r} cannot run automatically: {why}")
         plan = [s for s in self.steps() if s.name in wanted]
-        return self._launch([s.name for s in plan], plan)
+        return self._launch(
+            [s.name for s in plan],
+            plan,
+            auto=auto,
+            env=dict(AUTO_ENV) if auto else None,
+            note=note,
+        )
 
     def start_publish_now(self, draft_id: int) -> Job:
         """Post one approved draft now: `run_publish.py --live --now --draft ID`, as its own
@@ -219,7 +249,18 @@ class JobManager:
         )
         return self._launch([name], [step], publish=True)
 
-    def _launch(self, names: list[str], plan: list[Step], publish: bool = False) -> Job:
+    def _launch(
+        self,
+        names: list[str],
+        plan: list[Step],
+        publish: bool = False,
+        *,
+        auto: bool = False,
+        env: dict[str, str] | None = None,
+        note: str | None = None,
+    ) -> Job:
+        if auto and publish:  # an automatic run never posts; nothing may combine the two
+            raise JobError("an automatic run cannot publish")
         wanted = {s.lock_name for s in plan}
         with self._mutex:
             clash = [j for j in self._live if j.running and j.lock_names & wanted]
@@ -230,7 +271,14 @@ class JobManager:
                 busy = ", ".join(s.name for s in plan if s.lock_name in held)
                 raise JobError(f"{busy} is already running; wait for it to finish")
             job = Job(
-                id=uuid.uuid4().hex[:8], steps=names, started_at=_now(), plan=plan, publish=publish
+                id=uuid.uuid4().hex[:8],
+                steps=names,
+                started_at=_now(),
+                plan=plan,
+                publish=publish,
+                auto=auto,
+                env=dict(env or {}),
+                note=note,
             )
             self._live.insert(0, job)
         thread = threading.Thread(target=self._execute, args=(job,), daemon=True)
@@ -261,6 +309,8 @@ class JobManager:
     def _run_under_lock(self, job: Job) -> None:
         """Run the job's steps; each takes its own lock as it starts (`run_steps(lock_path=)`),
         and one that another window or cron is running is skipped as locked."""
+        if job.stopping:  # stopped before its thread got here: run nothing
+            return
         tail = int(self.cfg.get("run_log_tail_chars", 4000))
 
         # Results land on the job as each step finishes, so the runs page can show
@@ -287,6 +337,7 @@ class JobManager:
             on_output=output,
             stop=job.stop_event,
             lock_path=self.cfg["lock_path"],
+            env=job.env or None,
         )
         locked = [r.name for r in job.results if r.skipped_reason == runner.SKIP_LOCKED]
         if locked and len(locked) == len(job.results):
@@ -302,9 +353,24 @@ class JobManager:
         self._record(job)
 
     def _record(self, job: Job) -> None:
-        run_id = f"{job.started_at.strftime('%Y%m%dT%H%M%SZ')}-panel-{job.id}"
+        mark = store.AUTO_RUN_MARK if job.auto else "-panel-"
+        run_id = f"{job.started_at.strftime('%Y%m%dT%H%M%SZ')}{mark}{job.id}"
         conn = store.connect(self._db_path)
         try:
             store.record_results(conn, run_id, job.results)
+            if job.auto:
+                self._health_and_alert(conn)
         finally:
             conn.close()
+
+    def _health_and_alert(self, conn: Any) -> None:
+        """After an automatic run, what cron's run does: record a health report and send an
+        alert when a check is bad (cooldowns in ops/config.yaml apply). Nobody is watching an
+        automatic run, so this is how a failure reaches the operator. Never raises."""
+        import run_ops  # the CLI module owns the report-and-alert path; imported lazily
+
+        try:
+            db_path = Path(self._db_path) if self._db_path else store.db_path()
+            run_ops.health_and_alert(conn, self.cfg, db_path, _now(), send=True)
+        except Exception:
+            log.exception("automatic run: health report or alert failed")
