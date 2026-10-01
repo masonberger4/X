@@ -63,6 +63,17 @@ def _swarm_off(monkeypatch):
     monkeypatch.setattr(run_draft, "load_swarm_config", lambda *a, **k: {"enabled": False})
 
 
+@pytest.fixture(autouse=True)
+def _no_automatic_runs(monkeypatch):
+    """The shipped ops/config.yaml switches automatic runs on, and the desktop tests start a
+    real uvicorn with the app's lifespan. No test may start the timer thread (it would run
+    the pipeline at 06:00 in the middle of a test run); tests/test_autorun.py drives
+    `tick()` directly and starts the thread through `_start_thread`."""
+    from panel.autorun import AutoRunner
+
+    monkeypatch.setattr(AutoRunner, "start", lambda self: None)
+
+
 @pytest.fixture
 def db():
     d = Database(":memory:")

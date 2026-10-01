@@ -3,6 +3,41 @@
 {% block content %}
 <h1>Runs</h1>
 {% if error %}<p class="flash low">{{ error }}</p>{% endif %}
+{% if saved == 'auto' %}<p class="flash">Automatic runs saved.</p>{% endif %}
+
+<h2>Automatic runs</h2>
+<div id="auto-runs">
+<p><span class="pill {{ 'ok' if auto.on else ('fail' if auto.error else 'skip') }}">{{ auto.state }}</span>
+  {% if auto.on %}
+  {{ auto.steps|join(', ') or 'nothing' }} at {{ auto.times_text }} ({{ auto.tz_name }}).
+  {% if auto.next_due %}Next: <strong>{{ auto.next_due|localtime }}</strong> <span class="meta">(in {{ auto.next_in }})</span>.{% endif %}
+  {% elif auto.error %}{{ auto.error }}
+  {% else %}Nothing runs on its own. Switch it on to run {{ auto.steps|join(', ') or 'the steps' }} at set times while this app is open.
+  {% endif %}</p>
+{% if auto.on %}
+<p class="meta">{% if auto.leader %}This window runs them{% elif auto.holder %}Another panel window runs them (process {{ auto.holder.pid }}, since {{ auto.holder.since|localtime }}){% endif %}.
+  Status: {{ auto.reason }}.
+  {% if auto.pending %}The {{ auto.pending|localtime }} run is waiting.{% endif %}
+  Publishing never runs on its own: post from the approved page.</p>
+{% endif %}
+{% if auto.dropped %}<p class="meta">Left out: {{ auto.dropped|join('; ') }}.</p>{% endif %}
+<form method="post" action="/runs/auto" class="actions">
+  <label><input type="checkbox" name="enabled" value="1" {% if auto.enabled %}checked{% endif %}> On</label>
+  <label style="margin-left:1rem">Times <input type="text" name="times" value="{{ auto.times_text }}" size="28" placeholder="06:00, 12:00, 18:00"></label>
+  <button type="submit">Save</button>
+  <span class="meta">Local time, HH:MM, at most 8 a day and an hour apart. Runs only while this app is open; a time that passed while it was closed is not made up, and one missed while the computer slept runs on wake if it is under {{ auto.grace_minutes }} minutes late.</span>
+</form>
+{% if auto.outcomes %}
+<table>
+  <tr><th>Run time</th><th>What happened</th><th></th></tr>
+  {% for o in auto.outcomes %}
+  <tr><td>{{ o.slot|localtime }}</td><td>{{ o.text }}{% if o.job_id %} <span class="meta">(run {{ o.job_id }})</span>{% endif %}</td><td class="meta">{{ o.ago }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+</div>
+
+<h2>Run now</h2>
 <form method="post" action="/runs">
   {% for s in steps %}
   <label style="margin-right:1rem">

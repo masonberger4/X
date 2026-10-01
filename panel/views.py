@@ -101,8 +101,12 @@ def step_rows(
     return rows
 
 
-def source_rows(runs: list[SourceRun], now: datetime, stale_multiplier: float) -> list[dict]:
-    """One row per configured ingest source, worst first (error, never ran, stale, ok)."""
+def source_rows(
+    runs: list[SourceRun], now: datetime, stale_multiplier: float, stale_min_hours: float = 0
+) -> list[dict]:
+    """One row per configured ingest source, worst first (error, never ran, stale, ok). A
+    source is stale past `stale_multiplier` times its cadence, but never sooner than
+    `stale_min_hours` (the health check's `source_stale_min_hours`)."""
     rows = []
     for r in runs:
         if not r.enabled:
@@ -113,7 +117,7 @@ def source_rows(runs: list[SourceRun], now: datetime, stale_multiplier: float) -
             status = "warn"
         else:
             age_h = (now - r.last_run_at).total_seconds() / 3600.0
-            limit_h = stale_multiplier * r.cadence_minutes / 60.0
+            limit_h = max(stale_multiplier * r.cadence_minutes / 60.0, stale_min_hours)
             status = "warn" if age_h > limit_h else "ok"
         rows.append(
             {
@@ -252,4 +256,58 @@ def bet_summary_row(bet: dict) -> dict:
         "swarm_median_fmt": f"{sm:.2f}" if sm is not None else "-",
         "control_median_fmt": f"{cm:.2f}" if cm is not None else "-",
         "verdict": verdict,
+    }
+
+
+def auto_run_view(status: Any, now: datetime, tz_name: str) -> dict[str, Any]:
+    """The automatic-runs box on the runs page and the dashboard line, from
+    panel.autorun.AutoStatus. Datetimes stay aware (templates apply |localtime); relative
+    times use the fmt_hours style."""
+    on = status.enabled and bool(status.times)
+    if status.error:
+        state = "error"
+    elif not status.enabled:
+        state = "off"
+    elif not status.times:
+        state = "no times"
+    else:
+        state = "on"
+    holder = None
+    if status.holder:
+        holder = {"pid": status.holder.get("pid"), "since": status.holder.get("started_at")}
+    return {
+        "state": state,
+        "on": on,
+        "enabled": status.enabled,
+        "times": status.times,
+        "times_text": ", ".join(status.times),
+        "tz_name": tz_name,
+        "steps": status.steps,
+        "dropped": [f"{name}: {why}" for name, why in status.dropped.items()],
+        "grace_minutes": status.grace_minutes,
+        "error": status.error,
+        "next_due": status.next_due,
+        "next_in": fmt_hours((status.next_due - now).total_seconds() / 3600.0)
+        if status.next_due
+        else "",
+        "pending": status.pending,
+        "leader": status.leader,
+        "holder": holder,
+        "reason": status.reason,
+        "outcomes": [
+            {"slot": o.slot, "text": o.text, "job_id": o.job_id, "ago": fmt_age(now, o.at)}
+            for o in status.outcomes
+        ],
+    }
+
+
+def last_auto_run_row(run: dict[str, Any] | None, now: datetime) -> dict[str, Any] | None:
+    """The dashboard's "last automatic run" from ops.store.last_auto_run."""
+    if run is None:
+        return None
+    return {
+        "started_at": run["started_at"],
+        "age": fmt_age(now, run["started_at"]),
+        "status": "fail" if run["failed"] else "ok",
+        "summary": ("failed: " + ", ".join(run["failed"])) if run["failed"] else "ok",
     }

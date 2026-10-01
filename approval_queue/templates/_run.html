@@ -7,7 +7,7 @@
 {% set busy = busy_steps() %}
 <div class="runbar">
   {% for run in runs %}
-  <span class="pill warn">running</span> <strong>{{ run.steps|join(', ') }}</strong>
+  <span class="pill warn">running</span>{% if run.auto %} <span class="pill skip">automatic</span>{% endif %} <strong>{{ run.steps|join(', ') }}</strong>
   <span class="meta">{% if run.active_step %}{{ run.active_step }} for {{ run.active_for }}{% else %}starting…{% endif %}
     · <a href="/runs">watch the log</a></span>{% if not loop.last %}<br>{% endif %}
   {% endfor %}

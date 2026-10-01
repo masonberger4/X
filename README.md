@@ -34,15 +34,20 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline; one "Ingest and score" button |
 | `/publishing` | approved and waiting, what has posted, any partial thread needing a human, a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept); no post button and no automatic publishing: posting is manual only, from the approved page's "Publish now" |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
-| `/runs` | every run's log (whichever page started it) and the checkboxes to run any enabled step; stop the one in progress |
+| `/runs` | the automatic runs (switch and times of day, next run, what happened at each time), every run's log (whichever page started it) and the checkboxes to run any enabled step; stop any run in progress |
 | `/queue`, `/drafts/{id}`, `/voice` | the step 2 approval queue (its Revise box sends a draft back through the drafter with your note); the pending page has "Draft" and "Verify" buttons |
 | `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), and "Reopen" to send a draft that has not gone out back to pending (`POST /drafts/{id}/reopen`; refused for a posted, partial or claimed draft) |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
 step 1's own `db.Database` API — the same one `digest.py` uses, and the run buttons execute
-`ops/config.yaml`'s steps through `ops/runner.py` under the same `ops/lock.py` lock
-cron takes, so a run started in the browser is the run cron would have started. A step
+`ops/config.yaml`'s steps through `ops/runner.py` under the same per-step `ops/lock.py`
+locks cron takes, so a run started in the browser is the run cron would have started. While
+it is open the panel also runs everything but publishing on its own: `auto_run_steps`
+(ingest, score, draft, verify, feedback, evolve) at each of `auto_run_times` (06:00, 12:00,
+18:00 shipped, in the root `timezone:`), switched and timed from `/runs`, which writes
+`auto_run_enabled` / `auto_run_times` in `ops/config.yaml`. Only those six scripts can
+ever start that way, and those runs cannot post whatever `.env` says. A step
 disabled in `ops/config.yaml` is skipped, never run; the shipped `publish` step runs
 `run_publish.py` as a dry run (no `--live`), and posting is manual only: nothing posts on a
 schedule, and `run_ops.py run` refuses any configured step that carries `--live`. The run buttons sit on the pages they affect (feed, pending, approved)
@@ -407,7 +412,11 @@ python run_ops.py prune --days 90     # ops-owned tables only (pipeline_runs, he
 ```
 
 Settings live in `ops/config.yaml` (step order, per-step `timeout_seconds` where 0 means
-no limit, as `verify` uses, health thresholds and budget caps, backup dir/keep, alert channels and cooldown). The `publish` step is
+no limit, as `verify` uses, per-step `lock:` names, the control panel's automatic runs
+`auto_run_enabled` / `auto_run_times` / `auto_run_steps` / `auto_run_grace_minutes`,
+health thresholds and budget caps, backup dir/keep, alert channels and cooldown). The
+shipped staleness limits (13h, and `source_stale_min_hours`) fit three runs a day;
+tighten them if a scheduler runs every 30 minutes. The `publish` step is
 a dry run and stays one: posting is manual only, so `run_ops.py run` refuses to start when
 any step carries `--live` (post from the panel's approved page instead). Steps whose CLI has not merged yet are skipped with a warning.
 

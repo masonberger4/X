@@ -595,6 +595,36 @@ def record_alert(
     conn.commit()
 
 
+AUTO_RUN_MARK = "-auto-"  # in the run_id of a run the panel started on its own
+
+
+def last_auto_run(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """The newest automatic run (run_id containing AUTO_RUN_MARK): when it started and how
+    each step ended. None before the first one. Read-only."""
+    row = conn.execute(
+        "SELECT run_id FROM pipeline_runs WHERE run_id LIKE ? ORDER BY id DESC LIMIT 1",
+        (f"%{AUTO_RUN_MARK}%",),
+    ).fetchone()
+    if row is None:
+        return None
+    steps = conn.execute(
+        """SELECT step, started_at, exit_code, timed_out, skipped_reason FROM pipeline_runs
+           WHERE run_id = ? ORDER BY id""",
+        (row["run_id"],),
+    ).fetchall()
+    failed = [
+        s["step"]
+        for s in steps
+        if s["skipped_reason"] is None and (s["timed_out"] or s["exit_code"] != 0)
+    ]
+    return {
+        "run_id": row["run_id"],
+        "started_at": _parse(steps[0]["started_at"]) if steps else None,
+        "steps": [s["step"] for s in steps],
+        "failed": failed,
+    }
+
+
 def last_run_per_step(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     rows = conn.execute(
         """SELECT p.* FROM pipeline_runs p
