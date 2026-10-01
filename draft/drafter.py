@@ -218,6 +218,20 @@ def _number_in_source(num: str, source_text: str) -> bool:
     return True
 
 
+_MONEY_RE = re.compile(
+    r"\$\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)"
+    r"|(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(?:billion|million|trillion|bn)\b",
+    re.I,
+)
+
+
+def money_numbers(text: str) -> set[str]:
+    """Numbers written as dollar amounts ('$4.2B', '$900 million', '3 billion'). Rule 4's one
+    exception: market context in dollars may come from the model's knowledge, as long as
+    it is listed in claims_to_verify and checked on the web."""
+    return {m.group(1) or m.group(2) for m in _MONEY_RE.finditer(text)}
+
+
 def verify_numbers(draft: Draft, source_text: str) -> list[str]:
     """Return every number in the draft that does not appear verbatim in the source."""
     seen: set[str] = set()
@@ -331,6 +345,10 @@ def flag_unverified_numbers(draft: Draft, source_text: str) -> list[str]:
     missing = verify_numbers(draft, source_text)
     existing = {c.claim for c in draft.claims_to_verify}
     for num in missing:
+        # A figure the model already put in a claim (market context, rule 4) gets checked
+        # as that claim, which says what the number is; a bare "number not found" says less.
+        if any(_number_in_source(num, c) for c in existing):
+            continue
         claim = f"Number '{num}' does not appear in the source abstract"
         if claim not in existing:
             draft.claims_to_verify.append(Claim(claim=claim, confidence="low"))

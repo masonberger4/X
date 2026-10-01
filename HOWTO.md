@@ -134,6 +134,13 @@ source only when it is due, and score only scores what is new.
    this is sent back to the model like any other hard rule, and a human edit
    that breaks it is never used as a voice example.
 
+   Posts put a dollar size on the market a therapy targets (the market it is
+   going after, the leader's sales, a comparable deal, published peak sales
+   estimates). These figures usually are not in the source, so they are the one
+   exception to "every number verbatim": each goes into the draft's claims to
+   verify and is checked on the web by `run_verify.py` before approval, like any
+   other claim. The guidance is the "Size the prize" section of `draft/voice.md`.
+
    The first post is held to its own rule on top of that (rule 12): no thread
    position marker ("1/6"), no "thread", no emoji, and under 220 characters. X
    ranks a thread on what its opening post does in the first minutes, and a
