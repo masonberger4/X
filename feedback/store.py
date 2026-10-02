@@ -162,7 +162,7 @@ def fetch_posted(
         sql = (
             "SELECT id, draft_id, tweet_id, kind, position, posted_at, slot FROM posts"
             " WHERE status = 'posted' AND tweet_id IS NOT NULL AND error IS NULL"
-            " AND posted_at IS NOT NULL"
+            " AND posted_at IS NOT NULL AND tweet_id NOT LIKE 'manual-%'"
         )
         params: tuple[Any, ...] = ()
         if since is not None:

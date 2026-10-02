@@ -572,7 +572,9 @@ class PublishInfo:
 
     @property
     def tweet_url(self) -> str:
-        return f"https://x.com/i/web/status/{self.tweet_id}" if self.tweet_id else ""
+        if not self.tweet_id or not self.tweet_id.isdigit():
+            return ""  # a hand-posted thread without its URL has no X id to link
+        return f"https://x.com/i/web/status/{self.tweet_id}"
 
     @property
     def reopenable(self) -> bool:
