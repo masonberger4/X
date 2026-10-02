@@ -1,4 +1,4 @@
-﻿"""The panel runs orchestrator steps the same way cron does, and refuses everything else."""
+"""The panel runs orchestrator steps the same way cron does, and refuses everything else."""
 
 import sys
 import time
