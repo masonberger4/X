@@ -55,12 +55,13 @@ def attach_chart(
         log.info("draft %d: table awaits cell verification (run_verify.py)", draft_id)
         return None
     drawn, logos = _brand_chart(chart)
+    head = _story_logo(drawn.title, source_url)
     return _render(
         conn,
         draft_id,
         drawn,
         lambda path, style: render_chart(
-            drawn, path, source_url=source_url, style=style, logos=logos
+            drawn, path, source_url=source_url, style=style, logos=logos, header_logo=head
         ),
         alt_text(drawn, source_url),
         cfg,
@@ -83,12 +84,13 @@ def attach_extra_charts(
     out: list[Path] = []
     for k, chart in enumerate(charts, start=1):
         drawn, logos = _brand_chart(chart)
+        head = _story_logo(drawn.title, source_url)
         path = _render(
             conn,
             draft_id,
             drawn,
-            lambda path, style, c=drawn, lg=logos: render_chart(
-                c, path, source_url=source_url, style=style, logos=lg
+            lambda path, style, c=drawn, lg=logos, hd=head: render_chart(
+                c, path, source_url=source_url, style=style, logos=lg, header_logo=hd
             ),
             alt_text(drawn, source_url),
             cfg,
@@ -115,12 +117,19 @@ def attach_table(
     labels do in attach_chart); the alt text describes the branded table so it matches the
     picture."""
     drawn, logos = _brand(table)
+    head = _story_logo(drawn.title, source_url)
     return _render(
         conn,
         draft_id,
         drawn,
         lambda path, style: render_table(
-            drawn, path, source_url=source_url, blanked=blanked, style=style, logos=logos
+            drawn,
+            path,
+            source_url=source_url,
+            blanked=blanked,
+            style=style,
+            logos=logos,
+            header_logo=head,
         ),
         alt_text(drawn, source_url, blanked),
         cfg,
@@ -133,6 +142,15 @@ def _branding() -> branding.Branding:
     from panel.frozen import data_dir
 
     return branding.load_branding(root_config.load_config(), data_dir())
+
+
+def _story_logo(title: str, source_url: str) -> Path | None:
+    """The story's company logo for the card's header; any failure means none."""
+    try:
+        return branding.story_logo(_branding(), title, source_url)
+    except Exception:
+        log.exception("header logo skipped")
+        return None
 
 
 def _brand(table: Table) -> tuple[Table, dict]:
