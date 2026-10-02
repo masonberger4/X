@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -588,6 +589,44 @@ def record_post(
     )
     conn.commit()
     return int(cur.lastrowid)
+
+
+#: tweet_id prefix of a post a human pasted into X by hand without giving its URL. It is
+#: not an X id: feedback never fetches metrics for it, but `is_live` still sees the
+#: draft as posted, so nothing can reopen or repost it.
+MANUAL_ID_PREFIX = "manual-"
+
+
+def tweet_id_from_url(url: str) -> str | None:
+    """The numeric id in an X post URL (x.com/<user>/status/<id>), or a bare id; else None."""
+    url = url or ""
+    m = re.search(r"/status(?:es)?/(\d{5,25})", url) or re.fullmatch(r"\s*(\d{5,25})\s*", url)
+    return m.group(1) if m else None
+
+
+def record_manual(
+    conn: sqlite3.Connection, draft_id: int, texts: list[str], first_url: str = ""
+) -> bool:
+    """A human posted this draft on x.com by hand and pressed "I posted it". Claims the
+    draft as a publish run would, logs one posted row per post (post 1 carries the real
+    tweet id when `first_url` gives one, every other post a MANUAL_ID_PREFIX marker) and
+    finishes the schedule row as posted. False when a run already claimed the draft."""
+    if not claim(conn, draft_id, "manual"):
+        return False
+    head = tweet_id_from_url(first_url)
+    for pos, text in enumerate(texts, 1):
+        tid = head if pos == 1 and head else f"{MANUAL_ID_PREFIX}{draft_id}-{pos}"
+        record_post(
+            conn,
+            draft_id=draft_id,
+            text=text,
+            kind=KIND_THREAD,
+            position=pos,
+            slot="manual",
+            tweet_id=tid,
+        )
+    finish(conn, draft_id, SCHED_POSTED)
+    return True
 
 
 def list_posts(conn: sqlite3.Connection, draft_id: int | None = None) -> list[sqlite3.Row]:

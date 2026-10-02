@@ -42,6 +42,7 @@ def load_publish_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg["retry"].setdefault("max_attempts", 3)
     cfg.setdefault("media", {})
     cfg["media"].setdefault("attach_images", True)
+    cfg["posting"] = "api" if str(cfg.get("posting", "manual")).lower() == "api" else "manual"
     cfg["thread_numbering"] = numbering_mode(cfg.get("thread_numbering", "replies"))
     return cfg
 

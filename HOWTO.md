@@ -476,6 +476,22 @@ publisher, and the scheduler (part 6) refuses to run if any step in
 out; pick a time when you can stay with it for the first hour and answer
 replies, since that hour decides how far X shows it.
 
+**Copy-paste posting (shipped, no X API needed).** With `posting: manual` in
+`publish\config.yaml`, "Publish now" opens a copy-paste page instead of calling
+the X API:
+
+- each post of the thread with a **Copy text** button (numbered exactly as the
+  publisher would post it), and under it its picture(s) with **Copy picture**,
+  a download link and the alt text for X's "Add description";
+- a link to x.com's composer. Paste post 1's text and picture, press **+** for
+  each next post, and post it;
+- back on the page, optionally paste the link to the first post (feedback can
+  then read its metrics), and press **I posted it, everything went OK**. That
+  logs the draft as posted, so it leaves the approved list and counts toward
+  the daily limit. Nothing is sent to X from here.
+
+Set `posting: api` to go back to posting through the X API (the steps below).
+
 1. Rehearse. With no flags nothing is sent; it prints what would post and
    when, based on approved drafts and the slots in `publish\config.yaml`.
    ```
