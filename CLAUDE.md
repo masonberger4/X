@@ -213,8 +213,13 @@ carrying `--live`).
   `drafts.format_json` (guarded migration; `drafter.format_of` rebuilds the Format for a
   revision) and every rendered picture in `drafts.images_json` (`store.set_image(...,
   index=k)`, `image_file(id, k)`; `image_path`/`image_alt` stay the first picture).
-- **Draft images** (`draft/chart.py`): the drafter's `chart` is a bar-chart
-  SPEC (title, labels, values, unit, note), never a picture; `suggested_visual` stays a
+- **Draft images** (`draft/chart.py`): the drafter's `chart` is a chart
+  SPEC (title, labels, values, unit, note), never a picture; `Chart.kind` is `bars` (the
+  original), `grouped` (arms in `series` across endpoint labels) or `stat` (1-4 headline tiles
+  with per-tile `units`), and a plain bar chart's JSON keeps its five keys.
+  `chart.flat_chart_problems` sends back a bar chart whose bars are all equal, and
+  `branding.story_logo` (source site via `Brand.domains`, else the title) is the
+  `header_logo` drawn top right on every card; `suggested_visual` stays a
   text hint for the reviewer. `drafter.verify_chart` checks every number in it verbatim
   against the source and `drafter.chart_problems` turns one miss into a retry reason
   (never a silent drop; a draft that never gets it right is stored `failed`).

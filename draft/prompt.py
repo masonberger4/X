@@ -94,13 +94,23 @@ def hard_rules(fmt: Format | None = None) -> str:
 8. Any claim that goes beyond what the abstract states goes into claims_to_verify with an
    honest confidence level.
 {r9}
-   "chart" is a bar chart that code renders and
-   attaches to {where}: give it when the source states two or more comparable
-   numbers (arms, endpoints, cohorts) and copy each value exactly as written. Every
-   number in the chart is checked against the source like rule 4; one miss and the draft
-   is sent back to you. "suggested_visual" is a one-line description of the visual for
-   the human reviewer.
-10. "table" is the visual when the source has no numbers to chart: a small comparison
+   "chart" is a chart that code renders and attaches to {where}. Prefer it whenever the
+   source reports clinical numbers (response rates, CR rates, medians, hazard ratios,
+   patient counts, AE rates) and copy each value exactly as written. Pick the "kind" that
+   fits the data:
+   - "grouped": a randomised or multi-arm readout, two to four arms side by side across
+     one to six endpoints that share a unit (drug vs control on ORR and CR rate; median PFS
+     and OS in months). Endpoints in "labels", arms in "series", experimental arm first.
+   - "stat": one arm's headline numbers (a single-arm ORR, CR rate, median DOR), one to
+     four tiles, each with its own unit in "units". Use it instead of a two-row table of
+     results.
+   - "bars": one endpoint across arms, doses, cohorts or competitor drugs.
+   Only chart numbers that differ and mean something clinically: never chart a trial
+   phase, a date or a count of trials, and a bar chart whose bars are all equal is sent
+   back. Every number in the chart is checked against the source like rule 4; one miss and
+   the draft is sent back to you. "suggested_visual" is a one-line description of the
+   visual for the human reviewer.
+10. "table" is the visual when the source has no clinical numbers to chart: a small comparison
    (2-8 rows, 2-5 columns; the first column names the company, asset or trial) such as a
    competitor landscape, a set of upcoming catalysts or the deal terms side by side.
    Unlike a chart its cells MAY come from your own knowledge: every cell is fact-checked

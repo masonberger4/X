@@ -5,14 +5,16 @@ Nothing here is fetched or guessed. Tickers come from `config.yaml` (`ticker:` o
 are PNG files a human has placed in `branding.logos_dir` (default `assets/logos/`), named
 by the company key. `brand_table` rewrites a fact-checked table's company cells to
 "Name ($TICKER)" and tells the renderer which logo to draw in which cell; `brand_chart`
-does the same for a chart whose bar labels name companies. A company the config does not
-know is left exactly as it was. Pure: no network, no database.
+does the same for a chart whose bar labels name companies, and `story_logo` picks the logo
+for the card's header (the company whose site published the story, else the first one the
+title names). A company the config does not know is left exactly as it was. Pure: no
+network, no database.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +39,7 @@ class Brand:
     ticker: str = ""  # "" for a private company
     aliases: tuple[str, ...] = ()
     logo: Path | None = None
+    domains: tuple[str, ...] = ()  # the company's own sites: `domain:`, else its feed's host
 
     def label(self, text: str) -> str:
         """`text` with " ($TICKER)" appended when it does not already carry a ticker."""
@@ -72,11 +75,65 @@ class Branding:
                     best = (len(n), b)
         return best[1] if best else None
 
+    def by_host(self, url: str) -> Brand | None:
+        """The brand whose own site `url` is on (investor.regeneron.com -> Regeneron). A
+        domain claimed by two brands names neither."""
+        m = _HOST_RE.match(url or "")
+        if not m:
+            return None
+        host = m.group(1).lower()
+        hits = {
+            b.key: b for b in self.brands for d in b.domains if host == d or host.endswith("." + d)
+        }
+        return next(iter(hits.values())) if len(hits) == 1 else None
+
+    def find(self, text: str) -> Brand | None:
+        """The brand named first in free text (a chart title), by its configured name or
+        alias as whole words. None when nothing configured is named."""
+        hay = f" {_norm(text)} "
+        best: tuple[int, int, Brand] | None = None
+        for b in self.brands:
+            for cand in (b.name, *b.aliases):
+                n = _norm(cand)
+                pos = hay.find(f" {n} ") if n else -1
+                if pos >= 0 and (best is None or (pos, -len(n)) < (best[0], best[1])):
+                    best = (pos, -len(n), b)
+        return best[2] if best else None
+
     def is_company_column(self, header: str) -> bool:
         h = _norm(header)
         return any(
             h == c or h.startswith(c + " ") or h.endswith(" " + c) for c in self.company_columns
         )
+
+
+_HOST_RE = re.compile(r"^https?://(?:www\.)?([^/:]+)", re.IGNORECASE)
+# Two-label suffixes under which a company's own domain has three labels (example.co.uk).
+_SECOND_LEVEL = frozenset({"co.uk", "co.jp", "com.au", "com.cn"})
+
+
+def _site_domain(url: str) -> str:
+    """The registrable domain of `url`: ir.genmab.com -> genmab.com. Hosted IR platforms
+    (gcs-web.com) are why a feed entry may set `domain:` explicitly."""
+    m = _HOST_RE.match(url or "")
+    if not m:
+        return ""
+    parts = m.group(1).lower().split(".")
+    keep = 3 if ".".join(parts[-2:]) in _SECOND_LEVEL else 2
+    return ".".join(parts[-keep:])
+
+
+def _feed_domain(url: str, key: str, name: str) -> str:
+    """The company's own domain from its feed URL: investor.regeneron.com -> regeneron.com.
+    A feed on a hosted IR platform (crisprtx.gcs-web.com) does not name the company in its
+    registrable domain, so only that exact host counts, never the platform's other tenants."""
+    site = _site_domain(url)
+    first = site.split(".")[0].replace("-", "")
+    words = {w for w in (key.split("_")[0], *_norm(name).split()[:1]) if len(w) >= 3}
+    if site and any(w in first for w in words):
+        return site
+    m = _HOST_RE.match(url or "")
+    return m.group(1).lower() if m else ""
 
 
 def _norm(text: str) -> str:
@@ -113,6 +170,9 @@ def load_branding(root_cfg: dict[str, Any] | None, base_dir: str | Path | None =
                 logo = candidate
                 break
         aliases = tuple(str(a).strip() for a in (e.get("aliases") or []) if str(a).strip())
+        domain = str(e.get("domain") or "").strip().lower() or _feed_domain(
+            str(e.get("url") or ""), key, name
+        )
         brands.append(
             Brand(
                 key=key,
@@ -120,6 +180,7 @@ def load_branding(root_cfg: dict[str, Any] | None, base_dir: str | Path | None =
                 ticker=str(e.get("ticker") or "").strip().upper().lstrip("$"),
                 aliases=aliases,
                 logo=logo,
+                domains=(domain,) if domain else (),
             )
         )
     return Branding(brands=brands, company_columns=columns)
@@ -152,6 +213,8 @@ def brand_chart(chart: Chart, branding: Branding) -> tuple[Chart, dict[int, Path
     """The chart with tickers appended to bar labels that name a configured company, and
     the logo to draw per bar index. Values, title, unit and note are untouched, so the
     verified numbers are exactly what the drafter wrote."""
+    if chart.kind != "bars":
+        return chart, {}  # grouped labels are endpoints, stat labels are captions
     labels = list(chart.labels)
     logos: dict[int, Path] = {}
     for i, label in enumerate(labels):
@@ -163,14 +226,14 @@ def brand_chart(chart: Chart, branding: Branding) -> tuple[Chart, dict[int, Path
             logos[i] = brand.logo
     if labels == list(chart.labels) and not logos:
         return chart, {}
-    branded = Chart(
-        title=chart.title,
-        labels=labels,
-        values=list(chart.values),
-        unit=chart.unit,
-        note=chart.note,
-    )
-    return branded, logos
+    return replace(chart, labels=labels), logos
+
+
+def story_logo(branding: Branding, title: str, source_url: str = "") -> Path | None:
+    """The logo for the card's header: the company whose own site published the story,
+    else the first company the title names. None when neither has a logo on disk."""
+    brand = branding.by_host(source_url) or branding.find(title)
+    return brand.logo if brand is not None else None
 
 
 __all__ = ["Brand", "Branding", "brand_chart", "brand_table", "load_branding"]
