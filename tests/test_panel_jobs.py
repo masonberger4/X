@@ -1,4 +1,4 @@
-"""The panel runs orchestrator steps the same way cron does, and refuses everything else."""
+﻿"""The panel runs orchestrator steps the same way cron does, and refuses everything else."""
 
 import sys
 import time
@@ -130,7 +130,7 @@ def test_steps_sharing_a_lock_name_do_not_run_at_once(tmp_path):
         raw["lock"] = "stories"
     manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
     first = manager.start(["slow"])
-    with pytest.raises(JobError, match="other is already running"):
+    with pytest.raises(JobError, match="other cannot start while .* is running"):
         manager.start(["other"])
     _wait(first)
 

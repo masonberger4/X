@@ -268,8 +268,23 @@ class JobManager:
                 if publish:
                     raise JobError("a publish is already in progress")
                 held = {name for j in clash for name in j.lock_names}
-                busy = ", ".join(s.name for s in plan if s.lock_name in held)
-                raise JobError(f"{busy} is already running; wait for it to finish")
+                asked = [s.name for s in plan if s.lock_name in held]
+                # Name the steps that actually hold the lock: ingest and score share one,
+                # so a score refused during an ingest run must say ingest, not score.
+                holders: list[str] = []
+                for j in clash:
+                    done = {r.name for r in j.results}
+                    for s in j.plan:
+                        if s.name not in done and s.lock_name in wanted and s.name not in holders:
+                            holders.append(s.name)
+                if holders == asked:
+                    msg = f"{', '.join(asked)} is already running; wait for it to finish"
+                else:
+                    msg = (
+                        f"{', '.join(asked)} cannot start while {', '.join(holders)} is running "
+                        "or queued (they share a lock); wait for it to finish"
+                    )
+                raise JobError(msg)
             job = Job(
                 id=uuid.uuid4().hex[:8],
                 steps=names,
