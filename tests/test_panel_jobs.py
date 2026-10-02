@@ -91,26 +91,48 @@ def test_a_step_carrying_the_live_flag_is_refused(tmp_path):
         manager.start(["publish"])
 
 
-def test_a_held_pipeline_lock_stops_the_run(manager):
-    held = lock.acquire(manager.cfg["lock_path"])
+def test_a_step_another_window_is_running_is_skipped_as_locked(manager):
+    held = lock.acquire(lock.step_lock_path(manager.cfg["lock_path"], "ok"))
     assert held is not None
     try:
         job = _wait(manager.start(["ok"]))
     finally:
         held.release()
-    assert job.state == STATE_LOCKED and job.results == []
-    assert "lock" in job.error
+    assert job.state == STATE_LOCKED
+    assert [r.skipped_reason for r in job.results] == ["locked"]
+    assert "already running" in job.error
 
 
-def test_only_one_job_runs_at_a_time(tmp_path):
-    cfg = _cfg(tmp_path, [_step("slow", "import time; time.sleep(1)")])
+def test_different_steps_run_at_once_but_one_step_never_twice(tmp_path):
+    cfg = _cfg(
+        tmp_path,
+        [_step("slow", "import time; time.sleep(1)"), _step("other", "import time; time.sleep(1)")],
+    )
     manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
     first = manager.start(["slow"])
-    with pytest.raises(JobError, match="already in progress"):
+    with pytest.raises(JobError, match="slow is already running"):
         manager.start(["slow"])
+    second = manager.start(["other"])  # a different step starts alongside
+    assert {j.id for j in manager.running()} == {first.id, second.id}
+    assert manager.busy_steps() == {"slow", "other"}
     _wait(first)
-    manager.start(["slow"])  # the slot is free again
-    _wait(manager.current() or first)
+    _wait(second)
+    assert first.state == STATE_DONE and second.state == STATE_DONE
+    _wait(manager.start(["slow"]))  # free again
+
+
+def test_steps_sharing_a_lock_name_do_not_run_at_once(tmp_path):
+    cfg = _cfg(
+        tmp_path,
+        [_step("slow", "import time; time.sleep(1)"), _step("other", "print('x')")],
+    )
+    for raw in cfg["steps"]:
+        raw["lock"] = "stories"
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    first = manager.start(["slow"])
+    with pytest.raises(JobError, match="other is already running"):
+        manager.start(["other"])
+    _wait(first)
 
 
 def test_cancel_ends_a_running_job_and_records_why(tmp_path):
@@ -239,7 +261,7 @@ def test_publish_now_runs_beside_a_pipeline_run(tmp_path, monkeypatch):
     pub = _wait(manager.start_publish_now(7))
     assert pub.state == STATE_DONE and "posted" in pub.results[0].stdout_tail
     assert pipeline.running and manager.current() is pipeline
-    with pytest.raises(JobError, match="already in progress"):
+    with pytest.raises(JobError, match="already running"):
         manager.start(["slow"])
     assert manager.cancel("stopped by a test", job_id=pipeline.id)
     _wait(pipeline)

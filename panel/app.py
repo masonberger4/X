@@ -13,6 +13,8 @@ Routes owned here:
                         sends the browser back to the page that pressed the button (the
                         feed's "Ingest and score", the pending page's "Draft" and "Verify")
   POST /runs/cancel     stop the run in progress (kills the step and what it launched)
+  POST /runs/auto       switch the automatic runs on or off and set their times
+                        (auto_run_enabled / auto_run_times in ops/config.yaml)
   POST /publishing/now    post one approved draft now (run_publish.py --live --now --draft)
   POST /publishing/order  save the approved page's publishing order (schedule.position)
   POST /publishing/caps   save max_posts_per_day / min_gap_minutes into publish/config.yaml
@@ -22,10 +24,12 @@ so the operator has one URL for the whole workflow. Everything else this app sho
 read through `ops/store.py`'s read-only adapters; it owns no tables of its own.
 
 Read-only by design: the panel never edits config.yaml, voice.md or a draft's text. Its
-run buttons sit on the pages they affect and every log stays on /runs. Posting is manual
-only: the approved page's "Publish now" is a run of the publisher for the one draft a human
-pressed it on, nothing posts on a timer, and it still posts nothing unless
-PUBLISH_ENABLED=1 is set in .env.
+run buttons sit on the pages they affect and every log stays on /runs. While it is open it
+also runs everything but publishing on its own at the times in ops/config.yaml
+(`panel/autorun.py`, switched from the runs page). Posting is manual only: the approved
+page's "Publish now" is a run of the publisher for the one draft a human pressed it on,
+nothing posts on a timer, and it still posts nothing unless PUBLISH_ENABLED=1 is set in
+.env.
 """
 
 from __future__ import annotations
@@ -33,8 +37,8 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -53,10 +57,11 @@ from approval_queue import app as queue_app
 from db import Database
 from ops import backup as ops_backup
 from ops import store as ops_store
-from ops.config import load_ops_config
+from ops.config import load_ops_config, save_auto_run
 from ops.health import Thresholds
 from panel import feed, views
 from panel import publishing as publish_order_store
+from panel.autorun import LEADER_SUFFIX, AutoRunner
 from panel.frozen import data_dir, step_interpreter
 from panel.jobs import JobError, JobManager
 from publish import scheduler as publish_scheduler
@@ -82,19 +87,72 @@ CONFIG = load_ops_config()
 # build) under the interpreter that can run them there (see panel/frozen.py).
 JOBS = JobManager(CONFIG, data_dir(), python=step_interpreter())
 
-app = FastAPI(title="Pipeline control panel")
+
+def _leader_lock_path() -> Path:
+    """<lock_path>.autorun, in the data directory whatever the working directory is, so every
+    panel window over the same data competes for the same file."""
+    base = Path(str(CONFIG["lock_path"]))
+    if not base.is_absolute():
+        base = data_dir() / base
+    return Path(f"{base}{LEADER_SUFFIX}")
+
+
+def _backup_now(now: datetime | None = None) -> Path:
+    """One verified backup into `backups.dir`, rotated to `backups.keep`: the dashboard's
+    "Back up now" and the automatic runs' daily backup."""
+    return ops_backup.backup(
+        ops_store.db_path(), CONFIG["backups"]["dir"], int(CONFIG["backups"]["keep"]), now=now
+    )
+
+
+def _latest_backup_at() -> datetime | None:
+    latest = ops_backup.latest_backup(CONFIG["backups"]["dir"])
+    return latest[1] if latest else None
+
+
+# Automatic runs tick while the server runs (uvicorn drives the lifespan; a test client
+# that is not used as a context manager never starts it, and tests/conftest.py disables
+# AutoRunner.start for every test).
+AUTO = AutoRunner(JOBS, _leader_lock_path(), backup=_backup_now, latest_backup=_latest_backup_at)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    AUTO.start()
+    try:
+        yield
+    finally:
+        AUTO.stop()
+
+
+app = FastAPI(title="Pipeline control panel", lifespan=lifespan)
+
+
+def current_runs() -> list[dict[str, Any]]:
+    """Every run in flight, newest first, for the run bar on the feed and queue pages.
+    Registered as a template global on both template envs, so the queue's own pages can
+    show them without their routes knowing about the panel."""
+    return [r for r in (_run_view(j) for j in JOBS.running()) if r is not None]
+
+
+def busy_steps() -> set[str]:
+    """Steps whose run button is disabled: a run in this window holds their lock. Runs of
+    other steps start alongside."""
+    return JOBS.busy_steps()
 
 
 def current_run() -> dict[str, Any] | None:
-    """The run in flight, for the run buttons on the feed and queue pages (None when idle).
-    Registered as a template global on both template envs, so the queue's own pages can
-    show it without their routes knowing about the panel."""
-    job = JOBS.current()
+    """The newest run in flight (None when idle)."""
+    return _run_view(JOBS.current())
+
+
+def _run_view(job: Any) -> dict[str, Any] | None:
     if job is None or not job.running:
         return None
     now = _now()
     return {
         "id": job.id,
+        "auto": job.auto,
         "steps": job.steps,
         "active_step": job.active_step,
         "active_for": views.fmt_duration(
@@ -117,6 +175,8 @@ def publish_live() -> bool:
 
 
 templates.env.globals["current_run"] = current_run
+templates.env.globals["current_runs"] = current_runs
+templates.env.globals["busy_steps"] = busy_steps
 templates.env.globals["publish_live"] = publish_live
 templates.env.globals["publish_running"] = publish_running
 
@@ -169,6 +229,8 @@ def dashboard(request: Request, conn: Conn, backed_up: str = "", backup_error: s
             "backup_name": latest_backup[0].name if latest_backup else None,
             "backup_age": views.fmt_age(now, latest_backup[1]) if latest_backup else "none yet",
             "job": JOBS.current(),
+            "auto": views.auto_run_view(AUTO.status(now), now, timeutil.timezone_name()),
+            "last_auto": views.last_auto_run_row(ops_store.last_auto_run(conn), now),
             "backed_up": backed_up,
             "backup_error": backup_error,
         },
@@ -183,9 +245,7 @@ async def backup_now():
 
     def work():
         try:
-            path = ops_backup.backup(
-                ops_store.db_path(), CONFIG["backups"]["dir"], int(CONFIG["backups"]["keep"])
-            )
+            path = _backup_now()
         except Exception as exc:
             log.exception("backup from the panel failed")
             return RedirectResponse(f"/?{urlencode({'backup_error': str(exc)})}", status_code=303)
@@ -207,7 +267,10 @@ def sources(request: Request, conn: Conn):
     now = _now()
     thresholds = Thresholds.from_config(CONFIG.get("health"))
     rows = views.source_rows(
-        ops_store.fetch_source_runs(conn), now, thresholds.source_stale_multiplier
+        ops_store.fetch_source_runs(conn),
+        now,
+        thresholds.source_stale_multiplier,
+        thresholds.source_stale_min_hours,
     )
     return templates.TemplateResponse(
         request,
@@ -390,11 +453,18 @@ def swarm_page(request: Request, conn: Conn):
 
 
 @app.get("/runs", response_class=HTMLResponse)
-def runs(request: Request, error: str | None = None):
+def runs(request: Request, error: str | None = None, saved: str = ""):
+    now = _now()
     return templates.TemplateResponse(
         request,
         "runs.html",
-        {"jobs": _job_views(JOBS.history()), "steps": JOBS.steps(), "error": error},
+        {
+            "jobs": _job_views(JOBS.history()),
+            "steps": JOBS.steps(),
+            "error": error,
+            "saved": saved,
+            "auto": views.auto_run_view(AUTO.status(now), now, timeutil.timezone_name()),
+        },
     )
 
 
@@ -458,6 +528,23 @@ async def publish_order(request: Request):
     return RedirectResponse(_back(form, "/status/approved"), status_code=303)
 
 
+@app.post("/runs/auto")
+async def runs_auto(request: Request):
+    """The runs page's switch and run times: the two auto_run_* keys the panel writes in
+    ops/config.yaml (`ops/config.py:save_auto_run`, which validates the times and edits
+    nothing else). Which steps run stays a file-only setting. The timer reads the file on
+    every tick, so the change applies within a poll; a time already past today waits for
+    tomorrow."""
+    form = await read_form(request)
+    enabled = _first(form, "enabled") == "1"
+    try:
+        save_auto_run(enabled, _first(form, "times"))
+    except ValueError as exc:
+        return RedirectResponse(f"/runs?{urlencode({'error': str(exc)})}", status_code=303)
+    log.info("automatic runs %s", "on" if enabled else "off")
+    return RedirectResponse("/runs?saved=auto", status_code=303)
+
+
 @app.post("/runs/cancel")
 async def cancel_run(request: Request):
     """Stop the run whose button was pressed (`job_id`); without one, every run in flight."""
@@ -475,6 +562,8 @@ def _job_views(jobs: list[Any]) -> list[dict[str, Any]]:
                 "id": job.id,
                 "state": job.state,
                 "running": job.running,
+                "auto": job.auto,
+                "note": job.note,
                 "steps": job.steps,
                 "started": views.fmt_age(now, job.started_at),
                 "duration": views.fmt_duration(job.duration_seconds),
@@ -524,6 +613,8 @@ def _adopt_queue_routes() -> None:
     # The pending and approved pages carry run buttons; they need the run in flight and
     # whether a live post is possible, looked up at render time.
     queue_app.templates.env.globals["current_run"] = current_run
+    queue_app.templates.env.globals["current_runs"] = current_runs
+    queue_app.templates.env.globals["busy_steps"] = busy_steps
     queue_app.templates.env.globals["publish_live"] = publish_live
     queue_app.templates.env.globals["publish_running"] = publish_running
     have = {getattr(r, "path", None) for r in app.router.routes}

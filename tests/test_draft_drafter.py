@@ -36,7 +36,7 @@ def good_json(lead=None, **overrides):
     advice rules look at); the last post keeps the URL."""
     data = {
         "thread": [
-            "Phase 2 CAR-T data in relapsed myeloma: ORR 88%, median PFS 14.6 months.",
+            "Phase 2 CAR-T data in relapsed myeloma show ORR 88% and median PFS 14.6 months.",
             "Single-arm, so no comparator. The sequencing question is open.",
             "Grade 3 CRS in 4 patients.",
         ],
@@ -540,3 +540,18 @@ def test_a_factual_caption_passes():
     chart = {**CHART, "note": "n=97, single arm, investigator-assessed; data cutoff Jan 2026"}
     draft = validate_output(good_json(chart=chart))
     assert check_hard_rules(draft, url=URL, source="pubmed") == []
+
+
+def test_money_numbers_are_the_dollar_amounts():
+    from draft.drafter import money_numbers
+
+    text = "A $4.2B market, peak sales near 900 million, $1,200 per dose, ORR 88%."
+    assert money_numbers(text) == {"4.2", "900", "1,200"}
+
+
+def test_a_dollar_figure_already_claimed_is_not_flagged_twice():
+    claim = {"claim": "The BCMA myeloma market was about $9 billion.", "confidence": "low"}
+    lead = "The BCMA market did about $9 billion last year."
+    draft = validate_output(good_json(lead=lead, claims_to_verify=[claim]))
+    assert flag_unverified_numbers(draft, ABSTRACT) == ["9"]
+    assert len(draft.claims_to_verify) == 1

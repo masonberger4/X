@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 
 import timeutil
 from ops import alert, backup, health, lock, runner, store
+from ops.autorun import posts_live
 from ops.config import load_ops_config
 
 log = logging.getLogger("run_ops")
@@ -37,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 
 # Posting is manual only: a human presses "Publish now" on the panel or runs
 # run_publish.py --live by hand. A scheduled run never posts, however the config got edited.
-POSTING_FLAG = "--live"
+POSTING_FLAG = "--live"  # refused spelled out or abbreviated (ops.autorun.posts_live)
 
 
 def _now() -> datetime:
@@ -120,7 +121,7 @@ def cmd_run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         if unknown:
             log.error("unknown step(s) in --only: %s", ", ".join(sorted(unknown)))
             return 1
-    posting = [s.name for s in steps if POSTING_FLAG in s.argv and (not only or s.name in only)]
+    posting = [s.name for s in steps if posts_live(s.argv) and (not only or s.name in only)]
     if posting:
         log.error(
             "posting is manual only: step(s) %s carry %s; remove it from ops/config.yaml and "
@@ -144,7 +145,9 @@ def cmd_run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     with held:
         run_id = f"{_now().strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
         log.info("run %s starting (%s)", run_id, ", ".join(only or [s.name for s in steps]))
-        results = runner.run_steps(steps, only=only, cwd=REPO_ROOT, tail_chars=tail)
+        results = runner.run_steps(
+            steps, only=only, cwd=REPO_ROOT, tail_chars=tail, lock_path=cfg["lock_path"]
+        )
         db_path = _db_path(args)
         conn = store.connect(db_path)
         try:

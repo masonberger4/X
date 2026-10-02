@@ -149,9 +149,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def stop_run() -> None:
     """Closing the window must not leave a step (and the claude CLI it launches) running
-    on its own; the operator would keep seeing its windows with no way to stop it."""
-    from panel.app import JOBS
+    on its own; the operator would keep seeing its windows with no way to stop it. The
+    automatic-run timer stops first, so it cannot start a run after the cancel."""
+    from panel.app import AUTO, JOBS
 
+    AUTO.stop()
     if JOBS.cancel("stopped: the app was closed"):
         log.info("a run was in progress; its step was stopped")
 

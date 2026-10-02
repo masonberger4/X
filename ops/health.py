@@ -33,6 +33,9 @@ class Thresholds:
     max_hours_since_score: float = 6
     max_hours_since_draft: float = 48
     source_stale_multiplier: float = 3
+    # A floor under that limit: with runs a few times a day (auto_run_times), a 30-minute
+    # source is not stale just because the night has no run.
+    source_stale_min_hours: float = 0
     max_source_failure_fraction: float = 0.34
     pending_draft_max_age_hours: float = 72
     unscored_backlog_max: int = 100
@@ -90,7 +93,9 @@ def check_sources(runs: list[SourceRun], now: datetime, th: Thresholds) -> Check
             errors.append(r.source)
             continue
         age_h = hours_between(now, r.last_run_at)
-        limit_h = th.source_stale_multiplier * r.cadence_minutes / 60.0
+        limit_h = max(
+            th.source_stale_multiplier * r.cadence_minutes / 60.0, th.source_stale_min_hours
+        )
         if age_h is not None and age_h > limit_h:
             stale.append(r.source)
     bad = len(errors) + len(never) + len(stale)

@@ -11,11 +11,13 @@ from draft.drafter import (
     _INVEST_RE,
     _number_in_source,
     known_company_names,
+    money_numbers,
     numbers_in,
 )
 from draft.hook import HOOK_MAX_CHARS, hook_problems, link_problems
 from draft.prompt import PREPRINT_LABEL
 from draft.schema import MAX_POST_CHARS, tweet_length
+from draft.style import style_problems
 from draft.tags import Handle, tag_problems
 from swarm.genome import HOOK
 
@@ -53,10 +55,14 @@ def cell_problems(
         problems.append(f"reads as medical advice: {m.group(0)!r}")
     if m := _INVEST_RE.search(t):
         problems.append(f"reads as investment advice: {m.group(0)!r}")
-    missing = [num for num in numbers_in(t) if not _number_in_source(num, source_text)]
+    money = money_numbers(t)  # rule 4's exception: the assembly lists them as claims
+    missing = [
+        num for num in numbers_in(t) if num not in money and not _number_in_source(num, source_text)
+    ]
     if missing:
         problems.append("numbers not in the source: " + ", ".join(dict.fromkeys(missing)))
     problems += link_problems(t)
+    problems += style_problems(t)
     if needs_preprint is None:
         needs_preprint = slot == HOOK and is_preprint
     if needs_preprint and PREPRINT_LABEL not in t.lower():

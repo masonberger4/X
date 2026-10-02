@@ -888,11 +888,16 @@ def render_table(
     widths = [n / sum(longest) for n in longest]
     nrows = len(body) + 1
     row_h = min(st.table_row_height, (_PLOT_TOP + 0.03 - _PLOT_BOTTOM) / nrows)
+    logos = logos or {}
+    headers = [c.upper() for c in table.columns]
+    cell_fs, header_fs, cell_text, header_text = _fit_table(
+        fig, body, headers, widths, row_h, logos, cell_fs=6.8 * fs, header_fs=5.8 * fs
+    )
     ax = fig.add_axes((_MARGIN_X, _PLOT_BOTTOM, 1 - 2 * _MARGIN_X, _PLOT_TOP + 0.03 - _PLOT_BOTTOM))
     ax.axis("off")
     tbl = ax.table(
-        cellText=[[_wrap(c, max(12, int(34 / fs))) for c in row] for row in body],
-        colLabels=[c.upper() for c in table.columns],
+        cellText=cell_text,
+        colLabels=headers,
         colWidths=widths,
         cellLoc="left",
         colLoc="left",
@@ -905,8 +910,7 @@ def render_table(
         ),
     )
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(6.8 * fs)
-    logos = logos or {}
+    tbl.set_fontsize(cell_fs)
     for (r, c), cell in tbl.get_celld().items():
         cell.PAD = 0.05
         cell.set_linewidth(0.5)
@@ -925,12 +929,91 @@ def render_table(
             cell.set_text_props(color=pal.ink_3)
     fig.canvas.draw()  # positions the cells so the header bar and logos can use them
     _row_bands(ax, tbl, len(body), len(table.columns), pal)
-    _header_bar(ax, tbl, [c.upper() for c in table.columns], fontsize=5.8 * fs, pal=pal)
+    _header_bar(ax, tbl, header_text, fontsize=header_fs, pal=pal)
     for (r, c), logo in logos.items():
         _draw_logo(ax, tbl, r + 1, c, logo)
     fig.savefig(path, format="png", dpi=DPI, facecolor=pal.surface)
     plt.close(fig)
     return path
+
+
+_CELL_PAD = 0.05  # matplotlib Cell.PAD: text inset as a fraction of the cell's width
+_MIN_TABLE_FONT = 4.0  # points; the fit never shrinks text below this
+_LINE_SPACING = 1.25  # line height as a multiple of the font size, with some air
+
+
+def _fit_table(
+    fig,
+    body: list[list[str]],
+    headers: list[str],
+    widths: list[float],
+    row_h: float,
+    logos: dict,
+    *,
+    cell_fs: float,
+    header_fs: float,
+) -> tuple[float, float, list[list[str]], list[str]]:
+    """Wrap every cell to the width of its own column, measured in rendered pixels, and
+    shrink the cell and header fonts together until every wrapped cell fits its row height
+    and no single word is wider than its column. Returns (cell font, header font, wrapped
+    body, wrapped headers). Text is never cut: at the minimum font size the last wrap is
+    kept as it is."""
+    from matplotlib.font_manager import FontProperties
+
+    renderer = fig.canvas.get_renderer()
+    table_px = (1 - 2 * _MARGIN_X) * fig.bbox.width
+    row_px = row_h * fig.bbox.height
+
+    def inner(c: int, logo: bool) -> float:
+        pad = _CELL_PAD + (_LOGO_PAD / max(widths[c], 0.01) if logo else 0.0)
+        return widths[c] * table_px * max(0.2, 1 - 2 * pad)
+
+    def width_of(text: str, size: float, bold: bool) -> float:
+        prop = FontProperties(size=size, weight="bold" if bold else "normal")
+        w, _, _ = renderer.get_text_width_height_descent(text, prop, ismath=False)
+        return w
+
+    def wrap(text: str, avail: float, size: float, bold: bool) -> tuple[str, bool]:
+        """Greedy word wrap by measured width; the flag is False when a word alone is too wide."""
+        lines: list[str] = []
+        fits = True
+        for para in (text or "").split("\n"):
+            line = ""
+            for word in para.split():
+                trial = f"{line} {word}" if line else word
+                if not line or width_of(trial, size, bold) <= avail:
+                    line = trial
+                else:
+                    lines.append(line)
+                    line = word
+                if width_of(line, size, bold) > avail:
+                    fits = False
+            lines.append(line)
+        return "\n".join(lines), fits
+
+    def lines_px(n: int, size: float) -> float:
+        return n * size * _LINE_SPACING * fig.dpi / 72
+
+    scale = 1.0
+    while True:
+        cfs, hfs = cell_fs * scale, header_fs * scale
+        ok = True
+        cells: list[list[str]] = []
+        for r, row in enumerate(body):
+            out = []
+            for c, cell in enumerate(row):
+                text, fits = wrap(cell, inner(c, (r, c) in logos), cfs, bold=c == 0)
+                ok = ok and fits and lines_px(text.count("\n") + 1, cfs) <= row_px
+                out.append(text)
+            cells.append(out)
+        heads = []
+        for c, label in enumerate(headers):
+            text, fits = wrap(label, inner(c, False), hfs, bold=True)
+            ok = ok and fits and lines_px(text.count("\n") + 1, hfs) <= row_px
+            heads.append(text)
+        if ok or cfs * 0.92 < _MIN_TABLE_FONT:
+            return cfs, hfs, cells, heads
+        scale *= 0.92
 
 
 _LOGO_PAD = 0.055  # axes fraction reserved left of the text in a cell that carries a logo

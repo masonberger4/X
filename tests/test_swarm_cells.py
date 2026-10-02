@@ -60,3 +60,17 @@ def test_parse_winner():
     assert parse_winner('Sure! {"winner":"a"}') == "A"
     assert parse_winner("winner: B") == "B"
     assert parse_winner("both are fine") is None
+
+
+def test_a_dollar_figure_outside_the_source_is_market_context_not_a_drop():
+    from swarm.cells import cell_problems
+
+    problems = cell_problems(
+        "The BCMA market is worth about $9 billion a year.",
+        slot="body",
+        source_text="ORR 88%",
+        is_preprint=False,
+    )
+    assert not any("numbers not in the source" in p for p in problems)
+    problems = cell_problems("ORR was 91%.", slot="body", source_text="ORR 88%", is_preprint=False)
+    assert any("numbers not in the source" in p for p in problems)

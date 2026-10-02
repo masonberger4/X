@@ -55,10 +55,15 @@ def cell_rules(max_chars: int = MAX_POST_CHARS) -> str:
     return f"""RULES for this one {unit} (one that breaks a rule is discarded by code):
 - At most {max_chars} characters. Aim under {max_chars - 30}.
 - NEVER write a URL, a link or a bare domain. Name the source in words instead.
+- No colons and no dashes (no em dash, no " - "). Write it the way a person talks, in
+  plain sentences.
 - No medical advice or treatment recommendations. No investment advice: never buy, sell,
   hold, short, a price target or a promised return. Describe; the reader decides.
 - Every number must appear verbatim in the source title or abstract. Do not round,
-  convert, subtract or compute. No number in the source means no number in the post.
+  convert, subtract or compute. The one exception is market context in dollars (the size
+  of the market the therapy targets, a comparable drug's sales, a published peak sales
+  estimate, a comparable deal) written with its $ sign, attributed, and only a figure you
+  are confident was published. It is fact-checked on the web before posting.
 - An interpretation, not a restatement: say what it means, what to watch, what is overhyped.
 - Write an account whose handle the brief lists as @handle when you name it; never invent
   a handle. Write every formal drug name (#Trastuzumab Deruxtecan, #cilta-cel) and every
@@ -284,7 +289,8 @@ def assemble_prompt(
         how
         + _visual_sentence(fmt)
         + ", suggested_visual, why_it_matters and claims_to_verify for every claim in "
-        "these posts that goes beyond the abstract. Output the JSON object only.",
+        "these posts that goes beyond the abstract, each dollar figure not in the source as "
+        "its own full sentence. Output the JSON object only.",
     ]
     return "\n".join(parts)
 

@@ -22,7 +22,7 @@ def client(db_file):
 def draft_id(conn):
     seed_item(conn, "i1", source="biorxiv")
     d = Draft(
-        thread=["Preprint: ORR 88%. one", "two", "three"],
+        thread=["Preprint. ORR 88%. one", "two", "three"],
         suggested_visual="plot",
         why_it_matters="matters",
         claims_to_verify=[Claim("ORR 88% appears in the abstract", "low")],
@@ -90,7 +90,7 @@ def test_the_run_fragment_reports_whether_a_run_is_in_flight(client):
 def test_the_approval_queue_is_part_of_the_same_app(client, conn, draft_id):
     assert client.get("/").status_code == 200  # the dashboard, not the queue
     assert f"/drafts/{draft_id}" in client.get("/queue").text
-    assert "Preprint: ORR 88%." in client.get(f"/drafts/{draft_id}").text
+    assert "Preprint. ORR 88%." in client.get(f"/drafts/{draft_id}").text
     assert client.get("/voice").status_code == 200
     r = client.post(f"/drafts/{draft_id}/approve", data={"note": "good"})
     assert r.status_code == 303 and r.headers["location"] == "/queue"
@@ -184,20 +184,14 @@ def test_the_pending_page_offers_draft_and_verify_and_shows_the_run_in_flight(cl
     body = client.get("/queue").text
     assert ">Draft<" in body and ">Verify<" in body and 'value="verify"' in body
     assert "disabled" not in body.split('class="runbar"')[1].split("</div>")[0]
-    monkeypatch.setattr(
-        panel_app,
-        "current_run",
-        lambda: {
-            "id": "x",
-            "steps": ["draft"],
-            "active_step": "draft",
-            "active_for": "3s",
-            "started": "now",
-        },
-    )
-    panel_app._adopt_queue_routes()  # re-register the (patched) global on the queue's env
+    run = {"id": "x", "steps": ["draft"], "active_step": "draft", "active_for": "3s"}
+    monkeypatch.setattr(panel_app, "current_runs", lambda: [{**run, "started": "now"}])
+    monkeypatch.setattr(panel_app, "busy_steps", lambda: {"draft"})
+    panel_app._adopt_queue_routes()  # re-register the (patched) globals on the queue's env
     body = client.get("/queue").text
     bar = body.split('class="runbar"')[1].split("</div>")[0]
+    # only the busy step's button is disabled: Verify still starts beside the draft run
+    assert bar.count("disabled") == 1 and "draft is already running" in bar
     assert "running" in bar and "watch the log" in bar and "disabled" in bar
 
 

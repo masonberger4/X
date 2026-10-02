@@ -82,6 +82,8 @@ def install_standalone_globals() -> None:
     is process-wide; a test that wants the standalone pages calls this to put them back."""
     templates.env.globals["HAS_PANEL"] = False
     templates.env.globals["current_run"] = lambda: None
+    templates.env.globals["current_runs"] = lambda: []
+    templates.env.globals["busy_steps"] = lambda: set()
     templates.env.globals["publish_live"] = lambda: False
     templates.env.globals["publish_running"] = lambda: False
 

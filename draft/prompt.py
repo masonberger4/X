@@ -81,7 +81,13 @@ def hard_rules(fmt: Format | None = None) -> str:
    the first thread post.
 4. Every number you write must appear verbatim in the source abstract or title. Do not
    round, convert units, compute differences or percentages, or infer sample sizes.
-   If a number you want is not in the abstract, leave it out.
+   If a number you want is not in the abstract, leave it out. ONE exception, market
+   context in dollars: the size of the market a therapy targets, a comparable drug's
+   sales, a published peak sales estimate, a list price or a comparable deal's value may
+   come from what you know, written with its $ sign and attributed ("the BCMA market did
+   about $X last year", "analysts put peak sales near $X"). Use only a figure you are
+   confident was published, never one you worked out, and put each one in claims_to_verify
+   as a full sentence carrying the figure. Every one is checked on the web before posting.
 {r5}
 {r6}
 7. Every post must contain an interpretation, not just a restatement (see voice guide).
@@ -111,6 +117,10 @@ def hard_rules(fmt: Format | None = None) -> str:
    each time it appears. A trial's name (KEYNOTE-189) is plain text, never a hashtag; tag
    the trial by its NCT number when the source gives one. No other hashtags.
 {r12}
+13. Write like a human talking, not a press release or a slide. NO colons (a time or a
+   ratio such as 2:1 is fine) and NO em dashes, en dashes, "--" or " - " used as a dash.
+   Where you want one, end the sentence or use a comma. "Read-across: the comps got a
+   price" becomes "The read-across is simple. The comps just got a price."
 """
 
 

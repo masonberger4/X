@@ -136,7 +136,8 @@ class Score(BaseModel):
 class Database:
     def __init__(self, path: str = ":memory:"):
         self.path = path
-        self.conn = sqlite3.connect(path)
+        # Steps run side by side (ops/config.yaml), so wait out another writer.
+        self.conn = sqlite3.connect(path, timeout=30)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
