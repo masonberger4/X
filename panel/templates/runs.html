@@ -56,7 +56,13 @@
     var flag = box.querySelector("#run-state");
     return flag !== null && flag.getAttribute("data-running") === "1";
   }
+  function selecting() {
+    // Replacing the fragment would drop a selection the reader is about to copy.
+    var sel = window.getSelection();
+    return sel !== null && !sel.isCollapsed && box.contains(sel.anchorNode);
+  }
   function poll() {
+    if (selecting()) { setTimeout(poll, 2000); return; }
     fetch("/runs/current", {headers: {"Accept": "text/html"}})
       .then(function (r) { return r.text(); })
       .then(function (html) {
