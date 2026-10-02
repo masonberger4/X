@@ -564,6 +564,9 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    claims show as "not checked yet" and the run carries on. The `draft` and
    `evolve` steps have no time limit: with the swarm on and the Claude Code
    backend, every cell is one CLI launch and a run can take an hour or more.
+   `parallel_calls` in `swarm\config.yaml` (6 shipped) launches that many
+   cells, or judge matches, side by side; set it to 1 if the CLI hits its
+   usage limits, which costs time, not draft quality.
    Until that settles, run the steps by hand from the panel and post from
    the approved page; the scheduler can come back later.
    ```

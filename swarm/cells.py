@@ -93,26 +93,45 @@ def dedupe(candidates: list[str], max_similarity: float) -> list[str]:
 Judge = Callable[[str, str], str]
 
 
-def tournament(candidates: list[str], judge: Judge) -> tuple[str, list[dict]]:
-    """Single elimination. judge(a, b) returns the winning text. The A/B presentation order is
-    swapped on alternate matches so a position-biased judge does not decide every round the
-    same way. Returns (winner, match log)."""
+JudgeRound = Callable[[list[tuple[str, str]]], list[str]]
+
+
+def tournament(
+    candidates: list[str], judge: Judge | None = None, *, judge_round: JudgeRound | None = None
+) -> tuple[str, list[dict]]:
+    """Single elimination. judge(a, b) returns the winning text; `judge_round` instead takes
+    every (a, b) match of one round at once (so the engine can judge them side by side) and
+    returns the winners in order. The A/B presentation order is swapped on alternate matches
+    so a position-biased judge does not decide every round the same way. Returns (winner,
+    match log)."""
     if not candidates:
         raise ValueError("no candidates")
+    if judge_round is None:
+        if judge is None:
+            raise ValueError("tournament needs judge or judge_round")
+        _judge = judge
+
+        def judge_round(pairs: list[tuple[str, str]]) -> list[str]:
+            return [_judge(a, b) for a, b in pairs]
+
     log: list[dict] = []
     pool = list(candidates)
     match = 0
     while len(pool) > 1:
-        nxt: list[str] = []
+        pairs: list[tuple[str, str]] = []
+        presented: list[tuple[str, str]] = []
         for i in range(0, len(pool) - 1, 2):
             a, b = pool[i], pool[i + 1]
-            first, second = (a, b) if match % 2 == 0 else (b, a)
-            winner = judge(first, second)
+            pairs.append((a, b))
+            presented.append((a, b) if match % 2 == 0 else (b, a))
+            match += 1
+        winners = judge_round(presented)
+        nxt: list[str] = []
+        for (a, b), (first, second), winner in zip(pairs, presented, winners, strict=True):
             if winner not in (a, b):
                 winner = a
             log.append({"a": first, "b": second, "winner": winner})
             nxt.append(winner)
-            match += 1
         if len(pool) % 2:
             nxt.append(pool[-1])  # bye
         pool = nxt
