@@ -260,6 +260,41 @@ def fetch_stage_activity(conn: sqlite3.Connection, now: datetime | None = None) 
     return act
 
 
+def fetch_feed_yes_undrafted(
+    conn: sqlite3.Connection,
+    min_score: float,
+    since_hours: float = 48.0,
+    now: datetime | None = None,
+) -> tuple[int, int]:
+    """Stories the editor said yes to on the feed (latest human rating >= 4, as
+    score/editorial.py reads it) that have no draft of any status yet, and how many of
+    those the next `run_draft.py` will pick up: it selects by score (>= min_score, latest
+    score within since_hours), not by the feed decision. (0, 0) when tables are missing."""
+    present = tables(conn)
+    if not {"clusters", "scores", "ratings"} <= present:
+        return 0, 0
+    now = now or _now()
+    no_draft = (
+        "AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.cluster_id = c.id)"
+        if "drafts" in present
+        else ""
+    )
+    row = conn.execute(
+        f"""SELECT COUNT(*),
+                   COALESCE(SUM(s.total >= ? AND s.scored_at >= ?), 0)
+            FROM clusters c
+            JOIN ratings r ON r.id = (SELECT id FROM ratings
+                                      WHERE cluster_id = c.id
+                                        AND (rater IS NULL OR rater = 'human')
+                                      ORDER BY id DESC LIMIT 1)
+            LEFT JOIN scores s ON s.id = (SELECT id FROM scores WHERE cluster_id = c.id
+                                          ORDER BY id DESC LIMIT 1)
+            WHERE r.rating >= 4 {no_draft}""",
+        (min_score, _iso(now - timedelta(hours=since_hours))),
+    ).fetchone()
+    return int(row[0] or 0), int(row[1] or 0)
+
+
 def fetch_publish_state(conn: sqlite3.Connection, now: datetime | None = None) -> PublishState:
     """Step 3, as merged on main (publish/store.py):
       schedule(id, draft_id UNIQUE, scheduled_for, claimed_at, finished_at,

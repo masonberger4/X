@@ -12,6 +12,14 @@
   {% if last_auto %}· last automatic run {{ last_auto.started_at|localtime }}: <span class="pill {{ last_auto.status }}">{{ last_auto.summary }}</span>{% endif %}
   · <a href="/runs">settings</a></p>
 
+<h2>Drafting</h2>
+<div class="cards">
+  <div class="card"><div class="n">{{ yes_undrafted }}</div><div class="meta">said yes on the feed, not drafted</div></div>
+  <div class="card"><div class="n">{{ yes_draftable }}</div><div class="meta">of those, picked up by the next draft run</div></div>
+</div>
+<p class="meta">The draft step chooses stories by score ({{ draft_threshold }}+, scored in the last 48h), not by the
+feed's yes/no, so a yes below the bar or older than that is not drafted. <a href="/feed">Feed</a></p>
+
 <h2>Checks</h2>
 <table>
   <tr><th>Check</th><th>Status</th><th>Summary</th></tr>

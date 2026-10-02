@@ -295,3 +295,29 @@ def test_configured_backend_follows_the_env_override(monkeypatch):
     assert store.configured_backend() == "claude_code"
     monkeypatch.setenv("LLM_BACKEND", "nonsense")
     assert store.configured_backend() == "api"  # a bad value falls back, never raises
+
+
+def test_fetch_feed_yes_undrafted(conn):
+    def rate(cid, rating, rater=None):
+        conn.execute(
+            "INSERT INTO ratings (cluster_id, rating, rated_at, rater) VALUES (?, ?, ?, ?)",
+            (cid, rating, iso(datetime.now(UTC)), rater),
+        )
+
+    ready = seed_item(conn, "a", total=40, hours_ago=1)
+    low = seed_item(conn, "b", total=10, hours_ago=1)  # yes, but under the bar
+    old = seed_item(conn, "c", total=40, hours_ago=72)  # yes, scored too long ago
+    drafted = seed_item(conn, "d", total=40, hours_ago=1)
+    changed = seed_item(conn, "e", total=40, hours_ago=1)  # yes, then no
+    auto = seed_item(conn, "f", total=40, hours_ago=1)  # only the model said yes
+    for cid in (ready, low, old, drafted, changed):
+        rate(cid, 5)
+    rate(changed, 1)
+    rate(auto, 5, "auto:m")
+    from approval_queue import store as qstore
+
+    qstore.insert_draft(
+        conn, item_id="d", cluster_id=drafted, model="m", draft=Draft(["x"], "", "")
+    )
+    conn.commit()
+    assert store.fetch_feed_yes_undrafted(conn, 30) == (3, 1)
