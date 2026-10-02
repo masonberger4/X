@@ -130,6 +130,8 @@ def cmd_run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
             POSTING_FLAG,
         )
         return 1
+    if not only:  # a manual step (draft_retry) runs only when --only names it
+        steps = [s for s in steps if not s.manual]
     tail = int(cfg.get("run_log_tail_chars", 4000))
 
     if args.dry_run:
