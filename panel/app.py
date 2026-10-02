@@ -214,8 +214,6 @@ def dashboard(request: Request, conn: Conn, backed_up: str = "", backup_error: s
     report = run_ops.build_report(conn, CONFIG, db_path, now)
     last_runs = ops_store.last_run_per_step(conn)
     latest_backup = ops_backup.latest_backup(CONFIG["backups"]["dir"])
-    threshold = feed.feed_settings(root_config.load_config())["threshold"]
-    yes_undrafted, yes_draftable = ops_store.fetch_feed_yes_undrafted(conn, threshold, now=now)
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -225,9 +223,7 @@ def dashboard(request: Request, conn: Conn, backed_up: str = "", backup_error: s
             "checks": views.check_rows(report),
             "steps": views.step_rows(JOBS.steps(), last_runs, now),
             "counts": ops_store.table_counts(conn),
-            "yes_undrafted": yes_undrafted,
-            "yes_draftable": yes_draftable,
-            "draft_threshold": threshold,
+            "yes_undrafted": ops_store.fetch_feed_yes_undrafted(conn),
             "db_path": str(db_path),
             "db_size_mb": db_path.stat().st_size / (1024 * 1024) if db_path.exists() else 0.0,
             "disk_free_mb": _disk_free_mb(db_path),

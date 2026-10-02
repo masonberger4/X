@@ -305,8 +305,8 @@ def test_fetch_feed_yes_undrafted(conn):
         )
 
     ready = seed_item(conn, "a", total=40, hours_ago=1)
-    low = seed_item(conn, "b", total=10, hours_ago=1)  # yes, but under the bar
-    old = seed_item(conn, "c", total=40, hours_ago=72)  # yes, scored too long ago
+    low = seed_item(conn, "b", total=10, hours_ago=1)
+    old = seed_item(conn, "c", total=40, hours_ago=72)
     drafted = seed_item(conn, "d", total=40, hours_ago=1)
     changed = seed_item(conn, "e", total=40, hours_ago=1)  # yes, then no
     auto = seed_item(conn, "f", total=40, hours_ago=1)  # only the model said yes
@@ -320,4 +320,21 @@ def test_fetch_feed_yes_undrafted(conn):
         conn, item_id="d", cluster_id=drafted, model="m", draft=Draft(["x"], "", "")
     )
     conn.commit()
-    assert store.fetch_feed_yes_undrafted(conn, 30) == (3, 1)
+    assert store.fetch_feed_yes_undrafted(conn) == 3
+
+
+def test_fetch_candidates_takes_feed_yes_first(conn):
+    from approval_queue import store as qstore
+
+    seed_item(conn, "hi", total=40)
+    low = seed_item(conn, "low", total=5)
+    old = seed_item(conn, "old", total=5, hours_ago=200)
+    seed_item(conn, "skip", total=5)
+    for cid in (low, old):
+        conn.execute(
+            "INSERT INTO ratings (cluster_id, rating, rated_at) VALUES (?, 5, ?)",
+            (cid, iso(datetime.now(UTC))),
+        )
+    conn.commit()
+    ids = [c.item_id for c in qstore.fetch_candidates(30, 48, conn=conn)]
+    assert ids == ["low", "old", "hi"]
