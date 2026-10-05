@@ -191,6 +191,11 @@ source only when it is due, and score only scores what is new.
    python run_draft.py --retry-failed            # try again on stories whose draft failed
    python run_draft.py --retag                   # apply @handles and #tags to current drafts
    ```
+   In the panel, the pending page's **Retry failed** button runs the `draft_retry` step
+   from `ops/config.yaml`: `--retry-failed --since-hours 480 --limit 10`, so failed
+   stories from the last 20 days are drafted again. It is a `manual: true` step:
+   `run_ops.py run` skips it unless `--only draft_retry` names it, the automatic runs
+   never start it, and it shares draft's lock so the two never run side by side.
    A draft may come with a picture. Nothing draws it freehand: when the source
    has two or more comparable numbers (arms, endpoints, cohorts) the drafter
    lists them as a small bar-chart spec, every number in it is checked
@@ -239,6 +244,22 @@ source only when it is due, and score only scores what is new.
    company cells, consistent numbers, a quiet source line, and whether the
    card would stand out from the account's other cards), and
    those per-item scores show next to each render on the draft page.
+
+   A chart comes in three kinds, and the drafter picks the one that fits the
+   data. **Grouped** puts two to four arms side by side across up to six
+   endpoints that share a unit (drug vs control on ORR and CR rate) for a
+   randomised readout. **Stat** draws one to four headline numbers as big
+   tiles, each with its own unit (a single-arm ORR of 73% next to a median PFS
+   of 11 months). **Bars** is one endpoint across arms, doses, cohorts or
+   competitors. Every number in each kind is checked against the source. A bar
+   chart whose bars are all equal (two arms both "in phase 3") compares nothing,
+   so the draft is sent back to the model.
+
+   Every card also shows the story's company logo in its top right corner: the
+   company whose own site published the story (its `domain:`, or its feed's
+   site), otherwise the first configured company the chart or table title
+   names. A card from a journal or a regulator about no configured company has
+   no header logo.
 
    Company cells in a table, and chart bars labelled with a company, get a
    stock ticker and a logo automatically when
@@ -476,6 +497,22 @@ publisher, and the scheduler (part 6) refuses to run if any step in
 out; pick a time when you can stay with it for the first hour and answer
 replies, since that hour decides how far X shows it.
 
+**Copy-paste posting (shipped, no X API needed).** With `posting: manual` in
+`publish\config.yaml`, "Publish now" opens a copy-paste page instead of calling
+the X API:
+
+- each post of the thread with a **Copy text** button (numbered exactly as the
+  publisher would post it), and under it its picture(s) with **Copy picture**,
+  a download link and the alt text for X's "Add description";
+- a link to x.com's composer. Paste post 1's text and picture, press **+** for
+  each next post, and post it;
+- back on the page, optionally paste the link to the first post (feedback can
+  then read its metrics), and press **I posted it, everything went OK**. That
+  logs the draft as posted, so it leaves the approved list and counts toward
+  the daily limit. Nothing is sent to X from here.
+
+Set `posting: api` to go back to posting through the X API (the steps below).
+
 1. Rehearse. With no flags nothing is sent; it prints what would post and
    when, based on approved drafts and the slots in `publish\config.yaml`.
    ```
@@ -560,6 +597,9 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    verify in order and records each step. Each step takes its own lock
    (`<lock_path>.<lock name>`) while it runs, so a step the control panel is
    already running is skipped as `locked` and the rest carry on.
+   The `draft_retry` step is `manual: true`: a plain `run_ops.py run` and the
+   automatic runs skip it, and it runs only from the pending page's "Retry failed"
+   button or `run_ops.py run --only draft_retry`.
    The `verify` step runs after `draft` and is optional: if it fails, the
    claims show as "not checked yet" and the run carries on. The `draft` and
    `evolve` steps have no time limit: with the swarm on and the Claude Code
@@ -707,6 +747,11 @@ to stop it. Four pages:
   "Back up now" under Storage saves a copy of the database right away, the
   same verified copy `run_ops.py backup` makes, into the same `backups\`
   folder (the oldest beyond `backups: keep` in `ops\config.yaml` are removed).
+  Under Drafting, how many stories you said yes to on the feed have no draft
+  yet. A yes sends a story to drafting whatever its score or age: the next
+  draft run takes those first, then the best-scored new stories (score at
+  `scoring: threshold` in `config.yaml` or above, scored in the last 48
+  hours), at most `--limit` (10) a run.
 - **Sources** (`/sources`) — every source from `config.yaml`: when it last
   ran, how many items it fetched, how many were new, and the last error if
   it failed. A source in red has been failing; one in amber has not run for
