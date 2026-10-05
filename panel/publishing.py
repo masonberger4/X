@@ -1,4 +1,10 @@
-"""The approved page's two publishing actions, behind the control panel only.
+"""The approved page's publishing actions, behind the control panel only.
+
+Manual posting (`posting: manual` in publish/config.yaml): `manual_post` gathers what the
+copy-paste page shows for one approved draft (each post's final text, numbered and
+re-checked exactly as run_publish.py would post it, and the pictures anchored to it), and
+`confirm_manual` logs it as posted through step 3's own `publish.store.record_manual` once
+the human says it is on X. Nothing here talks to X.
 
 `parse_order` is pure: the "Set schedule" form's `order_<draft id>` boxes become the
 ordered list of draft ids (blank boxes drop out, ties keep the page's order). `save_order`
@@ -9,7 +15,13 @@ touches only `schedule.position` on unclaimed rows, never a draft or a post.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+import run_publish
 from publish import store as publish_store
+from publish.scheduler import load_publish_config
+from publish.thread import ThreadError
 
 ORDER_PREFIX = "order_"
 
@@ -39,5 +51,69 @@ def save_order(ordered_ids: list[int]) -> int:
     conn = publish_store.connect()
     try:
         return publish_store.set_order(conn, ordered_ids)
+    finally:
+        conn.close()
+
+
+@dataclass
+class ManualPost:
+    """One post of the copy-paste page: its text and its pictures [(index, alt)]."""
+
+    position: int
+    text: str
+    images: list[tuple[int, str]] = field(default_factory=list)
+
+
+@dataclass
+class ManualDraft:
+    draft_id: int
+    title: str
+    shape: str
+    posts: list[ManualPost]
+    image_paths: list[str]  # by index, what /publishing/manual/{id}/image/{index} serves
+    error: str | None = None  # the text fails a hard check: post nothing
+    blocked: str | None = None  # the daily cap or the gap says wait (a warning only)
+    status: str | None = None  # step 3's state when the draft is no longer waiting
+
+
+def manual_post(draft_id: int, now: datetime | None = None) -> ManualDraft | None:
+    """What to paste for one draft, or None when it is not an approved draft. A draft that
+    is already claimed (posted, or a run has it) comes back with `status` set and no posts."""
+    cfg = load_publish_config()
+    conn = publish_store.connect()
+    try:
+        found = publish_store.fetch_approved(limit=1, conn=conn, draft_ids=[draft_id])
+        if not found:
+            row = publish_store.get_schedule(conn, draft_id)
+            if row is None:
+                return None
+            return ManualDraft(draft_id, "", "", [], [], status=row["status"])
+        approved = found[0]
+        policy = run_publish.build_policy(conn, cfg, now or datetime.now(UTC))
+        blocked = policy.blocked_reason(now or datetime.now(UTC))
+    finally:
+        conn.close()
+    try:
+        _, texts = run_publish.texts_for(approved, cfg["thread_numbering"])
+    except ThreadError as exc:
+        return ManualDraft(draft_id, approved.title, approved.shape, [], [], error=str(exc))
+    paths: list[str] = []
+    posts = [ManualPost(i, t) for i, t in enumerate(texts, 1)]
+    for pos, pics in sorted(run_publish.images_for(approved, cfg).items()):
+        target = posts[min(pos, len(posts)) - 1]
+        for path, alt in pics:
+            target.images.append((len(paths), alt))
+            paths.append(path)
+    return ManualDraft(draft_id, approved.title, approved.shape, posts, paths, blocked=blocked)
+
+
+def confirm_manual(draft_id: int, first_url: str = "") -> bool:
+    """Log a hand-posted draft as posted. False when it is not waiting any more."""
+    draft = manual_post(draft_id)
+    if draft is None or draft.status or draft.error or not draft.posts:
+        return False
+    conn = publish_store.connect()
+    try:
+        return publish_store.record_manual(conn, draft_id, [p.text for p in draft.posts], first_url)
     finally:
         conn.close()

@@ -35,6 +35,17 @@ steps:
     enabled: true
     required: true
     timeout_seconds: 0
+  # Manual only (the pending page's "Retry failed" button, or run_ops.py run --only
+  # draft_retry): draft again the stories whose only drafts failed the hard rules,
+  # looking back 20 days rather than draft's 48 hours. A plain run and the automatic
+  # runs never start it; it shares draft's lock so the two never run at once.
+  - name: draft_retry
+    argv: ["python", "run_draft.py", "--retry-failed", "--since-hours", "480", "--limit", "10"]
+    enabled: true
+    required: false
+    manual: true
+    lock: draft
+    timeout_seconds: 0
   # Step 2b: check each new draft's claims against the web and attach the evidence so
   # the queue shows it. Optional: a failure here leaves the claims "unchecked", never
   # blocks the run. No time limit (0): each claim is one web-search call of a minute

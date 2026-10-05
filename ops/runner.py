@@ -46,6 +46,7 @@ class Step:
     required: bool = False
     timeout_seconds: int = 600  # 0 = no limit: the step runs until it exits or is stopped
     lock: str = ""  # the step's lock name; empty means its own name
+    manual: bool = False  # only when named: a button or --only, never a plain run or the timer
 
     @property
     def lock_name(self) -> str:
@@ -64,6 +65,7 @@ class Step:
             required=bool(raw.get("required", False)),
             timeout_seconds=int(raw.get("timeout_seconds", 600)),
             lock=str(raw.get("lock") or ""),
+            manual=bool(raw.get("manual", False)),
         )
 
 

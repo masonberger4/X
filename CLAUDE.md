@@ -263,7 +263,9 @@ carrying `--live`).
   `verify/store.py:carry_over_table_checks` (same row label, column and cell text keeps
   its verdict). `check_hard_rules` scans table cells for advice phrases.
 - Step 2 reads step 1's tables only through
-  `approval_queue/store.py:fetch_candidates` (one candidate per cluster). Its own
+  `approval_queue/store.py:fetch_candidates` (one candidate per cluster: score at or
+  above the bar within `--since-hours`, plus every story whose latest human feed rating is
+  yes whatever its score or age, those first). Its own
   tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
   An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
   decision carrying the text and the optional note) puts an approved draft back to

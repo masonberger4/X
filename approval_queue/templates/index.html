@@ -7,6 +7,7 @@
 <p class="meta">Tell the drafter what to change and it rewrites the post; open a draft for the full text, claims and approve buttons. Your notes and rejection reasons teach the drafter: see the <a href="/voice">voice report</a>.</p>
 {% if status == "pending" %}
   {% with buttons=[{"label": "Draft", "steps": ["draft"], "title": "draft posts for the stories that cleared the score threshold"},
+                   {"label": "Retry failed", "steps": ["draft_retry"], "title": "draft again the stories (last 20 days) whose only drafts failed the hard rules"},
                    {"label": "Verify", "steps": ["verify"], "title": "check every unchecked claim against the web (and auto-revise)"}],
           back="/queue" %}{% include "_run.html" %}{% endwith %}
 {% endif %}
@@ -48,10 +49,10 @@
           {% else %}<span class="pill warn">{{ p.status }}</span>{% endif %}
           {% if HAS_PANEL and (not p or p.status == "pending") %}
           <form method="post" action="/publishing/now" class="order-hide" style="margin-top:.3rem"
-                onsubmit="return confirm('Post draft {{ d.id }} to X now?')">
+                {% if not (manual_posting is defined and manual_posting()) %}onsubmit="return confirm('Post draft {{ d.id }} to X now?')"{% endif %}>
             <input type="hidden" name="draft_id" value="{{ d.id }}">
             <input type="hidden" name="back" value="/status/approved">
-            <button type="submit" {% if publish_running() %}disabled title="a publish is already running"{% endif %}>Publish now</button>
+            <button type="submit" {% if not (manual_posting is defined and manual_posting()) and publish_running() %}disabled title="a publish is already running"{% endif %}>Publish now</button>
           </form>
           {% endif %}
           {% if releasable.get(d.id) %}
