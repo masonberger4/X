@@ -52,6 +52,9 @@ include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "panel*"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# The studio's reference pieces are kept exactly as they were posted and handed off,
+# Python snippets in their Markdown included: never lint or reformat them.
+extend-exclude = ["studio/exemplars"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
