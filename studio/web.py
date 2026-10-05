@@ -11,13 +11,24 @@
   POST /studio/{id}/resume     a failed or interrupted piece: pick it up where it stopped
   POST /studio/{id}/discard    give up on a piece (its files stay on disk)
   GET  /studio/playbook        the playbook every session reads
-  POST /studio/playbook        save the editor's edit of it (the data folder's copy)
+  POST /studio/playbook        save the editor's edit of it as a new version
+  POST /studio/playbook/reset  the shipped seed as a new version
+  GET  /studio/performance     what X says: each posted piece's numbers, what each angle,
+                               shape, hook style and card count has done, the lean, and
+                               the playbook's history
+  POST /studio/performance/{id}/metrics          a piece's numbers, typed in from X
+  POST /studio/performance/{id}/link             the link of a piece posted by hand without it
+  POST /studio/playbook/versions/{id}/revert     put an earlier version back (as a new one)
+  POST /studio/playbook/versions/{id}/apply      apply the learning loop's open proposal
 
 Every button records what the editor wants in studio_pieces / studio_topics (this module
-writes only the studio's own tables, through studio/store.py) and then asks the panel to
-start the `studio_now` or `studio_resume` step from ops/config.yaml; the run itself, its
-log and its Stop button are the runs page's, like every other step. Without a panel the
-request waits for the next automatic studio run.
+writes only the studio's own tables, through studio/store.py and studio/playbook.py) and
+then asks the panel to start the `studio_now`, `studio_resume` or `studio_learn_now` step
+from ops/config.yaml; the run itself, its log and its Stop button are the runs page's,
+like every other step. Without a panel the request waits for the next automatic studio
+run. The one write elsewhere is the performance page's "add the link", which the panel
+does through step 3's own module (panel/publishing.py:add_head_link) when it wires this
+router in.
 """
 
 from __future__ import annotations
@@ -36,7 +47,11 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import ChoiceLoader, FileSystemLoader
 
 from studio import angles as A
+from studio import dashboard as D
+from studio import evidence as E
 from studio import ingest
+from studio import learn as L
+from studio import playbook as PB
 from studio import prompt as P
 from studio import store as S
 from studio.settings import DEFAULT_PLAYBOOK, PLAYBOOK_NAME, load_studio_config, playbook_path
@@ -46,6 +61,7 @@ log = logging.getLogger(__name__)
 TEMPLATES_DIR = Path(__file__).with_name("templates")
 STEP_NEW = "studio_now"
 STEP_RESUME = "studio_resume"
+STEP_LEARN = "studio_learn_now"
 LOG_TAIL_LINES = 400
 LOG_TAIL_BYTES = 4_000_000
 
@@ -53,15 +69,22 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Set by the panel when it includes this router: start_steps(["studio_now"]) starts a run
-# of those configured steps and returns a message (or raises with the reason it cannot).
-_starter: dict[str, Callable[[list[str]], str] | None] = {"start": None}
+# of those configured steps and returns a message (or raises with the reason it cannot);
+# add_link(draft_id, url) gives a draft posted by hand its X link and returns a message
+# (or raises ValueError with the reason).
+_starter: dict[str, Callable[..., str] | None] = {"start": None, "add_link": None}
 
 
 def configure(
-    *, start_steps: Callable[[list[str]], str] | None, queue_templates: Path | None
+    *,
+    start_steps: Callable[[list[str]], str] | None,
+    queue_templates: Path | None,
+    add_link: Callable[[int, str], str] | None = None,
 ) -> None:
-    """Wire the router into the panel: how to start a run, and the shared layout."""
+    """Wire the router into the panel: how to start a run, how to add a post's link, and
+    the shared layout."""
     _starter["start"] = start_steps
+    _starter["add_link"] = add_link
     loaders = [FileSystemLoader(str(TEMPLATES_DIR))]
     if queue_templates is not None:
         loaders.append(FileSystemLoader(str(queue_templates)))
@@ -112,10 +135,15 @@ def _start(steps: list[str]) -> str:
 
 
 def _redirect(path: str, flash: str = "") -> RedirectResponse:
+    """303 to `path` with the message in its query (before any #fragment, which the
+    browser keeps to itself)."""
     from urllib.parse import quote
 
+    if not flash:
+        return RedirectResponse(path, status_code=303)
+    path, hash_, fragment = path.partition("#")
     sep = "&" if "?" in path else "?"
-    return RedirectResponse(f"{path}{sep}flash={quote(flash)}" if flash else path, status_code=303)
+    return RedirectResponse(f"{path}{sep}flash={quote(flash)}{hash_}{fragment}", status_code=303)
 
 
 def _piece_or_404(conn: Any, piece_id: int) -> S.Piece:
@@ -259,15 +287,23 @@ def studio_drop_topic(topic_id: int, conn: Conn):
     return _redirect("/studio", "topic dropped")
 
 
+def _seed_text() -> str:
+    return _read(DEFAULT_PLAYBOOK)
+
+
 @router.get("/studio/playbook", response_class=HTMLResponse)
-def studio_playbook(request: Request, flash: str = ""):
+def studio_playbook(request: Request, conn: Conn, flash: str = ""):
     path = playbook_path(_data_folder())
+    text = _read(path)
     return templates.TemplateResponse(
         request,
         "studio_playbook.html",
         {
-            "text": _read(path),
+            "text": text,
             "editable_copy": path.name == PLAYBOOK_NAME,
+            "is_seed": text == _seed_text(),
+            "version": S.current_playbook_version(conn),
+            "proposal": S.open_proposal(conn),
             "path": str(path),
             "flash": flash,
         },
@@ -275,24 +311,141 @@ def studio_playbook(request: Request, flash: str = ""):
 
 
 @router.post("/studio/playbook")
-async def studio_save_playbook(request: Request):
+async def studio_save_playbook(request: Request, conn: Conn):
     form = await _form(request)
     text = (form.get("text") or [""])[0].replace("\r\n", "\n")
     if not text.strip():
         return _redirect("/studio/playbook", "the playbook cannot be empty")
-    target = _data_folder() / PLAYBOOK_NAME
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(text.rstrip() + "\n", encoding="utf-8")
-    tmp.replace(target)
-    return _redirect("/studio/playbook", "saved; the next session reads it")
+    note = _first(form, "note")
+    version = PB.save(
+        conn,
+        _data_folder(),
+        text.rstrip() + "\n",
+        source=S.PLAYBOOK_EDITOR,
+        changelog=[note or "edited by hand"],
+    )
+    return _redirect("/studio/playbook", f"saved as version {version}; the next session reads it")
 
 
 @router.post("/studio/playbook/reset")
-def studio_reset_playbook():
-    target = _data_folder() / PLAYBOOK_NAME
-    if target.is_file():
-        target.unlink()
-    return _redirect("/studio/playbook", f"back to the shipped seed ({DEFAULT_PLAYBOOK.name})")
+def studio_reset_playbook(conn: Conn):
+    seed = _seed_text()
+    if not seed.strip():
+        return _redirect("/studio/playbook", "the shipped seed is missing")
+    version = PB.save(
+        conn,
+        _data_folder(),
+        seed,
+        source=S.PLAYBOOK_REVERT,
+        changelog=[f"back to the shipped seed ({DEFAULT_PLAYBOOK.name})"],
+    )
+    return _redirect(
+        "/studio/playbook",
+        f"back to the shipped seed ({DEFAULT_PLAYBOOK.name}), as version {version}",
+    )
+
+
+@router.post("/studio/playbook/versions/{version_id}/revert")
+def studio_revert_playbook(version_id: int, conn: Conn):
+    try:
+        new = PB.revert(conn, _data_folder(), version_id)
+    except KeyError:
+        raise HTTPException(404, "no such version") from None
+    return _redirect(
+        "/studio/performance#playbook",
+        f"version {version_id} is back, as version {new}; the next session reads it",
+    )
+
+
+@router.post("/studio/playbook/versions/{version_id}/apply")
+def studio_apply_proposal(version_id: int, conn: Conn):
+    try:
+        new = PB.apply_proposal(conn, _data_folder(), version_id)
+    except KeyError:
+        return _redirect(
+            "/studio/performance#playbook",
+            f"version {version_id} is not the open proposal any more (a later version overtook it)",
+        )
+    return _redirect(
+        "/studio/performance#playbook",
+        f"proposal {version_id} applied as version {new}; the next session reads it",
+    )
+
+
+@router.get("/studio/performance", response_class=HTMLResponse)
+def studio_performance(request: Request, conn: Conn, flash: str = ""):
+    from datetime import UTC, datetime
+
+    cfg = load_studio_config()
+    now = datetime.now(UTC)
+    try:
+        angle_keys = list(A.load_angles())
+    except (OSError, ValueError):
+        angle_keys = []
+    ev, error = None, ""
+    try:
+        ev = E.measure(conn, cfg)
+    except Exception as exc:  # a page that explains beats a 500
+        log.exception("could not read what X says")
+        error = f"could not read the numbers: {exc}"
+    ev = ev or E.Evidence(measured=[], heads=[])
+    last = S.last_learned(conn)
+    return templates.TemplateResponse(
+        request,
+        "studio_performance.html",
+        {
+            "cfg": cfg,
+            "kpi": L.describe_kpi(str(cfg["learn"]["kpi"])),
+            "ev": ev,
+            "rows": D.piece_rows(ev, cfg, now),
+            "arms": D.arm_tables(ev, cfg, angles=angle_keys),
+            "state": D.learn_state(ev, cfg, last, now),
+            "versions": D.version_rows(S.playbook_versions(conn, 200), S.open_proposal(conn)),
+            "said": E.block(ev, cfg),
+            "metrics": S.MANUAL_METRICS,
+            "small": len(ev.scored) < L.SMALL_SAMPLE,
+            "error": error,
+            "flash": flash,
+            "can_link": _starter["add_link"] is not None,
+            "step_learn": STEP_LEARN,
+        },
+    )
+
+
+@router.post("/studio/performance/{piece_id}/metrics")
+async def studio_add_metrics(request: Request, piece_id: int, conn: Conn):
+    piece = _piece_or_404(conn, piece_id)
+    form = await _form(request)
+    counts: dict[str, int] = {}
+    for name in S.MANUAL_METRICS:
+        raw = _first(form, name).replace(",", "")
+        if not raw:
+            continue
+        if not (raw.isascii() and raw.isdigit()):
+            return _redirect("/studio/performance", f"{name}: a whole number, not {raw!r}")
+        counts[name] = int(raw)
+    if not counts:
+        return _redirect("/studio/performance", "type at least one of the numbers X shows")
+    S.add_manual_metrics(conn, piece.id, counts)
+    return _redirect(
+        "/studio/performance", f"numbers saved for piece {piece.id}; they count from now on"
+    )
+
+
+@router.post("/studio/performance/{piece_id}/link")
+async def studio_add_link(request: Request, piece_id: int, conn: Conn):
+    piece = _piece_or_404(conn, piece_id)
+    add_link = _starter["add_link"]
+    if add_link is None:
+        return _redirect("/studio/performance", "adding a link needs the control panel")
+    if piece.draft_id is None:
+        return _redirect("/studio/performance", f"piece {piece.id} has no draft in the queue")
+    form = await _form(request)
+    try:
+        message = add_link(piece.draft_id, _first(form, "url"))
+    except ValueError as exc:
+        return _redirect("/studio/performance", f"not linked: {exc}")
+    return _redirect("/studio/performance", message)
 
 
 @router.get("/studio/{piece_id}", response_class=HTMLResponse)

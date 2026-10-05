@@ -113,6 +113,27 @@ steps:
     enabled: true
     required: false
     timeout_seconds: 0             # breed makes one CLI call per writer child
+  # Step 10's learning loop (studio/config.yaml `learn`): measure the posted studio pieces
+  # on the snapshots the feedback step just took (or the numbers typed in on the
+  # performance page) and, once enough scored pieces are new to it, rewrite the playbook
+  # the next session reads in one CLI call. Starts no piece; its own lock, so it never
+  # waits for a studio session. No time limit (0): the rewrite has its own
+  # (learn.timeout_minutes).
+  - name: studio_learn
+    lock: studio_learn
+    argv: ["python", "run_studio.py", "--learn"]
+    enabled: true
+    required: false
+    timeout_seconds: 0
+  # Manual only (the performance page's "Rewrite the playbook now"): the same, rewriting
+  # whatever the counts.
+  - name: studio_learn_now
+    lock: studio_learn
+    argv: ["python", "run_studio.py", "--learn-now"]
+    enabled: true
+    required: false
+    manual: true
+    timeout_seconds: 0
 
 lock_path: ./pipeline.lock       # overlapping cron fires exit 2; steps lock <lock_path>.<name>
 run_log_tail_chars: 4000         # stdout/stderr kept per step per run
@@ -132,7 +153,7 @@ run_log_tail_chars: 4000         # stdout/stderr kept per step per run
 # pipeline-run (HOWTO Part 6) together is safe but wasteful: pick one.
 auto_run_enabled: true
 auto_run_times: ["06:00", "12:00", "18:00"]
-auto_run_steps: [ingest, score, studio, draft, verify, feedback, evolve]
+auto_run_steps: [ingest, score, studio, draft, verify, feedback, evolve, studio_learn]
 auto_run_grace_minutes: 60
 # Daily backup: an automatic run that starts when the newest backup in backups.dir is
 # older than this many hours also takes one, beside the run (the same verified backup as

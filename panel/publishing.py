@@ -8,9 +8,13 @@ the human says it is on X. Nothing here talks to X.
 
 `parse_order` is pure: the "Set schedule" form's `order_<draft id>` boxes become the
 ordered list of draft ids (blank boxes drop out, ties keep the page's order). `save_order`
-writes that order through step 3's own `publish.store.set_order`: the second and last row
-the panel writes outside its own pages (the feed page's rating is the first), and it
-touches only `schedule.position` on unclaimed rows, never a draft or a post.
+writes that order through step 3's own `publish.store.set_order`, touching only
+`schedule.position` on unclaimed rows, never a draft or a post.
+
+`add_head_link` is the studio performance page's "add the post's link" (wired into
+studio/web.py by panel/app.py): a draft confirmed with "I posted it" but no link gets its
+X id afterwards through step 3's own `publish.store.set_head_tweet`, which replaces only
+post 1's `manual-` marker, so step 4 can fetch the numbers the studio learns from.
 """
 
 from __future__ import annotations
@@ -117,3 +121,14 @@ def confirm_manual(draft_id: int, first_url: str = "") -> bool:
         return publish_store.record_manual(conn, draft_id, [p.text for p in draft.posts], first_url)
     finally:
         conn.close()
+
+
+def add_head_link(draft_id: int, url: str) -> str:
+    """Give a draft posted by hand without its link its X id. Raises ValueError with the
+    reason it cannot."""
+    conn = publish_store.connect()
+    try:
+        tid = publish_store.set_head_tweet(conn, draft_id, url)
+    finally:
+        conn.close()
+    return f"post {tid} linked to draft {draft_id}: the next feedback snapshot fetches its numbers"

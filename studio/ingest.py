@@ -144,3 +144,9 @@ def _attach_cards(conn: sqlite3.Connection, draft_id: int, report: qa.Report) ->
         except OSError:
             log.warning("could not remove %s", stale)
         k += 1
+
+
+def draft_cards(conn: sqlite3.Connection, draft_id: int) -> int:
+    """How many pictures a piece's queue draft carries now (what went out with it)."""
+    row = queue_store.get_draft(conn, draft_id)
+    return len(row.images) if row is not None else 0

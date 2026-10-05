@@ -314,6 +314,8 @@ def test_default_ops_config_never_contains_live():
         "publish",
         "feedback",
         "evolve",
+        "studio_learn",
+        "studio_learn_now",
     ]
     assert steps["verify"]["enabled"] and not steps["verify"]["required"]
     # the retry button's step runs only when named: never in a plain run or automatically
@@ -357,6 +359,27 @@ def test_the_studio_steps_share_one_lock_and_only_the_plain_one_runs_on_its_own(
     assert not plain.now and not plain.resume_only
 
 
+def test_the_learning_steps_have_their_own_lock_and_only_the_plain_one_runs_on_its_own():
+    cfg = load_ops_config()
+    steps = {s["name"]: s for s in cfg["steps"]}
+    for name in ("studio_learn", "studio_learn_now"):
+        # never waits for (or holds back) a studio session, which may run an hour
+        assert steps[name]["lock"] == "studio_learn" and steps[name]["timeout_seconds"] == 0
+        assert steps[name]["enabled"] is True and steps[name]["required"] is False
+    assert steps["studio_learn"]["argv"] == ["python", "run_studio.py", "--learn"]
+    assert not steps["studio_learn"].get("manual")
+    assert steps["studio_learn_now"]["manual"] is True
+    # after the snapshot it learns from, in the automatic runs too
+    order = [s["name"] for s in cfg["steps"]]
+    assert order.index("feedback") < order.index("studio_learn")
+    assert cfg["auto_run_steps"][-2:] == ["evolve", "studio_learn"]
+    import run_studio
+
+    assert run_studio._parse_args(steps["studio_learn"]["argv"][2:]).learn is True
+    now = run_studio._parse_args(steps["studio_learn_now"]["argv"][2:])
+    assert now.learn_now is True and not now.learn
+
+
 def test_default_config_dry_run_lists_real_clis(capsys):
     """With the default config, --dry-run resolves every enabled step to an existing CLI."""
     rc = run_ops.main(["run", "--dry-run"])
@@ -374,6 +397,8 @@ def test_default_config_dry_run_lists_real_clis(capsys):
     assert names.index("score") < names.index("studio") < names.index("draft")
     assert "studio_now" not in names and "studio_resume" not in names
     assert "draft_retry" not in names
+    assert names.index("feedback") < names.index("studio_learn")
+    assert "studio_learn_now" not in names
 
 
 def test_a_manual_studio_step_runs_when_named(capsys):
