@@ -305,6 +305,31 @@ def test_a_table_cites_no_analyst_target_either():
     draft = validate_output(good_json(chart=None, table=table))
     problems = check_hard_rules(draft, url=URL, source="pubmed")
     assert "table cites a price target: 'PT $38'" in problems
+    # a column header is printed on the picture too
+    table = {
+        **table,
+        "columns": ["Firm", "Price target"],
+        "rows": [["Stifel", "38"], ["Leerink", "41"]],
+    }
+    draft = validate_output(good_json(chart=None, table=table))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert "table reads as investment advice: 'Price target'" in problems
+
+
+def test_a_chart_cites_no_analyst_target_either():
+    chart = {
+        "title": "Analyst price targets after the readout ($)",
+        "labels": ["H.C. Wainwright", "Wells Fargo"],
+        "values": [20, 18],
+        "unit": "",
+    }
+    draft = validate_output(good_json(chart=chart))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert "chart cites a price target: 'Analyst price targets after the readout ($)'" in problems
+    chart = {**chart, "title": "Where the Street's average target sits"}
+    draft = validate_output(good_json(chart=chart))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert 'chart cites a price target: "Where the Street\'s average target sits"' in problems
 
 
 # --- number verification ---------------------------------------------------

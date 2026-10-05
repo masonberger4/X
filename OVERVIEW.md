@@ -103,12 +103,12 @@ plain code after the AI writes, not by trusting the AI to behave:
   about their treatment.
 - No investment advice. No buy, sell, hold or short, no price targets of its
   own, no promises about returns. Describe what a result means and what the risks
-  are; the reader decides. An analyst's target appears only in a studio piece, and
-  only with what it rests on and whether the post's catalyst is in it.
+  are; the reader decides. A quick-take draft cites no analyst's target at all.
 - Every number in the draft has to appear word-for-word in the source. No
   rounding, no "roughly", no doing the maths yourself.
 - Preprints get called preprints.
-- The link to the source is always there. Every post fits X's length limit.
+- No post carries a link: the source is named in words. Every post fits X's
+  length limit.
 
 A draft that breaks any of these is thrown out and the AI gets another go,
 this time told exactly what it did wrong. If it fails four times the story
@@ -137,7 +137,12 @@ overlapping or floating in empty space.
 The app's job is the boring part: choose what to ask for, keep it in its own
 sandbox (it can search the web and write in its own folder, nothing else on the
 PC), count characters the way X does, and check the lines that are never crossed:
-no investment or medical advice, no links. Then the finished piece lands in my
+no investment or medical advice, no price target of the account's own, no links.
+An analyst's target is the one place it has to show its working: the post says
+what the target rests on, whether the catalysts it tells you to watch are in it,
+and which way they would move it. The app checks that each target it cites is
+written down with that basis and that the post really says it; whether it is
+right is for the fact-check and for me. Then the finished piece lands in my
 queue with its fact base and fact-check log next to it. If I want changes I say
 so in words and the same session, which still remembers everything it read,
 rewrites it. Nothing posts until I press the button.

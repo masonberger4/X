@@ -98,9 +98,11 @@ the one list of what gets bundled, and a test checks it against the files on dis
 - No medical advice or treatment recommendations, ever.
 - No investment advice: no buy/sell/hold/short calls, no price target of the
   account's own, no return promises. Implications and risks, yes; the reader
-  decides. An analyst's published target is cited only with what it rests on and
-  whether the post's catalyst is in it (a studio piece; a drafter thread cites none).
-- Always link the primary source; label preprints as preprints.
+  decides. An analyst's published target is cited only with what it rests on,
+  whether the catalysts the post says to watch are in it and which way they would
+  move it (a studio piece; a drafter thread, chart or table cites none).
+- Name the primary source in words (no post carries a link); label preprints as
+  preprints.
 - Never fabricate numbers.
 
 **Plain-English overview:** [OVERVIEW.md](OVERVIEW.md) explains what the
@@ -759,13 +761,17 @@ everything it read):
    for itself and the picture cut back to the card, so the footer is never lost), counts
    characters the way X
    does (`studio/xcount.py`), runs the safety lines (`studio/safety.py`:
-   investment or medical advice, a price target of the account's own, links
-   including bare domains) and checks that every @handle has a page that verified
-   it and that every analyst target a post or card cites (`draft/targets.py` finds
-   them) is listed in piece.json's `price_targets` with the firm, the date, what it
-   rests on, the catalyst the piece is about, whether that catalyst is in the model
-   and, if not, what it would move, and a source (`studio/qa.py:check_price_targets`;
-   a figure given as a target that is not listed goes back too). Problems go back to
+   investment or medical advice and a price target, fair value or value per share
+   of the account's own, in the posts and on the cards and their alt text; links
+   including bare domains, in the posts) and checks that every @handle has a page
+   that verified it, and that a post or card citing an analyst's target
+   (`draft/targets.py` finds them) has entries in piece.json's `price_targets`: the
+   firm, the date, what it rests on, the catalysts the post says to watch, whether
+   they are in the model and, if not, what they would move, a source, and
+   `post_says`, the post's own words on what the target rests on, which must be in a
+   post or card (`studio/qa.py:check_price_targets`; a figure given as a target that
+   no entry lists as its target, the one before or a published case goes back too).
+   Whether those words hold up is for the cold fact-check and the editor. Problems go back to
    the same session for up to `max_polish_rounds`; at least one round always shows
    the session its rendered cards. A piece that still has a blocking problem ends
    `failed`; one with only fixable leftovers goes to the queue with them listed.
@@ -774,7 +780,7 @@ everything it read):
    leaves it alone, every card copied to `<db folder>/images/` and anchored to its
    post, each `recheck_before_posting` fact a `Re-check before posting:` line of
    `why_it_matters` that the copy-paste posting page lists, plus one naming the
-   analyst targets the piece cites). Publish chains a thread
+   analyst targets the posts still cite). Publish chains a thread
    of long posts as replies, unnumbered. Each ingest records what it put in the
    queue (`queued` in the piece's meta) as soon as the text is in, with the cards
    attached so far: a card that cannot be copied (a full disk, a picture another

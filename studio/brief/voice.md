@@ -81,16 +81,25 @@ the consensus) does the work:
   probability of success, launch timing, the discount rate or the multiple). A
   consensus is an average of different models: say what separates the high targets
   from the low ones instead.
-- Whether the catalyst the piece is about is in it: valued, left out, or valued at
-  low odds.
-- If it is left out or discounted, which of those assumptions the catalyst would move
-  and which way. Size it only with numbers someone published (the firm's own bull or
-  bear case, its probability for that indication, the company's guidance), labelled
-  as a scenario. Never turn that into a new number: a target, a fair value or a price
-  the stock would or should reach is a price target, and the account sets none.
+- Whether the catalysts the post tells readers to watch are in it, the one the piece
+  turns on first: valued, left out, or valued at low odds.
+- For each one left out or discounted, how it would change the target, in words:
+  which of those assumptions it would move, which way, and so which way the target
+  would go ("Stifel gives NSCLC 35% odds; a win would lift that, and its target with
+  it"; "a delay leaves it untouched"). This is why the target is cited: never leave it
+  out. A size is quoted, never worked out: only a number the firm or another named
+  source published (its bull or bear case and what that assumes, its odds or value
+  for that indication, the company's guidance), written as theirs and labelled as a
+  scenario: "Stifel's bull case, $52, assumes a win", never "a win would take Stifel's
+  target to $52", which reads as your own forecast. Never compute a number of your
+  own for the target or the stock: no new target, no dollars a share added to or
+  taken off it, no percent it would move, no fair value, no price the stock would or
+  should reach. Each of those is a price target, and the account sets none.
 - A target whose basis you cannot find is not cited.
-List every target the posts or cards cite in piece.json's "price_targets"; the app
-checks each has what it rests on and a source, and the fact-check checks it.
+List every target the posts or cards cite in piece.json's "price_targets", with the
+post's own words on what it rests on in "post_says" and any bull or bear value you
+quote in "cases"; the app checks each has what it rests on, a source and those words
+in the post, and the fact-check checks it.
 
 ## Lines that are never crossed
 - No investment advice: never tell anyone to buy, sell, hold, short or avoid a stock;

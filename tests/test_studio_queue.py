@@ -422,19 +422,35 @@ def test_the_copy_paste_page_lists_what_to_re_check_before_posting(conn, tmp_pat
 
 
 def test_the_analyst_targets_a_piece_cites_are_re_checked_before_posting(conn, tmp_path):
+    post = (
+        "H.C. Wainwright's $20 target values melanoma alone, and Goldman's $15 leaves NSCLC "
+        "out of the model. Not investment advice."
+    )
     targets = [
         {"firm": "H.C. Wainwright", "target": "$20", "date": "2026-09-30"},
-        {"firm": " Goldman  Sachs ", "target": "$15"},
+        {"firm": " Goldman  Sachs ", "target": "$15", "post_says": "Goldman's $15 leaves NSCLC"},
+        # cut from the post in the queue: nothing to re-check
+        {"firm": "Jefferies", "target": "$40", "date": "2026-09-01"},
         {"rests_on": "an entry with no firm or target names nothing"},
     ]
     _, draft_id, _ = put_piece(
-        conn, tmp_path, POSTS[:1], recheck=["the PDUFA date"], price_targets=targets
+        conn, tmp_path, [post], recheck=["the PDUFA date"], price_targets=targets
     )
     row = store.get_draft(conn, draft_id)
     assert store.recheck_lines(row.draft.why_it_matters) == [
         "the PDUFA date",
         "the analyst targets cited are still each firm's latest "
         "(H.C. Wainwright $20 of 2026-09-30; Goldman Sachs $15)",
+    ]
+
+
+def test_a_target_cited_with_no_entry_is_re_checked_by_its_words(conn, tmp_path):
+    # the polish rounds ran out with the target still unlisted: the editor is told to check it
+    post = "H.C. Wainwright raised its target to $20 from $9. Not investment advice."
+    _, draft_id, _ = put_piece(conn, tmp_path, [post])
+    row = store.get_draft(conn, draft_id)
+    assert store.recheck_lines(row.draft.why_it_matters) == [
+        "the analyst targets cited are still each firm's latest (post 1: target to $20)"
     ]
 
 

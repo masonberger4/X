@@ -351,7 +351,8 @@ WHAT TO WRITE IN YOUR WORKING FOLDER
      might cite, the firm, its rating, the target (and the one before, if it moved), the
      date, what it rests on as the firm or reliable coverage of its note published it
      (products and indications valued, peak sales, probability of success, launch
-     timing, discount rate or multiple), and whether the story's catalyst is in it. A
+     timing, discount rate or multiple), and whether the catalysts the piece may tell
+     readers to watch are in it (the one the story turns on first). A
      target whose basis you cannot find goes under "Open questions", not here;
    - "X handles": each @handle you verified on the organisation's own website, with the
      page (the handles the app has verified, listed below, need no check); organisations
@@ -417,9 +418,12 @@ def _piece_schema(b: Brief) -> str:
                 "previous": "$45",
                 "date": "2026-07-24",
                 "rests_on": "what the target assumes, as published",
-                "catalyst": "the catalyst the piece is about",
+                "catalyst": "each catalyst the post says to watch that it bears on",
                 "in_model": "yes | no | partly | unknown",
-                "effect": "unless yes: which assumption it would move, and which way",
+                "effect": "unless yes: the assumption it moves, which way, so which way "
+                "the target goes (in words)",
+                "cases": "the firm's published bull and bear values, if the post cites them",
+                "post_says": "the post's own words on what it rests on, copied exactly",
                 "source": "https://...",
             }
         ],
@@ -475,8 +479,10 @@ WRITE
    text of every post and every card's visible text (not your fact base or your notes)
    and tell it to check every claim, number, date, name, title, stage and handle against
    primary sources on the web, independently (an analyst's target, and what the post
-   says it rests on, included), and to report each problem with the source that shows
-   it. It does not get your standing instructions, so its instructions must
+   says it rests on, included), to flag any target, fair value or value per share, and
+   any change to a target in dollars or percent, that no source it can find published,
+   and to report each problem with the source that shows it. It does not get your
+   standing instructions, so its instructions must
    also say: {CHECKER_RULES} Run it in the foreground and wait for its report: the stage
    is not done while it is still checking. Fix every real problem. Write {FACTCHECK_FILE}: a
    table of every finding (post or card, what it said, the problem, the source, what you
@@ -488,10 +494,15 @@ WRITE
    "handles" lists every @handle in the posts with the page that verified it ("app" for
    one from the app's list below). "price_targets" lists every analyst or consensus
    target the posts or cards cite, the way the voice guide says to cite one: what it
-   rests on, the catalyst the piece is about, whether that catalyst is in the model
-   ("in_model": yes, no, partly or unknown) and, unless yes, what it would move
-   ("effect"); "previous" is the target before, if it just moved. [] when the piece
-   cites none.
+   rests on, the catalysts the post says to watch that it bears on, whether they are in
+   the model ("in_model": yes, no, partly or unknown) and, unless yes, what they would
+   move and so which way the target would go ("effect", in words); "previous" is the
+   target before, if it just moved, and "cases" the firm's own published bull and bear
+   values when the post cites them (a figure in a post that is not the target, the one
+   before or a published case reads as your own target). "post_says" copies,
+   word for word, the stretch of a post or card that says what the target rests on and
+   whether the catalyst is in it: the app looks for those words there. [] when the
+   piece cites none.
 
 ANGLES ON OFFER
 {_angles_block(b)}

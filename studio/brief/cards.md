@@ -87,7 +87,9 @@ bar tips in the text colours.
 - money / deal_ledger / deal_terms: bars split into upfront and contingent money;
   revenue columns; sizing bars against a reference line.
 - scenarios / bull_bear_columns / bar_for_success: labelled scenario bars or two
-  columns with the number that defines each case.
+  columns with the number that defines each case: sales, share, odds or a date, never a
+  value per share or a target of your own. An analyst's target or bull and bear values
+  appear only with the firm, the date and what they rest on, as the voice guide says.
 - results_table / side_by_side / cross_trial_context: a compact table of the numbers
   that decide the story, with the cross-trial caveat in the footer.
 - mechanism_diagram: a simple inline-SVG schematic, three to five labelled parts, no

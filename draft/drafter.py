@@ -309,15 +309,30 @@ def check_hard_rules(
         problems += [f"{label} {p}" for p in tag_problems(post, handles, companies)]
     if draft.chart is not None:
         problems += note_problems(draft.chart.note, "chart note")
+    # A picture is posted too: its words are held to the same lines as a post's.
+    visuals = [
+        ("chart", text)
+        for chart in ([draft.chart] if draft.chart is not None else []) + draft.extra_visuals
+        for text in chart.texts()
+    ]
     if draft.table is not None:
         problems += note_problems(draft.table.note, "table note")
-        for text in [draft.table.title, draft.table.note, *(c for _, _, c in draft.table.cells())]:
-            if _ADVICE_RE.search(text):
-                problems.append(f"table reads as medical advice: {text!r}")
-            elif _INVEST_RE.search(text):
-                problems.append(f"table reads as investment advice: {text!r}")
-            elif target_problems(text):
-                problems.append(f"table cites a price target: {text!r}")
+        visuals += [
+            ("table", text)
+            for text in [
+                draft.table.title,
+                draft.table.note,
+                *draft.table.columns,
+                *(c for _, _, c in draft.table.cells()),
+            ]
+        ]
+    for kind, text in visuals:
+        if _ADVICE_RE.search(text):
+            problems.append(f"{kind} reads as medical advice: {text!r}")
+        elif _INVEST_RE.search(text):
+            problems.append(f"{kind} reads as investment advice: {text!r}")
+        elif target_problems(text):
+            problems.append(f"{kind} cites a price target: {text!r}")
     if not draft.thread:
         problems.append("thread is empty")
         return problems

@@ -1165,12 +1165,19 @@ and long posts need X Premium.
    away below it. A piece cites an analyst's price target only when it bears on
    the story, and then the post says what the target rests on (the firm's
    assumptions: which indications it values, peak sales, the odds, the timing),
-   whether the catalyst the piece is about is in it and, if not, which assumption
-   it would move and which way. It never gives a target of its own: the app sends
-   a piece back for a target without its basis and stops one that projects a new
-   target. The piece's page lists the targets it cites, and the copy-paste page
-   asks you to check they are still each firm's latest before posting. Drafter
-   threads cite no analyst targets at all.
+   whether the catalysts it tells readers to watch are in it and, if not, which
+   assumption each would move and so which way the target would go, in words. It
+   never gives a target of its own, nor a new number for an analyst's. The app
+   sends a piece back while a target it cites has no entry in piece.json, or an
+   entry whose quoted words (`post_says`) are not in the post; what is still left
+   after the last polish round reaches you as a warning on the draft. A post or
+   card that states a target, fair value or value per share of the account's own
+   stops the piece: the checks catch the usual wordings, and the cold fact-check is
+   told to flag any target figure no source published. So read what the post says
+   about each target before you approve. The piece's page lists the targets it
+   cites, and the copy-paste page asks you to check they are still each firm's
+   latest before posting. Drafter threads, charts and tables cite no analyst
+   targets at all.
 6. Changes. Type them on the piece's page and press **Revise**: the session that
    wrote it rewrites it, fact-checks what changed and replaces the queue draft.
    A draft you rejected comes back to pending with the revision; one you already
