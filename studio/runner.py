@@ -260,9 +260,9 @@ def allowed_to_start(
         last_dt = datetime.fromisoformat(last)
         if now - last_dt < timedelta(hours=gap):
             return False, f"the last piece started under {gap:g} hours ago"
-    waiting = [p for p in S.list_pieces(conn, 20) if p.stage == S.STAGE_RESEARCH_READY]
-    if waiting:
-        return False, f"piece {waiting[0].id} is waiting at the research checkpoint"
+    waiting = S.first_in_stage(conn, S.STAGE_RESEARCH_READY)
+    if waiting is not None:
+        return False, f"piece {waiting.id} is waiting at the research checkpoint"
     return True, ""
 
 
@@ -283,8 +283,15 @@ def new_piece(
     session_id = str(uuid.uuid4())
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     name = f"{stamp}-{_slug(topic or (f'story-{cluster_id}' if cluster_id else 'auto'))}"
-    folder = workspace_root(_data_folder(), cfg) / name
-    folder.mkdir(parents=True, exist_ok=False)
+    root = workspace_root(_data_folder(), cfg)
+    folder, n = root / name, 1
+    while True:  # two pieces on the same topic in the same second get folders of their own
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+            break
+        except FileExistsError:
+            n += 1
+            folder = root / f"{name}-{n}"
     piece_id = S.create_piece(
         conn,
         origin=origin,
@@ -300,19 +307,6 @@ def new_piece(
     piece = S.get_piece(conn, piece_id)
     assert piece is not None
     return piece
-
-
-def _draft_not_pending(conn: sqlite3.Connection, piece: S.Piece) -> str:
-    """Why a revision of this finished piece could not reach the queue, or '' when it can:
-    its draft left `pending` (approved, rejected, posted), which studio/ingest.py refuses.
-    Asked when the request is acted on, not only when it was made: a request can wait for
-    the next studio run while the editor decides the draft in the queue."""
-    from approval_queue import store as queue_store
-
-    row = queue_store.find_by_item(conn, queue_store.studio_item_id(piece.id))
-    if row is None or row.status == queue_store.STATUS_PENDING:
-        return ""
-    return f"draft {row.id} is {row.status}, not pending; reopen it in the queue, then revise"
 
 
 def act_on_requests(ctx: SS.Context) -> int:
@@ -331,7 +325,9 @@ def act_on_requests(ctx: SS.Context) -> int:
         elif what == S.REQUEST_CONTINUE and piece.stage in (S.STAGE_FAILED, S.STAGE_INTERRUPTED):
             out = SS.resume_interrupted(ctx, piece, note)
         elif what == S.REQUEST_REVISE and piece.stage == S.STAGE_READY:
-            gone = _draft_not_pending(ctx.conn, piece)
+            from studio import ingest
+
+            gone = ingest.revise_blocker(ctx.conn, piece)
             if gone:
                 # The editor approved or rejected it after asking: the queue would refuse
                 # the revised text, so no session is spent and the piece stays ready.
@@ -358,6 +354,16 @@ def run(
     dry_run: bool = False,
 ) -> int:
     cfg = load_studio_config()
+    if dry_run:  # read-only: no lock, no stale marking, the piece the next run would start
+        conn = _db_conn()
+        try:
+            queued = None if (topic or story is not None) else S.next_queued_topic(conn)
+            if queued is not None:
+                topic, story = queued.topic, queued.cluster_id
+                angle = queued.angle or angle
+            return _dry_run(conn, cfg, topic=topic, story=story, angle=angle)
+        finally:
+            conn.close()
     root = workspace_root(_data_folder(), cfg)
     root.mkdir(parents=True, exist_ok=True)
     # One studio run at a time on this data folder, however it was started (the ops step,
@@ -371,8 +377,6 @@ def run(
         stale = mark_stale(conn)
         for p in stale:
             log.warning("piece %s was interrupted mid-stage; resume it from the studio page", p.id)
-        if dry_run:
-            return _dry_run(conn, cfg, topic=topic, story=story, angle=angle)
         ctx = make_context(conn, cfg)
         act_on_requests(ctx)
         if resume_only:
@@ -394,6 +398,16 @@ def run(
                 angle=queued.angle or angle,
                 checkpoint=queued.checkpoint if checkpoint is None else checkpoint,
             )
+            if plan["angle"] and plan["angle"] not in A.load_angles():
+                # Queued before the angle left studio/angles.yaml: the session chooses
+                # instead, rather than the topic failing every run.
+                log.warning(
+                    "queued topic %s asked for angle %r, which is no longer in the library; "
+                    "the session will choose",
+                    queued.id,
+                    plan["angle"],
+                )
+                plan["angle"] = ""
         elif now:
             plan = dict(
                 origin=S.ORIGIN_MANUAL,
@@ -414,6 +428,17 @@ def run(
                 angle="",
                 checkpoint=bool(cfg["auto"]["checkpoint"]),
             )
+        if plan["cluster_id"] is not None and T.fetch_story(plan["cluster_id"]) is None:
+            gone = f"story {plan['cluster_id']} is not in the feed any more (merged or removed)"
+            if topic or story is not None or queued is None:
+                log.error("%s; nothing started", gone)
+                return 2
+            if not plan["topic"]:
+                log.warning("%s; queued topic %s dropped", gone, queued.id)
+                S.drop_topic(conn, queued.id)
+                return 0
+            log.warning("%s; writing on the queued topic's words alone", gone)
+            plan["cluster_id"] = None
         piece = new_piece(conn, cfg, **plan)
         if queued is not None and not (topic or story is not None):
             S.claim_topic(conn, queued.id, piece.id)

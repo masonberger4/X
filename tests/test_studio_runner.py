@@ -352,6 +352,18 @@ def test_a_piece_waiting_at_the_research_checkpoint_blocks_a_new_one(sconn, cfg,
     assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
 
 
+def test_a_piece_waiting_at_the_checkpoint_blocks_however_many_came_after_it(sconn, cfg, clock):
+    cfg["auto"].update(max_new_per_day=5, min_hours_between=0)
+    clock.set(T0 - timedelta(days=30))
+    waiting = make_piece(sconn, stage=S.STAGE_RESEARCH_READY)
+    for _ in range(30):
+        make_piece(sconn, stage=S.STAGE_READY)
+    assert runner.allowed_to_start(sconn, cfg, T0) == (
+        False,
+        f"piece {waiting.id} is waiting at the research checkpoint",
+    )
+
+
 # ---- mark_stale: what a dead run left behind -----------------------------------------
 
 
@@ -510,15 +522,14 @@ def test_a_request_that_does_not_fit_the_stage_is_cleared_and_ignored(
     assert S.pending_requests(sconn) == []
 
 
-@pytest.mark.parametrize("decide", [queue_store.approve, queue_store.reject])
-def test_a_revision_is_not_run_once_its_draft_has_left_pending(sconn, cfg, stages, decide):
-    """The editor asked for a revision, then approved or rejected the draft before a studio
-    run picked the request up: the queue would refuse the revised text, so no session is
-    spent and the finished piece stays ready, saying why."""
+def test_a_revision_is_not_run_once_its_draft_is_approved(sconn, cfg, stages):
+    """The editor asked for a revision, then approved the draft before a studio run picked
+    the request up: the queue would refuse the revised text, so no session is spent and the
+    finished piece stays ready, saying why."""
     piece = make_piece(sconn, stage=S.STAGE_READY)
     draft_id = studio_draft(sconn, piece)
     S.request(sconn, piece.id, S.REQUEST_REVISE, NOTE)
-    decide(sconn, draft_id)
+    queue_store.approve(sconn, draft_id)
     status = queue_store.get_draft(sconn, draft_id).status
 
     assert runner.act_on_requests(bare_context(sconn, cfg)) == 0
@@ -527,9 +538,18 @@ def test_a_revision_is_not_run_once_its_draft_has_left_pending(sconn, cfg, stage
     after = get(sconn, piece.id)
     assert (after.stage, after.request, after.request_note) == (S.STAGE_READY, "", "")
     assert after.error == (
-        f"not revised: draft {draft_id} is {status}, not pending; reopen it in the queue, "
-        "then revise"
+        f"not revised: draft {draft_id} is {status}, not pending; reopen it in the queue "
+        "before revising"
     )
+
+
+def test_a_revision_of_a_rejected_draft_runs(sconn, cfg, stages):
+    """Asking for a revision after rejecting the draft is asking for it back."""
+    piece = make_piece(sconn, stage=S.STAGE_READY)
+    queue_store.reject(sconn, studio_draft(sconn, piece))
+    S.request(sconn, piece.id, S.REQUEST_REVISE, NOTE)
+    assert runner.act_on_requests(bare_context(sconn, cfg)) == 1
+    assert [call[0] for call in stages] == ["revise"]
 
 
 def test_requests_are_taken_oldest_first_and_counted(sconn, cfg, stages, clock):
@@ -993,6 +1013,52 @@ def test_the_run_flags_fill_in_what_a_queued_topic_leaves_open(rig, sconn):
     assert piece.checkpoint is True and piece.stage == S.STAGE_RESEARCH_READY
 
 
+def test_a_queued_topic_whose_angle_left_the_library_starts_without_it(rig, sconn, caplog):
+    queued = S.queue_topic(sconn, topic=TOPIC, angle="retired_angle", checkpoint=True)
+    with caplog.at_level(logging.WARNING, logger="studio.runner"):
+        assert runner.run() == 0
+    piece = rig.only_piece()
+    assert (piece.topic, piece.requested_angle) == (TOPIC, "")
+    assert S.queued_topics(sconn) == []  # claimed, so it never comes back
+    assert (
+        sconn.execute("SELECT piece_id FROM studio_topics WHERE id = ?", (queued,)).fetchone()[0]
+        == piece.id
+    )
+    assert "'retired_angle', which is no longer in the library" in caplog.text
+
+
+def test_an_explicit_story_that_left_the_feed_starts_nothing(rig, sconn, caplog):
+    with caplog.at_level(logging.ERROR, logger="studio.runner"):
+        assert runner.run(story=99999) == 2
+    assert rig.pieces() == [] and rig.cli.calls == []
+    assert "story 99999 is not in the feed any more" in caplog.text
+
+
+def test_a_queued_story_that_left_the_feed_falls_back_to_its_words_or_is_dropped(
+    rig, sconn, caplog
+):
+    S.queue_topic(sconn, cluster_id=99998)  # a story alone: nothing left to write about
+    with caplog.at_level(logging.WARNING, logger="studio.runner"):
+        assert runner.run() == 0
+    assert rig.pieces() == [] and S.queued_topics(sconn) == []
+    assert "story 99998 is not in the feed any more" in caplog.text
+
+    S.queue_topic(sconn, topic=TOPIC, cluster_id=99997, checkpoint=True)
+    assert runner.run() == 0
+    piece = rig.only_piece()
+    assert (piece.topic, piece.cluster_id) == (TOPIC, None)
+
+
+def test_two_pieces_on_one_topic_in_the_same_second_get_their_own_folders(rig, sconn, cfg):
+    first = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, checkpoint=True)
+    second = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, checkpoint=True)
+    third = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, checkpoint=True)
+    folders = [Path(p.workspace) for p in (first, second, third)]
+    assert len(set(folders)) == 3 and all(f.is_dir() for f in folders)
+    if folders[0].name[:15] == folders[1].name[:15] == folders[2].name[:15]:  # same second
+        assert [f.name for f in folders[1:]] == [folders[0].name + "-2", folders[0].name + "-3"]
+
+
 def test_a_queued_topics_own_angle_beats_the_runs(rig, sconn):
     S.queue_topic(sconn, topic=TOPIC, angle="deal_decoder", checkpoint=True)
     assert runner.run(now=True, angle="class_deep_dive") == 0
@@ -1063,7 +1129,7 @@ def test_resume_only_acts_on_requests_and_starts_nothing(rig, sconn, cfg, tmp_pa
     assert [t.id for t in S.queued_topics(sconn)] == [queued]
 
 
-@pytest.mark.parametrize("decide", [queue_store.approve, queue_store.reject])
+@pytest.mark.parametrize("decide", [queue_store.approve])
 def test_a_resumed_revision_is_not_run_once_its_draft_has_left_pending(
     rig, sconn, tmp_path, decide
 ):
@@ -1166,7 +1232,16 @@ def test_a_dry_run_prints_the_first_prompt_and_starts_nothing(rig, sconn, capsys
     assert f"Your working folder: {(rig.root / '(new)').resolve()}" in out
     assert rig.pieces() == [] and rig.cli.calls == []
     assert [t.id for t in S.queued_topics(sconn)] == [queued]
-    assert [p.name for p in rig.root.iterdir()] == [runner.LOCK_NAME]
+    assert not rig.root.exists()  # read-only: no folder, no lock, nothing marked stale
+
+
+def test_a_dry_run_shows_the_queued_topic_the_next_run_would_take(rig, sconn, capsys):
+    S.queue_topic(sconn, topic="a queued topic", angle="class_deep_dive")
+    assert runner.run(dry_run=True) == 0
+    out = capsys.readouterr().out
+    assert "The editor asked for a piece on: a queued topic" in out
+    assert "The editor chose this angle for the piece:" in out
+    assert [t.topic for t in S.queued_topics(sconn)] == ["a queued topic"]  # not claimed
 
 
 def test_a_dry_run_on_a_story_or_on_nothing_shows_what_the_session_would_get(rig, sconn, capsys):

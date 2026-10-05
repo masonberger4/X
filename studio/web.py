@@ -36,6 +36,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import ChoiceLoader, FileSystemLoader
 
 from studio import angles as A
+from studio import ingest
 from studio import prompt as P
 from studio import store as S
 from studio.settings import DEFAULT_PLAYBOOK, PLAYBOOK_NAME, load_studio_config, playbook_path
@@ -182,10 +183,25 @@ def _research(value: Any) -> dict[str, Any]:
 
 
 def _cards(workspace: Path) -> list[dict[str, Any]]:
+    """The drawn cards the piece uses: those piece.json lists (a revision that drops a card
+    leaves its old picture in the folder), or every drawn card while there is no list."""
+    try:
+        data = json.loads(_read(workspace / P.PIECE_FILE) or "{}")
+    except ValueError:
+        data = {}
+    listed = data.get("cards") if isinstance(data, dict) else None
+    wanted: set[str] | None = None
+    if isinstance(listed, list) and listed:
+        wanted = set()
+        for card in listed:
+            rel = card.get("file") if isinstance(card, dict) else None
+            path = _within(workspace, str(rel)) if rel else None
+            if path is not None:
+                wanted.add(path.with_suffix(".png").name)
     out = []
     for png in sorted((workspace / P.CARDS_DIR).glob("card_*.png")):
         stem = png.stem.removeprefix("card_")
-        if stem.isdigit():
+        if stem.isdigit() and (wanted is None or png.name in wanted):
             out.append({"n": int(stem), "name": png.name})
     return sorted(out, key=lambda c: c["n"])
 
@@ -334,12 +350,9 @@ async def studio_revise(request: Request, piece_id: int, conn: Conn):
         return _redirect(
             f"/studio/{piece_id}", f"the piece is {piece.stage}; only a finished piece is revised"
         )
-    if not _draft_revisable(piece.draft_id):
-        return _redirect(
-            f"/studio/{piece_id}",
-            "its draft is no longer pending in the queue (approved, rejected or posted); "
-            "reopen it there first",
-        )
+    blocked = _queue(lambda qconn: ingest.revise_blocker(qconn, piece))
+    if blocked:
+        return _redirect(f"/studio/{piece_id}", f"not revised: {blocked}")
     S.request(conn, piece_id, S.REQUEST_REVISE, note)
     return _redirect(f"/studio/{piece_id}", _start([STEP_RESUME]))
 
@@ -360,17 +373,19 @@ def studio_discard(piece_id: int, conn: Conn):
     if piece.stage in S.RUNNING_STAGES:
         return _redirect(f"/studio/{piece_id}", "stop the run on the runs page first")
     S.update_piece(conn, piece_id, stage=S.STAGE_DISCARDED, request="", request_note="")
-    return _redirect("/studio", f"piece {piece_id} discarded (its files stay in {piece.workspace})")
+    withdrawn = _queue(lambda qconn: ingest.withdraw(qconn, piece))
+    message = f"piece {piece_id} discarded (its files stay in {piece.workspace})"
+    if withdrawn is not None:
+        message += f"; its pending draft {withdrawn} is rejected in the queue"
+    return _redirect("/studio", message)
 
 
-def _draft_revisable(draft_id: int | None) -> bool:
-    if draft_id is None:
-        return False
+def _queue(work: Callable[[Any], Any]) -> Any:
+    """Run one call against the approval queue's own connection (its tables, its rules)."""
     from approval_queue import store as queue_store
 
     qconn = queue_store.connect()
     try:
-        row = queue_store.get_draft(qconn, draft_id)
+        return work(qconn)
     finally:
         qconn.close()
-    return row is not None and row.status == queue_store.STATUS_PENDING

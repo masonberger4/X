@@ -384,7 +384,7 @@ carrying `--live`).
   apart round the clock, YAML's base-60 ints read back), `slots_between` / `next_slot`
   (wall-clock times in a zone that is a parameter), `settings_of` and `plan` /
   `ineligible`, the allowlist: a step may run automatically only as
-  `python <AUTO_SCRIPTS>` (ingest, score, draft, verify, feedback, evolve) with nothing
+  `python <AUTO_SCRIPTS>` (ingest, score, studio, draft, verify, feedback, evolve) with nothing
   starting like the live flag (`posts_live`, which `run_ops.py` now uses too, so an
   abbreviated flag is refused; `run_publish.py` parses with `allow_abbrev=False`).
   `ops/config.py:save_auto_run` writes only `auto_run_enabled` / `auto_run_times` (top-level
@@ -599,7 +599,9 @@ carrying `--live`).
   `auto.min_hours_between` (any piece) and no checkpoint wait allow; one run at a time
   (`<workspace_dir>/.studio.lock`). `ops/config.yaml` has the automatic `studio` step
   (after `score`, `skip_when_busy`: `panel/autorun.py` leaves a busy one out of a slot
-  rather than waiting) and the manual `studio_now` / `studio_resume` steps, all under the
+  rather than waiting, and also the steps an earlier run still has queued behind it,
+  `JobManager.queued_behind`, so a long session never makes a run time skip ingest and
+  score) and the manual `studio_now` / `studio_resume` steps, all under the
   `studio` lock; `run_studio.py` is in `ops/autorun.AUTO_SCRIPTS`. The panel includes
   `studio/web.py`'s router (`/studio`, a piece's page, its cards, `/studio/playbook`); its
   buttons write studio rows and start those steps through `panel/app.py:_start_studio`,

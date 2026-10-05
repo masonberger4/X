@@ -15,12 +15,13 @@ import re
 # A directional call, a promise of returns or an instruction to trade. Describing a
 # thesis, a valuation, a scenario, a deal or a published analyst view is fine, so a trading
 # verb is advice only as an instruction: at the start of a sentence, line or bullet, or
-# after "I would", "should", "time to" and the like. "AstraZeneca agreed to buy shares",
-# "insiders hold shares" and "$MRK to buy $VRNA" are the news, not a call.
+# after "I would", "you should", "time to" and the like. "AstraZeneca agreed to buy shares",
+# "insiders now hold shares", "it would sell shares in an offering" and "$MRK to buy $VRNA"
+# are the news, not a call.
 _ADVICE_LEAD = (
-    r"(?:(?:^|[.!?\u2022:;)/\u2013\u2014-])\s*|\b(?:should|must|would|i[\u2019']d|"
-    r"i[\u2019']ll|i\s+will|i[\u2019']m|i\s+am|we[\u2019']d|we[\u2019']re|time\s+to|just|"
-    r"now|still|definitely|gonna)\s+)"
+    r"(?:(?:^|[.!?\u2022:;)/\u2013\u2014-])\s*|\b(?:you\s+should|should\s+you|you\s+must|"
+    r"i\s+would|we\s+would|i[\u2019']d|i[\u2019']ll|i\s+will|i[\u2019']m|i\s+am|we[\u2019']d|"
+    r"we[\u2019']re|time\s+to|definitely|gonna)\s+)"
 )
 _TRADE = r"(?:buy|sell|short|accumulate|dump|hold|load\s+up\s+on)"
 _INVESTMENT = (

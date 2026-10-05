@@ -13,7 +13,7 @@ effort: max                     # low | medium | high | xhigh | max
 # may start on its own. A button press (`--now`) ignores both limits.
 auto:
   enabled: true
-  max_new_per_day: 1            # new pieces started automatically per local day
+  max_new_per_day: 1            # new pieces started automatically in any 24 hours
   min_hours_between: 6          # since the last piece started, automatic or manual
   # Stop after the research stage so a human reads the fact base and says "continue"
   # (with notes) before the post is written. Off for automatic pieces: the finished

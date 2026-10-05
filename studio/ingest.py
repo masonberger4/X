@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 
 class IngestError(RuntimeError):
-    """The piece cannot go into the queue (its draft is no longer pending)."""
+    """The piece cannot go into the queue (its draft was approved or posted meanwhile)."""
 
 
 def _why(piece: S.Piece, pf: qa.PieceFiles, report: qa.Report) -> str:
@@ -59,7 +59,13 @@ def build_draft(piece: S.Piece, report: qa.Report, max_chars: int) -> Draft:
     )
 
 
-def _not_pending(existing: queue_store.DraftRow) -> str:
+# A revision replaces a pending draft, and brings a rejected one back to pending (the
+# editor asked for it after rejecting). An approved or posted draft waits for a reopen in
+# the queue, where the publishing checks run.
+_REVISABLE = (queue_store.STATUS_PENDING, queue_store.STATUS_REJECTED)
+
+
+def _not_revisable(existing: queue_store.DraftRow) -> str:
     return (
         f"draft {existing.id} is {existing.status}, not pending; reopen it in the queue "
         "before revising"
@@ -68,11 +74,22 @@ def _not_pending(existing: queue_store.DraftRow) -> str:
 
 def revise_blocker(conn: sqlite3.Connection, piece: S.Piece) -> str:
     """Why a revision of this piece could not replace its queue draft, or "" when it can:
-    the rule to_queue applies at the end, asked before an hour-long revision starts."""
+    the rule to_queue applies at the end, asked before an hour-long revision starts (by the
+    studio page, the runner and session.revise alike)."""
     existing = queue_store.find_by_item(conn, queue_store.studio_item_id(piece.id))
-    if existing is None or existing.status == queue_store.STATUS_PENDING:
+    if existing is None or existing.status in _REVISABLE:
         return ""
-    return _not_pending(existing)
+    return _not_revisable(existing)
+
+
+def withdraw(conn: sqlite3.Connection, piece: S.Piece) -> int | None:
+    """A discarded piece leaves nothing to approve: its draft is rejected when it is still
+    pending. Returns that draft's id, or None when there was nothing to withdraw."""
+    existing = queue_store.find_by_item(conn, queue_store.studio_item_id(piece.id))
+    if existing is None or existing.status != queue_store.STATUS_PENDING:
+        return None
+    queue_store.reject(conn, existing.id, note="discarded in the studio")
+    return existing.id
 
 
 def to_queue(
@@ -89,9 +106,11 @@ def to_queue(
             conn, item_id=item_id, model=model, draft=draft, cluster_id=piece.cluster_id
         )
     else:
-        if existing.status != queue_store.STATUS_PENDING:
-            raise IngestError(_not_pending(existing))
+        if existing.status not in _REVISABLE:
+            raise IngestError(_not_revisable(existing))
         draft_id = existing.id
+        if existing.status == queue_store.STATUS_REJECTED:
+            queue_store.reopen(conn, draft_id, note="revised in the studio after it was rejected")
         # The editor's words, as the queue's own revise logs them. session.revise keeps
         # them in meta: the request's note is cleared when the revision starts.
         note = str(piece.meta.get("revise_note") or "") or piece.request_note

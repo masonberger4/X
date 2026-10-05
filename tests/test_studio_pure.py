@@ -395,6 +395,8 @@ INVESTMENT_ADVICE = [
     "• Buy the stock before the readout.",
     "Strong data. Time to buy $SMMT.",
     "I'd load up on shares here.",
+    "You should buy shares before the readout.",
+    "We would short the stock here.",
 ]
 
 MEDICAL_ADVICE = [
@@ -436,6 +438,9 @@ DESCRIPTIONS = [
     "If you have been following the story, consider the base rate.",
     "A clear short-term catalyst, and an obvious sell-off.",
     "Viral load up 20% at week 4.",
+    "Insiders now hold shares, and the founders still hold shares too.",
+    "The company said it would sell shares in a public offering.",
+    "Funds just bought shares; the trust must sell shares by law.",
 ]
 
 

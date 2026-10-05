@@ -35,7 +35,8 @@ alone.
 ## Structure (long post or thread)
 - Sections with short ALL-CAPS headers ("THE DEAL", "WHY G12D IS THE PRIZE", "THE
   REALITY CHECK", "WHAT I'M WATCHING", "BOTTOM LINE"). Plain text only: X shows no
-  markdown, so no **bold**, no # headings, no tables.
+  markdown, so no **bold**, no # headings, no tables. A blank line separates sections;
+  never a line of only "---" (the approval queue splits posts there).
 - Bullets with "•" for lists of assets, terms or risks; numbered lists for reasons and
   signposts.
 - A TL;DR of three to five bullets near the top suits the long explainers (class deep

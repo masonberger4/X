@@ -287,6 +287,14 @@ def running_pieces(conn: sqlite3.Connection) -> list[Piece]:
     return [_row(r) for r in rows]
 
 
+def first_in_stage(conn: sqlite3.Connection, stage: str) -> Piece | None:
+    """The oldest piece in this stage, or None (however many pieces there are)."""
+    r = conn.execute(
+        "SELECT * FROM studio_pieces WHERE stage = ? ORDER BY id LIMIT 1", (stage,)
+    ).fetchone()
+    return _row(r) if r else None
+
+
 def recent_pieces(conn: sqlite3.Connection, limit: int) -> list[Piece]:
     """The newest pieces that got as far as being written (they define what to vary)."""
     rows = conn.execute(

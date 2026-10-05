@@ -130,7 +130,7 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
     if keys and piece.angle not in keys:
         # The angle is what the account's results are read by, so it must be a real key.
         minor.append(
-            f"{PIECE_FILE}: angle must be the key of one of the angles on offer (one of "
+            f"{PIECE_FILE}: angle must be the key of one of the library's angles (one of "
             f"{', '.join(sorted(keys))}), not {piece.angle!r}"
         )
     posts = data.get("posts")
@@ -227,6 +227,14 @@ def check_text(piece: PieceFiles, xcfg: dict[str, Any], known_handles: set[str])
                 f"{label} is {n} characters as X counts them; keep it under {limit - headroom}"
             )
         report.blocking += safety.blocking_problems(text, label)
+        if any(line.strip() == "---" for line in text.splitlines()):
+            # The approval queue's hand-edit form splits posts on such a line, so an edit
+            # there would cut this post in two.
+            report.fixable.append(
+                f"{label} has a line that is only '---'; the approval queue splits posts "
+                "there when the editor edits by hand, so use a blank line or an ALL-CAPS "
+                "header between sections"
+            )
         for handle in safety.handles_in(text):
             key = handle.lower()
             if key in known_handles:
@@ -304,7 +312,11 @@ def check_piece(
     xcfg: dict[str, Any],
     known_handles: set[str],
     renderer: Renderer | None,
+    *,
+    requested_angle: str = "",
 ) -> Report:
+    """Everything the app checks before a piece may go to the queue. `requested_angle` is
+    the angle the editor chose for the piece, if any: the session must write in it."""
     piece, blocking, minor = read_piece(workspace)
     if piece is None:
         report = Report()
@@ -313,6 +325,11 @@ def check_piece(
     report = check_text(piece, xcfg, known_handles)
     report.blocking += blocking
     report.fixable += minor
+    if requested_angle and piece.angle != requested_angle:
+        report.fixable.append(
+            f"{PIECE_FILE}: the editor chose the angle {requested_angle!r} for this piece; "
+            f"write it in that angle (piece.json says {piece.angle!r})"
+        )
     check_side_files(workspace, report)
     check_cards(piece, report, renderer)
     return report

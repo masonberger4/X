@@ -1021,13 +1021,19 @@ and long posts need X Premium.
    approve it there.
 6. Changes. Type them on the piece's page and press **Revise**: the session that
    wrote it rewrites it, fact-checks what changed and replaces the queue draft.
+   A draft you rejected comes back to pending with the revision; one you already
+   approved has to be reopened on the approved page first (the piece says
+   `not revised: draft N is approved ...` otherwise, and no session is spent).
    The queue's own Revise button would flatten a studio piece, so it points you
-   here instead. Hand edits on the queue page still work.
+   here instead. Hand edits on the queue page still work; keep each section
+   apart with a blank line, since a line of only `---` splits a post there.
 7. When something stops. A piece marked `interrupted` (stopped, timed out, the
-   PC slept) or `failed` (the checker still found a blocking problem after the
-   polish rounds) has **Resume where it stopped**: the same session carries on
-   with everything it already read. **Discard** gives up on a piece; its files
-   stay in the `studio_pieces` folder.
+   PC slept, Claude Code could not start) or `failed` (the checker still found a
+   blocking problem after the polish rounds) has **Resume where it stopped**: the
+   same session carries on with everything it already read, and anything you type
+   in the box goes to it. **Discard** gives up on a piece: its files stay in the
+   `studio_pieces` folder, and a draft of it still pending in the queue is
+   rejected.
 8. The playbook. **Studio → The playbook** is the short note every session
    reads before it writes: what works on this account and the mistakes the
    fact-checks keep catching. Edit and save it; the next session reads your

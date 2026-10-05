@@ -941,7 +941,10 @@ def test_a_problem_that_blocks_posting_and_is_never_fixed_fails_the_piece(rig):
         "STAGE 3 OF 3: POLISH (round 2 of 2)",
     ]
     for call in polish:
-        assert "\nPROBLEMS\n- post 1 reads as investment advice ('You should buy')" in call.prompt
+        assert (
+            "\nPROBLEMS\n- post 1 reads as investment advice ('You should buy the stock')"
+            in call.prompt
+        )
         assert "card_1.png" in call.prompt
     assert "check: 1 blocking, 0 fixable" in rig.log(p)
 
@@ -1207,12 +1210,35 @@ def test_resume_polish_checks_and_polishes_again(rig):
     stuck = rig.get(piece.id)
     assert stuck.meta["failed_stage"] == "polish"
 
-    out = SS.resume_interrupted(rig.ctx, stuck, "ignored: polish has no note")
+    out = SS.resume_interrupted(rig.ctx, stuck)
 
     assert out.stage == S.STAGE_READY
     assert rig.cli.stages() == ["research", "write", "polish", "polish"]
     assert not any(c.resumed for c in rig.cli.calls)
     assert rig.draft(rig.get(piece.id)).draft.thread == [POST_1, POST_2]
+
+
+def test_resume_polish_with_a_note_revises_with_it(rig):
+    rig.cli.fail("polish", stopped("killed"))
+    piece = rig.new_piece()
+    SS.research(rig.ctx, piece)
+    stuck = rig.get(piece.id)
+
+    out = SS.resume_interrupted(rig.ctx, stuck, "Lead with the China data.")
+
+    assert out.stage == S.STAGE_READY
+    assert rig.cli.stages()[3:] == ["revise", "polish"]
+    assert "Lead with the China data." in rig.cli.of("revise")[-1].prompt
+
+
+def test_resume_research_carries_the_editors_note(rig):
+    rig.cli.fail("research", stopped("killed"))
+    piece = rig.new_piece(checkpoint=True)
+    SS.research(rig.ctx, piece)
+
+    SS.resume_interrupted(rig.ctx, rig.get(piece.id), "Use the 10-K, not the press release.")
+
+    assert "THE EDITOR ADDS\nUse the 10-K, not the press release." in rig.cli.calls[-1].prompt
 
 
 def test_resume_after_a_polish_that_stayed_blocked_gets_fresh_rounds(rig):
@@ -1297,7 +1323,22 @@ def test_a_revision_with_more_cards_adds_pictures(rig):
     assert queue_store.image_file(row.id, 1).exists()
 
 
-@pytest.mark.parametrize("decide", [queue_store.approve, queue_store.reject])
+def test_a_rejected_draft_comes_back_to_pending_with_the_revision(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    queue_store.reject(rig.conn, draft_id)
+    rig.cli.work["revise"] = _rewrite_to_one_post
+
+    out = SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
+
+    assert out.stage == S.STAGE_READY
+    row = queue_store.get_draft(rig.conn, draft_id)
+    assert (row.status, row.draft.thread) == (queue_store.STATUS_PENDING, [POST_SINGLE])
+    actions = [d["action"] for d in queue_store.list_decisions(rig.conn, draft_id)]
+    assert actions[-3:] == ["reject", "reopen", "revise"]
+
+
+@pytest.mark.parametrize("decide", [queue_store.approve])
 def test_revise_leaves_a_draft_that_was_decided_alone(rig, decide):
     piece = rig.ready_piece()
     draft_id = rig.get(piece.id).draft_id
@@ -1325,15 +1366,25 @@ def test_revise_leaves_a_draft_that_was_decided_alone(rig, decide):
     ]
 
 
-@pytest.mark.parametrize("decide", [queue_store.approve, queue_store.reject])
-def test_revise_blocker_names_a_draft_that_was_decided(rig, decide):
+def test_revise_blocker_names_an_approved_draft_and_lets_a_rejected_one_through(rig):
     p = rig.get(rig.ready_piece().id)
     assert ingest.revise_blocker(rig.conn, p) == ""  # pending: a revision can replace it
-    decide(rig.conn, p.draft_id)
-    status = queue_store.get_draft(rig.conn, p.draft_id).status
+    queue_store.reject(rig.conn, p.draft_id)
+    assert ingest.revise_blocker(rig.conn, p) == ""  # rejected: the revision brings it back
+    queue_store.approve(rig.conn, p.draft_id)
     assert ingest.revise_blocker(rig.conn, p) == (
-        f"draft {p.draft_id} is {status}, not pending; reopen it in the queue before revising"
+        f"draft {p.draft_id} is approved, not pending; reopen it in the queue before revising"
     )
+
+
+def test_discarding_withdraws_a_pending_draft_only(rig):
+    p = rig.get(rig.ready_piece().id)
+    assert ingest.withdraw(rig.conn, p) == p.draft_id
+    row = queue_store.get_draft(rig.conn, p.draft_id)
+    assert row.status == queue_store.STATUS_REJECTED
+    assert queue_store.list_decisions(rig.conn, p.draft_id)[-1]["note"] == "discarded in the studio"
+    assert ingest.withdraw(rig.conn, p) is None  # not pending any more: left alone
+    assert ingest.withdraw(rig.conn, rig.new_piece()) is None  # no draft at all
 
 
 def test_revise_blocker_lets_a_piece_without_a_draft_through(rig):

@@ -191,7 +191,7 @@ def test_an_unknown_hook_style_is_fixable_and_none_is_fine(tmp_path):
 def _angle_problem(given: str) -> str:
     keys = ", ".join(sorted(load_angles()))
     return (
-        "piece.json: angle must be the key of one of the angles on offer "
+        "piece.json: angle must be the key of one of the library's angles "
         f"(one of {keys}), not {given!r}"
     )
 
@@ -209,6 +209,34 @@ def test_every_angle_in_the_library_reads_cleanly(tmp_path):
     for key in load_angles():
         folder(tmp_path, angle=key)
         assert read(tmp_path)[1:] == ([], []), key
+
+
+@pytest.mark.parametrize(
+    ("text", "flagged"),
+    [
+        ("THE DEAL\n---\nMerck pays $400 million.", True),
+        ("THE DEAL\n  ---  \nMerck pays.", True),
+        ("THE DEAL\n\nMerck pays.\n\nNot investment advice.", False),
+        ("A range: 2031---2033 is not a divider.", False),
+        ("THE DEAL\n----\nfour dashes do not split", False),
+    ],
+)
+def test_a_line_of_only_three_dashes_is_fixable(tmp_path, text, flagged):
+    folder(tmp_path, texts=(text,))
+    report = qa.check_piece(tmp_path, XCFG, set(), None)
+    hits = [p for p in report.fixable if "has a line that is only '---'" in p]
+    assert bool(hits) is flagged
+
+
+def test_the_angle_the_editor_chose_is_the_one_the_piece_must_use(tmp_path):
+    folder(tmp_path)  # deal_decoder
+    asked = qa.check_piece(tmp_path, XCFG, set(), None, requested_angle="catalyst_map")
+    assert asked.fixable[-1] == (
+        "piece.json: the editor chose the angle 'catalyst_map' for this piece; write it in "
+        "that angle (piece.json says 'deal_decoder')"
+    )
+    kept = qa.check_piece(tmp_path, XCFG, set(), None, requested_angle="deal_decoder")
+    assert not any("the editor chose" in p for p in kept.fixable)
 
 
 def test_an_unreadable_angle_library_skips_the_angle_check(tmp_path, monkeypatch):

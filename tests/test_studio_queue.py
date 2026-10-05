@@ -107,10 +107,29 @@ def row_of(body: str, draft_id: int) -> str:
 
 
 @pytest.fixture
-def client(db_file):
+def client(db_file, monkeypatch):
     # db_file sets DB_PATH: the app's connections, image_dir() and to_queue's copies all
-    # land in the test's folder
+    # land in the test's folder. The queue as the control panel serves it, with the studio
+    # pages beside it (the template environment is process-wide, so it is set here).
+    from approval_queue import app as queue_app
+
+    monkeypatch.setitem(queue_app.templates.env.globals, "HAS_PANEL", True)
     return TestClient(app, follow_redirects=False)
+
+
+def test_the_standalone_queue_names_a_studio_draft_without_dead_links(
+    client, conn, tmp_path, monkeypatch
+):
+    # run_queue.py serves the queue alone: no /studio pages, so no links to them
+    from approval_queue import app as queue_app
+
+    monkeypatch.setitem(queue_app.templates.env.globals, "HAS_PANEL", False)
+    piece_id, draft_id, _ = put_piece(conn, tmp_path, POSTS)
+    listing = row_of(client.get("/queue").text, draft_id)
+    detail = client.get(f"/drafts/{draft_id}").text
+    assert f"<strong>Studio piece {piece_id}</strong>" in listing
+    assert 'href="/studio/' not in listing and 'href="/studio/' not in detail
+    assert "its studio page in the control panel (run_app.py)" in detail
 
 
 def test_the_pending_list_names_a_studio_draft_by_its_piece(client, conn, tmp_path):

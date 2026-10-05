@@ -154,12 +154,19 @@ def _stopped_early(result: claude_cli.SessionResult) -> bool:
 
 
 def research(
-    ctx: Context, piece: S.Piece, *, first: bool = True, resumed_reason: str = ""
+    ctx: Context,
+    piece: S.Piece,
+    *,
+    first: bool = True,
+    resumed_reason: str = "",
+    note: str = "",
 ) -> Outcome:
     S.update_piece(ctx.conn, piece.id, stage=S.STAGE_RESEARCHING, error="")
     piece = S.get_piece(ctx.conn, piece.id) or piece
     brief = ctx.brief_for(piece)
     text = P.research_prompt(brief)
+    if note.strip():  # the editor's words when pressing Resume
+        text += f"\n\nTHE EDITOR ADDS\n{note.strip()}"
     if resumed_reason:
         text = P.resume_prompt("research", resumed_reason, text)
     result = _run_stage(ctx, piece, "research", text, first=first)
@@ -250,7 +257,13 @@ def polish(ctx: Context, piece: S.Piece) -> Outcome:
     workspace = Path(piece.workspace)
     max_rounds = max(1, int(ctx.cfg.get("max_polish_rounds") or 1))
     S.update_piece(ctx.conn, piece.id, stage=S.STAGE_POLISHING)
-    report = qa.check_piece(workspace, ctx.cfg["x"], ctx.known_handles, ctx.renderer)
+    report = qa.check_piece(
+        workspace,
+        ctx.cfg["x"],
+        ctx.known_handles,
+        ctx.renderer,
+        requested_angle=piece.requested_angle,
+    )
     if ctx.renderer is None and report.piece is not None and report.piece.cards:
         # This machine's problem, not the piece's: a round would ask the session to fix it,
         # and the one fix in its reach is to drop its cards. Stop; Resume once a browser is in.
@@ -279,7 +292,13 @@ def polish(ctx: Context, piece: S.Piece) -> Outcome:
         if not result.ok:
             return _fail(ctx, piece, "polish", result.detail, interrupted=_stopped_early(result))
         reviewed = True
-        report = qa.check_piece(workspace, ctx.cfg["x"], ctx.known_handles, ctx.renderer)
+        report = qa.check_piece(
+            workspace,
+            ctx.cfg["x"],
+            ctx.known_handles,
+            ctx.renderer,
+            requested_angle=piece.requested_angle,
+        )
     if report.blocking:
         message = "still blocked after polishing: " + "; ".join(report.blocking[:5])
         S.update_piece(
@@ -320,13 +339,15 @@ def resume_interrupted(ctx: Context, piece: S.Piece, note: str = "") -> Outcome:
             # session (a fresh id, in case the CLI kept a half-made one under the old id).
             S.update_piece(ctx.conn, piece.id, session_id=str(uuid.uuid4()))
             piece = S.get_piece(ctx.conn, piece.id) or piece
-            return research(ctx, piece, first=True)
-        return research(ctx, piece, first=False, resumed_reason=reason)
+            return research(ctx, piece, first=True, note=note)
+        return research(ctx, piece, first=False, resumed_reason=reason, note=note)
     if stage in ("write", ""):
         note = note or str(piece.meta.get("write_note") or "")
         return write(ctx, piece, note, resumed_reason=reason)
     if stage == "revise":
         note = note or str(piece.meta.get("revise_note") or "")
-        if note:
-            return revise(ctx, piece, note)
+    if note:
+        # Words typed with Resume on a piece stopped while polishing are changes asked for:
+        # a revision carries them to the session, then polishes as before.
+        return revise(ctx, piece, note)
     return polish(ctx, piece)
