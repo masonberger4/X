@@ -726,8 +726,10 @@ everything it read):
 2. *Write*: the session picks the angle from those on offer, the shape
    (`long_post`, `thread` of long posts, or `short_post`) and the hook, writes
    `posts/NN.txt`, designs `cards/card_N.html`, runs a cold fact-check with a
-   fresh sub-agent (Agent tool) that sees only the post and card text, logs every
-   finding in `factcheck.md`, and writes `piece.json`.
+   fresh sub-agent (Agent tool) that sees only the post and card text, waits for its
+   report (the CLI runs with background tasks off, so the agent always runs in the
+   foreground), logs every finding in `factcheck.md`, and writes `piece.json`. A piece
+   without that log is blocked: it goes back to the session, and never to the queue.
 3. *Polish*: the app draws every card (`studio/render.py`: headless Edge, Chrome or
    Chromium with the network blocked, a content policy that runs none of the card's own
    scripts and loads nothing from the web or the disk, and the house fonts injected; a
@@ -798,7 +800,11 @@ claude_code:
 
 `.env` holds nothing for Claude. An `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`
 in `.env` or the environment is ignored: `claude_cli.cli_env` strips both from the
-CLI's environment, so a stale key can never switch it to metered API billing. An
+CLI's environment, so a stale key can never switch it to metered API billing. Background
+tasks are switched off there too (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, and a
+`CLAUDE_AUTO_BACKGROUND_TASKS` in your environment is dropped): the app waits for each
+call, and an agent the CLI moved to the background would be killed unfinished when the
+call ended, as a studio session's cold fact-check once was. An
 `LLM_BACKEND` line left in an older `.env` does nothing either. `run_ops.py health`
 and the dashboard carry a `cli` check that fails when `claude_code.binary` is not
 found on PATH; it does not test the login, which a step's log reports as
