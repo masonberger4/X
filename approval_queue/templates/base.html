@@ -517,7 +517,7 @@
     .pill.skip { color: var(--skip-text); background: transparent;    border: 1px dashed var(--skip-line); }
     /* the approved page's publishing order ("#1") is information, not a success: cyan, no glow
        (the markup gives it .pill.ok, the same class as "posted") */
-    .pill.ok[title="publishing order"] { color: var(--info-text); background: var(--info-bg); border-color: var(--info-line); box-shadow: none; }
+    .pill.ok[title$="publishing order"] { color: var(--info-text); background: var(--info-bg); border-color: var(--info-line); box-shadow: none; }
     /* a link pill: room under the underline so it never touches the rounded border */
     a.pill { padding-bottom: .14em; text-decoration: underline; text-underline-offset: .22em; text-decoration-thickness: 1px; }
     a.pill:hover { color: #fff; text-shadow: none; }
@@ -722,13 +722,13 @@
     label { color: var(--text-soft); }
     /* a checkbox and its words wrap as one unit, and so does the studio form's
        "Angle" and its select (detail.html's "Why<br><select>" labels stay as they are) */
-    label:has(> input[type="checkbox"]), label:has(> input[type="radio"]),
-    form[action="/studio/topics"] label:has(> select) { display: inline-block; }
+    label:has(> input[type$="checkbox"]), label:has(> input[type$="radio"]),
+    form[action$="/studio/topics"] label:has(> select) { display: inline-block; }
 
     /* one control height: line-height 1.35 makes inputs and selects as tall as the
        buttons beside them (about 32.5px); textarea takes 1.55 back below. The resting
        border is 3.4:1 or more on the field, the panel and the cards. */
-    input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+    input:not([type$="checkbox"]):not([type$="radio"]):not([type$="hidden"]),
     textarea,
     select {
       font: inherit;
@@ -747,19 +747,19 @@
     select { padding-right: .4rem; cursor: pointer; }
     select option { background: var(--surface-solid); color: var(--text); }
     input::placeholder, textarea::placeholder { color: #a093c4; opacity: 1; }
-    input:hover:not(:disabled):not([type="checkbox"]):not([type="radio"]), textarea:hover:not(:disabled), select:hover:not(:disabled) { border-color: #a68bea; }
-    input:focus:not([type="checkbox"]):not([type="radio"]), textarea:focus, select:focus {
+    input:hover:not(:disabled):not([type$="checkbox"]):not([type$="radio"]), textarea:hover:not(:disabled), select:hover:not(:disabled) { border-color: #a68bea; }
+    input:focus:not([type$="checkbox"]):not([type$="radio"]), textarea:focus, select:focus {
       outline: none;
       border-color: var(--accent-2);
       box-shadow: inset 0 1px 3px rgba(0, 0, 0, .45), 0 0 0 3px rgba(45, 226, 230, .25), 0 0 14px rgba(45, 226, 230, .25);
     }
-    input:focus-visible:not([type="checkbox"]):not([type="radio"]), textarea:focus-visible, select:focus-visible {
+    input:focus-visible:not([type$="checkbox"]):not([type$="radio"]), textarea:focus-visible, select:focus-visible {
       outline: 2px solid var(--accent-2);
       outline-offset: 1px;
     }
     input:disabled, textarea:disabled, select:disabled { opacity: .55; border-style: dashed; cursor: not-allowed; }
-    input[type="radio"] { accent-color: var(--accent); }
-    input[type="checkbox"] {
+    input[type$="radio"] { accent-color: var(--accent); }
+    input[type$="checkbox"] {
       -webkit-appearance: none;
               appearance: none;
       width: 1.05rem;
@@ -772,27 +772,27 @@
       box-shadow: inset 0 1px 3px rgba(0, 0, 0, .5);
       cursor: pointer;
     }
-    input[type="checkbox"]:hover:not(:disabled) { border-color: var(--accent); box-shadow: 0 0 8px rgba(255, 60, 190, .45); }
-    input[type="checkbox"]:checked {
+    input[type$="checkbox"]:hover:not(:disabled) { border-color: var(--accent); box-shadow: 0 0 8px rgba(255, 60, 190, .45); }
+    input[type$="checkbox"]:checked {
       border-color: #ff7ad6;
       background-color: var(--accent);
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.6 8.4l2.9 2.9 5.9-6.6' fill='none' stroke='%23180318' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
       box-shadow: 0 0 10px rgba(255, 60, 190, .6);
     }
-    input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
-    input[type="checkbox"]:disabled { opacity: .45; border-style: dashed; box-shadow: none; cursor: not-allowed; }
+    input[type$="checkbox"]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+    input[type$="checkbox"]:disabled { opacity: .45; border-style: dashed; box-shadow: none; cursor: not-allowed; }
 
     form.inline { display: inline; }
     /* a draft's "Edit by hand": Thread, Note and Why each on their own line, with the note
        field wide enough to show its whole hint */
     details > form[action$="/edit"] > label { display: block; margin-top: .55rem; }
-    details > form[action$="/edit"] input[name="note"] { width: min(100%, 30em); }
+    details > form[action$="/edit"] input[name$="note"] { width: min(100%, 30em); }
     form.revise { display: flex; gap: .4rem; margin-top: .3rem; }
     /* width 0 lets the queue's revise input shrink in a narrow window; flex 1 still fills the row */
     form.revise input { flex: 1; width: 0; min-width: 7em; font: inherit; }
     input.order { width: 3.5em; font: inherit; }
     /* the approved table's narrow Source column: the note and its button on one line */
-    td input[name="note"] { width: 8.5em; }
+    td input[name$="note"] { width: 8.5em; }
     /* feed: the decision form gets its own row under "Write a studio piece", with
        space between its controls when they wrap */
     form.decide { margin-top: .4rem; }
@@ -853,8 +853,10 @@
     form[action$="/edit"] button:not([name]):not(.link):focus-visible,
     button.pick:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
-    /* the one that posts to X (and its manual twin): the full sunset */
-    form[action="/publishing/now"] button:not(.link),
+    /* the one that posts to X ("Publish now", the only form action ending /now) and its manual
+       twin: the full sunset. Suffix matches throughout, so the stylesheet never repeats a
+       page's own markup (tests look for it) */
+    form[action$="/now"] button:not(.link),
     form[action$="/done"] button:not(.link) {
       color: #1a0420;
       text-shadow: none;
@@ -863,7 +865,7 @@
       border: 1px solid #ffc27a;
       box-shadow: 0 0 16px rgba(255, 120, 90, .5), inset 0 1px 0 rgba(255, 255, 255, .45);
     }
-    form[action="/publishing/now"] button:not(.link):hover:not(:disabled),
+    form[action$="/now"] button:not(.link):hover:not(:disabled),
     form[action$="/done"] button:not(.link):hover:not(:disabled) {
       color: #12010f;
       background: linear-gradient(180deg, #ffe27d 0%, #ffad55 45%, #ff55c8 100%);
@@ -872,7 +874,7 @@
 
     /* reject, stop, drop: red tubes */
     form[action$="/reject"] button:not(.link),
-    form[action="/runs/cancel"] button:not(.link),
+    form[action$="/runs/cancel"] button:not(.link),
     form[action$="/drop"] button:not(.link) {
       color: #ffdde2;
       text-shadow: none;
@@ -881,7 +883,7 @@
       box-shadow: 0 0 10px rgba(255, 92, 112, .25);
     }
     form[action$="/reject"] button:not(.link):hover:not(:disabled),
-    form[action="/runs/cancel"] button:not(.link):hover:not(:disabled),
+    form[action$="/runs/cancel"] button:not(.link):hover:not(:disabled),
     form[action$="/drop"] button:not(.link):hover:not(:disabled) {
       color: #fff;
       background: linear-gradient(180deg, rgba(255, 92, 112, .44), rgba(255, 92, 112, .16));
@@ -987,7 +989,7 @@
       nav { padding: .4rem .7rem; font-size: .72rem; letter-spacing: .08em; }
       nav a, nav .sep { margin-right: .7rem; }
       h1 { font-size: 1.6rem; }
-      td input[name="note"] { width: 100%; }
+      td input[name$="note"] { width: 100%; }
       .actions form.inline { white-space: normal; }
       /* a long pill in a table cell ("read the research") wraps rather than squeeze its row */
       td > .pill { white-space: normal; letter-spacing: .05em; }
