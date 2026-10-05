@@ -8,13 +8,16 @@ studio/render.py (a headless browser, no network).
 
 from __future__ import annotations
 
+import html
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from draft.targets import target_figures, target_mentions
 from studio import render as render_mod
 from studio import safety
 from studio.angles import HOOK_STYLES, SHAPES, load_angles
@@ -54,6 +57,9 @@ class PieceFiles:
     companies: list[dict[str, Any]] = field(default_factory=list)
     handles: dict[str, str] = field(default_factory=dict)  # lowercased handle -> page
     recheck: list[str] = field(default_factory=list)
+    # Every analyst or consensus target the posts or cards cite, with what it rests on
+    # (check_price_targets).
+    price_targets: list[dict[str, Any]] = field(default_factory=list)
     summary: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -191,6 +197,7 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
             piece.handles[handle] = _str(h.get("verified_at"))
     piece.companies = [c for c in _items(data.get("companies")) if isinstance(c, dict)]
     piece.recheck = [_str(x) for x in _items(data.get("recheck_before_posting")) if _str(x)]
+    piece.price_targets = [p for p in _items(data.get("price_targets")) if isinstance(p, dict)]
     return piece, problems, minor
 
 
@@ -270,7 +277,96 @@ def check_text(piece: PieceFiles, xcfg: dict[str, Any], known_handles: set[str])
             report.blocking.append(f"post {post} carries {n} cards; X allows 4 per post")
     if not piece.title:
         report.fixable.append(f"{PIECE_FILE} has no title")
+    check_price_targets(piece, report)
     return report
+
+
+# --- analysts' price targets ----------------------------------------------------------------
+
+# Whether the catalyst the piece is about is in the analyst's model.
+IN_MODEL = ("yes", "no", "partly", "unknown")
+_FIGURE_RE = re.compile(r"\d{1,4}(?:\.\d{1,2})?")
+_TAG_RE = re.compile(r"<[^>]*>")
+_CODE_RE = re.compile(r"<(style|script)\b.*?</\1\s*>", re.I | re.S)
+
+
+def _cents(figure: str) -> str:
+    """$12.4, 12.40 and $12.40 are the same target."""
+    return f"{float(figure):.2f}"
+
+
+def card_text(path: Path) -> str:
+    """What a card says, from its HTML: the words a reader sees, "" when it cannot be read."""
+    try:
+        raw = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return ""
+    return " ".join(html.unescape(_TAG_RE.sub(" ", _CODE_RE.sub(" ", raw))).split())
+
+
+def _who(entry: dict[str, Any]) -> str:
+    return " ".join(x for x in (_str(entry.get("firm")), _str(entry.get("target"))) if x)
+
+
+def check_price_targets(piece: PieceFiles, report: Report) -> None:
+    """An analyst's target is cited only with what it rests on: every target a post or card
+    cites is listed in piece.json's price_targets with the firm, the target, its date, what
+    it rests on, the catalyst the piece is about, whether that catalyst is in the model (and
+    if not, what it would move) and a source. A figure given as a target that is not a
+    listed published target may be the account's own, and the account sets none."""
+    texts = [(f"post {i}", text) for i, text in enumerate(piece.posts, start=1)]
+    texts += [(f"card {c.html.name}", card_text(c.html)) for c in piece.cards]
+    cited = [(label, target_mentions(text)) for label, text in texts]
+    cited = [(label, found) for label, found in cited if found]
+    listed = piece.price_targets
+    if cited and not listed:
+        label, found = cited[0]
+        report.fixable.append(
+            f"{label} cites a price target ({found[0]!r}) but {PIECE_FILE} lists no "
+            "price_targets; a target is cited only with what it rests on: say in the post "
+            "what each cited target assumes and whether the catalyst the piece is about is "
+            "in it (and if not, what it would move), and list each in price_targets, or take "
+            "the target out"
+        )
+    known: set[str] = set()
+    for i, entry in enumerate(listed, start=1):
+        name = f"price_targets[{i}]" + (f" ({_who(entry)})" if _who(entry) else "")
+        figures = _FIGURE_RE.findall(_str(entry.get("target")))
+        known.update(_cents(f) for f in figures)
+        known.update(_cents(f) for f in _FIGURE_RE.findall(_str(entry.get("previous"))))
+        missing = [k for k in ("firm", "date", "rests_on", "catalyst") if not _str(entry.get(k))]
+        if not figures:
+            missing.insert(1, "target")
+        if missing:
+            report.fixable.append(f"{PIECE_FILE}: {name} has no {', '.join(missing)}")
+        in_model = _str(entry.get("in_model")).lower()
+        if in_model not in IN_MODEL:
+            report.fixable.append(
+                f"{PIECE_FILE}: {name} in_model must be one of {', '.join(IN_MODEL)}: is the "
+                "catalyst the piece is about in the analyst's model?"
+            )
+        elif in_model != "yes" and not _str(entry.get("effect")):
+            report.fixable.append(
+                f"{PIECE_FILE}: {name} says the catalyst is {in_model!r} in the model but "
+                "gives no effect: which assumption would it move, and which way?"
+            )
+        if not _str(entry.get("source")).startswith(("http://", "https://")):
+            report.fixable.append(f"{PIECE_FILE}: {name} has no source URL")
+    for label, text in texts if listed else ():  # with none listed, the message above says it
+        for figure in target_figures(text):
+            if _cents(figure) not in known:
+                report.fixable.append(
+                    f"{label} gives ${figure} as a target, but {PIECE_FILE}'s price_targets "
+                    f"lists no published target of ${figure}; list the analyst's target with "
+                    "what it rests on and its source, or take the figure out (the account sets "
+                    "no targets of its own)"
+                )
+    if listed:
+        names = ", ".join(_who(e) for e in listed if _who(e)) or f"{len(listed)}"
+        report.warnings.append(
+            f"cites analyst targets ({names}): check the post says what each rests on and "
+            "whether the piece's catalyst is in it"
+        )
 
 
 NO_FACTCHECK = (

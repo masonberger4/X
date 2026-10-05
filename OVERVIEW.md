@@ -101,9 +101,10 @@ plain code after the AI writes, not by trusting the AI to behave:
 
 - No medical advice. Ever. Describe evidence, never tell anyone what to do
   about their treatment.
-- No investment advice. No buy, sell, hold or short, no price targets, no
-  promises about returns. Describe what a result means and what the risks
-  are; the reader decides.
+- No investment advice. No buy, sell, hold or short, no price targets of its
+  own, no promises about returns. Describe what a result means and what the risks
+  are; the reader decides. An analyst's target appears only in a studio piece, and
+  only with what it rests on and whether the post's catalyst is in it.
 - Every number in the draft has to appear word-for-word in the source. No
   rounding, no "roughly", no doing the maths yourself.
 - Preprints get called preprints.

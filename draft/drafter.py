@@ -43,6 +43,7 @@ from draft.schema import (
 from draft.settings import load_draft_config
 from draft.style import style_problems
 from draft.tags import Handle, company_names, load_handles, relevant_handles, tag_problems
+from draft.targets import target_problems
 
 log = logging.getLogger(__name__)
 
@@ -301,6 +302,8 @@ def check_hard_rules(
             problems.append(
                 f"{label} reads as investment advice: {_INVEST_RE.search(post).group(0)!r}"
             )
+        else:  # an analyst's target too: a thread cannot say what it rests on
+            problems += [f"{label} {p}" for p in target_problems(post)]
         problems += [f"{label} {p}" for p in link_problems(post)]
         problems += [f"{label} {p}" for p in style_problems(post)]
         problems += [f"{label} {p}" for p in tag_problems(post, handles, companies)]
@@ -313,6 +316,8 @@ def check_hard_rules(
                 problems.append(f"table reads as medical advice: {text!r}")
             elif _INVEST_RE.search(text):
                 problems.append(f"table reads as investment advice: {text!r}")
+            elif target_problems(text):
+                problems.append(f"table cites a price target: {text!r}")
     if not draft.thread:
         problems.append("thread is empty")
         return problems

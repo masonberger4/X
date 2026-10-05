@@ -347,6 +347,12 @@ WHAT TO WRITE IN YOUR WORKING FOLDER
      dates); include only sections the story needs;
    - every fact with its source URL and "(opened)" or "(snippet)"; facts from your own
      knowledge marked "(knowledge)";
+   - "Analyst targets", when analysts' targets bear on the story: for each one a post
+     might cite, the firm, its rating, the target (and the one before, if it moved), the
+     date, what it rests on as the firm or reliable coverage of its note published it
+     (products and indications valued, peak sales, probability of success, launch
+     timing, discount rate or multiple), and whether the story's catalyst is in it. A
+     target whose basis you cannot find goes under "Open questions", not here;
    - "X handles": each @handle you verified on the organisation's own website, with the
      page (the handles the app has verified, listed below, need no check); organisations
      whose site links no X account, so they get a ticker or plain name instead;
@@ -404,6 +410,19 @@ def _piece_schema(b: Brief) -> str:
         "companies": [{"name": "Merck", "ticker": "MRK"}],
         "handles": [{"handle": "@Merck", "verified_at": "https://www.merck.com/"}],
         "recheck_before_posting": ["fast-moving facts to re-check on posting day"],
+        "price_targets": [
+            {
+                "firm": "the firm, or 'consensus (N analysts, aggregator)'",
+                "target": "$38",
+                "previous": "$45",
+                "date": "2026-07-24",
+                "rests_on": "what the target assumes, as published",
+                "catalyst": "the catalyst the piece is about",
+                "in_model": "yes | no | partly | unknown",
+                "effect": "unless yes: which assumption it would move, and which way",
+                "source": "https://...",
+            }
+        ],
         "summary": "two sentences for the editor",
     }
     return json.dumps(example, indent=2, ensure_ascii=False)
@@ -455,8 +474,9 @@ WRITE
 3. The cold fact-check. Start a fresh sub-agent with the Agent tool. Give it the full
    text of every post and every card's visible text (not your fact base or your notes)
    and tell it to check every claim, number, date, name, title, stage and handle against
-   primary sources on the web, independently, and to report each problem with the source
-   that shows it. It does not get your standing instructions, so its instructions must
+   primary sources on the web, independently (an analyst's target, and what the post
+   says it rests on, included), and to report each problem with the source that shows
+   it. It does not get your standing instructions, so its instructions must
    also say: {CHECKER_RULES} Run it in the foreground and wait for its report: the stage
    is not done while it is still checking. Fix every real problem. Write {FACTCHECK_FILE}: a
    table of every finding (post or card, what it said, the problem, the source, what you
@@ -466,7 +486,12 @@ WRITE
 {_piece_schema(b)}
    "shape" is one of {", ".join(SHAPES)}; "hook_style" one of the listed styles.
    "handles" lists every @handle in the posts with the page that verified it ("app" for
-   one from the app's list below).
+   one from the app's list below). "price_targets" lists every analyst or consensus
+   target the posts or cards cite, the way the voice guide says to cite one: what it
+   rests on, the catalyst the piece is about, whether that catalyst is in the model
+   ("in_model": yes, no, partly or unknown) and, unless yes, what it would move
+   ("effect"); "previous" is the target before, if it just moved. [] when the piece
+   cites none.
 
 ANGLES ON OFFER
 {_angles_block(b)}

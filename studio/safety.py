@@ -4,8 +4,9 @@ The session writes freely; the voice guide and the playbook shape the writing, a
 cold fact-check checks the facts. Code checks only what must never reach X whatever the
 writing looks like: investment or medical advice, a link, a post over its limit. These
 are blocking: a piece that still has one after the polish rounds is not handed to the
-queue. A few softer signals (a price target mentioned, no disclaimer line) are warnings
-the editor sees on the piece.
+queue. A target of the account's own is blocking too; an analyst's target the posts cite
+is checked against piece.json by studio/qa.py:check_price_targets (draft/targets.py finds
+the citations). A missing disclaimer line is a warning the editor sees on the piece.
 """
 
 from __future__ import annotations
@@ -29,7 +30,6 @@ _INVESTMENT = (
     _ADVICE_LEAD + r"(?:buy|sell|short|accumulate|dump)\s+\$[A-Za-z]{1,5}\b",
     r"\b(?:strong|clear|obvious|easy)\s+(?:buy|sell|short)(?![\w-])",
     r"\b(?:you|investors|traders|everyone)\s+should\s+(?:buy|sell|short|hold|avoid|add|trim|own)\b",
-    r"\b(?:my|our)\s+price\s+target\b",
     # A price call, not a forecast for a market ("the PD-1 market will double by 2030").
     r"(?:\b(?:stock|shares|this\s+(?:one|name|stock))|\$[A-Za-z]{1,5}\b)\s+(?:will|could|can|"
     r"is\s+going\s+to|is\s+set\s+to)\s+(?:double|triple|10x|moon)\b",
@@ -64,6 +64,19 @@ _MEDICAL = (
     + r"[^.!?\n]{0,60}?\b(?:ask|try|consider|switch|talk|enrol)",
 )
 _INVESTMENT_RE = re.compile("|".join(_INVESTMENT), re.I | re.M)
+# The account projecting a target of its own: what a target would become, or what it
+# should be. Saying which assumption a catalyst moves and which way is the analysis; the
+# new number is a price target, and the account sets none.
+_OWN_TARGET = (
+    r"\b(?:would|could|should|might|will)\s+(?:take|put|lift|push|raise|lower|cut|move|"
+    r"bring|send)\s+(?:\S+\s+){0,3}?(?:price\s+)?targets?\s+(?:up\s+|down\s+)?to\s+~?\$\s?"
+    r"\d[\d.,]*",
+    r"\b(?:price\s+target|target\s+price|fair\s+value)s?\s+(?:should|would|could|might)\s+be\b",
+    r"\b(?:my|our)\s+(?:(?:price\s+)?target|target\s+price|fair\s+value)s?\b",
+    r"\b(?:stock|shares)\s+(?:is|are|would\s+be|could\s+be|should\s+be)\s+worth\s+~?\$\s?"
+    r"\d[\d.,]*",
+)
+_OWN_TARGET_RE = re.compile("|".join(_OWN_TARGET), re.I)
 _MEDICAL_RE = re.compile("|".join(_MEDICAL), re.I)
 _URL_RE = re.compile(r"https?://\S+", re.I)
 # A bare domain is a link to X's parser too (example.com/path, www.example.com, bit.ly/x),
@@ -76,7 +89,6 @@ _BARE_DOMAIN_RE = re.compile(
 # A non-US listing written as ticker.exchange (GMAB.CO, NOVO-B.CO, BAYN.DE): the bare-domain
 # rule catches it, since X links it, but the fix is a cashtag or words, not a source's name.
 _EXCHANGE_CODE_RE = re.compile(r"[A-Z0-9][A-Z0-9-]*\.[A-Z]{1,2}")
-_PRICE_TARGET_RE = re.compile(r"\bprice\s+targets?\b", re.I)
 _DISCLAIMER_RE = re.compile(
     r"\bnot\s+(?:investment|financial)(?:\s+or\s+medical)?\s+advice\b", re.I
 )
@@ -90,6 +102,12 @@ def blocking_problems(text: str, label: str) -> list[str]:
     if m:
         words = m.group(0).lstrip(".!?\u2022:;)/\u2013\u2014- \t\n")
         out.append(f"{label} reads as investment advice ({words!r}); describe, never advise")
+    m = _OWN_TARGET_RE.search(text)
+    if m:
+        out.append(
+            f"{label} gives a price target of the account's own ({m.group(0)!r}); say which "
+            "of the analyst's assumptions the catalyst moves and which way, never the new number"
+        )
     m = _MEDICAL_RE.search(text)
     if m:
         out.append(f"{label} reads as medical advice ({m.group(0)!r}); describe evidence only")
@@ -112,14 +130,9 @@ def blocking_problems(text: str, label: str) -> list[str]:
 
 
 def warnings(posts: list[str]) -> list[str]:
-    """Softer signals for the editor, from the piece as a whole."""
+    """Softer signals for the editor, from the piece as a whole (the price targets a piece
+    cites are summed up by studio/qa.py:check_price_targets)."""
     out: list[str] = []
-    whole = "\n".join(posts)
-    if _PRICE_TARGET_RE.search(whole):
-        out.append(
-            "mentions a price target: fine when it is a named analyst's published target, "
-            "never the account's own"
-        )
     if posts and not _DISCLAIMER_RE.search(posts[-1]):
         out.append('the last post has no "Not investment advice." line')
     return out

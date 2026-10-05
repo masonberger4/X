@@ -69,11 +69,35 @@ alone.
 - Hashtags: a short line at the very end, topical (#ImmunoOncology #CTLA4 #ESMO26),
   three to nine. Not in the body.
 
+## Analyst price targets
+A target belongs in a post only when it bears on what the piece is about: the readout,
+launch, deal or other catalyst the piece turns on. A list of who raised to what is
+not analysis; it stays in the fact base. A post that cites a target (one firm's, or
+the consensus) does the work:
+- Whose it is and when: the firm, the target (and the one before, if it just moved),
+  the date.
+- What it rests on: the assumptions behind it, as the firm or reliable coverage of
+  its note published them (which products and indications are valued, peak sales,
+  probability of success, launch timing, the discount rate or the multiple). A
+  consensus is an average of different models: say what separates the high targets
+  from the low ones instead.
+- Whether the catalyst the piece is about is in it: valued, left out, or valued at
+  low odds.
+- If it is left out or discounted, which of those assumptions the catalyst would move
+  and which way. Size it only with numbers someone published (the firm's own bull or
+  bear case, its probability for that indication, the company's guidance), labelled
+  as a scenario. Never turn that into a new number: a target, a fair value or a price
+  the stock would or should reach is a price target, and the account sets none.
+- A target whose basis you cannot find is not cited.
+List every target the posts or cards cite in piece.json's "price_targets"; the app
+checks each has what it rests on and a source, and the fact-check checks it.
+
 ## Lines that are never crossed
 - No investment advice: never tell anyone to buy, sell, hold, short or avoid a stock;
   no price targets of your own; no promises or predictions of returns. Describing a
-  thesis, a valuation, analysts' published targets with attribution, a scenario or a
-  risk is fine. Sales scenarios are labelled as illustrative and as your opinion.
+  thesis, a valuation, a scenario or a risk is fine, and so is an analyst's published
+  target cited the way the section above says. Sales scenarios are labelled as
+  illustrative and as your opinion.
 - No medical advice: describe evidence; never tell anyone what they or their doctor
   should do.
 - Preprints are called preprints. Early data are called early. Cross-trial comparisons

@@ -58,7 +58,8 @@ def cell_rules(max_chars: int = MAX_POST_CHARS) -> str:
 - No colons and no dashes (no em dash, no " - "). Write it the way a person talks, in
   plain sentences.
 - No medical advice or treatment recommendations. No investment advice: never buy, sell,
-  hold, short, a price target or a promised return. Describe; the reader decides.
+  hold, short, a price target (an analyst's included) or a promised return. Describe;
+  the reader decides.
 - Every number must appear verbatim in the source title or abstract. Do not round,
   convert, subtract or compute. The one exception is market context in dollars (the size
   of the market the therapy targets, a comparable drug's sales, a published peak sales

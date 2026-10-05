@@ -17,6 +17,12 @@ def test_invented_number_is_a_problem():
     assert problems("ORR of 90% is strong.") == ["numbers not in the source: 90%"]
 
 
+def test_a_cell_cites_no_analyst_target():
+    [problem] = problems("Stifel cut its target to $38 on the delay.")
+    assert problem.startswith("cites a price target ('target to $38')")
+    assert not any("price target" in p for p in problems("It targets BCMA in 97 patients."))
+
+
 def test_length_advice_and_slot_rules():
     assert problems("x" * 281)[0].startswith("281 chars")
     assert "investment advice" in problems("Buy the stock now.")[0]

@@ -348,13 +348,20 @@ def test_handles_are_keyed_without_the_at_sign_in_lower_case(tmp_path):
         ("recheck_before_posting", {"what": "the ORR"}, []),
         ("recheck_before_posting", "the ORR on the poster", ["the ORR on the poster"]),
         ("recheck_before_posting", ["the ORR", "", "  ", 12], ["the ORR", "12"]),
+        ("price_targets", "Stifel $38", []),
+        ("price_targets", {"firm": "Stifel"}, []),
+        ("price_targets", [{"firm": "Stifel"}, "Stifel $38", 4], [{"firm": "Stifel"}]),
     ],
 )
 def test_list_fields_of_the_wrong_type_never_crash_the_check(tmp_path, field, value, read_as):
     folder(tmp_path, **{field: value})
     piece, blocking, minor = read(tmp_path)
     assert (blocking, minor) == ([], [])
-    got = {"handles": piece.handles, "companies": piece.companies}.get(field, piece.recheck)
+    got = {
+        "handles": piece.handles,
+        "companies": piece.companies,
+        "price_targets": piece.price_targets,
+    }.get(field, piece.recheck)
     assert got == read_as
 
 
@@ -519,16 +526,142 @@ def test_a_piece_without_a_title_is_fixable():
     assert report.fixable == ["piece.json has no title"]
 
 
-def test_the_editor_is_warned_about_a_price_target_and_a_missing_disclaimer():
-    report = qa.check_text(
-        piece_of("Jefferies set a price target of $40.", "Phase 3 reads out in May."),
-        XCFG,
-        set(),
+def test_the_editor_is_warned_about_a_missing_disclaimer():
+    report = qa.check_text(piece_of("Phase 3 reads out in May.", "Then the label."), XCFG, set())
+    assert (report.blocking, report.fixable) == ([], [])
+    assert report.warnings == ['the last post has no "Not investment advice." line']
+
+
+# ---- analysts' price targets -------------------------------------------------------------------
+
+# The smoke test's Iovance piece, as written before targets had to say what they rest on.
+IOVANCE = (
+    "The stock closed at $14.45, up 31.5%. H.C. Wainwright raised its target to $20 from $9, "
+    "and Wells Fargo to $18 from $14 the next day; Goldman had put a Buy and a $15 target on "
+    "it five days earlier. At Friday's close of $14.22 the company is worth about $6.4B, and "
+    "the shares sit above the average analyst target (~$12.40 on MarketBeat's tally). " + CLOSING
+)
+
+
+def target(firm: str, figure: str, **fields) -> dict:
+    """A complete price_targets entry: the firm's figure, what it rests on, the catalyst."""
+    return {
+        "firm": firm,
+        "target": figure,
+        "date": "2026-09-30",
+        "rests_on": "Amtagvi melanoma sales only, peak $1B, no NSCLC",
+        "catalyst": "the NSCLC registrational readout",
+        "in_model": "no",
+        "effect": "adds an indication the model values at zero; up",
+        "source": "https://www.marketbeat.com/stocks/NASDAQ/IOVA/price-target/",
+        **fields,
+    }
+
+
+IOVANCE_TARGETS = [
+    target("H.C. Wainwright", "$20", previous="$9"),
+    target("Wells Fargo", "$18", previous="$14"),
+    target("Goldman Sachs", "$15", date="2026-09-24"),
+    target("consensus (MarketBeat, 9 analysts)", "$12.40"),
+]
+
+
+def test_a_cited_target_with_nothing_listed_goes_back_to_the_session():
+    report = qa.check_text(piece_of(IOVANCE), XCFG, set())
+    assert report.blocking == []
+    [problem] = report.fixable  # one message, not one per figure as well
+    assert problem.startswith(
+        "post 1 cites a price target ('target to $20') but piece.json lists no price_targets"
     )
-    assert report.blocking == [] and report.fixable == []
-    assert len(report.warnings) == 2
-    assert report.warnings[0].startswith("mentions a price target")
-    assert report.warnings[1] == 'the last post has no "Not investment advice." line'
+    assert "what each cited target assumes" in problem and "or take the target out" in problem
+
+
+def test_targets_listed_with_what_they_rest_on_pass_and_the_editor_sees_them():
+    report = qa.check_text(piece_of(IOVANCE, price_targets=IOVANCE_TARGETS), XCFG, set())
+    assert (report.blocking, report.fixable) == ([], [])
+    assert report.warnings == [
+        "cites analyst targets (H.C. Wainwright $20, Wells Fargo $18, Goldman Sachs $15, "
+        "consensus (MarketBeat, 9 analysts) $12.40): check the post says what each rests on "
+        "and whether the piece's catalyst is in it"
+    ]
+
+
+def test_a_figure_given_as_a_target_must_be_a_listed_published_one():
+    # Wells Fargo's move is left out of the list: both its figures are named
+    listed = [t for t in IOVANCE_TARGETS if t["firm"] != "Wells Fargo"]
+    report = qa.check_text(piece_of(IOVANCE, price_targets=listed), XCFG, set())
+    assert [p.split(",")[0] for p in report.fixable] == [
+        "post 1 gives $18 as a target",
+        "post 1 gives $14 as a target",
+    ]
+    assert "the account sets no targets of its own" in report.fixable[0]
+    # the same figure written another way is the same target
+    same = [target("Stifel", "38.00 dollars")]
+    text = "Stifel's $38 target values only the squamous cohort. " + CLOSING
+    assert qa.check_text(piece_of(text, price_targets=same), XCFG, set()).fixable == []
+
+
+@pytest.mark.parametrize(
+    "fields, problem",
+    [
+        ({"firm": ""}, "price_targets[1] ($20) has no firm"),
+        ({"target": "twenty"}, "price_targets[1] (H.C. Wainwright twenty) has no target"),
+        ({"date": " "}, "price_targets[1] (H.C. Wainwright $20) has no date"),
+        ({"rests_on": ""}, "price_targets[1] (H.C. Wainwright $20) has no rests_on"),
+        ({"catalyst": None}, "price_targets[1] (H.C. Wainwright $20) has no catalyst"),
+        ({"rests_on": "", "catalyst": ""}, "has no rests_on, catalyst"),
+        ({"source": "MarketBeat"}, "price_targets[1] (H.C. Wainwright $20) has no source URL"),
+    ],
+)
+def test_each_listed_target_says_whose_it_is_what_it_rests_on_and_where_from(fields, problem):
+    text = "H.C. Wainwright's $20 target values melanoma alone. " + CLOSING
+    entry = {**target("H.C. Wainwright", "$20"), **fields}
+    report = qa.check_text(piece_of(text, price_targets=[entry]), XCFG, set())
+    assert [p for p in report.fixable if problem in p], report.fixable
+
+
+@pytest.mark.parametrize(
+    "in_model, effect, problem",
+    [
+        ("yes", "", None),
+        ("no", "adds NSCLC; up", None),
+        ("Partly", "raises the odds", None),
+        ("unknown", "", "says the catalyst is 'unknown' in the model but gives no effect"),
+        ("no", "", "says the catalyst is 'no' in the model but gives no effect"),
+        ("maybe", "", "in_model must be one of yes, no, partly, unknown"),
+        ("", "", "in_model must be one of yes, no, partly, unknown"),
+    ],
+)
+def test_whether_the_catalyst_is_in_the_model_and_what_it_would_move(in_model, effect, problem):
+    text = "H.C. Wainwright's $20 target values melanoma alone. " + CLOSING
+    entry = target("H.C. Wainwright", "$20", in_model=in_model, effect=effect)
+    fixable = qa.check_text(piece_of(text, price_targets=[entry]), XCFG, set()).fixable
+    assert fixable == [] if problem is None else [p for p in fixable if problem in p], fixable
+
+
+def test_a_target_on_a_card_counts_too(tmp_path):
+    card = tmp_path / "card_1.html"
+    card.write_text(
+        "<html><head><style>.t{color:red}</style></head><body><h1>Street targets</h1>"
+        "<p>Average target&nbsp;<b>$12.40</b></p><p>H.C. Wainwright: $20 PT</p></body></html>",
+        encoding="utf-8",
+    )
+    cards = [qa.Card(html=card, png=card.with_suffix(".png"), post=1, alt="Street targets")]
+    report = qa.check_text(piece_of(POST, cards=cards), XCFG, set())
+    assert report.fixable[0].startswith("card card_1.html cites a price target ('Street targets')")
+    listed = [target("consensus (MarketBeat)", "$12.40"), target("H.C. Wainwright", "$20")]
+    report = qa.check_text(piece_of(POST, cards=cards, price_targets=listed), XCFG, set())
+    assert report.fixable == []
+    assert qa.card_text(tmp_path / "gone.html") == ""
+
+
+def test_biotech_targets_are_not_price_targets():
+    text = (
+        "Ivonescimab targets PD-1 and VEGF; the target population is 780 patients and the "
+        "company is chasing a $5B target market. " + CLOSING
+    )
+    report = qa.check_text(piece_of(text), XCFG, set())
+    assert (report.blocking, report.fixable, report.warnings) == ([], [], [])
 
 
 # ---- check_side_files ----------------------------------------------------------------------

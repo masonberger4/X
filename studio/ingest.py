@@ -39,6 +39,13 @@ class IngestError(RuntimeError):
     """The piece cannot go into the queue (its draft was approved or posted meanwhile)."""
 
 
+def _target_line(entry: dict[str, Any]) -> str:
+    """ "H.C. Wainwright $20 of 2026-09-30" from a piece.json price_targets entry."""
+    who = " ".join(" ".join(str(entry.get(k) or "").split()) for k in ("firm", "target")).strip()
+    date = " ".join(str(entry.get("date") or "").split())
+    return f"{who} of {date}" if who and date else who
+
+
 def _why(piece: S.Piece, pf: qa.PieceFiles, report: qa.Report) -> str:
     lines = [pf.summary or piece.label]
     if pf.angle:
@@ -46,6 +53,15 @@ def _why(piece: S.Piece, pf: qa.PieceFiles, report: qa.Report) -> str:
     # One line per fact, so the copy-paste page lists them on posting day
     # (approval_queue/store.py:recheck_lines reads them back).
     lines += [queue_store.RECHECK_PREFIX + " ".join(r.split()) for r in pf.recheck]
+    # Analysts move targets often: each one cited is re-checked on posting day too.
+    targets = [line for line in map(_target_line, pf.price_targets) if line]
+    if targets:
+        lines.append(
+            queue_store.RECHECK_PREFIX
+            + "the analyst targets cited are still each firm's latest ("
+            + "; ".join(targets)
+            + ")"
+        )
     if report.warnings:
         lines.append("For the editor: " + "; ".join(report.warnings))
     lines.append(f"Fact base, fact-check log and session: /studio/{piece.id}")

@@ -378,8 +378,6 @@ INVESTMENT_ADVICE = [
     "Investors should avoid the name.",
     "You should own this through 2027.",
     "Everyone should trim into strength.",
-    "My price target is $40.",
-    "Our price target stays at $40.",
     "$SMMT will double on approval.",
     "This one will 10x.",
     "Ivonescimab to the moon.",
@@ -398,6 +396,22 @@ INVESTMENT_ADVICE = [
     "I'd load up on shares here.",
     "You should buy shares before the readout.",
     "We would short the stock here.",
+]
+
+# A target of the account's own: what a target would become or should be. Saying which of the
+# analyst's assumptions a catalyst moves, and which way, is the analysis; the new number is not.
+OWN_TARGETS = [
+    "My price target is $40.",
+    "Our price target stays at $40.",
+    "Our target is $40.",
+    "My fair value is $30.",
+    "The readout would take Stifel's target to $52.",
+    "A win could push the price target up to $30.",
+    "NSCLC would lift H.C. Wainwright's 12-month target to $25.",
+    "The price target should be $50.",
+    "Fair value would be higher still.",
+    "The stock is worth $30 on the NSCLC data.",
+    "Shares would be worth $45.50 if it works.",
 ]
 
 MEDICAL_ADVICE = [
@@ -422,6 +436,10 @@ MEDICAL_ADVICE = [
 DESCRIPTIONS = [
     "Berenberg flagged gotistobart as a potential treatment of choice in squamous NSCLC.",
     "Guggenheim cut its price target to $25 after the interim look.",
+    # an analyst's target with what it rests on, and which way the catalyst moves it
+    "Stifel's $38 target values only the squamous cohort; a win in NSCLC would move it up.",
+    "H.C. Wainwright's bull case, $30, assumes the NSCLC label.",
+    "A positive readout would raise the probability of success the model gives NSCLC.",
     "Shares fell 12% after the readout; the stock doubled in 2025.",
     "Summit raised $68.4M through its at-the-market program.",
     "Bull case: 20% to 25% share if the data hold. Bear case: a CRL.",
@@ -443,6 +461,13 @@ DESCRIPTIONS = [
     "The company said it would sell shares in a public offering.",
     "Funds just bought shares; the trust must sell shares by law.",
 ]
+
+
+@pytest.mark.parametrize("text", OWN_TARGETS)
+def test_a_target_of_the_accounts_own_blocks(text):
+    [problem] = safety.blocking_problems(text, "post 3")
+    assert problem.startswith("post 3 gives a price target of the account's own (")
+    assert problem.endswith("which way, never the new number")
 
 
 @pytest.mark.parametrize("text", INVESTMENT_ADVICE)
@@ -596,10 +621,10 @@ def test_the_smmt_thread_trips_only_on_its_sources_post():
 
 
 @pytest.mark.parametrize("mention", ["Guggenheim's price target is $25.", "Two price targets"])
-def test_a_price_target_is_a_warning_not_a_block(mention):
+def test_an_analysts_target_never_blocks(mention):
+    # what it rests on is studio/qa.py:check_price_targets's to hold it to, against piece.json
     assert safety.blocking_problems(mention, "post 1") == []
-    [warning] = safety.warnings([mention, "Not investment advice."])
-    assert warning.startswith("mentions a price target")
+    assert safety.warnings([mention, "Not investment advice."]) == []
 
 
 @pytest.mark.parametrize(
@@ -1093,6 +1118,34 @@ def test_the_piece_json_example_names_every_key_the_checker_reads():
     assert handle and handle <= set(example["handles"][0])
 
 
+def test_the_piece_json_example_shows_a_target_with_everything_the_checker_reads():
+    [entry] = _piece_example(P.write_prompt(_brief()))["price_targets"]
+    src = Path(qa.__file__).read_text(encoding="utf-8")
+    read = set(re.findall(r'\bentry\.get\("(\w+)"\)', src))
+    assert {"target", "previous", "in_model", "effect", "source"} <= read  # the scan works
+    assert read | {"firm", "date", "rests_on", "catalyst"} <= set(entry)
+    assert entry["in_model"].split(" | ") == list(qa.IN_MODEL)
+
+
+def test_research_write_and_the_voice_guide_ask_what_a_cited_target_rests_on():
+    research = " ".join(P.research_prompt(_brief()).split())
+    assert '"Analyst targets", when analysts\' targets bear on the story' in research
+    assert 'basis you cannot find goes under "Open questions", not here' in research
+    write = " ".join(P.write_prompt(_brief()).split())
+    assert "(an analyst's target, and what the post says it rests on, included)" in write
+    assert '"price_targets" lists every analyst or consensus target the posts or' in write
+    voice = " ".join((BRIEF_DIR / "voice.md").read_text(encoding="utf-8").split())
+    assert "## Analyst price targets" in voice
+    for line in (
+        "Whether the catalyst the piece is about is in it",
+        "which of those assumptions the catalyst would move and which way",
+        "a target, a fair value or a price the stock would or should reach is a price "
+        "target, and the account sets none",
+        "A target whose basis you cannot find is not cited.",
+    ):
+        assert line in voice, line
+
+
 def test_the_piece_json_example_round_trips_through_the_checker(tmp_path):
     example = _piece_example(P.write_prompt(_brief()))
     # The placeholders: the two fields that list their alternatives, and the angle, which
@@ -1123,6 +1176,7 @@ def test_the_piece_json_example_round_trips_through_the_checker(tmp_path):
     assert piece.companies == [{"name": "Merck", "ticker": "MRK"}]
     assert piece.handles == {"merck": "https://www.merck.com/"}
     assert piece.recheck == example["recheck_before_posting"]
+    assert piece.price_targets == example["price_targets"]
 
 
 # ---- prompts: variety ---------------------------------------------------------------------
