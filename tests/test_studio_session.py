@@ -201,6 +201,11 @@ def stopped(subtype: str) -> claude_cli.SessionResult:
         "no_result": ("CLI exited -9", "", "Killed"),
         "error_during_execution": ("", "Tool permission denied", ""),
         "refused": ("refusal", "Usage policy safeguards flagged this request", ""),
+        claude_cli.SUBAGENT_KILLED: (
+            "the CLI stopped 1 sub-agent(s) before they finished",
+            "The cold fact-check is still running in the background.",
+            "",
+        ),
         "": ("", "", "something went wrong"),
     }
     reason, text, stderr = reasons[subtype]
@@ -230,6 +235,9 @@ class FakeCLI:
             "write": lambda ws, call: write_piece(ws),
         }
         self.outcomes: dict[str, list[Any]] = {}  # stage -> results/exceptions, in turn
+        # What each session has cost so far: the CLI reports the session's running total
+        # (a resumed session carries on from its last), each finished run adding COST.
+        self.spent: dict[str, float] = {}
         self.record_init = True  # False: killed before the CLI recorded the session
         # True: each run ends twice, as a run does when a background sub-agent finishes
         # after the main turn (the CLI starts another turn: a second init and result).
@@ -306,13 +314,14 @@ class FakeCLI:
                 },
             )
             self._emit(kw, {"type": "result", "subtype": "success", "num_turns": TURNS})
+        self.spent[kw["session_id"]] = self.spent.get(kw["session_id"], 0.0) + COST
         return claude_cli.SessionResult(
             session_id=kw["session_id"],
             ok=True,
             subtype="success",
             text=f"{stage} done",
             num_turns=TURNS,
-            cost_usd=COST,
+            cost_usd=self.spent[kw["session_id"]],
             duration_ms=DURATION,
             returncode=0,
         )
@@ -560,11 +569,13 @@ def test_every_stage_runs_in_one_session_started_once(rig):
         SYSTEM,
     )
     assert [c.stage for c in later] == ["write", "polish"]
-    for call in later:  # a resume reuses the system prompt the session recorded
+    # A resume carries the standing instructions too: the CLI's record of the first
+    # launch's system prompt lasts only until the conversation is compacted.
+    for call in later:
         assert (call.kw["session_id"], call.kw["resume"], call.kw["system"]) == (
             piece.session_id,
             True,
-            "",
+            SYSTEM,
         )
     ws = Path(piece.workspace)
     for call in rig.cli.calls:
@@ -609,7 +620,45 @@ def test_each_launch_is_one_finished_run_row(rig):
     ]
     for r in runs:
         assert r.finished_at is not None
+        # each run's own cost, though the CLI reports the session's running total
         assert (r.turns, r.cost_usd, r.duration_ms) == (TURNS, COST, DURATION)
+
+
+def test_a_run_row_records_what_that_run_cost_not_the_sessions_running_total(rig):
+    """The live run's rows read research 11.99 and write 23.52: the CLI's total for the
+    whole session so far. Each row is the difference. A run stopped before it reported a
+    cost records none, and the next run's total takes it in."""
+    totals = iter([11.99, 0.0, 23.52, 34.43])
+    real = rig.cli.__call__
+
+    def running_totals(prompt, **kw):
+        result = real(prompt, **kw)
+        result.cost_usd = next(totals)
+        return result
+
+    rig.ctx.launch = running_totals
+    rig.cli.fail("write", stopped("killed"))
+    piece = rig.new_piece()
+    SS.research(rig.ctx, piece)
+    SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+    runs = S.list_runs(rig.conn, piece.id)
+    assert [r.stage for r in runs] == ["research", "write", "write", "polish"]
+    assert [round(r.cost_usd, 2) for r in runs] == [11.99, 0.0, 11.53, 10.91]
+    assert rig.get(piece.id).meta["session_cost"] == {"session": piece.session_id, "usd": 34.43}
+
+
+def test_a_fresh_session_counts_its_cost_from_nothing(rig):
+    rig.cli.fail("write", stopped("killed"))
+    piece = rig.new_piece()
+    SS.research(rig.ctx, piece)  # the old session: COST so far
+    rig.cli.fail("write", lost(piece.session_id))
+    SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+    p = rig.get(piece.id)
+    runs = S.list_runs(rig.conn, piece.id)
+    assert [(r.stage, r.outcome) for r in runs][-2:] == [("write", "ok"), ("polish", "ok")]
+    # the new session's first total is all its own, not less the old session's
+    assert [r.cost_usd for r in runs][-2:] == [COST, COST]
+    assert p.meta["session_cost"] == {"session": p.session_id, "usd": 2 * COST}
 
 
 def test_the_session_log_and_the_echo_follow_the_session(rig):
@@ -691,7 +740,7 @@ def test_continue_after_the_checkpoint_writes_with_the_editors_note(rig):
     assert not write.resumed
     assert write.prompt.startswith("STAGE 2 OF 3: WRITE")
     assert f"THE EDITOR READ YOUR FACT BASE AND SAYS\n{note}\n" in write.prompt
-    assert (write.kw["resume"], write.kw["system"]) == (True, "")
+    assert (write.kw["resume"], write.kw["system"]) == (True, SYSTEM)
     p = rig.get(piece.id)
     assert (p.request, p.request_note) == ("", "")  # the request is used up
     assert rig.draft(p).draft.thread == [POST_1, POST_2]
@@ -1202,7 +1251,7 @@ def test_resume_research_after_the_session_started_resumes_it(rig):
     assert (again.kw["session_id"], again.kw["resume"], again.kw["system"]) == (
         piece.session_id,
         True,
-        "",
+        SYSTEM,
     )
     assert rig.get(piece.id).session_id == piece.session_id
 
@@ -1351,7 +1400,7 @@ def test_revise_rewrites_the_queue_draft_in_place(rig):
     assert revise.prompt.startswith("REVISION") and note in revise.prompt
     assert (revise.kw["resume"], revise.kw["system"], revise.piece_stage) == (
         True,
-        "",
+        SYSTEM,
         S.STAGE_REVISING,
     )
     p = rig.get(piece.id)
@@ -2077,3 +2126,60 @@ def test_a_stage_stopped_for_another_reason_resumes_the_same_session(rig):
         SS.write(rig.ctx, rig.get(piece.id))
         assert rig.get(piece.id).session_id == piece.session_id
     assert not any(c.prompt.startswith(FRESH_HEAD) for c in rig.cli.calls)
+
+
+# ---- a stage whose sub-agent the CLI stopped -------------------------------------------
+
+
+def test_a_write_whose_fact_checker_was_killed_stops_and_resumes_to_finish_it(rig):
+    """The CLI stopped the cold fact-check when the turn ended and reported success: the
+    stage did not finish. The piece stops (interrupted, resumable) and says why in its log
+    and its runs; Resume sends the write stage again, naming the reason."""
+    killed = stopped(claude_cli.SUBAGENT_KILLED)
+    rig.cli.fail("write", killed)
+    piece = rig.new_piece()
+    out = SS.research(rig.ctx, piece)
+
+    p = rig.get(piece.id)
+    assert out.stage == p.stage == S.STAGE_INTERRUPTED
+    assert rig.cli.stages() == ["research", "write"]  # never polished, never queued
+    assert rig.no_draft(p)
+    assert p.error == killed.detail
+    assert p.error.startswith("the CLI stopped 1 sub-agent(s) before they finished: ")
+    log = rig.log(p)
+    assert f"stage ended: {claude_cli.SUBAGENT_KILLED} after 5 turns" in log
+    assert f"!!! write: {killed.detail}" in log
+    runs = S.list_runs(rig.conn, piece.id)
+    assert (runs[-1].stage, runs[-1].outcome, runs[-1].detail) == (
+        "write",
+        claude_cli.SUBAGENT_KILLED,
+        killed.detail,
+    )
+
+    out = SS.resume_interrupted(rig.ctx, p)
+
+    assert out.stage == S.STAGE_READY
+    again = rig.cli.of("write")[-1]
+    assert again.resumed and again.prompt.startswith(f"{RESUME_HEAD} ({killed.detail}).")
+
+
+def test_a_piece_whose_cold_fact_check_never_reported_never_reaches_the_queue(rig):
+    """The live run's other half (fixed with background tasks off in every CLI child): the
+    write stage ended without factcheck.md. Each polish round asks for it; a piece that
+    still has none after the last round fails rather than going into the queue."""
+
+    def write_without_factcheck(ws: Path, call: Call) -> None:
+        write_piece(ws)
+        (ws / P.FACTCHECK_FILE).unlink()
+
+    rig.cli.work["write"] = write_without_factcheck
+    piece = rig.new_piece()
+    out = SS.research(rig.ctx, piece)
+
+    p = rig.get(piece.id)
+    assert out.stage == p.stage == S.STAGE_FAILED
+    assert p.error.startswith(f"still blocked after polishing: {qa.NO_FACTCHECK}")
+    assert rig.no_draft(p)
+    polish = rig.cli.of("polish")
+    assert len(polish) == rig.ctx.cfg["max_polish_rounds"]
+    assert all(f"- {qa.NO_FACTCHECK}" in c.prompt for c in polish)

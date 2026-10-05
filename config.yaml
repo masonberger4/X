@@ -44,6 +44,11 @@ claude_code:                      # how every model call reaches Claude (claude_
   binary: claude                  # CLI on PATH; it must be logged in (`claude login`)
   timeout_seconds: 600            # per call (a swarm cell can run several minutes)
   extra_args: []                  # appended verbatim, e.g. ["--fallback-model", "sonnet"]
+  # --safe-mode on every call: your own Claude Code set-up (CLAUDE.md files, hooks, MCP
+  # servers, plugins, output styles) stays out of the pipeline's calls, which must answer
+  # in JSON. Each call also runs from an empty folder of its own. false only for a CLI too
+  # old to know the flag ("unknown option '--safe-mode'"); updating the CLI is the fix.
+  safe_mode: true
 
 scoring:
   batch_size: 10                  # clusters per CLI call

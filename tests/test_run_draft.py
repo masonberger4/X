@@ -371,3 +371,80 @@ def test_run_draft_drafts_as_before_without_the_studios_tables(conn, monkeypatch
     )
     assert run_draft.main(["--min-score", "7"]) == 0
     assert [r.item_id for r in store.list_drafts(conn)] == ["new"]
+
+
+# --- the CLI failing is not the model failing --------------------------------------------
+
+
+def _draft_with(monkeypatch, call):
+    import run_draft
+    from draft import drafter
+
+    monkeypatch.setattr(
+        run_draft,
+        "draft_item",
+        lambda **kw: drafter.draft_item(call=call, sleep=lambda s: None, **kw),
+    )
+    return run_draft
+
+
+def test_a_story_the_safeguard_refuses_is_stored_failed_and_not_sent_again(conn, monkeypatch):
+    """The same prompt is refused every time: four refused calls a story, every run, for
+    ever for a story the editor said yes to. Now one call, and the story is stored failed
+    with the reason (--retry-failed sends it once more)."""
+    import claude_cli
+
+    calls = []
+
+    def refuse(system, user, model):
+        calls.append(user)
+        raise claude_cli.ClaudeCliRefused("CLI exited 1: safeguards flagged this message")
+
+    run_draft = _draft_with(monkeypatch, refuse)
+    seed_item(conn, "flagged", total=9.0)
+    assert run_draft.main(["--min-score", "7"]) == 0
+    [failed] = store.list_drafts(conn, store.STATUS_FAILED)
+    assert failed.rejection_reason.startswith(f"{run_draft.REFUSED}: CLI exited 1: safeguards")
+    assert failed.model == "ClaudeCliRefused" and len(calls) == 1
+    run_draft.main(["--min-score", "7"])
+    assert len(calls) == 1  # not sent again
+
+
+def test_a_cli_that_cannot_start_ends_the_run(conn, monkeypatch):
+    import claude_cli
+
+    calls = []
+
+    def missing(system, user, model):
+        calls.append(user)
+        raise claude_cli.ClaudeCliUnavailable("'claude' not found on PATH")
+
+    run_draft = _draft_with(monkeypatch, missing)
+    for name in ("one", "two", "three"):
+        seed_item(conn, name, total=9.0)
+    assert run_draft.main(["--min-score", "7"]) == 0
+    assert len(calls) == 1  # one try, not three stories times four attempts with backoff
+    assert store.list_drafts(conn, store.STATUS_FAILED) == [] and store.list_drafts(conn) == []
+
+
+def test_a_usage_limit_after_a_rule_failure_leaves_the_story_for_the_next_run(conn, monkeypatch):
+    """Attempt 1 broke a hard rule and the usage limit hit the rest: nothing is stored, so
+    the next run drafts the story instead of it sitting failed with the old reason."""
+    import claude_cli
+
+    replies = iter([good_json(f"a link sneaks in {URL}")])
+
+    def limited(system, user, model):
+        reply = next(replies, None)
+        if reply is None:
+            raise claude_cli.ClaudeCliError("CLI exited 1: usage limit reached")
+        return reply
+
+    run_draft = _draft_with(monkeypatch, limited)
+    seed_item(conn, "later", total=9.0)
+    assert run_draft.main(["--min-score", "7"]) == 0
+    assert store.list_drafts(conn, store.STATUS_FAILED) == [] and store.list_drafts(conn) == []
+    _draft_with(monkeypatch, lambda s, u, m: good_json())
+    run_draft.main(["--min-score", "7"])
+    [row] = store.list_drafts(conn)
+    assert row.item_id == "later" and row.status == store.STATUS_PENDING

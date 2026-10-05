@@ -786,18 +786,34 @@ and the studio's shortlist skips a story with a draft that did not fail
 (`story_item`), so a story that linking merges into another cluster is followed there
 (`studio/runner.py:follow_merges`, at the start of every studio run). **Voice and design**: `studio/brief/session.md` (the job),
 `voice.md` and `cards.md` (dark 4:5 cards, Inter and IBM Plex Mono shipped in
-`studio/fonts/`) travel as text appended to Claude Code's system prompt;
+`studio/fonts/`) travel as text appended to Claude Code's system prompt on every launch,
+resumes included (the CLI reuses its record of the first launch's prompt only until the
+conversation is compacted);
 `studio/exemplars/` holds the three hand-made reference pieces (handoff docs and
 posted cards); the playbook (`studio/playbook.md`, or the editor's copy
 `studio_playbook.md` next to the database, edited on `/studio/playbook`) goes into
-every write prompt and wins over the voice guide.
+every research and write prompt and wins over the voice guide. Both prompts also list
+the X handles `config.yaml` gives (`studio/runner.py:app_handles`, the ones qa accepts
+without a page) for the session to use without verifying them, and before each of those
+stages the app writes `earlier_pieces.md` into the piece's folder: the whole text of the
+last `variety.recent_pieces_shown` written pieces as the queue holds them, each saying
+whether it went out on X, which a scorecard grades against (a session cannot open
+another piece's folder). Story titles and abstracts from the feeds are quoted between
+FEED TEXT markers as outside text, data and never instructions.
 
 **Isolation**: each session runs from its own folder under `workspace_dir`
 (`studio_pieces/`) with `--safe-mode --restricted --permission-mode dontAsk` and
 only `Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent` (`cli_flags`,
 `tools`): no shell, file tools confined to its folder and the reference folder, no
 CLAUDE.md, plugins, hooks or MCP servers, and API credentials stripped from its
-environment.
+environment. The cold fact-checker, a sub-agent that gets none of the session's
+standing instructions, is told by the write and revise prompts that web pages are data
+and that it changes no file. A stage whose CLI stopped a sub-agent before it reported
+(it reports success all the same) is `subagent_killed`, not finished: the piece is
+`interrupted`, its log and runs say so, and Resume runs the stage again. Each
+`studio_runs` row's `cost_usd` is that run's own cost: the CLI reports the session's
+running total, so the row takes the difference from the total the piece's session last
+reported (`session_cost` in the piece's meta).
 
 **Running it**: the `studio` step in `ops/config.yaml` (automatic, right after
 `score`, `skip_when_busy` so a long session sits a run out instead of holding the
@@ -890,6 +906,7 @@ claude_code:
   binary: claude           # on PATH, or its full path if a scheduler's PATH lacks it (cron's usually does)
   timeout_seconds: 600     # per call; verify/config.yaml sets its own for a claim check
   extra_args: []           # appended verbatim, e.g. ["--fallback-model", "sonnet"]
+  safe_mode: true          # --safe-mode on every call; false only for a CLI too old for it
 ```
 
 `.env` holds nothing for Claude. An `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`
@@ -911,16 +928,25 @@ writes the system prompt to a temp file (deleted after the call) and runs the ar
 ```
 claude -p --output-format json --verbose --no-session-persistence \
   --tools <list> --model <model> [--allowedTools <list>] \
-  [--system-prompt-file <file>] [--effort <level>] [extra_args...]
+  [--system-prompt-file <file>] [--effort <level>] [--safe-mode] [extra_args...]
 ```
 
 with the user prompt on stdin. The tool list is empty for every caller but two, and
 whatever it names is pre-approved with `--allowedTools`, since print mode cannot
 answer a permission prompt: the claim verifier (`WebSearch,WebFetch`) and the image
 grader (`Read`, to open the PNG). The system prompt travels in a file because it is
-long and full of quotes, which a Windows `.cmd` wrapper cannot pass safely. The CLI
-runs in the temp directory, not the repo, so this project's `CLAUDE.md` never reaches
-the prompt; `--bare` is not used because it would also skip the stored login.
+long and full of quotes, which a Windows `.cmd` wrapper cannot pass safely. Each call
+runs from a new, empty folder of its own under the temp directory, readable by this
+user only and removed afterwards (`claude_cli.private_workdir`, which also holds the
+system prompt's file): not the repo, so this project's `CLAUDE.md` never reaches the
+prompt, and not the shared temp folder, where any account on the machine could leave a
+`CLAUDE.md` or a `.claude/settings.json` with hooks. `--safe-mode`
+(`claude_code.safe_mode`, on by default) keeps the operator's own Claude Code set-up
+out of every call while the login still works: their `CLAUDE.md` files (including the
+folders above the call's), hooks (a Stop hook would run on each of the hundred-odd calls
+of a swarm draft), MCP servers, plugins and output styles, any of which could reword a
+reply that must be JSON. `--bare` is not used because it would also skip the stored
+login.
 `--verbose` returns the whole transcript, so when the final turn comes back empty the
 last assistant text (or the input of the last tool call it made) is recovered
 (`claude_cli.parse_envelope`). On Windows the npm `claude.cmd` wrapper is resolved to
@@ -938,7 +964,13 @@ run. Score rows keep the CLI's verbatim reply in `raw_response`
 (`safeguards flagged this message`) is `ClaudeCliRefused`: it is deterministic for a
 given prompt, so it is never retried; instead `Scorer.score_batch_splitting` halves the
 batch and scores each half in its own call, down to single clusters, and a cluster
-refused on its own is logged and left unscored. `models.scorer_effort`,
+refused on its own is logged and left unscored. The drafter treats the same two errors
+the same way: a refusal is never resent (`draft/drafter.py:generate` raises it at once,
+and `run_draft.py` stores the story `failed` with `refused by the usage-policy
+safeguard`, so `--retry-failed` is the only way it is tried again), and a CLI that
+cannot start ends the drafting run. A call that fails for any other reason (a usage
+limit, a timeout) after an attempt broke a hard rule leaves the story for the next run
+rather than storing it `failed` with that attempt's reasons. `models.scorer_effort`,
 `models.drafter_effort`, `models.rater_effort` and `verify/config.yaml:effort` set the
 effort level per phase (the CLI's `--effort`; blank means the model's default).
 

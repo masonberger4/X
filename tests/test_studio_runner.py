@@ -35,6 +35,7 @@ from approval_queue import store as queue_store
 from db import Database
 from draft.schema import SHAPE_LONG, Draft
 from ops import lock
+from publish import store as publish_store
 from studio import angles as A
 from studio import prompt as P
 from studio import qa, runner
@@ -694,7 +695,9 @@ def test_continue_writes_the_piece_in_its_own_session_with_the_editors_note(
 
     assert rig.cli.stages() == ["write"]  # clean at once: no polish round
     kw = rig.cli.kw("write")
-    assert (kw["session_id"], kw["resume"], kw["system"]) == (piece.session_id, True, "")
+    # the standing instructions go with a resume too (they outlast a compaction that way)
+    assert (kw["session_id"], kw["resume"]) == (piece.session_id, True)
+    assert kw["system"] == runner.system_text()
     assert Path(kw["cwd"]) == ws.resolve()
     assert f"THE EDITOR READ YOUR FACT BASE AND SAYS\n{NOTE}" in rig.cli.prompt("write")
     after = get(sconn, piece.id)
@@ -1557,6 +1560,80 @@ def test_each_stage_is_told_the_date_and_the_playbook_as_they_are_when_it_starts
     assert (first.today, second.today) == ("2026-10-05", "2026-10-06")
     assert first.playbook != second.playbook == "SAVED DURING THE RUN\n"
     assert "Today is 2026-10-06 (America/Los_Angeles)." in P.write_prompt(second)
+
+
+# ---- what the app knows that the session cannot look up ---------------------------------
+
+
+def test_every_stage_is_told_the_handles_the_app_has_verified(rig, sconn, monkeypatch):
+    """config.yaml gives Immunocore its @Immunocore, though the company's own site links no
+    X account: qa accepts the handle without a page, and voice.md lets the session use one
+    the app gives it as verified, so research and write are told every one of them."""
+    root = {
+        "companies": {
+            "feeds": [{"key": "imcr", "name": "Immunocore", "x": "Immunocore", "url": ""}]
+        },
+        "mentions": [
+            {"name": "Johnson & Johnson", "handle": "@JNJNews", "aliases": ["J&J", "Janssen"]},
+            {"name": "No handle here"},
+        ],
+    }
+    monkeypatch.setattr(runner, "_root_config", lambda: root)
+    assert runner.app_handles(root) == [
+        ("Immunocore", "Immunocore"),
+        ("JNJNews", "Johnson & Johnson, J&J, Janssen"),
+    ]
+    assert {h.lower() for h, _ in runner.app_handles(root)} == runner.known_handles(root)
+
+    assert runner.run(topic=TOPIC, checkpoint=False) == 0
+
+    for stage in ("research", "write"):
+        prompt = rig.cli.prompt(stage)
+        assert "X HANDLES THE APP HAS VERIFIED" in prompt, stage
+        assert "- @Immunocore = Immunocore\n- @JNJNews = Johnson & Johnson, J&J, Janssen" in prompt
+
+
+def test_a_new_piece_reads_the_accounts_earlier_pieces_in_its_own_folder(rig, sconn):
+    """--restricted keeps a session out of other pieces' folders, and a scorecard grades an
+    outcome against the bar the account set in an earlier piece: the app copies the recent
+    pieces' text, as the queue holds it, into the new piece's folder, saying which went
+    out on X."""
+    assert runner.run(topic="the first piece", checkpoint=False) == 0
+    first = rig.only_piece()
+    assert not (Path(first.workspace) / P.EARLIER_FILE).exists()  # nothing written before it
+    assert "EARLIER PIECES" not in rig.cli.prompt("research")
+    publish_store.connect().close()  # step 3's tables, as its first run makes them
+    publish_store.record_post(
+        sconn,
+        draft_id=first.draft_id,
+        text=POST,
+        kind=publish_store.KIND_THREAD,
+        position=1,
+        slot=None,
+        tweet_id="1790000000000000001",
+    )
+    edited = make_piece(sconn, stage=S.STAGE_READY, angle="deal_decoder", title="Merck's bet")
+    queue_store.edit(
+        sconn, studio_draft(sconn, edited), thread=["The editor's own words."], approve_after=False
+    )
+    make_piece(sconn, stage=S.STAGE_READY, angle="the_race", title="Never queued")
+    rig.cli.calls.clear()
+
+    assert runner.run(topic=TOPIC, checkpoint=False) == 0
+
+    newest = S.list_pieces(sconn)[0]
+    earlier = (Path(newest.workspace) / P.EARLIER_FILE).read_text(encoding="utf-8")
+    assert earlier.index("Merck's bet") < earlier.index(TITLE)  # newest first
+    assert (
+        "· Merck's bet (deal_decoder)\n\nwaiting in the approval queue, not posted\n\n"
+        "The editor's own words." in earlier
+    )
+    assert f"· {TITLE} (class_deep_dive, long_post, hard_number)\n\nposted on X\n\n{POST}" in (
+        earlier
+    )
+    assert "Never queued" not in earlier
+    for stage in ("research", "write"):
+        assert f"is in {P.EARLIER_FILE} in your working folder" in rig.cli.prompt(stage), stage
 
 
 # ---- an automatic piece needs a browser to draw its cards with -------------------------

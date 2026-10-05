@@ -6,7 +6,9 @@ launches `claude -p` as a subprocess. The CLI is logged in with your own Anthrop
 account, so usage counts against that account's plan; there is no API key and no other
 backend. API credentials are kept out of the child's environment (`cli_env`) so a stale
 key in .env can never switch the CLI to metered billing, and background tasks are disabled
-there, so nothing a call starts outlives it unfinished.
+there, so nothing a call starts outlives it unfinished. Each one-shot call runs from a
+private, empty folder of its own with the operator's Claude Code customisations switched
+off (`--safe-mode`, `claude_code.safe_mode`), so nothing but the prompt shapes its reply.
 
 Trade-offs, documented in README: no strict tool schema (replies are validated in code
 and retried), the CLI must be installed and logged in on the machine that runs the
@@ -26,7 +28,8 @@ import subprocess
 import sys
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,6 +40,7 @@ DEFAULTS: dict[str, Any] = {
     "binary": "claude",
     "timeout_seconds": 600,
     "extra_args": [],
+    "safe_mode": True,
 }
 
 
@@ -88,6 +92,8 @@ def cli_settings(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     out = dict(DEFAULTS)
     out.update((cfg or {}).get("claude_code") or {})
     out["extra_args"] = [str(a) for a in (out.get("extra_args") or [])]
+    # Only an explicit false turns it off: a blank `safe_mode:` keeps the isolation.
+    out["safe_mode"] = out.get("safe_mode") is not False
     return out
 
 
@@ -116,9 +122,13 @@ def build_argv(
     Two callers pass some: the claim verifier (WebSearch/WebFetch) and the image grader
     (Read, to look at the PNG). The system prompt travels in a file: it is long and full
     of quotes, and on Windows the argv goes through a .cmd wrapper where that is not safe.
-    No `--bare`: it also skips the stored login ("Not logged in" on every call). The
-    project's CLAUDE.md is kept out of the prompt by running the CLI from the temp
-    directory instead (see run_claude)."""
+    No `--bare`: it also skips the stored login ("Not logged in" on every call).
+    `--safe-mode` (settings["safe_mode"], on unless claude_code.safe_mode is false) keeps
+    the operator's own Claude Code set-up out of the call while the login still works: their
+    CLAUDE.md files and rules (yours and any in the folders above the call's), hooks (a Stop
+    hook would run on every one of the hundred calls a swarm draft makes), MCP servers,
+    plugins and output styles, any of which could reword a reply that must be JSON. The
+    studio's sessions pass the same flag through studio/config.yaml's cli_flags."""
     tool_list = ",".join(tools or [])
     argv = [
         binary,
@@ -138,6 +148,8 @@ def build_argv(
         argv += ["--system-prompt-file", system_file]
     if effort:
         argv += ["--effort", effort]
+    if settings.get("safe_mode"):
+        argv.append("--safe-mode")
     return argv + settings["extra_args"]
 
 
@@ -213,34 +225,46 @@ def run_claude(
 ) -> str:
     """The single subprocess call. The user prompt goes in on stdin (no arg-length limit).
     `effort` (low|medium|high|xhigh|max) maps to the CLI's --effort; `tools` is empty for
-    every caller except the claim verifier and the image grader."""
+    every caller except the claim verifier and the image grader. The call runs from a
+    private folder of its own (`private_workdir`), which also holds the system prompt's
+    file, and the folder is removed when the call ends."""
     settings = cli_settings(cfg)
     binary = resolve_binary(settings)
-    system_file = None
-    if system:
-        with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", suffix=".md", prefix="claude-system-", delete=False
-        ) as fh:
-            fh.write(system)
-            system_file = fh.name
-    argv = build_argv(binary, model, system_file, settings, effort, tools)
-    log.debug("running %s (%d chars of prompt)", binary, len(user))
-    try:
-        proc = _run_with_timeout(argv, user, float(settings["timeout_seconds"]))
-    except subprocess.TimeoutExpired as exc:
-        raise ClaudeCliError(f"CLI timed out after {settings['timeout_seconds']}s") from exc
-    except OSError as exc:
-        raise ClaudeCliUnavailable(f"could not start {binary!r}: {exc}") from exc
-    finally:
-        if system_file:
-            try:
-                os.unlink(system_file)
-            except OSError:
-                pass
+    with private_workdir() as workdir:
+        system_file = None
+        if system:
+            system_file = os.path.join(workdir, "system-prompt.md")
+            with open(system_file, "w", encoding="utf-8") as fh:
+                fh.write(system)
+        argv = build_argv(binary, model, system_file, settings, effort, tools)
+        log.debug("running %s (%d chars of prompt)", binary, len(user))
+        try:
+            proc = _run_with_timeout(argv, user, float(settings["timeout_seconds"]), cwd=workdir)
+        except subprocess.TimeoutExpired as exc:
+            raise ClaudeCliError(f"CLI timed out after {settings['timeout_seconds']}s") from exc
+        except OSError as exc:
+            raise ClaudeCliUnavailable(f"could not start {binary!r}: {exc}") from exc
     if proc.returncode != 0:
         reason = f"CLI exited {proc.returncode}: {_failure_reason(proc)}"
         raise (ClaudeCliRefused if is_refusal(reason) else ClaudeCliError)(reason)
     return parse_envelope(proc.stdout)
+
+
+@contextmanager
+def private_workdir() -> Iterator[str]:
+    """A new, empty folder for one CLI call, removed afterwards (whatever is left in it).
+
+    The CLI reads instructions and settings from the folder it runs in: CLAUDE.md,
+    CLAUDE.local.md and AGENTS.md, and .claude/settings.json with its hooks. Run from the
+    repository it would read the project's CLAUDE.md; run from the shared temp folder,
+    which on Linux any local account can write to, a file someone left there would steer
+    every score, draft and verdict or run a hook. mkdtemp makes the folder readable by
+    this user only."""
+    path = tempfile.mkdtemp(prefix="claude-call-")
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def no_window_kwargs() -> dict[str, int]:
@@ -257,12 +281,17 @@ def no_window_kwargs() -> dict[str, int]:
 
 
 def _run_with_timeout(
-    argv: list[str], stdin: str, timeout: float
+    argv: list[str], stdin: str, timeout: float, cwd: str | None = None
 ) -> subprocess.CompletedProcess[str]:
     """subprocess.run with a timeout that actually ends the call. On Windows the npm
     `claude.cmd` wrapper starts node as a grandchild; killing only the wrapper leaves node
     holding the output pipes and the post-timeout communicate() blocks for good. Kill the
-    whole tree (taskkill /T) before collecting output."""
+    whole tree (taskkill /T) before collecting output. The child runs in `cwd`, or in a
+    private folder made for it when none is given (never the repo, never the shared temp
+    folder: see private_workdir)."""
+    if cwd is None:
+        with private_workdir() as own:
+            return _run_with_timeout(argv, stdin, timeout, own)
     proc = subprocess.Popen(
         argv,
         stdin=subprocess.PIPE,
@@ -270,7 +299,7 @@ def _run_with_timeout(
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
-        cwd=tempfile.gettempdir(),  # not the repo: no CLAUDE.md auto-discovery
+        cwd=cwd,
         env=cli_env(),
         **no_window_kwargs(),
     )
@@ -319,6 +348,12 @@ def _failure_reason(proc: subprocess.CompletedProcess[str]) -> str:
 # --- long agentic sessions (the studio) ------------------------------------------------
 
 
+# A stage whose CLI ended a sub-agent before it finished (SessionResult.subtype). The CLI
+# reports such a run as an ordinary success, yet the work the sub-agent was doing (the
+# studio's cold fact-check) never came back, so the stage did not finish.
+SUBAGENT_KILLED = "subagent_killed"
+
+
 @dataclass
 class SessionResult:
     """How one agentic CLI invocation ended. `ok` is a clean finish; every other outcome
@@ -326,7 +361,8 @@ class SessionResult:
 
     session_id: str
     ok: bool
-    subtype: str = ""  # success | error_max_turns | error_during_execution | killed | ...
+    # success | error_max_turns | error_during_execution | killed | subagent_killed | ...
+    subtype: str = ""
     text: str = ""
     terminal_reason: str = ""
     num_turns: int = 0
@@ -402,7 +438,31 @@ def describe_event(event: dict[str, Any]) -> list[str]:
                 lines.append(text[:240] + ("..." if len(text) > 240 else ""))
     elif etype == "result":
         lines.append(f"stage ended: {event.get('subtype')} after {event.get('num_turns')} turns")
+    elif _killed_task(event):
+        lines.append(f"a sub-agent was stopped before it finished (task {event.get('task_id')})")
     return lines
+
+
+def _killed_task(event: dict[str, Any]) -> bool:
+    """A stream-json event saying the CLI stopped one of the session's tasks (a sub-agent)
+    before it finished: {"type": "system", "subtype": "task_updated", "task_id": ...,
+    "patch": {"status": "killed"}}."""
+    patch = event.get("patch")
+    return (
+        event.get("type") == "system"
+        and event.get("subtype") == "task_updated"
+        and isinstance(patch, dict)
+        and patch.get("status") == "killed"
+    )
+
+
+def _killed_subagents(result_event: dict[str, Any]) -> int:
+    """How many sub-agents a result line says were stopped unfinished: the counts under
+    subagent_stats.killed ({"parent": 0, "user": 0, "system": 1}), or a plain number."""
+    stats = result_event.get("subagent_stats")
+    killed = stats.get("killed") if isinstance(stats, dict) else None
+    values = killed.values() if isinstance(killed, dict) else [killed]
+    return sum(int(v) for v in values if isinstance(v, int | float) and not isinstance(v, bool))
 
 
 def _tool_summary(args: dict[str, Any]) -> str:
@@ -434,16 +494,21 @@ def run_session(
 ) -> SessionResult:
     """One long agentic invocation of the CLI (a studio stage), run from `cwd` so the
     session's files and its stored conversation stay together. `system` is appended to
-    Claude Code's own system prompt on the first invocation; a resume reuses what the
-    session recorded. Every stream-json line is appended to `transcript` as it arrives and
-    handed to `on_event`. `timeout` None or <= 0 means no limit; on expiry the CLI and what
-    it started are killed and the result says so (the session can still be resumed).
+    Claude Code's own system prompt on every invocation, resumes included. The CLI records
+    the first launch's system prompt and sends that record on every later request, even
+    when a later launch passes other text, but only until the conversation is compacted:
+    from then on it builds the prompt from the current launch's flags, so a resume without
+    the file would carry on with none of the standing instructions (and a CLI that keeps
+    no record would lose them from the first resume). Every stream-json line is appended
+    to `transcript` as it arrives and handed to `on_event`. `timeout` None or <= 0 means
+    no limit; on expiry the CLI and what it started are killed and the result says so (the
+    session can still be resumed).
     Raises ClaudeCliUnavailable when the CLI cannot start, and OSError when `transcript`
     cannot be opened (before anything starts); any other failure is returned."""
     settings = cli_settings(cfg)
     binary = resolve_binary(settings)
     system_file = None
-    if system and not resume:
+    if system:
         with tempfile.NamedTemporaryFile(
             "w", encoding="utf-8", suffix=".md", prefix="claude-system-", delete=False
         ) as fh:
@@ -522,6 +587,7 @@ def _stream_session(
     if timeout and timeout > 0:
         threading.Thread(target=watchdog, daemon=True).start()
     result_event: dict[str, Any] | None = None
+    killed_tasks: set[str] = set()  # sub-agents the CLI stopped unfinished during the run
     try:
         assert proc.stdin is not None and proc.stdout is not None
         try:
@@ -541,6 +607,8 @@ def _stream_session(
                 continue
             if event.get("type") == "result":
                 result_event = event
+            elif _killed_task(event):
+                killed_tasks.add(str(event.get("task_id") or len(killed_tasks)))
             if on_event is not None:
                 try:
                     on_event(event)
@@ -581,6 +649,14 @@ def _stream_session(
         # A result line that reads as a clean finish from a CLI that then exited non-zero:
         # the exit is the reason, not "success".
         reason = "" if ok or proc.returncode in (0, None) else f"CLI exited {proc.returncode}"
+    # A sub-agent still running when the turn ended (moved to the background, or started
+    # there) is stopped by the CLI, which then reports success all the same: the stage
+    # ended without that agent's work, and can be resumed to finish it. The task events
+    # cover a run of several turns; the last result line counts only its own.
+    killed = max(len(killed_tasks), _killed_subagents(result_event))
+    if ok and killed:
+        ok, subtype = False, SUBAGENT_KILLED
+        reason = f"the CLI stopped {killed} sub-agent(s) before they finished"
     return SessionResult(
         session_id=str(result_event.get("session_id") or session_id),
         ok=ok,

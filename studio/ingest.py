@@ -208,6 +208,27 @@ def hand_edits(conn: sqlite3.Connection, piece: S.Piece) -> HandEdits | None:
     return edits if edits else None
 
 
+# How a piece's draft stands, as the next pieces are told (one not on X was never published).
+_WHERE = {
+    queue_store.STATUS_PENDING: "waiting in the approval queue, not posted",
+    queue_store.STATUS_APPROVED: "approved, not posted yet",
+    queue_store.STATUS_REJECTED: "rejected by the editor, never posted",
+}
+
+
+def queued_text(conn: sqlite3.Connection, piece: S.Piece) -> tuple[list[str], str]:
+    """A piece's posts as the approval queue holds them now (the editor's changes included)
+    and where its draft stands, for the pieces after it to read (studio/prompt.py's
+    EARLIER_FILE): a session cannot open another piece's folder, and the account's earlier
+    words are the bar a scorecard grades against. ([], "") for a piece with no draft."""
+    row = queue_store.find_by_item(conn, queue_store.studio_item_id(piece.id))
+    if row is None or not row.draft.thread:
+        return [], ""
+    if publishing.is_live(conn, row.id):
+        return list(row.draft.thread), "posted on X"
+    return list(row.draft.thread), _WHERE.get(row.status, f"{row.status}, not posted")
+
+
 def unsynced(piece: S.Piece, edits: HandEdits | None) -> bool:
     """Changes the session was never given: a revision has to start from them first."""
     return bool(edits) and edits.key() != _synced(piece)

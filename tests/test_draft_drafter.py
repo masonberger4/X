@@ -555,3 +555,46 @@ def test_a_dollar_figure_already_claimed_is_not_flagged_twice():
     draft = validate_output(good_json(lead=lead, claims_to_verify=[claim]))
     assert flag_unverified_numbers(draft, ABSTRACT) == ["9"]
     assert len(draft.claims_to_verify) == 1
+
+
+# --- a failed call is not a failed draft ------------------------------------------
+
+
+def test_a_call_that_fails_after_a_rule_failure_is_raised_not_rejected():
+    """Attempt 1 broke a hard rule, then the usage limit hit: the model never got to try
+    again, so the story is retried next run instead of being stored failed with the first
+    attempt's reasons (which the queue would show as the cause)."""
+    from claude_cli import ClaudeCliError
+
+    limit = ClaudeCliError("CLI exited 1: usage limit reached")
+    call = fake_call([good_json(lead="x" * 300), limit, limit, limit])
+    with pytest.raises(ClaudeCliError, match="usage limit"):
+        run(call, max_attempts=4)
+    assert len(call.calls) == 4
+    # the model's own output last: that is a rejection
+    call = fake_call([good_json(lead="x" * 300), limit, good_json(lead="y" * 300)])
+    with pytest.raises(DraftRejected):
+        run(call, max_attempts=3)
+
+
+@pytest.mark.parametrize("error", ["refused", "unavailable"])
+def test_a_refusal_or_a_missing_cli_is_never_retried(error):
+    """The safeguard refuses the same prompt every time, and a CLI that cannot start will not
+    start on the next attempt either: one call, no backoff, the error goes up."""
+    import claude_cli
+
+    exc = (
+        claude_cli.ClaudeCliRefused("CLI exited 1: safeguards flagged this message")
+        if error == "refused"
+        else claude_cli.ClaudeCliUnavailable("'claude' not found on PATH")
+    )
+    sleeps = []
+    call = fake_call([exc, good_json()])
+    with pytest.raises(type(exc)):
+        run(call, sleep=sleeps.append)
+    assert len(call.calls) == 1 and sleeps == []
+    # also after an earlier attempt broke a rule
+    call = fake_call([good_json(lead="x" * 300), exc, good_json()])
+    with pytest.raises(type(exc)):
+        run(call, sleep=sleeps.append)
+    assert len(call.calls) == 2

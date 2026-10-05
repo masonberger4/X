@@ -102,7 +102,11 @@ carrying `--live`).
   CLI always runs on its own login, drops `CLAUDE_AUTO_BACKGROUND_TASKS` and sets
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so nothing a call starts (a studio
   session's fact-check agent) is moved to the background and killed unfinished when
-  the call ends), and `publish/client.py`
+  the call ends; each one-shot call runs from a new private folder removed afterwards,
+  `claude_cli.private_workdir`, never the repo or the shared temp folder, with
+  `--safe-mode` from the root `claude_code.safe_mode`, on unless false, so the operator's
+  CLAUDE.md files, hooks, MCP servers and output styles never reach a call), and
+  `publish/client.py`
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
   `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
@@ -606,7 +610,12 @@ carrying `--live`).
   `session.fresh_session`, a new id the piece keeps (`lost_sessions` in its meta), the
   standing instructions again and `prompt.fresh_session_prompt`, which has it read the
   piece's files first; `cwd` is the piece folder; `--append-system-prompt-file`
-  with `studio/brief/session.md` + `voice.md` + `cards.md` once, recorded by the CLI;
+  with `studio/brief/session.md` + `voice.md` + `cards.md` on every launch, resumes
+  included (the CLI reuses its record of the first launch's prompt only until the
+  conversation is compacted); a run whose CLI stopped a sub-agent unfinished
+  (`task_updated` killed, or `subagent_stats.killed` in the result line) reports
+  success all the same, so it comes back `claude_cli.SUBAGENT_KILLED`, not ok, and the
+  stage is resumable;
   `--add-dir studio/exemplars`; `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
@@ -614,7 +623,9 @@ carrying `--live`).
   `offered_stories`, the shortlist ids every research run of the piece was offered), an
   optional checkpoint (`research_ready`, the editor's Continue), write (`posts/NN.txt`,
   `cards/card_N.html`, a cold fact-check by a fresh sub-agent logged in `factcheck.md`,
-  in the foreground since `cli_env` disables background tasks, `piece.json`; a piece
+  in the foreground since `cli_env` disables background tasks and told by the prompt
+  that pages are data and that it changes no file (`prompt.CHECKER_RULES`: a sub-agent
+  gets none of the standing instructions), `piece.json`; a piece
   without that log blocks, `qa.NO_FACTCHECK`), polish rounds (`studio/qa.py`: `piece.json` shape, X-weighted length from
   `studio/xcount.py` with `x.headroom`, `studio/safety.py` blocking lines (investment or
   medical advice, links incl. bare domains), an @handle without a verifying page, cards
@@ -653,7 +664,9 @@ carrying `--live`).
   and painted leaf boxes projected on the vertical axis; a box holding other elements is
   not content) is a fixable layout problem.
   `studio/store.py` owns `studio_pieces` (stage, session id, workspace, angle, shape,
-  hook, draft id, the editor's pending `request`), `studio_runs` (one per CLI run) and
+  hook, draft id, the editor's pending `request`), `studio_runs` (one per CLI run, its
+  `cost_usd` that run's own: the CLI reports the session's running total, so
+  `session._run_cost` subtracts the total the piece's session last reported) and
   `studio_topics` (queued by the editor); its one read of step 1 is `studio/topics.py`
   through `db.Database`. Each piece and queued topic keeps one item of its story
   (`story_item`, guarded migration; recorded by the queue route, `runner.new_piece` and
@@ -667,7 +680,14 @@ carrying `--live`).
   avoid (from the last `recent_pieces_shown` written pieces, `Brief.recent`); RECENT
   PIECES in the research prompt is `Brief.topics_to_avoid`, every piece started in the
   last `topics.avoid_days` days that was not discarded, finished or not
-  (`store.started_within`, an unwritten one with its status). `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
+  (`store.started_within`, an unwritten one with its status). Research and write both
+  carry the playbook, the handles `config.yaml` gives (`runner.app_handles`, the set
+  `known_handles` lets qa accept) and, when there are some, a pointer to
+  `prompt.EARLIER_FILE`, which `session.write_earlier` puts in the piece folder before
+  each of them: the `Brief.recent` pieces' text as the queue holds it and whether it went
+  out on X (`ingest.queued_text`), since `--restricted` keeps a session out of other
+  pieces' folders and the scorecard angle grades against the account's own bar. Feed
+  stories are quoted between `prompt.FEED_TEXT_START` / `FEED_TEXT_END` as data. `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
   `interrupted`, acts on `request`s (continue, revise), then starts at most one piece:
   explicit `--topic`/`--story`, else the oldest queued topic, else with `--now` an
   automatic topic, else only when `auto.max_new_per_day` (automatic pieces per calendar

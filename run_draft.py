@@ -10,7 +10,10 @@ Usage: python run_draft.py [--min-score 30] [--since-hours 48] [--limit N] [--dr
 
 Drafts that pass every hard rule are stored as pending. Drafts the model could not get
 past the hard rules are stored as status=failed with the reason, so they are not retried
-on the next run and the reviewer can see why.
+on the next run and the reviewer can see why; so is a story the CLI's usage-policy
+safeguard refuses (the same prompt is refused every time). A story whose model call failed
+(an outage, a usage limit) is tried again next run, and a CLI that cannot start at all ends
+the run.
 
 Every draft is a 3-6 post thread with exactly one visual, a chart or a table (the drafter
 retries a draft that has neither, or whose chart holds a number the source does not). A
@@ -43,6 +46,7 @@ from datetime import UTC, datetime, timedelta
 
 from dotenv import load_dotenv
 
+import claude_cli
 from approval_queue import choosing, images, store
 from draft.chart import Style
 from draft.drafter import (
@@ -69,6 +73,9 @@ from swarm.settings import load_swarm_config
 from verify import store as verify_store
 
 log = logging.getLogger("run_draft")
+
+# The reason a story the safeguard refused is stored as failed under (run_draft.main).
+REFUSED = "refused by the usage-policy safeguard"
 
 
 def build_examples(
@@ -211,6 +218,10 @@ def draft_with_swarm(
             )
         except DraftRejected as exc:
             control_problem = exc.reasons
+        except claude_cli.ClaudeCliRefused as exc:
+            # The same prompt is refused every run: a failed control, so the swarm's draft
+            # still wins, or the story is stored failed rather than retried for ever.
+            control_problem = [f"{REFUSED}: {exc}"]
         # any other exception propagates: the caller retries the story next run
 
     calls = swarm_result.calls if swarm_result else 0
@@ -559,8 +570,16 @@ def main(argv: list[str] | None = None) -> int:
                         rationale=c.rationale,
                         examples_block=examples_block,
                     )
-            except DraftRejected as exc:
+            except (DraftRejected, claude_cli.ClaudeCliRefused) as exc:
+                # Rejected: the model never got past the hard rules. Refused: the safeguard
+                # refuses this story's prompt every time. Stored failed, so neither is sent
+                # again each run (--retry-failed tries it once more).
                 failed += 1
+                if isinstance(exc, DraftRejected):
+                    reasons = exc.reasons
+                else:
+                    log.error("%s: %s: %s", c.item_id, REFUSED, exc)
+                    reasons = [f"{REFUSED}: {exc}"]
                 draft_id = store.insert_draft(
                     conn,
                     item_id=c.item_id,
@@ -568,12 +587,16 @@ def main(argv: list[str] | None = None) -> int:
                     model=exc.__class__.__name__,
                     draft=Draft([], "", ""),
                     status=store.STATUS_FAILED,
-                    rejection_reason="; ".join(exc.reasons),
+                    rejection_reason="; ".join(reasons),
                 )
                 store.record_examples(conn, draft_id, edit_ids, rejection_ids)
                 if run_id is not None:
                     swarm_store.set_run_draft(conn, run_id, draft_id)
                 continue
+            except claude_cli.ClaudeCliUnavailable as exc:
+                # Not installed or cannot start: every other story would fail the same way.
+                log.error("stopping: %s", exc)
+                break
             except Exception:
                 log.exception("model call failed drafting %s; will retry next run", c.item_id)
                 continue

@@ -266,6 +266,10 @@ def test_a_resumed_session_names_the_session_it_continues():
     argv = _argv(resume=True, system_file=None)
     assert opt(argv, "--resume") == SID
     assert "--session-id" not in argv and "--append-system-prompt-file" not in argv
+    # with the standing instructions, which a resume carries too
+    argv = _argv(resume=True)
+    assert opt(argv, "--resume") == SID
+    assert opt(argv, "--append-system-prompt-file") == "/tmp/claude-system-x.md"
 
 
 def test_each_extra_folder_gets_its_own_add_dir_with_one_value():
@@ -519,15 +523,22 @@ def test_a_new_session_gets_its_system_prompt_from_a_temp_file_that_is_removed(f
     assert args[-4:] == ["--safe-mode", "--restricted", "--debug-file", "x.log"]
 
 
-def test_a_resumed_session_sends_no_system_prompt(fake, workspace, tmp_path, monkeypatch):
+def test_a_resumed_session_gets_its_system_prompt_again(fake, workspace, tmp_path, monkeypatch):
+    """The CLI reuses its record of the first launch's system prompt only until the
+    conversation is compacted; after that it builds the prompt from the current launch's
+    flags, so a resume without the file would go on without the standing instructions."""
     tmp = tmp_path / "tmp"
     tmp.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmp))
-    assert run(workspace, resume=True, system="the session recorded this already").ok
+    assert run(workspace, resume=True, system="You are the studio.").ok
     rec = fake.record
     assert opt(rec["argv"], "--resume") == SID and "--session-id" not in rec["argv"]
-    assert "--append-system-prompt-file" not in rec["argv"] and "system" not in rec
-    assert list(tmp.iterdir()) == []  # no system file was even written
+    assert opt(rec["argv"], "--append-system-prompt-file") == rec["system_file"]
+    assert rec["system"] == "You are the studio."
+    assert list(tmp.iterdir()) == []  # the file is removed after the stage
+    # no standing instructions given: none sent
+    assert run(workspace, resume=True).ok
+    assert "--append-system-prompt-file" not in fake.record["argv"]
 
 
 def test_allowed_tools_default_to_the_tools_and_can_be_narrower(fake, workspace):
@@ -594,6 +605,92 @@ def test_a_safeguard_verdict_is_reported_as_refused(fake, workspace):
     fake.program(lines=[result_event(result="Checked: the safeguards flagged nothing.")])
     r = run(workspace)
     assert r.ok and r.subtype == "success"
+
+
+def killed_task(task_id="abe56c825a1075442"):
+    """The CLI stopping a sub-agent that was still running when the turn ended."""
+    return {
+        "type": "system",
+        "subtype": "task_updated",
+        "task_id": task_id,
+        "patch": {"status": "killed", "end_time": 1791176184374},
+        "session_id": SID,
+    }
+
+
+def subagent_stats(completed=0, killed_by_system=0):
+    """A result line's subagent_stats, in the CLI's shape."""
+    return {
+        "spawned": completed + killed_by_system,
+        "completed": completed,
+        "failed": 0,
+        "killed": {"parent": 0, "user": 0, "system": killed_by_system},
+    }
+
+
+def test_a_stage_whose_sub_agent_was_killed_did_not_finish(fake, workspace):
+    """The live run: the cold fact-check was moved to the background, the turn ended, the
+    CLI stopped the checker and reported success. The stage did not finish: it says so and
+    can be resumed."""
+    text = "The cold fact-check is still running in the background. The stage isn't finished."
+    fake.program(
+        lines=[
+            init_event(),
+            assistant_event(tool("Agent", {"description": "Cold fact-check"})),
+            killed_task(),
+            result_event(result=text, subagent_stats=subagent_stats(killed_by_system=1)),
+        ]
+    )
+    seen = []
+    r = run(workspace, on_event=seen.append)
+    assert not r.ok and r.subtype == claude_cli.SUBAGENT_KILLED
+    assert r.terminal_reason == "the CLI stopped 1 sub-agent(s) before they finished"
+    assert r.detail == f"the CLI stopped 1 sub-agent(s) before they finished: {text}"
+    assert r.returncode == 0 and r.num_turns == 7  # the run itself ended normally
+    lines = [line for e in seen for line in claude_cli.describe_event(e)]
+    assert "a sub-agent was stopped before it finished (task abe56c825a1075442)" in lines
+
+
+def test_a_sub_agent_killed_in_an_earlier_turn_still_counts(fake, workspace):
+    """The CLI starts another turn after a background sub-agent ends; the last result line
+    counts only its own turn, so the task events of the whole run decide."""
+    fake.program(
+        lines=[
+            init_event(),
+            killed_task("t1"),
+            killed_task("t2"),
+            killed_task("t2"),  # the same task said twice is one
+            result_event(subagent_stats=subagent_stats()),
+        ]
+    )
+    r = run(workspace)
+    assert not r.ok and r.subtype == claude_cli.SUBAGENT_KILLED
+    assert r.terminal_reason == "the CLI stopped 2 sub-agent(s) before they finished"
+
+
+def test_sub_agents_that_all_reported_leave_a_clean_finish(fake, workspace):
+    fake.program(lines=[init_event(), result_event(subagent_stats=subagent_stats(completed=4))])
+    r = run(workspace)
+    assert r.ok and r.subtype == "success" and r.detail == "finished"
+    # an older CLI's result line without the stats, or with a number where the counts go
+    fake.program(lines=[result_event(subagent_stats={"killed": 0})])
+    assert run(workspace).ok
+    fake.program(lines=[result_event(subagent_stats={"killed": 2})])
+    assert run(workspace).subtype == claude_cli.SUBAGENT_KILLED
+
+
+def test_a_stage_that_failed_anyway_keeps_its_own_reason(fake, workspace):
+    fake.program(
+        lines=[
+            killed_task(),
+            result_event(
+                subtype="error_max_turns", is_error=True, terminal_reason="max_turns", result=""
+            ),
+        ],
+        exit=1,
+    )
+    r = run(workspace)
+    assert not r.ok and (r.subtype, r.terminal_reason) == ("error_max_turns", "max_turns")
 
 
 def test_a_cli_that_exits_without_a_result_says_so(fake, workspace):

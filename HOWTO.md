@@ -1132,7 +1132,8 @@ and long posts need X Premium.
    Drop picture say so instead of acting, since the revision replaces the draft
    when it lands.
 7. When something stops. A piece marked `interrupted` (stopped, timed out, the
-   PC slept, Claude Code could not start) or `failed` (the checker still found a
+   PC slept, Claude Code could not start, or Claude Code stopped the cold
+   fact-check before it reported) or `failed` (the checker still found a
    blocking problem after the polish rounds) has **Resume where it stopped**: the
    same session carries on with everything it already read, and anything you type
    in the box goes to it. If you edited its queue draft by hand while it was
@@ -1151,12 +1152,16 @@ and long posts need X Premium.
    rejected. A piece discarded before it reached the queue gives its story back to
    the drafter.
 8. The playbook. **Studio → The playbook** is the short note every session
-   reads before it writes: what works on this account and the mistakes the
-   fact-checks keep catching. Edit and save it (the box under it says what you
-   changed, for the history); the next piece written reads your version, even one
-   whose run is already going (it lives in `studio_playbook.md` next to
-   `pipeline.db`). Every version is kept: yours, the learning loop's (below) and the
-   shipped seed, and any one can be put back from the performance page.
+   reads when it researches and when it writes: what works on this account and
+   the mistakes the fact-checks keep catching. Edit and save it (the box under it
+   says what you changed, for the history); the next piece written reads your
+   version, even one whose run is already going (it lives in `studio_playbook.md`
+   next to `pipeline.db`). Every version is kept: yours, the learning loop's
+   (below) and the shipped seed, and any one can be put back from the performance
+   page. The session is also given the X handles in `config.yaml` as already
+   verified, and a copy of the account's recent pieces as they stand in the queue
+   (`earlier_pieces.md` in the piece's folder, each marked posted or not), so a
+   follow-up or a scorecard quotes what the account actually wrote.
 9. What X says. **Studio → what X says** (`/studio/performance`) is the
    dashboard for the posted pieces, and what it shows is fed back into the next
    session. Each piece is measured on its first post 48 hours after it went out
@@ -1278,6 +1283,8 @@ reference pieces in `studio\exemplars\`.
 | A company feed says `404 Not Found` | the company moved or retired its RSS feed. Open its press page, find the current feed and edit that company's `url` in `companies.feeds` in `config.yaml` (Cellectis, for one, now publishes at `/en/feed/?post_type=press_release`) |
 | `clinicaltrials_oncology` says `403 Forbidden` | ClinicalTrials.gov blocks a Python program that calls itself a browser. Its entry in `config.yaml` has its own `user_agent` starting with `python-httpx/` for that reason; if the line was removed, put it back |
 | A score run logs `safeguards flagged this message` | the CLI's usage-policy check tripped on a batch full of biology abstracts. The scorer does not retry the same prompt; it halves the batch and scores each half in a fresh call, down to single stories. A single story still refused is logged and left for the next run. `scorer_effort` / `drafter_effort` in `config.yaml` set how hard the model thinks (`low` is the cheapest) |
+| A draft shows as failed with `refused by the usage-policy safeguard` | the CLI's usage-policy check refuses that story's prompt, and would every time, so it is not sent again on every run. To try it once more: `python run_draft.py --retry-failed`, or write it in the studio |
+| Score, draft or verify runs fail at once with `unknown option '--safe-mode'` | your Claude Code is older than the pipeline expects: `npm install -g @anthropic-ai/claude-code`, then run again. As a stopgap set `safe_mode: false` under `claude_code:` in `config.yaml` (your own CLAUDE.md and hooks then reach every call) |
 | Want a completely fresh start | delete `pipeline.db`, then `python run_ingest.py --force` |
 | The dashboard's `cli` check says `'claude' not found on PATH` | every model call runs the Claude Code CLI; install it and log in (part 1, step 3). If `claude` works in a Command Prompt but not from the app or a scheduled task, put its full path on `binary:` under `claude_code:` in `config.yaml` (`where claude` lists it; use the line ending in `claude.cmd`) |
 | A step keeps running after you closed the app (a `claude` window keeps reopening) | that was the behaviour before the Stop button; on an old checkout, `taskkill /F /IM pythonw.exe` ends it (or `python.exe` if you started the app from a command prompt) |
@@ -1292,6 +1299,7 @@ reference pieces in `studio\exemplars\`.
 | The runs page shows `studio_learn` failed with `the rewritten playbook was not used` (or `the playbook rewrite call failed`) | nothing changed: the sessions keep the playbook they had, and the next run tries again. The log line says why (cut short, a section missing, Claude Code not logged in); **Rewrite the playbook now** on the performance page retries at once |
 | A learned playbook made the pieces worse | on the performance page, **put this version back** under the version you want; it becomes the newest version and the next session reads it. `learn: playbook: propose` in `studio\config.yaml` makes every rewrite wait for you instead |
 | A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept or restarted). Press Resume on its page; the session keeps everything it already read |
+| A studio piece says `interrupted: the CLI stopped 1 sub-agent(s) before they finished` | Claude Code ended the cold fact-check before it reported (an old Claude Code, or one started with background tasks on), so the stage did not finish. Press Resume: the session runs the stage again, fact-check included |
 | A studio piece still says `writing` (or researching, polishing, revising) after its run was stopped | another studio run holds the studio lock (a `run_studio.py` in a command prompt, or a run in a second window): the piece belongs to it until it ends. Otherwise reload the page: with no studio run going, opening it marks the piece `interrupted` |
 | A studio piece says `the piece's folder ... is missing` | its folder under `studio_pieces` was deleted or moved (moving the data folder moves them all). Put the folder back at that path and press Resume, or discard the piece |
 | A studio piece's log says `the CLI no longer has session ...` | Claude Code cleaned up the piece's session (it keeps 30 days by default). Nothing to do: a fresh session took the piece over from its files and carried on |
@@ -1303,7 +1311,9 @@ reference pieces in `studio\exemplars\`.
 
 Everything lives in `config.yaml` (sources, keywords, models, caps;
 `claude_code:` is the Claude Code CLI every model call runs through, by name
-or full path, with its time limit per call; a source
+or full path, with its time limit per call, and `safe_mode: true`, which keeps your
+own Claude Code set-up (your CLAUDE.md, hooks, plugins) out of the pipeline's calls;
+a source
 can set its own `min_abstract_chars` when its feed only carries a one-line
 summary, as the Fierce Biotech and BioPharma Dive entries do; `linking:` is the
 story-linking pass that merges a release with the trade-press write-ups of it

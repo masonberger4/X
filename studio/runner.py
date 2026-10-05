@@ -83,6 +83,15 @@ def known_handles(root_cfg: dict[str, Any]) -> set[str]:
     return {h.handle.lower() for h in load_handles(root_cfg)}
 
 
+def app_handles(root_cfg: dict[str, Any] | None) -> list[tuple[str, str]]:
+    """The handles the root config gives (the same ones qa accepts without a page), as the
+    stage prompts list them: (handle, the names it stands for). voice.md lets the session
+    use a handle the app gives it as verified, which only works if it is told them."""
+    from draft.tags import load_handles
+
+    return [(h.handle, ", ".join(h.names)) for h in load_handles(root_cfg)]
+
+
 def system_text() -> str:
     return P.system_prompt(read_brief("session.md"), read_brief("voice.md"), read_brief("cards.md"))
 
@@ -127,9 +136,17 @@ _NOT_WRITTEN = {
 }
 
 
-def _recent_piece(p: S.Piece) -> P.RecentPiece:
+def _recent_piece(p: S.Piece, conn: sqlite3.Connection | None = None) -> P.RecentPiece:
+    """How a stage prompt lists a piece. With `conn`, a piece that reached the queue also
+    brings its whole text and where its draft stands (EARLIER_FILE)."""
     from timeutil import fmt_date
 
+    posts: list[str] = []
+    where = ""
+    if conn is not None and p.draft_id is not None:
+        from studio import ingest
+
+        posts, where = ingest.queued_text(conn, p)
     return P.RecentPiece(
         # The display zone's date, as `today` is: a UTC date can read as tomorrow.
         date=fmt_date(p.created_at),
@@ -140,6 +157,8 @@ def _recent_piece(p: S.Piece) -> P.RecentPiece:
         opening=_opening(p),
         companies=_companies(p),
         status="" if p.draft_id is not None else _NOT_WRITTEN.get(p.stage, ""),
+        text="\n\n".join(t.strip() for t in posts if t.strip()),
+        where=where,
     )
 
 
@@ -175,11 +194,13 @@ def build_brief(
     today: str,
     tzname: str,
     evidence: E.Evidence | None = None,
+    handles: list[tuple[str, str]] | None = None,
 ) -> P.Brief:
-    # Variety (angles, hooks, shapes, openings) comes from the last written pieces; the
-    # topics to avoid from every piece of the last `topics.avoid_days` days, written or not.
+    # Variety (angles, hooks, shapes, openings) comes from the last written pieces, which
+    # also bring their text (EARLIER_FILE); the topics to avoid from every piece of the
+    # last `topics.avoid_days` days, written or not.
     pieces = [p for p in recent(conn, cfg) if p.id != piece.id]
-    recent_pieces = [_recent_piece(p) for p in pieces]
+    recent_pieces = [_recent_piece(p, conn) for p in pieces]
     days = float(cfg["topics"].get("avoid_days") or 0)
     avoid = [_recent_piece(p) for p in S.started_within(conn, days) if p.id != piece.id]
     offer = A.offer(
@@ -234,6 +255,7 @@ def build_brief(
         playbook=playbook,
         evidence=said,
         lean=lean,
+        handles=list(handles or []),
         # The limits the checker enforces (qa.check_text keeps `headroom` under X's own),
         # so a post written to the number it is given is never sent back as too long.
         long_post_max=int(x["long_post_max"]) - int(x.get("headroom") or 0),
@@ -292,6 +314,7 @@ def make_context(
     root_cfg = _root_config()
     library = A.load_angles()
     evidence = measure_quietly(conn, cfg)
+    handles = app_handles(root_cfg)
 
     def brief_for(piece: S.Piece) -> P.Brief:
         # The date and the playbook as they are when this stage starts, not when the run
@@ -308,6 +331,7 @@ def make_context(
             today=today,
             tzname=tzname,
             evidence=evidence,
+            handles=handles,
         )
         if brief.lean is not None and piece.meta.get("lean") != brief.lean.as_dict():
             # Kept with the piece, so the performance page can show what it was offered.
@@ -713,6 +737,7 @@ def _dry_run(
         today=today,
         tzname=tzname,
         evidence=measure_quietly(conn, cfg),
+        handles=app_handles(_root_config()),
     )
     print(P.research_prompt(brief))
     return 0

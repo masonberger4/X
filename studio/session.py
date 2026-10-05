@@ -123,7 +123,9 @@ def _run_stage(
             cwd=workspace,
             session_id=piece.session_id,
             resume=not first,
-            system=ctx.system if first else "",
+            # Every launch, resumes included: the CLI's record of the first launch's system
+            # prompt lasts only until the conversation is compacted (claude_cli.run_session).
+            system=ctx.system,
             effort=piece.effort or None,
             tools=ctx.cfg["tools"],
             allowed=ctx.cfg["tools"],
@@ -170,10 +172,33 @@ def _run_stage(
         outcome="ok" if result.ok else (result.subtype or "error"),
         detail=result.detail,
         turns=result.num_turns,
-        cost_usd=result.cost_usd,
+        cost_usd=_run_cost(ctx, piece, result),
         duration_ms=result.duration_ms,
     )
     return result
+
+
+def _run_cost(ctx: Context, piece: S.Piece, result: claude_cli.SessionResult) -> float:
+    """What this one CLI run cost. The CLI reports the session's running total (a resumed
+    session carries on from its last one), so the run's own cost is what the total grew by
+    since the piece's session last reported one (`session_cost` in its meta). A new session
+    starts from nothing, and a total lower than the last (a CLI that counts each launch on
+    its own) is the run's own. A run that reported nothing cost nothing it can say; the next
+    run's total takes it in."""
+    total = float(result.cost_usd or 0.0)
+    if total <= 0:
+        return 0.0
+    seen = piece.meta.get("session_cost")
+    before = 0.0
+    if isinstance(seen, dict) and seen.get("session") == piece.session_id:
+        try:
+            before = float(seen.get("usd") or 0.0)
+        except (TypeError, ValueError):
+            before = 0.0
+    S.update_piece(
+        ctx.conn, piece.id, meta={"session_cost": {"session": piece.session_id, "usd": total}}
+    )
+    return total - before if total >= before else total
 
 
 def fresh_session(
@@ -224,8 +249,9 @@ def _fail(
 
 
 def _stopped_early(result: claude_cli.SessionResult) -> bool:
-    """A stage that ran out of turns or time can be resumed rather than failed."""
-    return result.subtype in ("error_max_turns", "killed", "no_result")
+    """A stage that ran out of turns or time, or whose CLI stopped a sub-agent before it
+    reported (the cold fact-check), can be resumed rather than failed."""
+    return result.subtype in ("error_max_turns", "killed", "no_result", claude_cli.SUBAGENT_KILLED)
 
 
 def research(
@@ -243,6 +269,7 @@ def research(
     # resumed research run may be offered a newer shortlist than the first).
     offered = sorted({*_offered(piece), *(s.cluster_id for s in brief.shortlist)})
     S.update_piece(ctx.conn, piece.id, meta={"offered_stories": offered})
+    write_earlier(Path(piece.workspace), brief)
     text = P.research_prompt(brief)
     if note.strip():  # the editor's words when pressing Resume
         text += f"\n\nTHE EDITOR ADDS\n{note.strip()}"
@@ -290,6 +317,22 @@ def research(
     return write(ctx, piece)
 
 
+def write_earlier(workspace: Path, brief: P.Brief) -> None:
+    """Put the account's recent pieces (P.earlier_pieces) in the working folder, where the
+    stage prompt says they are: --restricted keeps the session out of other pieces' folders.
+    Removed when there are none. A folder that cannot be written is left to the stage's
+    launch, which says why."""
+    path = workspace / P.EARLIER_FILE
+    text = P.earlier_pieces(brief)
+    try:
+        if text:
+            path.write_text(text, encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning("could not write %s: %s", path, exc)
+
+
 def _offered(piece: S.Piece) -> list[int]:
     ids = piece.meta.get("offered_stories")
     return [i for i in ids if isinstance(i, int)] if isinstance(ids, list) else []
@@ -331,6 +374,7 @@ def write(ctx: Context, piece: S.Piece, note: str = "", *, resumed_reason: str =
     # (so no story shortlist is fetched for a prompt that does not use one).
     piece = S.get_piece(ctx.conn, piece.id) or piece
     brief = ctx.brief_for(piece)
+    write_earlier(Path(piece.workspace), brief)
     text = P.write_prompt(brief, note)
     if resumed_reason:
         text = P.resume_prompt("write", resumed_reason, text)

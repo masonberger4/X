@@ -73,6 +73,9 @@ _BARE_DOMAIN_RE = re.compile(
     r"(?<![\w@./$-])(?:www\.[^\s]+|(?=[a-z0-9-]*[a-z])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|gov|edu|co|ai|bio|health|info|us|uk|eu|de|fr|ch|cn|jp|hk|ly|me|tv|news|ca|au|in|it|es|nl|se|dk|fi|be|at|kr|sg|nz|br|app|dev|xyz|link|site|online|tech|page|gl|fm|science|care|cc)(?:/[^\s]*)?)(?![\w-]|\.\w)",
     re.I,
 )
+# A non-US listing written as ticker.exchange (GMAB.CO, NOVO-B.CO, BAYN.DE): the bare-domain
+# rule catches it, since X links it, but the fix is a cashtag or words, not a source's name.
+_EXCHANGE_CODE_RE = re.compile(r"[A-Z0-9][A-Z0-9-]*\.[A-Z]{1,2}")
 _PRICE_TARGET_RE = re.compile(r"\bprice\s+targets?\b", re.I)
 _DISCLAIMER_RE = re.compile(
     r"\bnot\s+(?:investment|financial)(?:\s+or\s+medical)?\s+advice\b", re.I
@@ -90,9 +93,21 @@ def blocking_problems(text: str, label: str) -> list[str]:
     m = _MEDICAL_RE.search(text)
     if m:
         out.append(f"{label} reads as medical advice ({m.group(0)!r}); describe evidence only")
-    m = _URL_RE.search(text) or _BARE_DOMAIN_RE.search(text)
-    if m:
-        out.append(f"{label} contains a link ({m.group(0)}); name the source in words")
+    # Every link in the post at once, so one polish round can clear them all.
+    found = sorted(
+        [*_URL_RE.finditer(text), *_BARE_DOMAIN_RE.finditer(text)], key=lambda m: m.start()
+    )
+    links = list(dict.fromkeys(m.group(0) for m in found))
+    codes = [x for x in links if _EXCHANGE_CODE_RE.fullmatch(x)]
+    names = [x for x in links if x not in codes]
+    if names:
+        what = f"a link ({names[0]})" if len(names) == 1 else f"links ({', '.join(names)})"
+        out.append(f"{label} contains {what}; name the source in words")
+    if codes:
+        out.append(
+            f"{label} writes a listing as a dotted code X turns into a link ({', '.join(codes)}); "
+            'give its US $cashtag, or the exchange and the ticker in words ("Copenhagen: GMAB")'
+        )
     return out
 
 
