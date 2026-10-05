@@ -55,6 +55,10 @@ class Context:
     # Why a revision could not go into the queue ("" when it can), asked before it runs;
     # None skips the check (studio/ingest.py:revise_blocker in the app).
     revisable: Callable[[S.Piece], str] | None = None
+    # What research.json gives the radar once research is done (the radar topic it used,
+    # the catalysts it found: studio/scan.py:harvest in the app); None skips it. It never
+    # fails the piece.
+    harvest: Callable[[S.Piece, dict[str, Any]], None] | None = None
 
 
 @dataclass
@@ -187,6 +191,13 @@ def research(
         updates["cluster_id"] = story_id
     S.update_piece(ctx.conn, piece.id, **updates)
     piece = S.get_piece(ctx.conn, piece.id) or piece
+    if ctx.harvest is not None:
+        try:
+            ctx.harvest(piece, info)
+        except Exception:  # the calendar is a by-product: the piece goes on without it
+            log.warning(
+                "piece %s: could not take its catalysts for the radar", piece.id, exc_info=True
+            )
     if piece.checkpoint or ctx.stop_after_research:
         S.update_piece(ctx.conn, piece.id, stage=S.STAGE_RESEARCH_READY)
         return Outcome(S.STAGE_RESEARCH_READY, "research done; waiting for the editor")

@@ -11,13 +11,30 @@
   POST /studio/{id}/resume     a failed or interrupted piece: pick it up where it stopped
   POST /studio/{id}/discard    give up on a piece (its files stay on disk)
   GET  /studio/playbook        the playbook every session reads
-  POST /studio/playbook        save the editor's edit of it (the data folder's copy)
+  POST /studio/playbook        save the editor's edit of it as a new version
+  POST /studio/playbook/reset  the shipped seed as a new version
+  GET  /studio/performance     what X says: each posted piece's numbers, what each angle,
+                               shape, hook style and card count has done, the lean, and
+                               the playbook's history
+  POST /studio/performance/{id}/metrics          a piece's numbers, typed in from X
+  POST /studio/performance/{id}/link             the link of a piece posted by hand without it
+  POST /studio/playbook/versions/{id}/revert     put an earlier version back (as a new one)
+  POST /studio/playbook/versions/{id}/apply      apply the learning loop's open proposal
+  GET  /studio/radar           where topics come from: the latest scan's topics, the feed's
+                               top stories and the catalyst calendar, each with Write it
+  POST /studio/radar/topics/{id}/write        queue a radar topic and start the studio
+  POST /studio/radar/topics/{id}/dismiss      take it off the radar
+  POST /studio/radar/catalysts/{id}/write     queue a preview (or a reaction) of a catalyst
+  POST /studio/radar/catalysts/{id}/dismiss   take it off the calendar
 
 Every button records what the editor wants in studio_pieces / studio_topics (this module
-writes only the studio's own tables, through studio/store.py) and then asks the panel to
-start the `studio_now` or `studio_resume` step from ops/config.yaml; the run itself, its
-log and its Stop button are the runs page's, like every other step. Without a panel the
-request waits for the next automatic studio run.
+writes only the studio's own tables, through studio/store.py and studio/playbook.py) and
+then asks the panel to start the `studio_now`, `studio_resume`, `studio_scan_now` or
+`studio_learn_now` step from ops/config.yaml; the run itself, its log and its Stop button
+are the runs page's, like every other step. Without a panel the request waits for the
+next automatic studio run. The one write elsewhere is the performance page's "add the
+link", which the panel does through step 3's own module (panel/publishing.py:add_head_link)
+when it wires this router in.
 """
 
 from __future__ import annotations
@@ -26,6 +43,7 @@ import json
 import logging
 import os
 from collections.abc import Callable, Iterator
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import parse_qs
@@ -36,8 +54,13 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import ChoiceLoader, FileSystemLoader
 
 from studio import angles as A
+from studio import dashboard as D
+from studio import evidence as E
 from studio import ingest
+from studio import learn as L
+from studio import playbook as PB
 from studio import prompt as P
+from studio import radar as R
 from studio import store as S
 from studio.settings import DEFAULT_PLAYBOOK, PLAYBOOK_NAME, load_studio_config, playbook_path
 
@@ -46,6 +69,9 @@ log = logging.getLogger(__name__)
 TEMPLATES_DIR = Path(__file__).with_name("templates")
 STEP_NEW = "studio_now"
 STEP_RESUME = "studio_resume"
+STEP_SCAN = "studio_scan_now"
+SOON_DAYS = 30  # the calendar's "coming up" section; later ones are listed below it
+STEP_LEARN = "studio_learn_now"
 LOG_TAIL_LINES = 400
 LOG_TAIL_BYTES = 4_000_000
 
@@ -53,15 +79,22 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Set by the panel when it includes this router: start_steps(["studio_now"]) starts a run
-# of those configured steps and returns a message (or raises with the reason it cannot).
-_starter: dict[str, Callable[[list[str]], str] | None] = {"start": None}
+# of those configured steps and returns a message (or raises with the reason it cannot);
+# add_link(draft_id, url) gives a draft posted by hand its X link and returns a message
+# (or raises ValueError with the reason).
+_starter: dict[str, Callable[..., str] | None] = {"start": None, "add_link": None}
 
 
 def configure(
-    *, start_steps: Callable[[list[str]], str] | None, queue_templates: Path | None
+    *,
+    start_steps: Callable[[list[str]], str] | None,
+    queue_templates: Path | None,
+    add_link: Callable[[int, str], str] | None = None,
 ) -> None:
-    """Wire the router into the panel: how to start a run, and the shared layout."""
+    """Wire the router into the panel: how to start a run, how to add a post's link, and
+    the shared layout."""
     _starter["start"] = start_steps
+    _starter["add_link"] = add_link
     loaders = [FileSystemLoader(str(TEMPLATES_DIR))]
     if queue_templates is not None:
         loaders.append(FileSystemLoader(str(queue_templates)))
@@ -112,10 +145,15 @@ def _start(steps: list[str]) -> str:
 
 
 def _redirect(path: str, flash: str = "") -> RedirectResponse:
+    """303 to `path` with the message in its query (before any #fragment, which the
+    browser keeps to itself)."""
     from urllib.parse import quote
 
+    if not flash:
+        return RedirectResponse(path, status_code=303)
+    path, hash_, fragment = path.partition("#")
     sep = "&" if "?" in path else "?"
-    return RedirectResponse(f"{path}{sep}flash={quote(flash)}" if flash else path, status_code=303)
+    return RedirectResponse(f"{path}{sep}flash={quote(flash)}{hash_}{fragment}", status_code=303)
 
 
 def _piece_or_404(conn: Any, piece_id: int) -> S.Piece:
@@ -259,15 +297,23 @@ def studio_drop_topic(topic_id: int, conn: Conn):
     return _redirect("/studio", "topic dropped")
 
 
+def _seed_text() -> str:
+    return _read(DEFAULT_PLAYBOOK)
+
+
 @router.get("/studio/playbook", response_class=HTMLResponse)
-def studio_playbook(request: Request, flash: str = ""):
+def studio_playbook(request: Request, conn: Conn, flash: str = ""):
     path = playbook_path(_data_folder())
+    text = _read(path)
     return templates.TemplateResponse(
         request,
         "studio_playbook.html",
         {
-            "text": _read(path),
+            "text": text,
             "editable_copy": path.name == PLAYBOOK_NAME,
+            "is_seed": text == _seed_text(),
+            "version": S.current_playbook_version(conn),
+            "proposal": S.open_proposal(conn),
             "path": str(path),
             "flash": flash,
         },
@@ -275,24 +321,275 @@ def studio_playbook(request: Request, flash: str = ""):
 
 
 @router.post("/studio/playbook")
-async def studio_save_playbook(request: Request):
+async def studio_save_playbook(request: Request, conn: Conn):
     form = await _form(request)
     text = (form.get("text") or [""])[0].replace("\r\n", "\n")
     if not text.strip():
         return _redirect("/studio/playbook", "the playbook cannot be empty")
-    target = _data_folder() / PLAYBOOK_NAME
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(text.rstrip() + "\n", encoding="utf-8")
-    tmp.replace(target)
-    return _redirect("/studio/playbook", "saved; the next session reads it")
+    note = _first(form, "note")
+    version = PB.save(
+        conn,
+        _data_folder(),
+        text.rstrip() + "\n",
+        source=S.PLAYBOOK_EDITOR,
+        changelog=[note or "edited by hand"],
+    )
+    return _redirect("/studio/playbook", f"saved as version {version}; the next session reads it")
 
 
 @router.post("/studio/playbook/reset")
-def studio_reset_playbook():
-    target = _data_folder() / PLAYBOOK_NAME
-    if target.is_file():
-        target.unlink()
-    return _redirect("/studio/playbook", f"back to the shipped seed ({DEFAULT_PLAYBOOK.name})")
+def studio_reset_playbook(conn: Conn):
+    seed = _seed_text()
+    if not seed.strip():
+        return _redirect("/studio/playbook", "the shipped seed is missing")
+    version = PB.save(
+        conn,
+        _data_folder(),
+        seed,
+        source=S.PLAYBOOK_REVERT,
+        changelog=[f"back to the shipped seed ({DEFAULT_PLAYBOOK.name})"],
+    )
+    return _redirect(
+        "/studio/playbook",
+        f"back to the shipped seed ({DEFAULT_PLAYBOOK.name}), as version {version}",
+    )
+
+
+@router.post("/studio/playbook/versions/{version_id}/revert")
+def studio_revert_playbook(version_id: int, conn: Conn):
+    try:
+        new = PB.revert(conn, _data_folder(), version_id)
+    except KeyError:
+        raise HTTPException(404, "no such version") from None
+    return _redirect(
+        "/studio/performance#playbook",
+        f"version {version_id} is back, as version {new}; the next session reads it",
+    )
+
+
+@router.post("/studio/playbook/versions/{version_id}/apply")
+def studio_apply_proposal(version_id: int, conn: Conn):
+    try:
+        new = PB.apply_proposal(conn, _data_folder(), version_id)
+    except KeyError:
+        return _redirect(
+            "/studio/performance#playbook",
+            f"version {version_id} is not the open proposal any more (a later version overtook it)",
+        )
+    return _redirect(
+        "/studio/performance#playbook",
+        f"proposal {version_id} applied as version {new}; the next session reads it",
+    )
+
+
+@router.get("/studio/performance", response_class=HTMLResponse)
+def studio_performance(request: Request, conn: Conn, flash: str = ""):
+    from datetime import UTC, datetime
+
+    cfg = load_studio_config()
+    now = datetime.now(UTC)
+    try:
+        angle_keys = list(A.load_angles())
+    except (OSError, ValueError):
+        angle_keys = []
+    ev, error = None, ""
+    try:
+        ev = E.measure(conn, cfg)
+    except Exception as exc:  # a page that explains beats a 500
+        log.exception("could not read what X says")
+        error = f"could not read the numbers: {exc}"
+    ev = ev or E.Evidence(measured=[], heads=[])
+    last = S.last_learned(conn)
+    return templates.TemplateResponse(
+        request,
+        "studio_performance.html",
+        {
+            "cfg": cfg,
+            "kpi": L.describe_kpi(str(cfg["learn"]["kpi"])),
+            "ev": ev,
+            "rows": D.piece_rows(ev, cfg, now),
+            "arms": D.arm_tables(ev, cfg, angles=angle_keys),
+            "state": D.learn_state(ev, cfg, last, now),
+            "versions": D.version_rows(S.playbook_versions(conn, 200), S.open_proposal(conn)),
+            "said": E.block(ev, cfg),
+            "metrics": S.MANUAL_METRICS,
+            "small": len(ev.scored) < L.SMALL_SAMPLE,
+            "error": error,
+            "flash": flash,
+            "can_link": _starter["add_link"] is not None,
+            "step_learn": STEP_LEARN,
+        },
+    )
+
+
+@router.post("/studio/performance/{piece_id}/metrics")
+async def studio_add_metrics(request: Request, piece_id: int, conn: Conn):
+    piece = _piece_or_404(conn, piece_id)
+    form = await _form(request)
+    counts: dict[str, int] = {}
+    for name in S.MANUAL_METRICS:
+        raw = _first(form, name).replace(",", "")
+        if not raw:
+            continue
+        if not (raw.isascii() and raw.isdigit()):
+            return _redirect("/studio/performance", f"{name}: a whole number, not {raw!r}")
+        counts[name] = int(raw)
+    if not counts:
+        return _redirect("/studio/performance", "type at least one of the numbers X shows")
+    S.add_manual_metrics(conn, piece.id, counts)
+    return _redirect(
+        "/studio/performance", f"numbers saved for piece {piece.id}; they count from now on"
+    )
+
+
+@router.post("/studio/performance/{piece_id}/link")
+async def studio_add_link(request: Request, piece_id: int, conn: Conn):
+    piece = _piece_or_404(conn, piece_id)
+    add_link = _starter["add_link"]
+    if add_link is None:
+        return _redirect("/studio/performance", "adding a link needs the control panel")
+    if piece.draft_id is None:
+        return _redirect("/studio/performance", f"piece {piece.id} has no draft in the queue")
+    form = await _form(request)
+    try:
+        message = add_link(piece.draft_id, _first(form, "url"))
+    except ValueError as exc:
+        return _redirect("/studio/performance", f"not linked: {exc}")
+    return _redirect("/studio/performance", message)
+
+
+def _today() -> date:
+    from timeutil import display_tz
+
+    return datetime.now(display_tz()).date()
+
+
+def _angle_from(form: dict[str, list[str]]) -> str:
+    """The angle the editor left selected, if the library still has it."""
+    angle = _first(form, "angle")
+    try:
+        return angle if angle in A.load_angles() else ""
+    except (OSError, ValueError):
+        return ""
+
+
+@router.get("/studio/radar", response_class=HTMLResponse)
+def studio_radar(request: Request, conn: Conn, flash: str = ""):
+    from studio import topics as T
+
+    cfg = load_studio_config()
+    rcfg = cfg["radar"]
+    today = _today()
+    try:
+        library = A.load_angles()
+    except (OSError, ValueError):
+        library = {}
+    since = datetime.now(UTC) - timedelta(days=float(rcfg["topic_days"]))
+    topics = S.radar_topics(
+        conn,
+        since_iso=since.isoformat(timespec="seconds"),
+        statuses=(S.RADAR_NEW, S.RADAR_QUEUED, S.RADAR_USED),
+    )
+    first = today - timedelta(days=int(rcfg["past_days"]))
+    last = today + timedelta(days=int(rcfg["calendar_days"]))
+    rows = S.catalysts_between(conn, first.isoformat(), last.isoformat())
+    soon = (today + timedelta(days=SOON_DAYS)).isoformat()
+    calendar = {
+        "passed": [c for c in rows if c.date_end < today.isoformat()],
+        "soon": [c for c in rows if c.date_end >= today.isoformat() and c.date_start <= soon],
+        "later": [c for c in rows if c.date_start > soon],
+    }
+    suggested = {c.id: R.catalyst_text(c.to_catalyst(), today=today)[1] for c in rows}
+    feed = T.fetch_shortlist(
+        {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=S.used_cluster_ids(conn)
+    )
+    return templates.TemplateResponse(
+        request,
+        "studio_radar.html",
+        {
+            "cfg": cfg,
+            "scan": S.last_scan(conn),
+            "done": S.last_scan(conn, S.SCAN_DONE),
+            "topics": topics,
+            "feed": feed,
+            "calendar": calendar,
+            "suggested": suggested,
+            "angles": library,
+            "kinds": R.KIND_LABELS,
+            "today": today.isoformat(),
+            "flash": flash,
+            "step_scan": STEP_SCAN,
+            "S": S,
+        },
+    )
+
+
+def _radar_topic_or_404(conn: Any, radar_id: int) -> S.RadarTopic:
+    topic = S.get_radar_topic(conn, radar_id)
+    if topic is None:
+        raise HTTPException(404, "no such radar topic")
+    return topic
+
+
+def _catalyst_or_404(conn: Any, catalyst_id: int) -> S.CatalystRow:
+    row = S.get_catalyst(conn, catalyst_id)
+    if row is None:
+        raise HTTPException(404, "no such catalyst")
+    return row
+
+
+@router.post("/studio/radar/topics/{radar_id}/write")
+async def studio_radar_write(request: Request, radar_id: int, conn: Conn):
+    topic = _radar_topic_or_404(conn, radar_id)
+    if topic.status != S.RADAR_NEW:
+        return _redirect("/studio/radar", f"radar topic {radar_id} is {topic.status} already")
+    form = await _form(request)
+    text = R.topic_text(topic.to_topic(), scanned=topic.created_at[:10])
+    topic_id = S.queue_topic(
+        conn,
+        topic=text,
+        cluster_id=None,
+        angle=_angle_from(form),
+        checkpoint=bool(_first(form, "checkpoint")),
+    )
+    S.set_radar_topic(conn, radar_id, status=S.RADAR_QUEUED, topic_id=topic_id)
+    return _redirect("/studio/radar", _start([STEP_NEW]))
+
+
+@router.post("/studio/radar/topics/{radar_id}/dismiss")
+def studio_radar_dismiss(radar_id: int, conn: Conn):
+    topic = _radar_topic_or_404(conn, radar_id)
+    if topic.status != S.RADAR_NEW:
+        return _redirect("/studio/radar", f"radar topic {radar_id} is {topic.status}; it stays")
+    S.set_radar_topic(conn, radar_id, status=S.RADAR_DISMISSED)
+    return _redirect("/studio/radar", "topic dismissed")
+
+
+@router.post("/studio/radar/catalysts/{catalyst_id}/write")
+async def studio_catalyst_write(request: Request, catalyst_id: int, conn: Conn):
+    row = _catalyst_or_404(conn, catalyst_id)
+    if row.topic_id is not None or row.piece_id is not None:
+        return _redirect(
+            "/studio/radar", f"catalyst {catalyst_id} already has a piece queued or written"
+        )
+    form = await _form(request)
+    text, _ = R.catalyst_text(row.to_catalyst(), today=_today())
+    topic_id = S.queue_topic(
+        conn,
+        topic=text,
+        cluster_id=None,
+        angle=_angle_from(form),
+        checkpoint=bool(_first(form, "checkpoint")),
+    )
+    S.set_catalyst(conn, catalyst_id, topic_id=topic_id)
+    return _redirect("/studio/radar", _start([STEP_NEW]))
+
+
+@router.post("/studio/radar/catalysts/{catalyst_id}/dismiss")
+def studio_catalyst_dismiss(catalyst_id: int, conn: Conn):
+    _catalyst_or_404(conn, catalyst_id)
+    S.set_catalyst(conn, catalyst_id, status=S.CATALYST_DISMISSED)
+    return _redirect("/studio/radar", "catalyst taken off the calendar")
 
 
 @router.get("/studio/{piece_id}", response_class=HTMLResponse)

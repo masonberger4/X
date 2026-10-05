@@ -535,16 +535,16 @@ def test_the_editor_is_warned_about_a_price_target_and_a_missing_disclaimer():
 
 
 @pytest.mark.parametrize(
-    "factbase, factcheck, missing",
+    "factbase, factcheck, fixable, blocking",
     [
-        ("- a fact", "| a check |", []),
-        (None, "| a check |", ["factbase.md is missing or empty"]),
-        ("- a fact", " \n\n ", ["factcheck.md is missing or empty"]),
-        ("dir", None, ["factbase.md is missing or empty", "factcheck.md is missing or empty"]),
+        ("- a fact", "| a check |", [], []),
+        (None, "| a check |", ["factbase.md is missing or empty"], []),
+        ("- a fact", " \n\n ", [], [qa.NO_FACTCHECK]),
+        ("dir", None, ["factbase.md is missing or empty"], [qa.NO_FACTCHECK]),
     ],
 )
 def test_the_fact_base_and_the_fact_check_log_must_have_content(
-    tmp_path, factbase, factcheck, missing
+    tmp_path, factbase, factcheck, fixable, blocking
 ):
     for name, text in (("factbase.md", factbase), ("factcheck.md", factcheck)):
         if text == "dir":
@@ -553,7 +553,14 @@ def test_the_fact_base_and_the_fact_check_log_must_have_content(
             (tmp_path / name).write_text(text, encoding="utf-8")
     report = qa.Report()
     qa.check_side_files(tmp_path, report)
-    assert report.fixable == missing and report.blocking == []
+    assert report.fixable == fixable and report.blocking == blocking
+
+
+def test_a_piece_without_its_cold_fact_check_never_reaches_the_queue_unchecked():
+    """The fact-check is what makes a piece postable: without its log the piece blocks
+    (the polish rounds ask the session for it first), and the message says how."""
+    assert qa.NO_FACTCHECK.startswith("factcheck.md is missing or empty: run the cold fact-check")
+    assert "wait for its report" in qa.NO_FACTCHECK
 
 
 # ---- check_cards ---------------------------------------------------------------------------
@@ -705,6 +712,7 @@ def test_every_kind_of_problem_lands_where_the_polish_loop_expects_it(tmp_path):
     assert report.blocking == [
         *safety.blocking_problems(advice, "post 1"),
         "post 3 file posts/09.txt does not exist",
+        qa.NO_FACTCHECK,
         "card card_2.html came out (10, 10) instead of (2160, 2700); size the page to the card",
     ]
     assert report.fixable == [
@@ -714,7 +722,6 @@ def test_every_kind_of_problem_lands_where_the_polish_loop_expects_it(tmp_path):
         "piece.json has no title",
         "piece.json: hook_style must be one of " + ", ".join(qa.HOOK_STYLES),
         "factbase.md is missing or empty",
-        "factcheck.md is missing or empty",
         "card card_1.html: text runs off the card",
     ]
     assert report.warnings == ['the last post has no "Not investment advice." line']

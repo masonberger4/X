@@ -7,14 +7,18 @@ import logging
 import re
 import sqlite3
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from ops import lock
 from studio import angles as A
+from studio import evidence as E
+from studio import learn as L
+from studio import playbook as PB
 from studio import prompt as P
 from studio import qa
+from studio import radar as R
 from studio import render as render_mod
 from studio import session as SS
 from studio import store as S
@@ -30,6 +34,10 @@ from studio.settings import (
 log = logging.getLogger(__name__)
 
 LOCK_NAME = ".studio.lock"
+SCAN_LOCK_NAME = ".studio_scan.lock"
+RADAR_IN_BRIEF = 8  # radar topics an open piece is shown
+COMING_UP_IN_BRIEF = 20  # catalysts an open piece is shown
+LEARN_LOCK_NAME = ".studio_learn.lock"
 
 _STAGE_OF = {
     S.STAGE_RESEARCHING: "research",
@@ -112,6 +120,7 @@ def build_brief(
     playbook: str,
     today: str,
     tzname: str,
+    evidence: E.Evidence | None = None,
 ) -> P.Brief:
     from timeutil import fmt_date
 
@@ -140,9 +149,27 @@ def build_brief(
     )
     story = T.fetch_story(piece.cluster_id) if piece.cluster_id is not None else None
     shortlist: list[P.Story] = []
+    radar: list[tuple[int, R.Topic]] = []
+    coming: list[R.Catalyst] = []
     if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
         # Only the research stage chooses a story; later stages have one.
         shortlist = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+        radar, coming = radar_for_brief(conn, cfg, date.fromisoformat(today))
+    said, lean = "", None
+    if evidence is not None:
+        said = E.block(evidence, cfg)
+        # The lean draws only among what the variety rules leave on offer, so the two never
+        # pull against each other.
+        last_shapes = [p.shape for p in pieces[:3] if p.shape]
+        worn = last_shapes[0] if len(last_shapes) >= 2 and len(set(last_shapes)) == 1 else ""
+        lean = E.lean_for(
+            evidence,
+            cfg,
+            angles=[a.key for a in offer.angles],
+            shapes=[s for s in A.SHAPES if s != worn],
+            hooks=[h for h in A.HOOK_STYLES if h not in hooks],
+            seed=piece.id,
+        )
     x = cfg["x"]
     return P.Brief(
         piece_id=piece.id,
@@ -154,10 +181,14 @@ def build_brief(
         topic=piece.topic,
         story=story,
         shortlist=shortlist,
+        radar=radar,
+        coming_up=coming,
         offer=offer,
         hooks_to_avoid=hooks,
         recent=recent_pieces,
         playbook=playbook,
+        evidence=said,
+        lean=lean,
         # The limits the checker enforces (qa.check_text keeps `headroom` under X's own),
         # so a post written to the number it is given is never sent back as too long.
         long_post_max=int(x["long_post_max"]) - int(x.get("headroom") or 0),
@@ -165,6 +196,27 @@ def build_brief(
         short_post_max=int(x["short_post_max"]),
         max_cards=int(x["max_cards_total"]),
     )
+
+
+def radar_for_brief(
+    conn: sqlite3.Connection, cfg: dict[str, Any], today: date
+) -> tuple[list[tuple[int, R.Topic]], list[R.Catalyst]]:
+    """What an open piece is offered from the radar: the recent scans' topics nobody has
+    taken, and the catalysts coming up or just passed. Nothing when the radar is off."""
+    from studio import scan as SC
+
+    rcfg = cfg["radar"]
+    if not rcfg.get("enabled"):
+        return [], []
+    since = datetime.now(UTC) - timedelta(days=float(rcfg["topic_days"]))
+    topics = S.radar_topics(conn, since_iso=since.isoformat(timespec="seconds"))
+    coming = R.coming_up(
+        SC.known_catalysts(conn, rcfg, today),
+        today=today,
+        ahead_days=int(rcfg["brief_upcoming_days"]),
+        back_days=int(rcfg["brief_recent_days"]),
+    )
+    return [(t.id, t.to_topic()) for t in topics[:RADAR_IN_BRIEF]], coming[:COMING_UP_IN_BRIEF]
 
 
 def _today() -> tuple[str, str]:
@@ -196,11 +248,23 @@ def make_context(
     library = A.load_angles()
     playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
     today, tzname = _today()
+    evidence = measure_quietly(conn, cfg)
 
     def brief_for(piece: S.Piece) -> P.Brief:
-        return build_brief(
-            conn, cfg, piece, library=library, playbook=playbook, today=today, tzname=tzname
+        brief = build_brief(
+            conn,
+            cfg,
+            piece,
+            library=library,
+            playbook=playbook,
+            today=today,
+            tzname=tzname,
+            evidence=evidence,
         )
+        if brief.lean is not None and piece.meta.get("lean") != brief.lean.as_dict():
+            # Kept with the piece, so the performance page can show what it was offered.
+            S.update_piece(conn, piece.id, meta={"lean": brief.lean.as_dict()})
+        return brief
 
     max_chars = max(int(cfg["x"]["long_post_max"]), int(cfg["x"]["thread_post_max"]))
 
@@ -222,7 +286,30 @@ def make_context(
         # Asked by every revision, a resumed one too, before its session runs: a draft
         # approved or rejected meanwhile would refuse the result after an hour's work.
         revisable=lambda piece: ingest.revise_blocker(conn, piece),
+        harvest=lambda piece, info: _harvest(conn, cfg, piece, info, today),
     )
+
+
+def _harvest(
+    conn: sqlite3.Connection, cfg: dict[str, Any], piece: S.Piece, info: dict[str, Any], today: str
+) -> None:
+    from studio import scan as SC
+
+    note = SC.harvest(conn, cfg, piece, info, today=date.fromisoformat(today))
+    if note:
+        log.info("piece %s: %s", piece.id, note)
+
+
+def measure_quietly(conn: sqlite3.Connection, cfg: dict[str, Any]) -> E.Evidence | None:
+    """What X says, for the briefs; None when learning is off or the numbers cannot be read
+    (a piece is never held back by its evidence)."""
+    if not cfg["learn"].get("enabled"):
+        return None
+    try:
+        return E.measure(conn, cfg)
+    except Exception:  # the briefs go out without it rather than not at all
+        log.warning("could not read what X says; the briefs go without it", exc_info=True)
+        return None
 
 
 def mark_stale(conn: sqlite3.Connection) -> list[S.Piece]:
@@ -481,10 +568,102 @@ def _dry_run(
         error="",
     )
     brief = build_brief(
-        conn, cfg, fake, library=library, playbook=playbook, today=today, tzname=tzname
+        conn,
+        cfg,
+        fake,
+        library=library,
+        playbook=playbook,
+        today=today,
+        tzname=tzname,
+        evidence=measure_quietly(conn, cfg),
     )
     print(P.research_prompt(brief))
     return 0
+
+
+# --- learning from X (run_studio.py --learn) ----------------------------------------------
+
+
+def _learn_summary(ev: E.Evidence) -> str:
+    scored = ev.scored
+    return (
+        f"{len(ev.posted)} posted piece(s): {len(scored)} scored, "
+        f"{len(ev.measured) - len(scored)} measured but not yet comparable, "
+        f"{len(ev.waiting)} waiting for numbers"
+    )
+
+
+def learn(*, dry_run: bool = False, force: bool = False) -> int:
+    """Measure the posted pieces against X and, when enough are new to it, rewrite the
+    playbook from the evidence (studio/config.yaml `learn`). Starts no piece. `force`
+    rewrites now whatever the counts; `dry_run` prints the evidence and the rewrite prompt
+    and changes nothing."""
+    cfg = load_studio_config()
+    lcfg = cfg["learn"]
+    if not lcfg.get("enabled"):
+        log.info("learning from X is off (studio/config.yaml learn.enabled)")
+        return 0
+    data_dir = _data_folder()
+    conn = _db_conn()
+    try:
+        ev = E.measure(conn, cfg)
+        said = E.block(ev, cfg)
+        log.info("%s", _learn_summary(ev))
+        edits = E.edits(conn)
+        if dry_run:
+            print(said or "(no studio piece is scored yet)")
+            if lcfg["playbook"] != "off":
+                system, user = L.rewrite_prompt(
+                    PB.current_text(data_dir),
+                    ev.measured,
+                    edits,
+                    evidence=said,
+                    max_words=int(lcfg["max_words"]),
+                )
+                print("\n--- the playbook rewrite's system prompt ---\n" + system)
+                print("\n--- and its user prompt ---\n" + user)
+            return 0
+        if lcfg["playbook"] == "off":
+            log.info("the playbook is not rewritten (learn.playbook: off)")
+            return 0
+        last = S.last_learned(conn)
+        new = L.unseen(ev.measured, last.pieces if last else ())
+        due = force or L.rewrite_due(
+            ev.measured,
+            learned_from=last.pieces if last else (),
+            last_rewrite_at=E.parse_when(last.created_at) if last else None,
+            now=datetime.now(UTC),
+            min_new=int(lcfg["rewrite_min_new"]),
+            min_hours=float(lcfg["rewrite_min_hours"]),
+        )
+        if not due:
+            log.info(
+                "no playbook rewrite: %d scored piece(s) new since the last one (needs %s, "
+                "at most every %sh)",
+                len(new),
+                lcfg["rewrite_min_new"],
+                lcfg["rewrite_min_hours"],
+            )
+            return 0
+        if not ev.scored:
+            log.info("no playbook rewrite: no piece is scored yet")
+            return 0
+        root = workspace_root(data_dir, cfg)
+        root.mkdir(parents=True, exist_ok=True)
+        held = lock.acquire(root / LEARN_LOCK_NAME, trust_os_lock=True)
+        if held is None:
+            log.info("another learning run is in progress; nothing to do")
+            return 0
+        try:
+            outcome = PB.rewrite(
+                conn, cfg, data_dir, ev.measured, edits, evidence=said, root_cfg=_root_config()
+            )
+        finally:
+            held.release()
+        (log.info if outcome.ok else log.error)("%s", outcome.message)
+        return 0 if outcome.ok else 1
+    finally:
+        conn.close()
 
 
 def print_list() -> int:
@@ -504,3 +683,72 @@ def print_list() -> int:
     finally:
         conn.close()
     return 0
+
+
+# --- the radar's scan (run_studio.py --scan) ----------------------------------------------
+
+
+def feed_lines(cfg: dict[str, Any], conn: sqlite3.Connection) -> list[str]:
+    """The feed's top unused stories, one line each, as leads for the scan."""
+    stories = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+    return [
+        f"{s.title} ({', '.join(x for x in (s.source, s.published) if x)})"
+        + (f" [feed score {s.score}/50]" if s.score is not None else "")
+        for s in stories
+    ]
+
+
+def scan(*, dry_run: bool = False, force: bool = False) -> int:
+    """The radar's scan: when the last one finished `radar.scan_every_hours` ago (or
+    `force`), one call with web search proposes topics and reports catalysts. Starts no
+    piece. `dry_run` prints the prompt and changes nothing."""
+    from studio import scan as SC
+
+    cfg = load_studio_config()
+    rcfg = cfg["radar"]
+    if not rcfg.get("enabled"):
+        log.info("the radar is off (studio/config.yaml radar.enabled)")
+        return 0
+    conn = _db_conn()
+    try:
+        today_text, tzname = _today()
+        today = date.fromisoformat(today_text)
+        angles = {key: a.question for key, a in A.load_angles().items()}
+        if dry_run:
+            system, user = SC.prompt_for(
+                conn, cfg, today=today, tzname=tzname, angles=angles, feed=feed_lines(cfg, conn)
+            )
+            print("--- the scan's system prompt ---\n" + system)
+            print("\n--- and its user prompt ---\n" + user)
+            return 0
+        last = S.last_scan(conn, S.SCAN_DONE)
+        if not force and not SC.scan_due(last, datetime.now(UTC), float(rcfg["scan_every_hours"])):
+            log.info(
+                "no scan: the last one (%s) is under %sh old",
+                last.finished_at if last else "",
+                rcfg["scan_every_hours"],
+            )
+            return 0
+        root = workspace_root(_data_folder(), cfg)
+        root.mkdir(parents=True, exist_ok=True)
+        held = lock.acquire(root / SCAN_LOCK_NAME, trust_os_lock=True)
+        if held is None:
+            log.info("another scan is in progress; nothing to do")
+            return 0
+        try:
+            S.close_running_scans(conn, "the run stopped before the scan finished")
+            out = SC.run_scan(
+                conn,
+                cfg,
+                today=today,
+                tzname=tzname,
+                angles=angles,
+                feed=feed_lines(cfg, conn),
+                root_cfg=_root_config(),
+            )
+        finally:
+            held.release()
+        (log.info if out.ok else log.error)("%s", out.message)
+        return 0 if out.ok else 1
+    finally:
+        conn.close()

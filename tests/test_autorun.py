@@ -128,7 +128,17 @@ def test_the_studio_runs_automatically_but_its_buttons_never_do():
     )
 
 
-SHIPPED_AUTO_STEPS = ["ingest", "score", "studio", "draft", "verify", "feedback", "evolve"]
+SHIPPED_AUTO_STEPS = [
+    "ingest",
+    "score",
+    "studio_scan",
+    "studio",
+    "draft",
+    "verify",
+    "feedback",
+    "evolve",
+    "studio_learn",
+]
 
 
 def test_the_shipped_config_runs_everything_but_publishing():
@@ -143,8 +153,9 @@ def test_the_shipped_config_runs_everything_but_publishing():
     # the studio is the one step that sits a run time out while a session is still going
     assert [st.name for st in steps if st.skip_when_busy] == ["studio"]
     # the studio page's buttons are manual: even listed by mistake they never run on a timer
-    names, dropped = autorun.plan(["studio_now", "studio_resume"], steps)
-    assert names == [] and set(dropped) == {"studio_now", "studio_resume"}
+    buttons = ["studio_now", "studio_resume", "studio_scan_now", "studio_learn_now"]
+    names, dropped = autorun.plan(buttons, steps)
+    assert names == [] and set(dropped) == set(buttons)
     assert all("manual" in why for why in dropped.values())
 
 
@@ -453,7 +464,7 @@ def test_a_time_waits_for_a_busy_step_then_gives_up_after_the_grace(tmp_path):
 
 # The three studio steps share one lock, so a session in flight makes all three busy.
 STUDIO_BUSY = {"studio", "studio_now", "studio_resume"}
-REST = ["ingest", "score", "draft", "verify", "feedback", "evolve"]
+REST = ["ingest", "score", "studio_scan", "draft", "verify", "feedback", "evolve", "studio_learn"]
 
 
 def test_a_busy_studio_sits_the_run_time_out_while_the_other_steps_start(tmp_path):
@@ -532,13 +543,14 @@ def test_only_a_step_marked_skip_when_busy_sits_a_run_time_out(tmp_path):
 
 def test_steps_waiting_behind_a_busy_studio_in_an_earlier_run_sit_the_time_out_too(tmp_path):
     jobs = FakeJobs()
-    later = ["draft", "verify", "feedback", "evolve"]  # the 06:00 run's, after its studio
+    # the 06:00 run's, after its studio
+    later = ["draft", "verify", "feedback", "evolve", "studio_learn"]
     jobs.busy = STUDIO_BUSY | set(later)
     jobs.behind = dict.fromkeys(later, "studio")
     r = _runner(tmp_path, jobs, _settings(auto_run_steps=SHIPPED_AUTO_STEPS))
     r.tick(la(2026, 10, 1, 11, 59))
     assert r.tick(la(2026, 10, 1, 12, 0)) == "started run job1"
-    assert jobs.started == [(["ingest", "score"], True)]
+    assert jobs.started == [(["ingest", "score", "studio_scan"], True)]
     (note,) = jobs.notes
     assert "left out studio: still running from an earlier run" in note
     for name in later:

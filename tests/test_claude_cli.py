@@ -57,10 +57,15 @@ def test_no_app_module_imports_the_anthropic_sdk():
 # ---- the child's environment ------------------------------------------------------
 
 
+NO_BACKGROUND = {"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
+
+
 def test_cli_env_strips_api_credentials_and_keeps_the_rest(monkeypatch):
     for name in API_CREDENTIALS:
         monkeypatch.delenv(name, raising=False)
-    assert claude_cli.cli_env() == dict(os.environ)  # nothing to strip: an exact copy
+    monkeypatch.delenv("CLAUDE_AUTO_BACKGROUND_TASKS", raising=False)
+    # nothing to strip: a copy, with background tasks off
+    assert claude_cli.cli_env() == {**os.environ, **NO_BACKGROUND}
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api-stale")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-gateway-token")
@@ -68,10 +73,24 @@ def test_cli_env_strips_api_credentials_and_keeps_the_rest(monkeypatch):
     monkeypatch.setenv("PIPELINE_TEST_VAR", "kept")
     env = claude_cli.cli_env()
     assert set(os.environ) - set(env) == API_CREDENTIALS
-    assert all(env[name] == os.environ[name] for name in env)  # the rest is untouched
+    # the rest is untouched, but for background tasks
+    assert all(env[name] == os.environ[name] for name in env if name not in NO_BACKGROUND)
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "account-login"
     assert env["PIPELINE_TEST_VAR"] == "kept" and env["PATH"] == os.environ["PATH"]
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-api-stale"  # a copy: ours is unchanged
+
+
+def test_no_cli_child_can_move_work_to_the_background(monkeypatch):
+    """A session's fact-check agent must finish inside the call that started it: the
+    app waits for the call, and whatever the CLI moved to the background is killed when
+    the call ends. Whatever our own environment says, background tasks are off in the
+    child."""
+    monkeypatch.setenv("CLAUDE_AUTO_BACKGROUND_TASKS", "true")
+    monkeypatch.setenv("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "0")
+    env = claude_cli.cli_env()
+    assert "CLAUDE_AUTO_BACKGROUND_TASKS" not in env
+    assert env["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] == "1"
+    assert os.environ["CLAUDE_AUTO_BACKGROUND_TASKS"] == "true"  # ours is unchanged
 
 
 def test_run_claude_hands_popen_the_env_without_api_credentials(monkeypatch):

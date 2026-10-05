@@ -273,11 +273,24 @@ def check_text(piece: PieceFiles, xcfg: dict[str, Any], known_handles: set[str])
     return report
 
 
+NO_FACTCHECK = (
+    f"{FACTCHECK_FILE} is missing or empty: run the cold fact-check (a fresh sub-agent with only "
+    "the post and card text), wait for its report, fix what it finds and log it there"
+)
+
+
 def check_side_files(workspace: Path, report: Report) -> None:
+    """The fact base and the cold fact-check's log. A piece without the log never reached
+    the queue unchecked: the fact-check is what makes it postable, so its absence blocks
+    (the polish rounds ask for it first); a missing fact base only costs the editor a
+    reference."""
     for name in (FACTBASE_FILE, FACTCHECK_FILE):
         f = workspace / name
         if not f.is_file() or not f.read_text(encoding="utf-8", errors="replace").strip():
-            report.fixable.append(f"{name} is missing or empty")
+            if name == FACTCHECK_FILE:
+                report.blocking.append(NO_FACTCHECK)
+            else:
+                report.fixable.append(f"{name} is missing or empty")
 
 
 Renderer = Callable[[Path, Path], render_mod.RenderResult]

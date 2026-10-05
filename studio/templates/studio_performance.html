@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Studio · performance{% endblock %}
+{% block content %}
+<p><a href="/studio">&larr; Studio</a></p>
+<h1>What X says</h1>
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+{% if error %}<p class="banner fail">{{ error }}</p>{% endif %}
+<p class="meta">Each posted piece is measured on its first post's {{ kpi }} {{ cfg.learn.horizon_hours }}
+hours after it went out, against the median of every post the account made in the
+{{ cfg.learn.baseline_days }} days before it (at least {{ cfg.learn.min_baseline_posts }} of them). What
+follows goes into every new session's brief, and the playbook is rewritten from it
+(studio/config.yaml <code>learn</code>).{% if not cfg.learn.enabled %} <strong>Learning is off</strong>
+(<code>learn.enabled</code>): sessions get none of it.{% endif %}</p>
+
+<div class="cards">
+  <div class="card"><div class="n">{{ ev.posted|length }}</div>pieces posted</div>
+  <div class="card"><div class="n">{{ ev.scored|length }}</div>scored against the median</div>
+  <div class="card"><div class="n">{{ ev.waiting|length }}</div>waiting for numbers</div>
+  <div class="card"><div class="n">{{ state.new_pieces }}</div>new since the last rewrite (needs {{ state.min_new }})</div>
+</div>
+
+<h2>Posted pieces</h2>
+{% if rows %}
+<p class="meta">Numbers come from the feedback step's snapshots (X API read access) or from what you type in
+below; typed-in numbers count as they are, so type them about {{ cfg.learn.horizon_hours }} hours after
+posting. &times; median is the piece's {{ cfg.learn.kpi }} against the account's median before it.</p>
+<table>
+  <tr><th>Posted</th><th>Piece</th><th>Angle · shape · hook · cards</th><th>Numbers</th><th>&times; median</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="meta">{{ r.posted_at|localtime }}{% if r.url %}<br><a href="{{ r.url }}">on X</a>{% endif %}</td>
+    <td><a href="/studio/{{ r.piece_id }}">{{ r.label }}</a>
+      {% if r.lean %}<br><span class="meta">lean offered: {{ r.lean.values()|join(", ") }}{% if r.followed %} (went with {{ r.followed|join(", ") }}){% endif %}</span>{% endif %}</td>
+    <td>{{ r.angle or "-" }} · {{ r.shape or "-" }} · {{ r.hook_style or "-" }}{% if r.cards is not none %} · {{ r.cards }} card{{ "s" if r.cards != 1 }}{% endif %}</td>
+    <td>{% if r.counts %}<span class="meta">{% for name in metrics %}{{ name }} {{ r.counts[name] }}{{ ", " if not loop.last }}{% endfor %}</span><br>{{ cfg.learn.kpi }} {{ "%g"|format(r.value) }}{% if r.source == "manual" %} <span class="badge">typed in</span>{% endif %}{% endif %}
+      {% if r.status %}<br><span class="meta">{{ r.status }}</span>{% endif %}
+      <details><summary class="meta">type the numbers X shows</summary>
+        <form method="post" action="/studio/performance/{{ r.piece_id }}/metrics">
+          {% for name in metrics %}<label class="meta">{{ name }} <input name="{{ name }}" size="6" inputmode="numeric"></label> {% endfor %}
+          <button type="submit">Save numbers</button>
+        </form>
+      </details>
+      {% if r.needs_link and can_link %}
+      <details><summary class="meta">add the post's link</summary>
+        <form method="post" action="/studio/performance/{{ r.piece_id }}/link">
+          <input name="url" placeholder="https://x.com/your_account/status/..." size="40" aria-label="link to the post">
+          <button type="submit">Add link</button>
+        </form>
+      </details>
+      {% endif %}</td>
+    <td>{% if r.relative is not none %}<strong>{{ "%.1f"|format(r.relative) }}&times;</strong><br><span class="meta">median {{ "%g"|format(r.baseline) }}</span>{% else %}-{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No studio piece has been posted yet. Once one is (by "Publish now" or "I posted it" on the
+approved page), it shows here.</p>
+{% endif %}
+
+<h2>What has done well</h2>
+{% if ev.scored %}
+{% if small %}<p class="caveats">{{ ev.scored|length }} scored piece{{ "s" if ev.scored|length != 1 }}: too few to be sure of anything.
+One post's numbers are mostly the story and the day; read these as hints. The lean still tries what has
+little evidence, so the sample grows evenly.</p>{% endif %}
+<p class="meta">"Suggested" is how often the lean offers it to a session (its chance of being the best on the
+evidence so far); an untried value starts at the account's median and keeps a real chance.</p>
+{% for t in arms %}
+<details {% if t.arm == "angle" %}open{% endif %}><summary><strong>{{ t.label }}</strong></summary>
+<table>
+  <tr><th>{{ t.label }}</th><th>Pieces</th><th>&times; median</th><th>Suggested</th></tr>
+  {% for a in t.rows %}
+  <tr><td>{{ a.value }}</td><td>{{ a.n or "-" }}</td>
+      <td>{% if a.times is not none %}{{ "%.1f"|format(a.times) }}&times;{% else %}<span class="meta">untried</span>{% endif %}</td>
+      <td>{% if a.share is not none %}{{ "%.0f"|format(a.share * 100) }}%{% else %}<span class="meta">-</span>{% endif %}</td></tr>
+  {% endfor %}
+</table>
+</details>
+{% endfor %}
+<details><summary class="meta">the text every session reads</summary><pre class="log">{{ said }}</pre></details>
+{% else %}
+<p class="meta">Nothing scored yet. A piece is scored once it has numbers at {{ cfg.learn.horizon_hours }} hours and the
+account has {{ cfg.learn.min_baseline_posts }} posts before it to compare with. Until then the sessions get no
+"what X says" section and no lean.</p>
+{% endif %}
+
+<h2 id="playbook">The playbook</h2>
+<p class="meta">Every session reads <a href="/studio/playbook">the playbook</a>. The learning loop rewrites it once
+{{ state.min_new }} scored pieces are new to it, at most every {{ "%g"|format(state.min_hours) }} hours:
+{% if state.mode == "auto" %}the new version is used at once.{% elif state.mode == "propose" %}the new version waits here for you to apply it.{% else %}<strong>off</strong> (<code>learn.playbook: off</code>).{% endif %}
+{% if state.last %}Last rewrite: version {{ state.last.id }}, {{ state.last.created_at|localtime }}.{% else %}No rewrite yet.{% endif %}
+Every version is kept; putting one back makes it a new version.</p>
+{% if cfg.learn.enabled and state.mode != "off" %}
+{% with buttons=[{"label": "Rewrite the playbook now", "steps": [step_learn], "title": "one call on the writer's model: the playbook, the evidence and your hand edits in, a new version out"}], back="/studio/performance" %}
+{% include "_run.html" %}
+{% endwith %}
+{% endif %}
+{% if versions %}
+{% for row in versions %}
+{% set v = row.version %}
+<div class="{{ 'proposal' if row.open else 'entry' }}">
+  <p><strong>Version {{ v.id }}</strong> · {{ v.source }} · <span class="meta">{{ v.created_at|localtime }}</span>
+    {% if row.current %}<span class="pill ok">in use</span>{% endif %}
+    {% if row.status %}<span class="pill {{ 'warn' if row.open else 'skip' }}">{{ row.status }}</span>{% endif %}
+    {% if v.pieces %}<span class="meta">learned from {{ v.pieces|length }} scored piece{{ "s" if v.pieces|length != 1 }}</span>{% endif %}</p>
+  {% if v.changelog %}<ul>{% for c in v.changelog %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
+  {% if row.diff %}<details><summary class="meta">what changed</summary>
+    <pre class="diff">{% for line in row.diff.splitlines() %}<span class="{{ 'add' if line.startswith('+') else ('del' if line.startswith('-') else 'same') }}">{{ line }}</span>{% endfor %}</pre></details>{% endif %}
+  <details><summary class="meta">the whole text</summary><pre class="log">{{ v.text }}</pre></details>
+  {% if row.open %}
+  <form method="post" action="/studio/playbook/versions/{{ v.id }}/apply" class="inline"><button type="submit">Apply this version</button></form>
+  {% elif not row.current and v.source != "proposal" %}
+  <form method="post" action="/studio/playbook/versions/{{ v.id }}/revert" class="inline"><button class="link" type="submit">put this version back</button></form>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<p class="meta">No versions yet: the first save, rewrite or revert records the playbook in use first.</p>
+{% endif %}
+{% endblock %}

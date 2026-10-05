@@ -86,3 +86,59 @@ x:
 render:
   browser: ""
   timeout_seconds: 60
+
+# The radar (studio/radar.py, studio/scan.py, /studio/radar): where topics come from.
+# Once a day (`python run_studio.py --scan`, the `studio_scan` step, before `studio`) one
+# call on the writer's model with web search reads the last few days of news and proposes
+# the account's next 3-5 topics, each with why now, a suggested angle and its sources, and
+# reports the dated catalysts coming up (PDUFA dates, readouts, conference slots). Every
+# piece's research adds the catalysts it found. The radar page shows the topics, the
+# feed's top stories and the catalyst calendar, each with "Write it"; an automatic piece
+# is offered the same and picks one, or finds something better.
+radar:
+  enabled: true
+  scan_every_hours: 20          # one scan a day at most; "Scan now" ignores it
+  model: ""                     # blank = the writer's model above
+  effort: ""                    # blank = the writer's effort above
+  timeout_minutes: 40           # one scan's limit
+  max_topics: 5
+  max_catalysts: 40             # per scan
+  topic_days: 3                 # a scan's topics stay on the radar this long
+  calendar_days: 180            # catalysts further out are left off the calendar
+  past_days: 14                 # catalysts that passed stay this long, for reaction pieces
+  brief_upcoming_days: 21       # what an open piece is shown as coming up
+  brief_recent_days: 3          # and as just passed
+  feed_stories: 10              # the feed's top stories on the radar page
+
+# What X says, fed back into the next piece (studio/learn.py, studio/evidence.py). Each
+# posted piece is measured on its first post `horizon_hours` after it went out (step 4's
+# snapshot, or the numbers typed in on the performance page) and compared with the median
+# of every post the account made in the `baseline_days` before it. From those scores every
+# session is shown what has done well (by angle, shape, hook style and card count, with
+# the sample sizes), offered a lean (a Thompson draw: what has done better is suggested
+# more often, what has little evidence is still tried) and, after enough new pieces, reads
+# a playbook rewritten from the evidence and your hand edits. `python run_studio.py
+# --learn` (the `studio_learn` step) does the measuring and the rewrite; nothing here posts.
+learn:
+  enabled: true
+  kpi: conversation             # feedback/models.py: replies, quotes x3; bookmarks, reposts x2; likes x1; impressions x0.05
+  horizon_hours: 48             # a post is compared at this age (typed-in numbers as they are)
+  baseline_days: 30             # against the median of the account's posts in these days before it
+  min_baseline_posts: 3         # fewer posts than this before it: measured, not yet scored
+  smoothing: 1.0                # added to both sides, so a quiet account still compares
+  lean_min_measured: 3          # scored pieces before the brief suggests a lean
+  prior_sd: 0.5                 # how far from the median an untried angle may plausibly be (log scale)
+  post_sd: 0.8                  # one post's spread (log scale) until 10 pieces measure it
+  # The playbook rewrite: one call (no tools) once `rewrite_min_new` scored pieces are new
+  # to it, at most every `rewrite_min_hours`. propose (shipped): it waits on the
+  # performance page for you to read and apply, since a handful of posts is mostly noise
+  # (the numbers mean little before 20 to 30 pieces); auto: the next session reads it at
+  # once; off: never rewritten. Every version is kept there with its changelog, and any
+  # one can be put back.
+  playbook: propose
+  rewrite_min_new: 3
+  rewrite_min_hours: 24
+  model: ""                     # blank = the writer's model above
+  effort: ""                    # blank = the writer's effort above
+  max_words: 900                # the playbook's length limit
+  timeout_minutes: 30
