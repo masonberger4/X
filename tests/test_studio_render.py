@@ -206,6 +206,7 @@ def test_studio_browser_wins_over_the_configured_path(no_browsers, tmp_path, mon
     assert render.find_browser(str(configured)) == str(configured)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="PATH lookup of extensionless names")
 def test_an_explicit_browser_may_be_a_name_on_path(no_browsers, monkeypatch):
     found = _exe(no_browsers, "edge-dev")
     monkeypatch.setenv("STUDIO_BROWSER", "edge-dev")
