@@ -93,7 +93,10 @@ carrying `--live`).
   `verify/verifier.py:call_model`, routes through it; there is no Anthropic API
   path, no `anthropic` SDK and no API key, and `claude_cli.cli_env` drops
   `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` from the child's environment so the
-  CLI always runs on its own login), and `publish/client.py`
+  CLI always runs on its own login, drops `CLAUDE_AUTO_BACKGROUND_TASKS` and sets
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so nothing a call starts (a studio
+  session's fact-check agent) is moved to the background and killed unfinished when
+  the call ends), and `publish/client.py`
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
   `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
@@ -583,7 +586,8 @@ carrying `--live`).
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`), an
   optional checkpoint (`research_ready`, the editor's Continue), write (`posts/NN.txt`,
   `cards/card_N.html`, a cold fact-check by a fresh sub-agent logged in `factcheck.md`,
-  `piece.json`), polish rounds (`studio/qa.py`: `piece.json` shape, X-weighted length from
+  in the foreground since `cli_env` disables background tasks, `piece.json`; a piece
+  without that log blocks, `qa.NO_FACTCHECK`), polish rounds (`studio/qa.py`: `piece.json` shape, X-weighted length from
   `studio/xcount.py` with `x.headroom`, `studio/safety.py` blocking lines (investment or
   medical advice, links incl. bare domains), an @handle without a verifying page, cards
   drawn by `studio/render.py`; blocking problems keep a piece out of the queue, fixable ones
