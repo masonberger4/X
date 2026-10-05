@@ -56,6 +56,27 @@ def _no_image_grader_network(monkeypatch):
     monkeypatch.setattr(grader, "call_grader", offline)
 
 
+# Test modules that exercise the CLI launchers themselves (with subprocess faked).
+_CLI_TEST_MODULES = ("test_claude_cli", "test_claude_cli_session")
+
+
+@pytest.fixture(autouse=True)
+def _never_spawn_the_cli(request, monkeypatch):
+    """Every model call goes through the Claude Code CLI, which is on PATH on a developer's
+    machine: a test that forgot to fake its call must fail loudly, not spend the
+    subscription. The CLI's own tests fake subprocess instead and are left alone."""
+    import claude_cli
+
+    if request.module.__name__.rsplit(".", 1)[-1] in _CLI_TEST_MODULES:
+        return
+
+    def refuse(*a, **k):
+        raise RuntimeError("a test tried to run the real Claude Code CLI; fake the call")
+
+    monkeypatch.setattr(claude_cli, "run_claude", refuse)
+    monkeypatch.setattr(claude_cli, "run_session", refuse)
+
+
 @pytest.fixture(autouse=True)
 def _swarm_off(monkeypatch):
     """Step 9's swarm is on in the shipped config; every test runs the plain drafter unless it

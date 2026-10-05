@@ -131,7 +131,8 @@ def build_brief(
     )
     story = T.fetch_story(piece.cluster_id) if piece.cluster_id is not None else None
     shortlist: list[P.Story] = []
-    if story is None and not piece.topic:
+    if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
+        # Only the research stage chooses a story; later stages have one.
         shortlist = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
     x = cfg["x"]
     return P.Brief(

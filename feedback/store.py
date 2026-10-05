@@ -188,7 +188,8 @@ def fetch_posted(
 
 _CONTEXT_SQL = """
 SELECT d.id AS draft_id, d.item_id, d.cluster_id,
-       i.source, i.url, i.title,
+       COALESCE(i.source, CASE WHEN d.item_id LIKE 'studio:%' THEN 'studio' END) AS source,
+       i.url, i.title,
        s.novelty, s.clinical_significance, s.audience_interest, s.expertise_fit, s.timeliness,
        s.hype_risk, s.total, s.evidence_level, s.suggested_angle,
        (SELECT rating FROM ratings WHERE cluster_id = COALESCE(d.cluster_id, i.cluster_id)
@@ -206,7 +207,8 @@ WHERE d.id IN ({placeholders})
 
 _CONTEXT_SQL_NO_STEP1 = """
 SELECT d.id AS draft_id, d.item_id, d.cluster_id,
-       NULL AS source, NULL AS url, NULL AS title,
+       CASE WHEN d.item_id LIKE 'studio:%' THEN 'studio' END AS source,
+       NULL AS url, NULL AS title,
        NULL AS novelty, NULL AS clinical_significance, NULL AS audience_interest,
        NULL AS expertise_fit, NULL AS timeliness, NULL AS hype_risk, NULL AS total,
        NULL AS evidence_level, NULL AS suggested_angle, NULL AS rating,
@@ -220,7 +222,9 @@ WHERE d.id IN ({placeholders})
 def fetch_post_context(
     draft_ids: Iterable[int], conn: sqlite3.Connection | None = None
 ) -> dict[int, PostContext]:
-    """Story metadata for each draft id, joined from steps 1 and 2.
+    """Story metadata for each draft id, joined from steps 1 and 2. A studio piece
+    (step 10, item_id `studio:<id>`) has no item of its own: its source reads `studio`, so
+    the weekly report compares studio posts with the drafter's.
 
     This is the ONLY place step 4 reads drafts/decisions/items/scores/ratings. Drafts that
     do not exist are simply absent from the result.

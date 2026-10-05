@@ -49,7 +49,7 @@ class Context:
     brief_for: Callable[[S.Piece], P.Brief]
     renderer: qa.Renderer | None
     ingest: Callable[[S.Piece, qa.Report], int]
-    launch: Launcher = claude_cli.run_session
+    launch: Launcher | None = None  # None: claude_cli.run_session, looked up at call time
     echo: Callable[[str], None] = print
     stop_after_research: bool = False
 
@@ -83,8 +83,9 @@ def _run_stage(
             _write_log(workspace, line)
             ctx.echo(f"[piece {piece.id} {stage}] {line}")
 
+    launch = ctx.launch or claude_cli.run_session
     try:
-        result = ctx.launch(
+        result = launch(
             prompt_text,
             model=piece.model,
             cwd=workspace,
@@ -134,11 +135,12 @@ def _stopped_early(result: claude_cli.SessionResult) -> bool:
 def research(
     ctx: Context, piece: S.Piece, *, first: bool = True, resumed_reason: str = ""
 ) -> Outcome:
+    S.update_piece(ctx.conn, piece.id, stage=S.STAGE_RESEARCHING, error="")
+    piece = S.get_piece(ctx.conn, piece.id) or piece
     brief = ctx.brief_for(piece)
     text = P.research_prompt(brief)
     if resumed_reason:
         text = P.resume_prompt("research", resumed_reason, text)
-    S.update_piece(ctx.conn, piece.id, stage=S.STAGE_RESEARCHING, error="")
     result = _run_stage(ctx, piece, "research", text, first=first)
     if not result.ok:
         return _fail(ctx, piece, "research", result.detail, interrupted=_stopped_early(result))
@@ -183,8 +185,16 @@ def write(ctx: Context, piece: S.Piece, note: str = "", *, resumed_reason: str =
 
 
 def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
+    # The note is kept with the piece so a revision that is interrupted can be resumed with
+    # the editor's words, not just re-checked.
     S.update_piece(
-        ctx.conn, piece.id, stage=S.STAGE_REVISING, error="", request="", request_note=""
+        ctx.conn,
+        piece.id,
+        stage=S.STAGE_REVISING,
+        error="",
+        request="",
+        request_note="",
+        meta={"revise_note": note},
     )
     result = _run_stage(ctx, piece, "revise", P.revise_prompt(note), first=False)
     if not result.ok:
@@ -265,6 +275,8 @@ def resume_interrupted(ctx: Context, piece: S.Piece, note: str = "") -> Outcome:
         return research(ctx, piece, first=False, resumed_reason=reason)
     if stage in ("write", ""):
         return write(ctx, piece, note, resumed_reason=reason)
-    if stage == "revise" and note:
-        return revise(ctx, piece, note)
+    if stage == "revise":
+        note = note or str(piece.meta.get("revise_note") or "")
+        if note:
+            return revise(ctx, piece, note)
     return polish(ctx, piece)

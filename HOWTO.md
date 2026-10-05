@@ -97,6 +97,10 @@ source only when it is due, and score only scores what is new.
 
 ## Part 3. Drafting and approving posts (start after a few days of part 2)
 
+The studio (part 9) is now the main way posts are made: one Opus session per
+piece, researched, fact-checked and with designed cards. The drafter below still
+runs and writes shorter threads for the day's other stories.
+
 1. Draft posts for the top stories.
    ```
    python run_draft.py
@@ -548,7 +552,7 @@ replies, since that hour decides how far X shows it.
 ## Part 6. Running it on a schedule (Windows Task Scheduler)
 
 You may not need this part. While the control panel or desktop window is open it
-already runs ingest, score, draft, verify, feedback and evolve on its own at
+already runs ingest, score, studio, draft, verify, feedback and evolve on its own at
 06:00, 12:00 and 18:00 (part 8, "Automatic runs"), and it never publishes. Task
 Scheduler is the other way: it runs even with the app closed and can wake the
 PC, but it needs the tasks below. Pick one for `pipeline-run`. Running both is
@@ -773,6 +777,10 @@ to stop it. Four pages:
   posts per day and the minimum gap between posts in minutes, are the one
   setting the panel edits here ("Save limits" writes them into
   `publish\config.yaml`, and the next "Publish now" uses them).
+- **Studio** (`/studio`) — part 9: every studio piece with its stage, the box
+  to write a piece on any topic, the queued topics, and the playbook every
+  session reads. A piece's page shows its fact base, post, cards, fact-check log
+  and live session log, with Continue (after research), Revise and Resume.
 - **Swarm** (`/swarm`) — step 9's recipes (writer genomes, designers and
   formats): live or retired, posts scored, median score, parent, and the
   swarm-vs-control line. A view only; `run_evolve.py` does the breeding and
@@ -806,7 +814,7 @@ to stop it. Four pages:
   claim's verdict is saved the moment it lands, so stopping the run keeps
   every claim already checked and only the one in flight is redone next time.
 - **Automatic runs** (top of `/runs`) — while the panel or the desktop window
-  is open it runs ingest, score, draft, verify, feedback and evolve on its own,
+  is open it runs ingest, score, studio, draft, verify, feedback and evolve on its own,
   at 06:00, 12:00 and 18:00 local time as shipped. Publishing is never one of
   them: posting stays the approved page's "Publish now", and an automatic run
   cannot post even if `.env` allows posting. The box says whether it is on,
@@ -961,6 +969,99 @@ Works on mobile data as well as Wi-Fi. The PC still has to be on and running
 the app; to have it start by itself, add `python run_app.py --host 0.0.0.0`
 as a task in Task Scheduler (part 6) that runs at log-on.
 
+## Part 9. The studio: one Opus session per post
+
+The studio is how the account's best posts get made now. Each piece is ONE Claude
+Code session on Opus 5.5 at max effort, the same way the Merck SPR2015, Summit
+catalyst map and next-gen CTLA-4 posts were made by hand in a chat. The session
+researches the topic and writes a fact base with every source. It then writes a
+long post (or a thread of long posts), designs the cards, and runs its own cold
+fact-check through a fresh sub-agent. The app draws the cards, counts characters
+the way X does, checks the few lines that are never crossed (no investment or
+medical advice, no links) and hands any problem back to the same session. The
+finished piece waits in the pending queue as "Studio piece N" with its cards
+attached. Nothing posts from here: approving and "Publish now" work as in part 5,
+and long posts need X Premium.
+
+1. Nothing new to install. The session runs through the Claude Code you set up
+   in part 1, and the cards are drawn by Microsoft Edge, which comes with
+   Windows (Chrome or Chromium work too). If a piece says `no Chromium-family
+   browser found`, put the browser's full path on `render: browser:` in
+   `studio\config.yaml`, or on `STUDIO_BROWSER=` in `.env`.
+2. It runs on its own. The `studio` step sits in the automatic runs (part 8)
+   right after `score`, so each run first acts on anything you asked for on the
+   studio page, then starts a new piece if `studio\config.yaml` allows one: at
+   most `max_new_per_day` (1) in any 24 hours, `min_hours_between` (6) hours after
+   the last piece, and never while a piece waits for you at the research
+   checkpoint. An automatic piece picks its own story from the top scored stories
+   of the last two days that no piece has used, or finds a better one with its own
+   news scan, and writes straight through (`auto: checkpoint: false`). Expect it in
+   the queue 30 to 90 minutes after the run starts. A session still running at
+   the next run time sits that run out (`skip_when_busy`) instead of holding the
+   other steps back.
+3. Or start one yourself. Open **Studio** in the panel's top bar, type a topic
+   ("next-gen CTLA-4", "Merck's KRAS G12D deal", "what ESMO week means for
+   $SMMT"), pick an angle or leave it to the session, and press **Write it**. On
+   the **Feed** page, **Write a studio piece** under a story does the same with
+   that story. A piece you start stops after research by default (the tick box)
+   so you can read the fact base first. The run shows on the runs page like any
+   other; its Stop button ends it, and the piece can be resumed later.
+4. The research checkpoint. When a piece says **read the research**, open it:
+   the fact base is there with every source marked opened or seen in search
+   results only, the X handles it verified, the corrections it made and the
+   questions it could not answer. Type any direction (the angle you want, what to
+   lead with, what to drop) and press **Continue: write the piece**.
+5. Review. The piece's page shows the post exactly as it will be posted, the
+   cards, the fact-check log (every finding, what changed, what stayed
+   unverified) and the session's own log. The same draft is on the pending page;
+   approve it there.
+6. Changes. Type them on the piece's page and press **Revise**: the session that
+   wrote it rewrites it, fact-checks what changed and replaces the queue draft.
+   The queue's own Revise button would flatten a studio piece, so it points you
+   here instead. Hand edits on the queue page still work.
+7. When something stops. A piece marked `interrupted` (stopped, timed out, the
+   PC slept) or `failed` (the checker still found a blocking problem after the
+   polish rounds) has **Resume where it stopped**: the same session carries on
+   with everything it already read. **Discard** gives up on a piece; its files
+   stay in the `studio_pieces` folder.
+8. The playbook. **Studio → The playbook** is the short note every session
+   reads before it writes: what works on this account and the mistakes the
+   fact-checks keep catching. Edit and save it; the next session reads your
+   version (it lives in `studio_playbook.md` next to `pipeline.db`).
+9. From a command prompt (the same thing the buttons do):
+   ```
+   python run_studio.py --list
+   python run_studio.py --topic "next-gen CTLA-4" --checkpoint
+   python run_studio.py --story 123 --angle readout_reaction
+   python run_studio.py --now --no-checkpoint
+   python run_studio.py --resume-only
+   python run_studio.py --dry-run
+   python run_studio.py
+   ```
+   `--list` shows recent pieces and queued topics; `--dry-run` prints the
+   research prompt the next piece would get and starts nothing; plain
+   `run_studio.py` is the automatic run. In `ops\config.yaml` the buttons are the
+   manual steps `studio_now` (start a piece now) and `studio_resume` (act on
+   Continue, Revise and Resume).
+10. Cost. One piece is one long session at max effort, often an hour, and it
+    uses a lot of your Claude plan; one automatic piece a day is the shipped
+    pace. Each stage has a time limit in `studio\config.yaml` (`timeouts:`).
+11. What the session can do on your PC: search and read the web, read the
+    reference pieces, and read and write files inside its own piece folder.
+    It has no shell, cannot touch anything else on the PC, ignores your
+    CLAUDE.md, plugins and hooks, and cannot post (the `cli_flags` in
+    `studio\config.yaml`).
+
+The angles it chooses from (19 of them: deal decoder, class deep dive, catalyst
+map, readout reaction, readout preview, the race, head to head, post-mortem,
+regulatory decoder, follow the money, patent cliff, origin story, mechanism for
+investors, contrarian take, bull vs bear, one chart, conference playbook, weekly
+watchlist, scorecard) are in `studio\angles.yaml`. The app never offers an angle
+the last three pieces used, and tells the session which hooks and openings to
+avoid, so the account does not repeat itself. The card style (dark, 4:5, Inter)
+is in `studio\brief\cards.md`, the voice in `studio\brief\voice.md`, and the three
+reference pieces in `studio\exemplars\`.
+
 ---
 
 ## Fixing things
@@ -986,6 +1087,10 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | A draft sits on the approved page marked `claimed` and never posts | the run that claimed it died before it posted (a sleep, a power cut, the Stop button). Press "Release" beside it once the claim is over 30 minutes old, or run `python run_publish.py --release-failed`; check on the publishing page first that no part of it reached X |
 | The control panel says a step is already running, or a run's step is marked `locked` | that step is running in this window, another window or the scheduler (part 6); wait for it and press the button again. Other steps can run meanwhile |
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
+| A studio piece says `no Chromium-family browser found` | the cards are drawn by Edge, Chrome or Chromium; put the browser's full path on `render: browser:` in `studio\config.yaml` (Edge is usually `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`) and press Resume on the piece |
+| A studio piece fails at once with `unknown option '--restricted'` (or `--safe-mode`) | your Claude Code is older than the studio expects: `npm install -g @anthropic-ai/claude-code`, then Resume. As a stopgap remove that flag from `cli_flags` in `studio\config.yaml` |
+| A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept). Press Resume on its page; the session keeps everything it already read |
+| A studio piece says `failed: still blocked after polishing` | the page lists what the checker still found (advice wording, a link, a post over the limit). Resume with a note saying how to fix it, or Discard |
 | `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |
 | Building the exe fails with `No module named PyInstaller` | `pip install -e ".[desktop]"` in the venv first |
 
@@ -1003,7 +1108,10 @@ skips the chart), `verify\config.yaml`
 attaches or skips the chart; posting itself is manual only), `feedback\config.yaml`,
 `swarm\config.yaml` (step 9: the cheap model, how many cells per post, how many
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
-drafter) and `ops\config.yaml` (which steps the scheduler runs). Ask me to commit a change rather than editing by
+drafter), `studio\config.yaml` (part 9: the studio's model and effort, how many
+automatic pieces a day, whether they stop after research, stage time limits, the
+session's tools and the card browser) and `ops\config.yaml` (which steps the
+scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
 
 ### The clock you see
