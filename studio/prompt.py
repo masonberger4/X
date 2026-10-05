@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 
 from studio.angles import HOOK_STYLES, SHAPES, AngleOffer
+from studio.radar import KINDS, Catalyst, Topic
 
 PIECE_FILE = "piece.json"
 RESEARCH_FILE = "research.json"
@@ -91,6 +92,10 @@ class Brief:
     hooks_to_avoid: list[str] = field(default_factory=list)
     recent: list[RecentPiece] = field(default_factory=list)
     playbook: str = ""
+    # The radar (studio/radar.py), for a piece that chooses its own topic: today's scan
+    # topics as (radar id, topic), and the catalysts coming up or just passed.
+    radar: list[tuple[int, Topic]] = field(default_factory=list)
+    coming_up: list[Catalyst] = field(default_factory=list)
     long_post_max: int = 25000
     thread_post_max: int = 25000
     short_post_max: int = 1000
@@ -123,15 +128,44 @@ def _topic_block(b: Brief) -> str:
         "a regulatory decision, a financing, a catalyst coming up, or a pattern across "
         "several of them."
     ]
-    if b.shortlist:
+    if b.radar:
         lines.append(
-            "These are the top stories from the account's feeds that no piece has used "
-            "yet. Pick one of them, or run your own news scan (web search) and pick "
-            "something better; say which and why in research.json."
+            "THE RADAR: topics today's scan of the news proposed (no piece has used them). "
+            "Check its facts yourself; its why-now is a lead, not a source."
         )
+        lines += [_radar_line(rid, t) for rid, t in b.radar]
+    if b.coming_up:
+        lines.append(
+            "COMING UP: dated catalysts on the account's calendar. A preview before an "
+            "event or a reaction just after one makes a strong piece."
+        )
+        lines += [f"- {c.line()}" for c in b.coming_up]
+    if b.shortlist:
+        lines.append("THE FEEDS: the top scored stories no piece has used yet.")
         lines += [s.block() for s in b.shortlist]
+    if b.radar or b.coming_up or b.shortlist:
+        lines.append(
+            "Pick one of these, or run your own news scan (web search) and pick something "
+            "better; say which and why in research.json."
+        )
     else:
         lines.append("Run a news scan with web search to find it.")
+    return "\n".join(lines)
+
+
+def _radar_line(radar_id: int, t: Topic) -> str:
+    lines = [f"- [radar {radar_id}] {t.title}"]
+    if t.why_now:
+        lines.append(f"  Why now: {t.why_now}")
+    tags = []
+    if t.angle:
+        tags.append(f"suggested angle {t.angle}")
+    if t.companies:
+        tags.append("companies " + ", ".join(c.label() for c in t.companies))
+    if tags:
+        lines.append("  " + "; ".join(tags))
+    if t.sources:
+        lines.append("  " + " ".join(t.sources))
     return "\n".join(lines)
 
 
@@ -194,11 +228,17 @@ WHAT TO WRITE IN YOUR WORKING FOLDER
 2. {RESEARCH_FILE}: JSON with
    {{"topic": "the piece's subject in one line",
     "story_id": <the story number if you used one of the listed stories, else null>,
+    "radar_topic": <the radar number if you used one of the radar's topics, else null>,
     "why_now": "one sentence",
     "companies": [{{"name": "...", "ticker": "MRK or 9926.HK or null"}}],
     "candidate_angles": [{{"angle": "<angle key from the list below>", "why": "..."}}],
+    "catalysts": [{{"date": "2026-11-14 or 2026-11 or Q4 2026", "company": "...",
+                   "ticker": "...", "drug": "...", "kind": "{" | ".join(KINDS)}",
+                   "detail": "one sentence", "source": "https://..."}}],
     "summary": "two or three sentences for the editor"}}
-   Give two or three candidate angles, best first.
+   Give two or three candidate angles, best first. Under "catalysts" list every dated
+   upcoming event you confirmed (PDUFA dates, readouts, conference presentations,
+   advisory committees) with its source: the account keeps a catalyst calendar from them.
 
 ANGLES ON OFFER
 {_angles_block(b)}

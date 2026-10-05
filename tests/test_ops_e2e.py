@@ -305,6 +305,8 @@ def test_default_ops_config_never_contains_live():
     assert [s["name"] for s in cfg["steps"]] == [
         "ingest",
         "score",
+        "studio_scan",
+        "studio_scan_now",
         "studio",
         "studio_now",
         "studio_resume",
@@ -357,6 +359,28 @@ def test_the_studio_steps_share_one_lock_and_only_the_plain_one_runs_on_its_own(
     assert not plain.now and not plain.resume_only
 
 
+def test_the_scan_steps_have_their_own_lock_and_only_the_plain_one_runs_on_its_own():
+    cfg = load_ops_config()
+    steps = {s["name"]: s for s in cfg["steps"]}
+    for name in ("studio_scan", "studio_scan_now"):
+        # never waits for (or holds back) a studio session, which may run an hour
+        assert steps[name]["lock"] == "studio_scan" and steps[name]["timeout_seconds"] == 0
+        assert steps[name]["enabled"] is True and steps[name]["required"] is False
+    assert steps["studio_scan"]["argv"] == ["python", "run_studio.py", "--scan"]
+    assert not steps["studio_scan"].get("manual")
+    assert steps["studio_scan_now"]["manual"] is True
+    # right before the studio, so the day's piece is offered the day's topics
+    order = [s["name"] for s in cfg["steps"]]
+    assert order.index("score") < order.index("studio_scan") < order.index("studio")
+    autos = cfg["auto_run_steps"]
+    assert autos.index("studio_scan") + 1 == autos.index("studio")
+    import run_studio
+
+    assert run_studio._parse_args(steps["studio_scan"]["argv"][2:]).scan is True
+    now = run_studio._parse_args(steps["studio_scan_now"]["argv"][2:])
+    assert now.scan_now is True and not now.scan
+
+
 def test_default_config_dry_run_lists_real_clis(capsys):
     """With the default config, --dry-run resolves every enabled step to an existing CLI."""
     rc = run_ops.main(["run", "--dry-run"])
@@ -374,6 +398,7 @@ def test_default_config_dry_run_lists_real_clis(capsys):
     assert names.index("score") < names.index("studio") < names.index("draft")
     assert "studio_now" not in names and "studio_resume" not in names
     assert "draft_retry" not in names
+    assert names.index("studio_scan") < names.index("studio") and "studio_scan_now" not in names
 
 
 def test_a_manual_studio_step_runs_when_named(capsys):

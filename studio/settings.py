@@ -47,9 +47,34 @@ DEFAULTS: dict[str, Any] = {
         "max_cards_total": 4,
     },
     "render": {"browser": "", "timeout_seconds": 60},
+    "radar": {
+        "enabled": True,
+        "scan_every_hours": 20,
+        "model": "",
+        "effort": "",
+        "timeout_minutes": 40,
+        "max_topics": 5,
+        "max_catalysts": 40,
+        "topic_days": 3,
+        "calendar_days": 180,
+        "past_days": 14,
+        "brief_upcoming_days": 21,
+        "brief_recent_days": 3,
+        "feed_stories": 10,
+    },
 }
 
-_SECTIONS = ("auto", "manual", "timeouts", "max_turns", "topics", "variety", "x", "render")
+_SECTIONS = (
+    "auto",
+    "manual",
+    "timeouts",
+    "max_turns",
+    "topics",
+    "variety",
+    "x",
+    "render",
+    "radar",
+)
 
 
 def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
@@ -69,6 +94,10 @@ def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
         raise ValueError("studio/config.yaml must name the writer's model (model: ...)")
     cfg["tools"] = [str(t) for t in (cfg.get("tools") or [])]
     cfg["cli_flags"] = [str(f) for f in (cfg.get("cli_flags") or [])]
+    radar = cfg["radar"]
+    # The scan runs on the writer's model and effort unless told otherwise.
+    radar["model"] = str(radar.get("model") or "").strip() or cfg["model"]
+    radar["effort"] = str(radar.get("effort") or "").strip() or str(cfg.get("effort") or "")
     return cfg
 
 

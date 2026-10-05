@@ -154,6 +154,8 @@ python run_studio.py --now --no-checkpoint   # a piece now on today's best story
 python run_studio.py --resume-only   # only Continue / Revise / Resume what the studio page asked for
 python run_studio.py --list      # recent pieces and queued topics
 python run_studio.py --dry-run   # print the research prompt the next piece would get
+python run_studio.py --scan      # the radar's daily news scan (topics and catalysts), when due
+python run_studio.py --scan-now  # the scan now
 python run_queue.py             # approval UI alone on localhost:8000
 python run_queue.py --host 0.0.0.0 --port 8080   # bind elsewhere (--reload for development)
 python run_app.py               # control panel: dashboard + sources + runs + the queue
@@ -778,7 +780,32 @@ others back, along with the steps its own run still has to come behind it,
 piece waits at the checkpoint; `studio_now` and `studio_resume` are the studio
 page's manual buttons. One studio run at a time (`studio_pieces/.studio.lock`). A
 killed run leaves the piece `interrupted`; Resume carries on in the same session.
-Tables: `studio_pieces`, `studio_runs`, `studio_topics`.
+Tables: `studio_pieces`, `studio_runs`, `studio_topics`, `studio_scans`,
+`studio_radar_topics`, `studio_catalysts`.
+
+**The radar** (`studio/radar.py`, pure; `studio/scan.py`; `/studio/radar`;
+`studio/config.yaml` `radar:`) is where topics come from. Once a day (`run_studio.py
+--scan`, the automatic `studio_scan` step right before `studio`, its own lock; at most every
+`scan_every_hours`) one call on the writer's model and effort, through
+`studio/scan.py:call_scanner` (`claude_cli.run_claude` with WebSearch and WebFetch only and
+`radar.timeout_minutes`), is given the angle library, the account's recent pieces, the
+feed's top stories and the catalysts already on the calendar, and answers in JSON: 3 to
+`max_topics` topics (title, why now, a suggested angle key, companies with tickers, the
+sources it opened) and the dated catalysts coming up (date as precise as the source: a
+day, a month, a quarter or a half; company, ticker, drug, kind, detail, source).
+`radar.parse_scan` keeps what checks out (an unknown angle becomes blank, sources must be
+http(s), a catalyst needs a company and a date between `past_days` back and
+`calendar_days` ahead); an unusable answer or a failed call marks the scan failed and stores
+nothing. Every piece's research adds the catalysts it confirmed (`research.json`
+`catalysts`, through `studio/scan.py:harvest`) and names the radar topic it took
+(`radar_topic`). Catalysts merge by company or ticker, kind, drug and start date. An open
+piece's research prompt lists the recent scans' untaken topics, the catalysts in the next
+`brief_upcoming_days` and the last `brief_recent_days`, and the feed's stories. The page
+shows them with **Write it** (a topic queued with the scan's reasons and sources and the
+selected angle), **Write the preview** / **Write the reaction** (a catalyst, with
+`radar.PREVIEW_ANGLES` / `REACTION_ANGLES` selected) and **Dismiss**, plus **Scan now**
+(the manual `studio_scan_now` step). Claiming a queued topic marks its radar topic or
+catalyst with the piece; dropping it puts them back.
 
 ## Claude Code CLI
 

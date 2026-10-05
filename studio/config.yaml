@@ -86,3 +86,27 @@ x:
 render:
   browser: ""
   timeout_seconds: 60
+
+# The radar (studio/radar.py, studio/scan.py, /studio/radar): where topics come from.
+# Once a day (`python run_studio.py --scan`, the `studio_scan` step, before `studio`) one
+# call on the writer's model with web search reads the last few days of news and proposes
+# the account's next 3-5 topics, each with why now, a suggested angle and its sources, and
+# reports the dated catalysts coming up (PDUFA dates, readouts, conference slots). Every
+# piece's research adds the catalysts it found. The radar page shows the topics, the
+# feed's top stories and the catalyst calendar, each with "Write it"; an automatic piece
+# is offered the same and picks one, or finds something better.
+radar:
+  enabled: true
+  scan_every_hours: 20          # one scan a day at most; "Scan now" ignores it
+  model: ""                     # blank = the writer's model above
+  effort: ""                    # blank = the writer's effort above
+  timeout_minutes: 40           # one scan's limit
+  max_topics: 5
+  max_catalysts: 40             # per scan
+  topic_days: 3                 # a scan's topics stay on the radar this long
+  calendar_days: 180            # catalysts further out are left off the calendar
+  past_days: 14                 # catalysts that passed stay this long, for reaction pieces
+  brief_upcoming_days: 21       # what an open piece is shown as coming up
+  brief_recent_days: 3          # and as just passed
+  feed_stories: 10              # the feed's top stories on the radar page
+

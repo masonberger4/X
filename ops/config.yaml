@@ -35,6 +35,25 @@ steps:
   # has its own limit in studio/config.yaml, and a stopped piece resumes from the studio
   # page. skip_when_busy: a session still running at the next run time sits that run out
   # instead of holding the other steps back.
+  # Step 10's radar (studio/config.yaml `radar`): at most once a day (scan_every_hours),
+  # one call on the writer's model with web search proposes the next topics and reports
+  # dated catalysts for the calendar on /studio/radar. Right before the studio step, so
+  # the day's automatic piece is offered today's topics. Its own lock: it never waits for
+  # a session. No time limit (0): the scan has its own (radar.timeout_minutes).
+  - name: studio_scan
+    lock: studio_scan
+    argv: ["python", "run_studio.py", "--scan"]
+    enabled: true
+    required: false
+    timeout_seconds: 0
+  # Manual only (the radar page's "Scan now"): the same, whatever the time since the last.
+  - name: studio_scan_now
+    lock: studio_scan
+    argv: ["python", "run_studio.py", "--scan-now"]
+    enabled: true
+    required: false
+    manual: true
+    timeout_seconds: 0
   - name: studio
     lock: studio
     argv: ["python", "run_studio.py"]
@@ -132,7 +151,7 @@ run_log_tail_chars: 4000         # stdout/stderr kept per step per run
 # pipeline-run (HOWTO Part 6) together is safe but wasteful: pick one.
 auto_run_enabled: true
 auto_run_times: ["06:00", "12:00", "18:00"]
-auto_run_steps: [ingest, score, studio, draft, verify, feedback, evolve]
+auto_run_steps: [ingest, score, studio_scan, studio, draft, verify, feedback, evolve]
 auto_run_grace_minutes: 60
 # Daily backup: an automatic run that starts when the newest backup in backups.dir is
 # older than this many hours also takes one, beside the run (the same verified backup as

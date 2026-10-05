@@ -19,6 +19,7 @@ import pytest
 from studio import angles as A
 from studio import prompt as P
 from studio import qa, safety
+from studio import radar as R
 from studio.settings import ANGLES_PATH, BRIEF_DIR, DEFAULT_PLAYBOOK, EXEMPLARS_DIR
 from studio.xcount import URL_WEIGHT, x_length
 
@@ -734,12 +735,61 @@ def test_a_feed_story_with_an_editor_note_and_a_shortlist_starts_from_the_story(
     assert "[story 99]" not in block
 
 
+PICK = (
+    "Pick one of these, or run your own news scan (web search) and pick something better; "
+    "say which and why in research.json."
+)
+
+
 def test_research_from_the_shortlist_lists_every_story_in_order():
     shortlist = [_story(101, "First", score=44), _story(102, "Second", score=38)]
     block = _block(P.research_prompt(_brief(shortlist=shortlist)), "THE TOPIC")
     assert block.startswith("Choose the topic yourself.")
-    assert "Pick one of them, or run your own news scan" in block
-    assert block.endswith(shortlist[0].block() + "\n" + shortlist[1].block())
+    assert block.endswith(
+        "THE FEEDS: the top scored stories no piece has used yet.\n"
+        + shortlist[0].block()
+        + "\n"
+        + shortlist[1].block()
+        + "\n"
+        + PICK
+    )
+    assert "THE RADAR" not in block and "COMING UP" not in block
+
+
+def test_research_offers_the_radar_and_the_calendar_before_the_feed():
+    topic = R.Topic(
+        "Iovance raises, then its first rival ships",
+        why_now="Guidance up on Sep 29; Tudriqev launched Oct 1.",
+        angle="bull_vs_bear",
+        companies=(R.Company("Iovance", "IOVA"), R.Company("Replimune")),
+        sources=("https://ir.iovance.com/a", "https://ir.replimune.com/b"),
+    )
+    soon = R.Catalyst(
+        R.parse_when("2026-10-28"), "Iovance", "IOVA", "lifileucel", "readout", "NSCLC data"
+    )
+    later = R.Catalyst(R.parse_when("Q4 2026"), "Summit", "SMMT", kind="pdufa")
+    brief = _brief(radar=[(7, topic)], coming_up=[soon, later], shortlist=[_story(101, "First")])
+    block = _block(P.research_prompt(brief), "THE TOPIC")
+    radar_at, coming_at, feeds_at = (
+        block.index(h) for h in ("THE RADAR", "COMING UP", "THE FEEDS")
+    )
+    assert radar_at < coming_at < feeds_at and block.endswith(PICK)
+    assert (
+        "- [radar 7] Iovance raises, then its first rival ships\n"
+        "  Why now: Guidance up on Sep 29; Tudriqev launched Oct 1.\n"
+        "  suggested angle bull_vs_bear; companies Iovance (IOVA), Replimune\n"
+        "  https://ir.iovance.com/a https://ir.replimune.com/b"
+    ) in block
+    assert "- 2026-10-28 · Iovance (IOVA) · data readout · lifileucel: NSCLC data" in block
+    assert "- Q4 2026 · Summit (SMMT) · PDUFA date" in block
+    assert "its why-now is a lead, not a source" in block
+
+
+def test_the_research_json_asks_for_the_radar_topic_and_every_catalyst():
+    text = P.research_prompt(_brief(topic="t"))
+    assert '"radar_topic"' in text and '"catalysts"' in text
+    assert '"kind": "pdufa | readout | conference | regulatory | financial | other"' in text
+    assert "the account keeps a catalyst calendar from them" in text
 
 
 def test_research_without_a_shortlist_runs_a_news_scan():

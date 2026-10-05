@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Studio · radar{% endblock %}
+{% block content %}
+<p><a href="/studio">&larr; Studio</a></p>
+<h1>Radar</h1>
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+<p class="meta">Where the studio's topics come from: the daily scan of the news, the feed's top
+stories and the catalyst calendar. <strong>Write it</strong> queues a piece and starts the studio (a
+piece you start stops after research when the box is ticked). An automatic piece is offered the same
+list and picks one itself. {% if not cfg.radar.enabled %}<strong>The radar is off</strong>
+(<code>radar.enabled</code> in studio/config.yaml): no scan runs and pieces are offered only the
+feed.{% endif %}</p>
+
+{% if cfg.radar.enabled %}
+{% with buttons=[{"label": "Scan now", "steps": [step_scan], "title": "one call on " ~ cfg.radar.model ~ " at " ~ cfg.radar.effort ~ " effort with web search: today's topics and the catalysts coming up"}], back="/studio/radar" %}
+{% include "_run.html" %}
+{% endwith %}
+{% endif %}
+<p class="meta">{% if scan %}Last scan: {{ scan.started_at|localtime }}, {{ scan.status }}{% if scan.status == "done" %}: {{ scan.topics }} topic{{ "s" if scan.topics != 1 }}, {{ scan.catalysts }} new catalyst{{ "s" if scan.catalysts != 1 }}{% endif %}.
+{% if scan.status == "failed" %}<span class="pill fail">failed</span> {{ scan.detail }}{% endif %}
+{% if done and done.id != scan.id %}The last good one: {{ done.started_at|localtime }}.{% endif %}
+{% else %}No scan yet.{% endif %} One scan runs a day at most ({{ cfg.radar.scan_every_hours }}h apart),
+before the first automatic studio run.</p>
+{% if done and done.summary %}<p class="proposal">{{ done.summary }}</p>{% endif %}
+
+<h2>Topics from the scan</h2>
+{% if topics %}
+{% for t in topics %}
+<div class="entry">
+  <p><strong>{{ t.title }}</strong>
+    {% if t.status == "queued" %}<span class="pill warn">queued</span>{% elif t.status == "used" %}<span class="pill ok">written</span>{% if t.piece_id %} <a href="/studio/{{ t.piece_id }}">piece {{ t.piece_id }}</a>{% endif %}{% endif %}
+    <span class="meta">· {{ t.created_at|localtime }}</span></p>
+  {% if t.why_now %}<p>{{ t.why_now }}</p>{% endif %}
+  <p class="meta">{% if t.angle %}Suggested angle: {{ angles[t.angle].name if t.angle in angles else t.angle }}{% endif %}
+    {% if t.companies %} · {% for c in t.companies %}{{ c.name }}{% if c.ticker %} ({{ c.ticker }}){% endif %}{{ ", " if not loop.last }}{% endfor %}{% endif %}
+    {% for u in t.sources %}<br><a href="{{ u }}" class="wrap" rel="noreferrer noopener" target="_blank">{{ u }}</a>{% endfor %}</p>
+  {% if t.status == "new" %}
+  <form method="post" action="/studio/radar/topics/{{ t.id }}/write" class="inline">
+    <select name="angle" aria-label="angle">
+      <option value="">the session chooses</option>
+      {% for key, a in angles.items() %}<option value="{{ key }}" {% if key == t.angle %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+    </select>
+    <label class="meta"><input type="checkbox" name="checkpoint" value="1" {% if cfg.manual.checkpoint %}checked{% endif %}> stop after research</label>
+    <button type="submit">Write it</button>
+  </form>
+  <form method="post" action="/studio/radar/topics/{{ t.id }}/dismiss" class="inline"><button class="link" type="submit">dismiss</button></form>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<p class="meta">No topics from the last {{ cfg.radar.topic_days }} days. {% if cfg.radar.enabled %}Press <em>Scan now</em>, or wait for the next automatic run.{% endif %}</p>
+{% endif %}
+
+<h2>From the feeds</h2>
+{% if feed %}
+<table>
+  <tr><th>Story</th><th>Score</th><th></th></tr>
+  {% for s in feed %}
+  <tr><td>{{ s.title }}<br><span class="meta">{{ s.source }}{% if s.published %} · {{ s.published }}{% endif %}{% if s.why %} · {{ s.why }}{% endif %}</span></td>
+      <td>{{ s.score if s.score is not none else "-" }}</td>
+      <td><form method="post" action="/studio/topics" class="inline">
+        <input type="hidden" name="story" value="{{ s.cluster_id }}">
+        <input type="hidden" name="checkpoint" value="1">
+        <button type="submit">Write it</button></form></td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No scored story of the last {{ cfg.topics.lookback_hours }} hours that no piece has used (the <a href="/feed">feed</a> has the rest).</p>
+{% endif %}
+
+<h2 id="calendar">Catalyst calendar</h2>
+<p class="meta">Dated events from the scans and from every piece's research: PDUFA dates, readouts,
+conference slots. A preview before an event or a reaction just after one makes a strong piece.
+Dates are as precise as the source was; a quarter counts until it ends.</p>
+{% for section, label in [("passed", "Just passed: react to it"), ("soon", "Coming up in the next 30 days"), ("later", "Later")] %}
+{% set rows = calendar[section] %}
+{% if rows %}
+<h3>{{ label }}</h3>
+<table>
+  <tr><th>When</th><th>Company</th><th>What</th><th></th></tr>
+  {% for c in rows %}
+  <tr>
+    <td>{{ c.when_text }}</td>
+    <td>{{ c.company }}{% if c.ticker %} <span class="meta">({{ c.ticker }})</span>{% endif %}</td>
+    <td>{{ kinds.get(c.kind, c.kind) }}{% if c.drug %}: {{ c.drug }}{% endif %}{% if c.detail %}<br><span class="meta">{{ c.detail }}</span>{% endif %}
+      <br><span class="meta">{% if c.source %}<a href="{{ c.source }}" rel="noreferrer noopener" target="_blank">source</a> · {% endif %}from {{ c.origin }}{% if c.piece_id %} · <a href="/studio/{{ c.piece_id }}">piece {{ c.piece_id }}</a>{% endif %}</span></td>
+    <td>{% if c.topic_id is none and c.piece_id is none %}
+      <form method="post" action="/studio/radar/catalysts/{{ c.id }}/write" class="inline">
+        <select name="angle" aria-label="angle">
+          <option value="">the session chooses</option>
+          {% for key, a in angles.items() %}<option value="{{ key }}" {% if key == suggested[c.id] %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+        </select>
+        <input type="hidden" name="checkpoint" value="1">
+        <button type="submit">{{ "Write the reaction" if section == "passed" else "Write the preview" }}</button>
+      </form>
+      {% elif c.piece_id is none %}<span class="pill warn">queued</span>{% endif %}
+      <form method="post" action="/studio/radar/catalysts/{{ c.id }}/dismiss" class="inline"><button class="link" type="submit">dismiss</button></form></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endfor %}
+{% if not (calendar.passed or calendar.soon or calendar.later) %}
+<p class="meta">Nothing on the calendar yet. The scan and every piece's research add the dated catalysts they find.</p>
+{% endif %}
+{% endblock %}

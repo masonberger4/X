@@ -6,6 +6,7 @@ Each draft gets into the queue the way the studio puts it there (studio/ingest.p
 from the checker's report over a finished piece's files and cards); no model is involved.
 """
 
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -171,7 +172,8 @@ def test_a_drafter_draft_keeps_its_title_and_its_revise_form(client, conn):
     draft_id = drafter_draft(conn)
     body = client.get(f"/drafts/{draft_id}").text
     assert "<h1>Title i1</h1>" in body and "Studio piece" not in body
-    assert f'action="/drafts/{draft_id}/revise"' in body and "/studio/" not in body
+    # no link to a studio piece (the nav's radar link is every page's)
+    assert f'action="/drafts/{draft_id}/revise"' in body and not re.search(r"/studio/\d", body)
 
 
 def test_the_queue_never_revises_a_studio_draft_itself(client, conn, tmp_path, monkeypatch):

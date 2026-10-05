@@ -595,8 +595,8 @@ Set `posting: api` to go back to posting through the X API (the steps below).
 ## Part 6. Running it on a schedule (Windows Task Scheduler)
 
 You may not need this part. While the control panel or desktop window is open it
-already runs ingest, score, studio, draft, verify, feedback and evolve on its own at
-06:00, 12:00 and 18:00 (part 8, "Automatic runs"), and it never publishes. Task
+already runs ingest, score, studio_scan, studio, draft, verify, feedback and evolve on
+its own at 06:00, 12:00 and 18:00 (part 8, "Automatic runs"), and it never publishes. Task
 Scheduler is the other way: it runs even with the app closed and can wake the
 PC, but it needs the tasks below. Pick one for `pipeline-run`. Running both is
 safe (a step that is already running is skipped, never run twice) but wasteful.
@@ -835,6 +835,9 @@ to stop it. Four pages:
   to write a piece on any topic, the queued topics, and the playbook every
   session reads. A piece's page shows its fact base, post, cards, fact-check log
   and live session log, with Continue (after research), Revise and Resume.
+- **Radar** (`/studio/radar`) — part 9: where topics come from. The day's scan
+  topics, the feed's top stories and the catalyst calendar, each with **Write
+  it**, and the **Scan now** button.
 - **Swarm** (`/swarm`) — step 9's recipes (writer genomes, designers and
   formats): live or retired, posts scored, median score, parent, and the
   swarm-vs-control line. A view only; `run_evolve.py` does the breeding and
@@ -868,7 +871,7 @@ to stop it. Four pages:
   claim's verdict is saved the moment it lands, so stopping the run keeps
   every claim already checked and only the one in flight is redone next time.
 - **Automatic runs** (top of `/runs`) — while the panel or the desktop window
-  is open it runs ingest, score, studio, draft, verify, feedback and evolve on its own,
+  is open it runs ingest, score, studio_scan, studio, draft, verify, feedback and evolve on its own,
   at 06:00, 12:00 and 18:00 local time as shipped. Publishing is never one of
   them: posting stays the approved page's "Publish now", and an automatic run
   cannot post even if `.env` allows posting. The box says whether it is on,
@@ -1050,7 +1053,9 @@ and long posts need X Premium.
    the last piece, and never while a piece waits for you at the research
    checkpoint. An automatic piece picks its own story from the top scored stories
    of the last two days that no piece has used, or finds a better one with its own
-   news scan, and writes straight through (`auto: checkpoint: false`). Expect it in
+   news scan, and writes straight through (`auto: checkpoint: false`). It is also
+   offered the radar (item 9): the day's scan topics and the catalysts coming up
+   or just passed. Expect it in
    the queue 30 to 90 minutes after the run starts. A session still running at
    the next run time sits that run out (`skip_when_busy`) instead of holding the
    other steps back, and so do the steps still waiting behind it in its own run
@@ -1091,7 +1096,27 @@ and long posts need X Premium.
    reads before it writes: what works on this account and the mistakes the
    fact-checks keep catching. Edit and save it; the next session reads your
    version (it lives in `studio_playbook.md` next to `pipeline.db`).
-9. From a command prompt (the same thing the buttons do):
+9. The radar. **Radar** in the top bar (`/studio/radar`) is where topics come
+   from, and the same list is offered to every automatic piece:
+   - **Topics from the scan.** Once a day, before the first automatic studio run,
+     one call on the writer's model (Opus 5.5 at max, with web search) reads the
+     last few days of immuno-oncology news and proposes 3 to 5 topics. Each says
+     why now and names its companies, its sources and a suggested angle. **Write
+     it** queues the topic, with the scan's reasons and sources, and the angle you
+     leave selected ("the session chooses" works too), then starts the studio.
+     **Dismiss** takes a topic off. **Scan now** runs a scan at once.
+   - **From the feeds.** The top scored stories no piece has used, each with
+     **Write it**.
+   - **The catalyst calendar.** Dated events: PDUFA dates, readouts, conference
+     presentations, advisory committees. Each scan reports the ones it finds, and
+     every piece's research adds the ones its session confirmed, with the source.
+     A date is as precise as its source (a day, a month, a quarter). **Write the
+     preview** queues a piece on an event coming up, and **Write the reaction**
+     one on an event that just passed, each with a fitting angle selected.
+     **Dismiss** takes an event off (for instance an old date after it moved).
+   A failed scan changes nothing: the page says why, and the next run tries
+   again. The settings are `radar:` in `studio\config.yaml`.
+10. From a command prompt (the same thing the buttons do):
    ```
    python run_studio.py --list
    python run_studio.py --topic "next-gen CTLA-4" --checkpoint
@@ -1100,16 +1125,22 @@ and long posts need X Premium.
    python run_studio.py --resume-only
    python run_studio.py --dry-run
    python run_studio.py
+   python run_studio.py --scan
+   python run_studio.py --scan-now
+   python run_studio.py --scan --dry-run
    ```
    `--list` shows recent pieces and queued topics; `--dry-run` prints the
    research prompt the next piece would get and starts nothing; plain
-   `run_studio.py` is the automatic run. In `ops\config.yaml` the buttons are the
-   manual steps `studio_now` (start a piece now) and `studio_resume` (act on
-   Continue, Revise and Resume).
-10. Cost. One piece is one long session at max effort, often an hour, and it
+   `run_studio.py` is the automatic run. `--scan` runs the radar's scan when one
+   is due (once a day), `--scan-now` runs it now, and `--scan --dry-run` prints
+   its prompt. In `ops\config.yaml` the buttons are the manual steps `studio_now`
+   (start a piece now), `studio_resume` (act on Continue, Revise and Resume) and
+   `studio_scan_now` (Scan now). The `studio_scan` step runs `--scan` in every
+   automatic run, right before `studio`, under a lock of its own.
+11. Cost. One piece is one long session at max effort, often an hour, and it
     uses a lot of your Claude plan; one automatic piece a day is the shipped
     pace. Each stage has a time limit in `studio\config.yaml` (`timeouts:`).
-11. What the session can do on your PC: search and read the web, read the
+12. What the session can do on your PC: search and read the web, read the
     reference pieces, and read and write files inside its own piece folder.
     It has no shell, cannot touch anything else on the PC, ignores your
     CLAUDE.md, plugins and hooks, and cannot post (the `cli_flags` in
@@ -1152,6 +1183,8 @@ reference pieces in `studio\exemplars\`.
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
 | A studio piece says `no browser to draw the cards with` (its run's log: `no Chromium-family browser found`) | the cards are drawn by Edge, Chrome or Chromium; put the browser's full path on `render: browser:` in `studio\config.yaml` (Edge is usually `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`) and press Resume on the piece. The piece stops before polishing, its cards as written |
 | A studio piece fails at once with `unknown option '--restricted'` (or `--safe-mode`) | your Claude Code is older than the studio expects: `npm install -g @anthropic-ai/claude-code`, then Resume. As a stopgap remove that flag from `cli_flags` in `studio\config.yaml` |
+| The radar page says the last scan `failed` | the line beside it says why (Claude Code not logged in, the time limit, an answer that was not JSON). Nothing was stored from it; press **Scan now**, or the next automatic run tries again. `radar: timeout_minutes` in `studio\config.yaml` gives a slow scan longer |
+| The calendar shows one event twice with different dates | the date moved and both reports were kept. **Dismiss** the old one |
 | A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept). Press Resume on its page; the session keeps everything it already read |
 | A studio piece says `failed: still blocked after polishing` | the page lists what the checker still found (advice wording, a link, a post over the limit). Resume with a note saying how to fix it, or Discard |
 | `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |
@@ -1175,7 +1208,8 @@ attaches or skips the chart; posting itself is manual only), `feedback\config.ya
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter), `studio\config.yaml` (part 9: the studio's model and effort, how many
 automatic pieces a day, whether they stop after research, stage time limits, the
-session's tools and the card browser) and `ops\config.yaml` (which steps the
+session's tools, the card browser and `radar:`, the daily scan and the catalyst
+calendar) and `ops\config.yaml` (which steps the
 scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
 

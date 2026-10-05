@@ -63,7 +63,8 @@ carrying `--live`).
   source URL out of a queued draft's posts, since no post carries a link),
   `python run_studio.py [--now|--resume-only|--topic T|--story ID] [--angle KEY]
   [--checkpoint|--no-checkpoint] [--list] [--dry-run]` (step 10: the studio's automatic run,
-  or one piece now; see `studio/config.yaml`),
+  or one piece now; see `studio/config.yaml`), `python run_studio.py --scan|--scan-now
+  [--dry-run]` (step 10's radar: the daily news scan, when due or now),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -87,8 +88,9 @@ carrying `--live`).
   `score/rater.py:call_model`
   (the `digest.py --auto-rate` second-opinion rater, and the call behind
   `filter/link.py` story linking), `draft/grader.py:call_grader` (the image
-  grader: the CLI with `tools=["Read"]` opens the PNG),
-  `claude_cli.run_claude` (the only place that spawns the Claude Code CLI and the
+  grader: the CLI with `tools=["Read"]` opens the PNG), `studio/scan.py:call_scanner`
+  (the radar's daily scan: the CLI with `tools=["WebSearch","WebFetch"]`, its own time
+  limit), `claude_cli.run_claude` (the only place that spawns the Claude Code CLI and the
   app's only way to reach Claude: every Claude call site above, and step 2b's
   `verify/verifier.py:call_model`, routes through it; there is no Anthropic API
   path, no `anthropic` SDK and no API key, and `claude_cli.cli_env` drops
@@ -628,6 +630,29 @@ carrying `--live`).
   and the playbook editor writes only `studio_playbook.md` next to the database (the
   shipped seed is `studio/playbook.md`). `tests/conftest.py` never lets a test spawn the
   real CLI.
+  **The radar** is where topics come from. `studio/radar.py` is pure (`today` is a
+  parameter): `parse_when` (a day, a month, a quarter, a half, early/mid/late, a year ->
+  `When(start, end, text)`, never guessed), `Catalyst.key` (ticker or normalised company,
+  kind, drug, start), `parse_scan` (raises `ScanRejected`; caps, http(s) sources, an
+  unknown angle blank, catalysts between `past_days` back and `calendar_days` ahead),
+  `scan_prompt`, `topic_text` / `catalyst_text` (what a queued radar topic or catalyst
+  asks for, with `PREVIEW_ANGLES` / `REACTION_ANGLES`), `coming_up`.
+  `studio/scan.py` does the I/O: `run_scan` (one row in `studio_scans` whatever happens;
+  a failed call or a rejected answer stores nothing else), `harvest` (a piece's
+  `research.json`: its `radar_topic` becomes used, its `catalysts` go on the calendar;
+  `session.research` calls it through `Context.harvest` and never fails the piece on it),
+  `scan_due` (`radar.scan_every_hours`). `runner.scan` (`--scan`, `--scan-now`, `--scan
+  --dry-run`; `<workspace_dir>/.studio_scan.lock`; marks a scan a dead run left running
+  as failed) and `runner.radar_for_brief` (an open piece's research brief: the untaken
+  topics of the last `topic_days`, `coming_up` catalysts; `Brief.radar`,
+  `Brief.coming_up`). `studio/store.py` owns `studio_scans`, `studio_radar_topics`
+  (new/queued/used/dismissed, `topic_id` of the queued topic, `piece_id`) and
+  `studio_catalysts` (unique `key`, open/dismissed, `origin` scan:<id> or piece:<id>);
+  `claim_topic` marks the radar topic or catalyst a queued topic came from with the piece,
+  `drop_topic` puts it back. `/studio/radar` (studio/web.py) queues them through
+  `queue_topic` and starts `studio_now`. `ops/config.yaml` has the automatic
+  `studio_scan` step (right before `studio`) and the manual `studio_scan_now`, both under
+  the `studio_scan` lock.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -701,7 +726,10 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           session.py (stages), runner.py (one run: stale pieces, requests, new piece),
           qa.py + xcount.py + safety.py (the checks), render.py (cards via headless browser),
           ingest.py (into the queue), topics.py (feed stories), store.py (studio_pieces,
-          studio_runs, studio_topics), web.py + templates/ (/studio pages)
+          studio_runs, studio_topics, studio_scans, studio_radar_topics,
+          studio_catalysts), radar.py (pure: the scan's prompt and answer, the calendar's
+          dates), scan.py (the daily scan, the research harvest), web.py + templates/
+          (/studio pages, /studio/radar)
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
 run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py
 run_logos.py  run_evolve.py  run_unlink.py  run_studio.py   (CLIs)
