@@ -19,6 +19,7 @@ from draft.prompt import PREPRINT_LABEL
 from draft.schema import MAX_POST_CHARS, tweet_length
 from draft.style import style_problems
 from draft.tags import Handle, tag_problems
+from draft.targets import target_problems
 from swarm.genome import HOOK
 
 
@@ -55,6 +56,8 @@ def cell_problems(
         problems.append(f"reads as medical advice: {m.group(0)!r}")
     if m := _INVEST_RE.search(t):
         problems.append(f"reads as investment advice: {m.group(0)!r}")
+    else:
+        problems += target_problems(t)
     money = money_numbers(t)  # rule 4's exception: the assembly lists them as claims
     missing = [
         num for num in numbers_in(t) if num not in money and not _number_in_source(num, source_text)

@@ -71,7 +71,8 @@ def hard_rules(fmt: Format | None = None) -> str:
 1. No medical advice and no treatment recommendations. Describe evidence; never tell
    anyone what they or their doctor should do.
 1b. No investment advice. Never tell anyone to buy, sell, hold, short, or avoid a stock,
-   never give a price target, never promise or predict a return. Describe what a result
+   never give or cite a price target (an analyst's included: a thread has no room to say
+   what a target rests on), never promise or predict a return. Describe what a result
    means for a company's thesis and the risks; the reader decides.
 2. NEVER write a URL, a link or a bare domain in any post. Not the source URL, not a
    trial registry link, not a company page: a post with a link is shown to fewer readers

@@ -270,6 +270,68 @@ def test_thesis_language_is_not_investment_advice(text):
     assert not any("investment advice" in p for p in problems), text
 
 
+# --- analysts' price targets: a thread has no room for what a target rests on ----------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "H.C. Wainwright raised its target to $20 from $9.",
+        "Goldman put a Buy and a $15 target on it.",
+        "The shares sit above the average analyst target.",
+        "Stifel: Buy, PT $38.",
+    ],
+)
+def test_the_drafter_cites_no_analyst_target(text):
+    draft = validate_output(good_json(lead=f"{text} ORR 88%."))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert any(p.startswith("thread[0] cites a price target (") for p in problems), problems
+
+
+def test_targets_in_the_biotech_sense_are_fine_in_a_thread():
+    lead = "The bispecific targets BCMA and CD3, a $5B target market. ORR 88%."
+    draft = validate_output(good_json(lead=lead))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert not any("price target" in p for p in problems), problems
+
+
+def test_a_table_cites_no_analyst_target_either():
+    table = {
+        "title": "Where the Street stands",
+        "columns": ["Firm", "View"],
+        "rows": [["Stifel", "PT $38"], ["Guggenheim", "Buy"]],
+        "note": "",
+    }
+    draft = validate_output(good_json(chart=None, table=table))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert "table cites a price target: 'PT $38'" in problems
+    # a column header is printed on the picture too
+    table = {
+        **table,
+        "columns": ["Firm", "Price target"],
+        "rows": [["Stifel", "38"], ["Leerink", "41"]],
+    }
+    draft = validate_output(good_json(chart=None, table=table))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert "table reads as investment advice: 'Price target'" in problems
+
+
+def test_a_chart_cites_no_analyst_target_either():
+    chart = {
+        "title": "Analyst price targets after the readout ($)",
+        "labels": ["H.C. Wainwright", "Wells Fargo"],
+        "values": [20, 18],
+        "unit": "",
+    }
+    draft = validate_output(good_json(chart=chart))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert "chart cites a price target: 'Analyst price targets after the readout ($)'" in problems
+    chart = {**chart, "title": "Where the Street's average target sits"}
+    draft = validate_output(good_json(chart=chart))
+    problems = check_hard_rules(draft, url=URL, source="pubmed")
+    assert 'chart cites a price target: "Where the Street\'s average target sits"' in problems
+
+
 # --- number verification ---------------------------------------------------
 
 

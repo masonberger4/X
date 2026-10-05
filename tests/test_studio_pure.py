@@ -378,8 +378,6 @@ INVESTMENT_ADVICE = [
     "Investors should avoid the name.",
     "You should own this through 2027.",
     "Everyone should trim into strength.",
-    "My price target is $40.",
-    "Our price target stays at $40.",
     "$SMMT will double on approval.",
     "This one will 10x.",
     "Ivonescimab to the moon.",
@@ -398,6 +396,100 @@ INVESTMENT_ADVICE = [
     "I'd load up on shares here.",
     "You should buy shares before the readout.",
     "We would short the stock here.",
+]
+
+# A target of the account's own: what a target would become or should be. Saying which of the
+# analyst's assumptions a catalyst moves, and which way, is the analysis; the new number is not.
+OWN_TARGETS = [
+    "My price target is $40.",
+    "Our price target stays at $40.",
+    "Our target is $40.",
+    "My fair value is $30.",
+    "The readout would take Stifel's target to $52.",
+    "A win could push the price target up to $30.",
+    "NSCLC would lift H.C. Wainwright's 12-month target to $25.",
+    "The price target should be $50.",
+    "The stock is worth $30 on the NSCLC data.",
+    "Shares would be worth $45.50 if it works.",
+    # the number a target would become, however it is put
+    "An NSCLC approval would lift the price target on Iovance to $30.",
+    "With NSCLC its target would be raised to $30.",
+    "Stifel would likely raise its target to $52.",
+    "Its target will be $52 after the data.",
+    "That adds about $5 to the target.",
+    "Fair value closer to $30.",
+    # a value per share of the account's own
+    "We value the company at $30 a share after the readout.",
+    "A clean NSCLC readout would justify $45 a share on our math.",
+    # the review's: a hedge, "at", PT, the delta, the first person, a price to reach
+    "A win would lift Stifel's $38 target to about $46.",
+    "Approval would put Stifel's target at $52.",
+    "Approval would send Stifel's PT to $52.",
+    "Stifel's target would move to the high $40s.",
+    "Folding NSCLC in at Stifel's 35% odds would lift its target by about $8, to roughly $46.",
+    "A win would add about $8 a share to Stifel's target.",
+    "A win would lift the target roughly 20%.",
+    "That would bring the target in line with Goldman's $41.",
+    "Put NSCLC in at 60% and Stifel's $38 becomes $46.",
+    "Our 12-month target is $45.",
+    "My base-case fair value is $60.",
+    "My math puts fair value at $30.",
+    "My sum-of-the-parts gets to $38 a share.",
+    "I see fair value closer to $30.",
+    "We see $45 as fair value.",
+    "I'd value the stock at $45.",
+    "Taken together, I get to about $46 for Stifel's target with NSCLC in.",
+    "Stifel's target should be closer to $50.",
+    "The targets should all be north of $40.",
+    "A fair target is $45.",
+    "A win takes the right target to the mid-$40s.",
+    "Approval would justify a $50 target.",
+    "A win would justify a target in the mid-$40s.",
+    "Upside to $45 if HARMONi-3 hits.",
+    "The stock deserves $45.",
+    "Stifel should be at $50, not $38.",
+    "Each share would be worth $45 on my numbers.",
+    "$SMMT is worth $30 a share on approval.",
+    "Summit is worth $30 a share if HARMONi-3 hits.",
+    "The stock could reach $50 on a win.",
+    "Summit should trade at $40 after approval.",
+]
+# What an analyst would write about a target without setting one, and facts that use the
+# same words: none is the account's own target.
+NOT_OWN_TARGETS = [
+    "Stifel's price target would be unaffected by a delay.",
+    "A win would push Stifel's target up.",
+    "Stifel's target would be higher with NSCLC in it.",
+    "Fair value would be higher still.",
+    "Stifel's bull case, $52, assumes a HARMONi-3 win.",
+    "Stifel's $38 target would need NSCLC odds above 50%.",
+    "These are the analysts' targets, not our price targets. Not investment advice.",
+    '"Our target is to file the BLA by year end," the CEO said.',
+    '"We hit all of our targets this year," Duggan said.',
+    "At $18.36 a share, AstraZeneca's new shares are worth $2.0B.",
+    "Duggan's shares are worth $9B at today's price.",
+    "The CVR is worth $2 a share if the drug hits $1B.",
+    "The enrollment target would be 600 patients.",
+    "It is worth noting that $IOVA trades at $14.",
+    # the review's: which way, with no number, is the answer the editor asked for
+    "Stifel's price target would be higher with NSCLC in the model.",
+    "Leerink's price target would be unchanged by a delay, since it already assumes 2028.",
+    "Morningstar's fair value would be lower if the label is second line only.",
+    "Its price targets could be cut if the FDA wants overall survival data first.",
+    "The consensus price target might be stale: half the notes predate the AstraZeneca deal.",
+    "A clean label means the price target should be revisited.",
+    "Leerink's price target could be conservative, since it gives the EU no value.",
+    "Stifel's $38 target (cut from $45) assigns NSCLC a 35% probability of success.",
+    "Under Stifel's own bear case ($20), a HARMONi-3 miss is already priced at 35% odds.",
+    "Stifel values NSCLC at $8 a share risk-adjusted, its note says.",
+    # quotes of management, stakes and deal terms
+    'Iovance reiterated "our target of $450 million to $475 million in 2026 revenue."',
+    'Management said "our target population is 780 patients."',
+    "In the company's words, our target is CLDN18.2-positive gastric cancer.",
+    "Insiders' shares are worth $1.2 billion at today's price.",
+    "AstraZeneca's new shares are worth $2 billion at the $15.48 close.",
+    "Each share would be worth $40 in cash under the offer.",
+    "Is CLDN18.2 the right target? Shares are at $14.",
 ]
 
 MEDICAL_ADVICE = [
@@ -422,6 +514,10 @@ MEDICAL_ADVICE = [
 DESCRIPTIONS = [
     "Berenberg flagged gotistobart as a potential treatment of choice in squamous NSCLC.",
     "Guggenheim cut its price target to $25 after the interim look.",
+    # an analyst's target with what it rests on, and which way the catalyst moves it
+    "Stifel's $38 target values only the squamous cohort; a win in NSCLC would move it up.",
+    "H.C. Wainwright's bull case, $30, assumes the NSCLC label.",
+    "A positive readout would raise the probability of success the model gives NSCLC.",
     "Shares fell 12% after the readout; the stock doubled in 2025.",
     "Summit raised $68.4M through its at-the-market program.",
     "Bull case: 20% to 25% share if the data hold. Bear case: a CRL.",
@@ -443,6 +539,23 @@ DESCRIPTIONS = [
     "The company said it would sell shares in a public offering.",
     "Funds just bought shares; the trust must sell shares by law.",
 ]
+
+
+@pytest.mark.parametrize("text", OWN_TARGETS)
+def test_a_target_of_the_accounts_own_blocks(text):
+    [problem] = safety.blocking_problems(text, "post 3")
+    assert problem.startswith("post 3 gives a price target of the account's own (")
+    assert "and so which way the target would go, never the new number or by how much" in problem
+    # and how to keep a figure the firm published: as the firm's case, listed
+    assert problem.endswith(
+        "written as that firm's case (\"Stifel's bull case, $52, assumes a win\") and listed "
+        "in price_targets"
+    )
+
+
+@pytest.mark.parametrize("text", NOT_OWN_TARGETS)
+def test_saying_which_way_a_target_moves_is_not_a_target_of_ones_own(text):
+    assert safety.blocking_problems(text, "post 3") == []
 
 
 @pytest.mark.parametrize("text", INVESTMENT_ADVICE)
@@ -596,10 +709,10 @@ def test_the_smmt_thread_trips_only_on_its_sources_post():
 
 
 @pytest.mark.parametrize("mention", ["Guggenheim's price target is $25.", "Two price targets"])
-def test_a_price_target_is_a_warning_not_a_block(mention):
+def test_an_analysts_target_never_blocks(mention):
+    # what it rests on is studio/qa.py:check_price_targets's to hold it to, against piece.json
     assert safety.blocking_problems(mention, "post 1") == []
-    [warning] = safety.warnings([mention, "Not investment advice."])
-    assert warning.startswith("mentions a price target")
+    assert safety.warnings([mention, "Not investment advice."]) == []
 
 
 @pytest.mark.parametrize(
@@ -1093,6 +1206,42 @@ def test_the_piece_json_example_names_every_key_the_checker_reads():
     assert handle and handle <= set(example["handles"][0])
 
 
+def test_the_piece_json_example_shows_a_target_with_everything_the_checker_reads():
+    [entry] = _piece_example(P.write_prompt(_brief()))["price_targets"]
+    src = Path(qa.__file__).read_text(encoding="utf-8")
+    read = set(re.findall(r'\b(?:entry\.get\(|field_text\(entry, )"(\w+)"', src))
+    assert {"target", "previous", "in_model", "effect", "post_says", "source"} <= read
+    assert read <= set(qa.TARGET_FIELDS)
+    assert list(entry) == list(qa.TARGET_FIELDS)
+    assert entry["in_model"].split(" | ") == list(qa.IN_MODEL)
+
+
+def test_research_write_and_the_voice_guide_ask_what_a_cited_target_rests_on():
+    research = " ".join(P.research_prompt(_brief()).split())
+    assert '"Analyst targets", when analysts\' targets bear on the story' in research
+    assert "whether the catalysts the piece may tell readers to watch are in it" in research
+    assert 'basis you cannot find goes under "Open questions", not here' in research
+    write = " ".join(P.write_prompt(_brief()).split())
+    assert "(an analyst's target, and what the post says it rests on, included)" in write
+    assert "to flag any target, fair value or value per share, and any change to a" in write
+    assert '"price_targets" lists every analyst or consensus target the posts or' in write
+    assert '"post_says" copies, word for word, the stretch of a post or card' in write
+    voice = " ".join((BRIEF_DIR / "voice.md").read_text(encoding="utf-8").split())
+    assert "## Analyst price targets" in voice
+    for line in (
+        "Whether the catalysts the post tells readers to watch are in it",
+        "which of those assumptions it would move, which way, and so which way the target would go",
+        "no new target, no dollars a share added to or taken off it, no percent it would "
+        "move, no fair value, no price the stock would or should reach. Each of those is a "
+        "price target, and the account sets none.",
+        "A target whose basis you cannot find is not cited.",
+        '"Stifel\'s bull case, $52, assumes a win", never "a win would take Stifel\'s target '
+        'to $52", which reads as your own forecast',
+        'with the post\'s own words on what it rests on in "post_says"',
+    ):
+        assert line in voice, line
+
+
 def test_the_piece_json_example_round_trips_through_the_checker(tmp_path):
     example = _piece_example(P.write_prompt(_brief()))
     # The placeholders: the two fields that list their alternatives, and the angle, which
@@ -1123,6 +1272,7 @@ def test_the_piece_json_example_round_trips_through_the_checker(tmp_path):
     assert piece.companies == [{"name": "Merck", "ticker": "MRK"}]
     assert piece.handles == {"merck": "https://www.merck.com/"}
     assert piece.recheck == example["recheck_before_posting"]
+    assert piece.price_targets == example["price_targets"]
 
 
 # ---- prompts: variety ---------------------------------------------------------------------

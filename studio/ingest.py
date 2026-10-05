@@ -29,6 +29,7 @@ from typing import Any
 from approval_queue import publishing
 from approval_queue import store as queue_store
 from draft.schema import SHAPE_LONG, Draft
+from draft.targets import target_mentions
 from studio import qa
 from studio import store as S
 
@@ -39,6 +40,13 @@ class IngestError(RuntimeError):
     """The piece cannot go into the queue (its draft was approved or posted meanwhile)."""
 
 
+def _target_line(entry: dict[str, Any]) -> str:
+    """ "H.C. Wainwright $20 of 2026-09-30" from a piece.json price_targets entry."""
+    who = " ".join(" ".join(qa.field_text(entry, k).split()) for k in ("firm", "target")).strip()
+    date = " ".join(qa.field_text(entry, "date").split())
+    return f"{who} of {date}" if who and date else who
+
+
 def _why(piece: S.Piece, pf: qa.PieceFiles, report: qa.Report) -> str:
     lines = [pf.summary or piece.label]
     if pf.angle:
@@ -46,6 +54,19 @@ def _why(piece: S.Piece, pf: qa.PieceFiles, report: qa.Report) -> str:
     # One line per fact, so the copy-paste page lists them on posting day
     # (approval_queue/store.py:recheck_lines reads them back).
     lines += [queue_store.RECHECK_PREFIX + " ".join(r.split()) for r in pf.recheck]
+    # Analysts move targets often: each one the posts still cite is re-checked on posting
+    # day too, and one cited with no price_targets entry by the words that cite it.
+    texts = qa.piece_texts(pf)
+    targets = [line for line in map(_target_line, qa.cited_targets(pf, texts)) if line]
+    if not targets:
+        targets = [f"{label}: {m}" for label, text in texts for m in target_mentions(text)]
+    if targets:
+        lines.append(
+            queue_store.RECHECK_PREFIX
+            + "the analyst targets cited are still each firm's latest ("
+            + "; ".join(targets)
+            + ")"
+        )
     if report.warnings:
         lines.append("For the editor: " + "; ".join(report.warnings))
     lines.append(f"Fact base, fact-check log and session: /studio/{piece.id}")

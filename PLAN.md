@@ -22,10 +22,14 @@ who follow the money.
 - Human-in-the-loop by default. Autonomy is a dial, not a starting point.
 - Every post must contain an interpretation (what it means, what to watch, what's overhyped).
 - No medical advice or treatment recommendations. Ever.
-- No investment advice: no buy/sell/hold/short calls, no price targets, no
-  return promises. Describe what a result means for a thesis and the risks;
-  the reader decides. Bio discloses that nothing is investment advice.
-- Always link the primary source. Label preprints as preprints.
+- No investment advice: no buy/sell/hold/short calls, no price target of the
+  account's own, no return promises. Describe what a result means for a thesis
+  and the risks; the reader decides. An analyst's published target is cited only
+  with what it rests on, whether the catalysts the post says to watch are in it
+  and which way they would move it. Bio discloses that nothing is investment
+  advice.
+- Name the primary source in words (no post carries a link). Label preprints as
+  preprints.
 - Never fabricate numbers; stats are pulled verbatim from the source.
 - Bio discloses AI-assisted drafting.
 

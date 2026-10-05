@@ -175,8 +175,24 @@ carrying `--live`).
 - Logging: stdlib `logging`. INFO for per-source counts, DEBUG for items.
 - Ask before adding a dependency not already in `pyproject.toml`.
 - Generated content must never contain medical advice or investment advice
-  (no buy/sell/hold/short calls, price targets, or return promises; describing
-  a thesis, a valuation or a risk is fine). Preprints are labelled as
+  (no buy/sell/hold/short calls, no price target of the account's own, no return promises;
+  describing a thesis, a valuation or a risk is fine). An analyst's published target is
+  cited only with what it rests on (`draft/targets.py`, pure, finds the citations: the
+  phrase, a per-share figure in dollars or a listing's currency next to target, PT, PO or
+  fair value, a fact base's rating shorthand; links are blanked first, and "targets PD-1",
+  the median target lesion, a $5B target market, a revenue or EPS target, a takeover
+  target's deal price and a CVR's fair value are not): a drafter thread cites none
+  (`target_problems`, from `check_hard_rules` per post and on its chart and table text,
+  column headers included, and from `swarm/cells.py:cell_problems`), and a studio piece
+  lists each in piece.json's `price_targets` (`qa.TARGET_FIELDS`: firm, target,
+  `previous`, date, `rests_on`, the `catalyst`s the post says to watch, `in_model`
+  yes/no/partly/unknown, `effect` unless yes, the firm's published `cases`, `post_says`,
+  `source`), held to it by `studio/qa.py:check_price_targets` (fixable: a cited target
+  with nothing listed, an entry missing a field, `post_says` in no post or card, a firm
+  listed twice, a figure given as a target that no entry lists as its target, previous or
+  case), while `studio/safety.py:advice_problems` blocks a target, fair value, value per
+  share or computed change of the account's own (`_OWN_TARGET`, per-share figures only)
+  in a post, on a card or in its alt text. Preprints are labelled as
   preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
   after generation (plus 280 chars/post with URLs as 23, the link ban,
   and verbatim-number verification); drafts that fail are stored as `failed`.
@@ -651,7 +667,10 @@ carrying `--live`).
   gets none of the standing instructions), `piece.json`; a piece
   without that log blocks, `qa.NO_FACTCHECK`), polish rounds (`studio/qa.py`: `piece.json` shape, X-weighted length from
   `studio/xcount.py` with `x.headroom`, `studio/safety.py` blocking lines (investment or
-  medical advice, links incl. bare domains), an @handle without a verifying page, cards
+  medical advice and a price target of the account's own, on the cards and their alt text
+  too; links incl. bare domains), an @handle without a verifying page, an analyst target
+  cited with no entry or with a `post_says` the posts do not contain
+  (`check_price_targets`, the voice guide's "Analyst price targets"), cards
   drawn by `studio/render.py`; blocking problems keep a piece out of the queue, fixable ones
   go back to the session up to `max_polish_rounds` and then ride along as warnings, and one
   review round always shows the session its PNGs), then `studio/ingest.py`: a pending draft
@@ -660,7 +679,9 @@ carrying `--live`).
   it), every card copied to `image_file(id, k)` and anchored to its post, each
   `recheck_before_posting` fact a `store.RECHECK_PREFIX` line of `why_it_matters`
   (`store.recheck_lines`, listed by the panel's copy-paste page through
-  `Approved.why_it_matters`); a revision (`store.revise`) replaces text and cards of a
+  `Approved.why_it_matters`, plus one line naming the analyst targets the posts still
+  cite, `qa.cited_targets` and `ingest._target_line`, or the words citing one no entry
+  lists); a revision (`store.revise`) replaces text and cards of a
   pending draft, or of a rejected one that `store.reopen` brings back (refused when
   `approval_queue/publishing.py:is_live` or `block_reason` says step 3 holds it, followed
   by `publishing.forget`, as the queue's Reopen does). Every ingest records what it put in
@@ -825,7 +846,9 @@ draft/    schema.py (Draft, Format, validate_output), hook.py (rule 2: the link 
           grade_image, call_grader), branding.py (tickers + logos for company cells),
           logos.py (site icon discovery + PNG normalisation for run_logos.py), prompt.py,
           voice.md, drafter.py, config.yaml, settings.py, tags.py (Handle, load_handles,
-          relevant_handles, trial_names, drug_names, tag_problems),
+          relevant_handles, trial_names, drug_names, tag_problems), targets.py
+          (price-target citations: target_mentions, target_figures, target_problems,
+          field_figure, SHARE_FIGURE),
           examples.py (EditExample, select_edit_examples, format_examples_block),
           voice_report.py (VoiceReport, build_report, render_markdown, CLI)
 approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
