@@ -5,67 +5,1014 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Approval queue{% endblock %}</title>
   <style>
-    body { font: 15px/1.5 system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
-    nav a { margin-right: 1rem; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
-    .post { white-space: pre-wrap; border: 1px solid #ccc; border-radius: 6px; padding: .6rem .8rem; margin: .4rem 0; background: #fafafa; }
-    .meta { color: #666; font-size: .9em; }
-    button.link { background: none; border: none; padding: 0; color: #0645ad; text-decoration: underline; cursor: pointer; font: inherit; }
-    .over { color: #b00020; font-weight: bold; }
-    .low { color: #b00020; } .medium { color: #b26a00; } .high { color: #2e7d32; }
+    /* ==========================================================================
+       OUTRUN SUNSET  ·  a night drive into a 1986 synthwave sunset
+       A deep purple-black sky with stars, a striped sun setting behind the nav,
+       a faint sky grid, a neon floor grid at the bottom of the window, chrome
+       headings, hot pink and cyan neon. All content sits on one dark panel, so
+       the scenery never runs behind text.
+       Pure CSS, system fonts only, no external resources. Nothing moves except
+       the progress bar while a long form runs.
+       ========================================================================== */
+
+    :root {
+      color-scheme: dark;
+
+      /* sky and surfaces */
+      --bg: #0c0320;
+      --bg-deep: #05010e;
+      --panel: rgba(13, 4, 31, .93);          /* the page panel <main> */
+      --surface: rgba(30, 13, 61, .66);       /* panels inside it (cards, entries, run bar) */
+      --surface-solid: #170830;
+      --surface-2: #1d0c3b;                   /* used by page-level template styles too */
+      --surface-3: #261048;
+      --well: #070214;                         /* logs, diffs, inputs */
+      --border: #4a3480;
+      --border-soft: rgba(166, 120, 255, .24);
+
+      /* text */
+      --text: #f1eaff;
+      --text-soft: #ddd3f5;
+      --muted: #b9acda;
+      --faint: #6f5f9c;
+
+      /* neon */
+      --link: #5ef0ff;
+      --link-hover: #ff9ae4;
+      --accent: #ff3cbe;
+      --accent-2: #2de2e6;
+      --orange: #ff9a3c;
+      --sun: #ffd23f;
+      --violet: #a66bff;
+      --phosphor: #b9f5d3;
+
+      /* status: a colour, a text tint, a background tint and a line for each */
+      --ok: #4dffb0;
+      --ok-text: #8dffcb;
+      --ok-bg: rgba(77, 255, 176, .09);
+      --ok-line: rgba(77, 255, 176, .62);
+      --warn: #ffc53d;
+      --warn-text: #ffd77a;
+      --warn-bg: rgba(255, 197, 61, .1);
+      --warn-line: rgba(255, 197, 61, .66);
+      --fail: #ff5c70;
+      --fail-text: #ffa3ae;
+      --fail-bg: rgba(255, 92, 112, .14);
+      --fail-line: rgba(255, 92, 112, .72);
+      --fail-fill: #ff6b7d;                    /* the solid fail pill */
+      --fail-ink: #1d0207;                     /* text on it, 7.2:1 */
+      --skip: #a99cc9;
+      --skip-text: #cfc6e8;
+      --skip-line: rgba(185, 172, 222, .62);
+      --info: #2de2e6;
+      --info-text: #e2fcff;
+      --info-bg: rgba(45, 226, 230, .08);
+      --info-line: rgba(45, 226, 230, .4);
+
+      --chart-line: #2de2e6;
+
+      /* gradients */
+      --grad-sunset: linear-gradient(180deg, #ffd25a 0%, #ff9a3c 45%, #ff3cbe 100%);
+      --grad-laser: linear-gradient(180deg, #b4fcff 0%, #5ef0ff 45%, #2de2b4 100%);
+      --grad-neon: linear-gradient(90deg, var(--accent), var(--orange) 50%, var(--accent-2));
+      --grad-readout: linear-gradient(180deg, #fff2b8 0%, #ffd25a 42%, #ff9a3c 100%);
+
+      --font-body: "Avenir Next", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+      --font-display: "Futura", "Century Gothic", "Avenir Next", "Bahnschrift", "Segoe UI", system-ui, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+
+      --radius: 10px;
+
+      /* the scene: where the sun sets (the top of the nav bar) and how big it is */
+      --horizon: 76px;
+      --sun-top: 12px;
+      --sun-d: 168px;
+    }
+
+    /* a short or narrow window: the sky band shrinks so content starts sooner */
+    @media (max-height: 760px), (max-width: 640px) {
+      :root {
+        --horizon: 58px;
+        --sun-top: 9px;
+        --sun-d: 128px;
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+       The scene: sky, stars, sun glow and horizon line live on <html>; the sun,
+       the floor grid, its fade, the sky grid and the scanlines are pseudo-elements
+       behind everything (pointer-events none, negative z-index).
+       -------------------------------------------------------------------------- */
+    html {
+      background-color: var(--bg);
+      background-image:
+        /* horizon line, magenta to orange to magenta */
+        linear-gradient(90deg, transparent 4%, rgba(255, 60, 190, .75) 28%, #ffb35c 50%, rgba(255, 60, 190, .75) 72%, transparent 96%),
+        /* warm glow around the sun */
+        radial-gradient(ellipse 280px 80px at 50% var(--horizon), rgba(255, 140, 70, .42), transparent 72%),
+        /* magenta haze along the horizon */
+        radial-gradient(ellipse 62% 64px at 50% var(--horizon), rgba(255, 60, 190, .40), transparent 75%),
+        /* stars */
+        radial-gradient(circle at 18% 22%, rgba(255, 255, 255, .85) 0 1px, transparent 1.6px),
+        radial-gradient(circle at 63% 58%, rgba(255, 214, 248, .7) 0 1px, transparent 1.6px),
+        radial-gradient(circle at 41% 81%, rgba(170, 240, 255, .65) 0 .8px, transparent 1.4px),
+        /* sky, darkest at the top, purple at the horizon, night ground below */
+        linear-gradient(180deg, var(--bg-deep) 0px, #12042b 34px, #2c0a4a var(--horizon), #170533 calc(var(--horizon) + 56px), var(--bg) calc(var(--horizon) + 240px));
+      background-size:
+        100% 2px,
+        auto, auto,
+        173px 72px, 241px 72px, 311px 72px,
+        auto;
+      background-position:
+        0 calc(var(--horizon) - 1px),
+        0 0, 0 0,
+        0 0, 37px 0, 90px 0,
+        0 0;
+      background-repeat:
+        no-repeat,
+        no-repeat, no-repeat,
+        repeat-x, repeat-x, repeat-x,
+        no-repeat;
+      scrollbar-color: rgba(255, 60, 190, .45) rgba(255, 255, 255, .04);
+    }
+
+    /* faint lavender sky grid and scanlines: the 80s texture beside the panel */
+    html::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(180deg, rgba(0, 0, 0, .16) 0 1px, transparent 1px 3px),
+        linear-gradient(rgba(190, 160, 255, .05) 1px, transparent 1px) 50% 0 / 48px 48px,
+        linear-gradient(90deg, rgba(190, 160, 255, .05) 1px, transparent 1px) 50% 0 / 48px 48px;
+    }
+
+    /* the fade that lets the floor grid melt into the night */
+    html::after {
+      content: "";
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 300px;
+      z-index: -3;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse 55% 22px at 50% 122px, rgba(255, 60, 190, .22), transparent 80%),
+        linear-gradient(0deg, transparent 0, transparent 30%, rgba(12, 3, 32, .7) 62%, var(--bg) 82%);
+    }
+
+    body {
+      position: relative;
+      font: 15px/1.55 var(--font-body);
+      max-width: 940px;
+      margin: 0 auto;
+      padding: var(--horizon) 1rem 5rem;
+      color: var(--text);
+      background: transparent;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* the striped sun, half set behind the nav bar */
+    body::before {
+      content: "";
+      position: absolute;
+      top: var(--sun-top);
+      left: 50%;
+      width: var(--sun-d);
+      height: calc(var(--horizon) - var(--sun-top) + 8px);   /* stops just under the horizon, behind the nav */
+      margin-left: calc(var(--sun-d) / -2);
+      z-index: -2;
+      pointer-events: none;
+      clip-path: circle(calc(var(--sun-d) / 2) at 50% calc(var(--sun-d) / 2));
+      background: linear-gradient(180deg, #ffef7a 0%, #ffc23d 27%, #ff8a3d 51%, #ff4f8b 73%, #ff3cbe 92%);
+      -webkit-mask-image: linear-gradient(180deg, #000 0 44%, transparent 44% 47%, #000 47% 55%, transparent 55% 59%, #000 59% 66%, transparent 66% 71%, #000 71% 78%, transparent 78% 85%, #000 85%);
+              mask-image: linear-gradient(180deg, #000 0 44%, transparent 44% 47%, #000 47% 55%, transparent 55% 59%, #000 59% 66%, transparent 66% 71%, #000 71% 78%, transparent 78% 85%, #000 85%);
+    }
+
+    /* the neon floor grid, receding toward the far horizon at the bottom of the
+       window; static, and only ever seen beside or below the page panel */
+    body::after {
+      content: "";
+      position: fixed;
+      left: -70vw;
+      right: -70vw;
+      bottom: 0;
+      height: 1400px;
+      z-index: -4;
+      pointer-events: none;
+      background-image:
+        linear-gradient(90deg, rgba(45, 226, 230, .55) 0 2px, transparent 2px),
+        linear-gradient(180deg, rgba(255, 60, 190, .68) 0 5px, transparent 5px);
+      background-size: 84px 84px;
+      background-position: center bottom;
+      transform-origin: 50% 100%;
+      transform: perspective(900px) rotateX(72deg);
+      opacity: .42;
+    }
+
+    ::selection { background: rgba(255, 60, 190, .5); color: #fff; }
+
+    /* --------------------------------------------------------------------------
+       Navigation: a glass dashboard bar sitting on the horizon
+       -------------------------------------------------------------------------- */
+    nav {
+      position: relative;
+      padding: .45rem 1rem;
+      font: 600 .78rem/2 var(--font-display);
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      background: linear-gradient(180deg, rgba(30, 8, 58, .92), rgba(10, 3, 26, .95));
+      border: 1px solid rgba(255, 60, 190, .6);
+      border-radius: var(--radius);
+      box-shadow:
+        0 0 0 1px rgba(255, 60, 190, .12),
+        0 0 26px rgba(255, 60, 190, .28),
+        inset 0 1px 0 rgba(255, 255, 255, .07),
+        inset 0 -1px 0 rgba(45, 226, 230, .35);
+    }
+    nav a { margin-right: 1rem; color: #a6f7ff; text-decoration: none; white-space: nowrap; border-radius: 3px; }
+    nav a:hover { color: #fff; text-shadow: 0 0 8px var(--accent), 0 0 16px rgba(255, 60, 190, .6); }
+    nav .sep { color: #8576b5; margin-right: 1rem; }
+
+    /* --------------------------------------------------------------------------
+       The page panel: every page's content sits on one dark, near-opaque panel
+       with a neon hairline along its top edge
+       -------------------------------------------------------------------------- */
+    main {
+      display: block;
+      position: relative;
+      margin-top: 1rem;
+      padding: .2rem 1.4rem 1.3rem;
+      background: linear-gradient(180deg, rgba(20, 7, 45, .93), var(--panel) 360px);
+      border: 1px solid rgba(166, 120, 255, .2);
+      border-radius: 14px;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), 0 0 46px rgba(255, 60, 190, .07), 0 20px 60px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .04);
+    }
+    main::before {
+      content: "";
+      position: absolute;
+      top: -1px;
+      left: 24px;
+      right: 24px;
+      height: 2px;
+      border-radius: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent) 18%, var(--orange) 50%, var(--accent-2) 82%, transparent);
+      opacity: .85;
+      pointer-events: none;
+    }
+
+    /* --------------------------------------------------------------------------
+       Headings: chrome and neon
+       -------------------------------------------------------------------------- */
+    h1, h2 { font-family: var(--font-display); }
+
+    h1 {
+      margin: 1.1rem 0 .8rem;
+      font-size: 2.05rem;
+      font-weight: 800;
+      line-height: 1.22;
+      letter-spacing: .01em;
+      color: #ffd9f3;
+      /* chrome: white sky, a soft cyan horizon, pink-to-orange ground; one band per line */
+      background-image: linear-gradient(180deg, #ffffff 0%, #fdf2ff 24%, #b4f7ff 47%, #ff9be3 53%, #ff7fd6 72%, #ffb266 100%);
+      background-size: 100% 1.22em;
+      background-repeat: repeat-y;
+      -webkit-background-clip: text;
+              background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 10px rgba(255, 60, 190, .4));
+    }
+    h1 .meta {
+      -webkit-text-fill-color: var(--muted);
+      color: var(--muted);
+      font-family: var(--font-body);
+      font-size: .5em;
+      font-weight: 500;
+      letter-spacing: .02em;
+      vertical-align: middle;
+    }
+
+    h2 {
+      width: fit-content;
+      max-width: 100%;
+      margin: 1.9rem 0 .8rem;
+      font-size: 1.02rem;
+      font-weight: 700;
+      line-height: 1.35;
+      text-transform: uppercase;
+      letter-spacing: .16em;
+      color: var(--accent-2);
+      background-image: linear-gradient(90deg, #7ff6ff 0%, #b8a0ff 60%, #f590ff 100%);
+      -webkit-background-clip: text;
+              background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 7px rgba(45, 226, 230, .35));
+    }
+    h2::after {
+      content: "";
+      display: block;
+      height: 2px;
+      margin-top: .35rem;
+      border-radius: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--orange) 70%, transparent);
+    }
+    h2 .meta { -webkit-text-fill-color: var(--muted); text-transform: none; letter-spacing: .02em; }
+
+    /* feed stories: a title, not a section label */
+    .entry h2 {
+      width: auto;
+      margin: .4rem 0 .2rem;
+      font-size: 1.22rem;
+      line-height: 1.35;
+      text-transform: none;
+      letter-spacing: .005em;
+      background: none;
+      -webkit-text-fill-color: currentColor;
+      color: var(--text);
+      filter: none;
+    }
+    .entry h2::after { display: none; }
+
+    /* --------------------------------------------------------------------------
+       Text, links, code
+       -------------------------------------------------------------------------- */
+    a {
+      color: var(--link);
+      text-decoration: underline;
+      text-decoration-color: rgba(94, 240, 255, .5);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      transition: color .15s, text-shadow .15s;
+    }
+    a:hover { color: var(--link-hover); text-decoration-color: currentColor; text-shadow: 0 0 10px rgba(255, 60, 190, .55); }
+
+    strong { color: #fff; font-weight: 700; }
+    em { color: #fbf7ff; }
+    .meta strong { color: var(--text-soft); }
+    a strong, .over strong, .low strong, .high strong, .medium strong, .flash strong, .banner strong { color: inherit; }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: .86em;
+      color: #ffc48a;
+      background: rgba(255, 154, 60, .09);
+      border: 1px solid rgba(255, 154, 60, .22);
+      border-radius: 4px;
+      padding: .02em .32em;
+      overflow-wrap: break-word;
+    }
+
+    ul, ol { padding-left: 1.4rem; }
+    li { margin: .2rem 0; }
+    li::marker { color: var(--accent); }
+
+    summary { cursor: pointer; color: var(--text-soft); border-radius: 4px; }
+    summary::marker { color: var(--accent); }
+    summary:hover { color: #fff; }
+    details { margin: .5rem 0; }
+
+    blockquote { color: var(--text-soft); }
+
+    :focus-visible {
+      outline: 2px solid var(--accent-2);
+      outline-offset: 2px;
+      box-shadow: 0 0 0 4px rgba(45, 226, 230, .22);
+    }
+
+    .meta { color: var(--muted); font-size: .9em; }
+    .caveats { color: var(--muted); font-size: .9em; }
     .wrap { overflow-wrap: anywhere; word-break: break-word; }
-    form.inline { display: inline; }
-    form.revise { display: flex; gap: .4rem; margin-top: .3rem; }
-    form.revise input { flex: 1; font: inherit; }
-    textarea { width: 100%; font: inherit; }
-    button { margin-right: .5rem; }
-    .actions { margin: 1rem 0; }
-    .flash { background: #fff8e1; padding: .5rem; border-radius: 6px; }
-    pre.diff { white-space: pre-wrap; font: 13px/1.4 ui-monospace, monospace; background: #fafafa; border: 1px solid #ddd; border-radius: 6px; padding: .5rem; margin: .3rem 0; }
-    .diff .del { background: #fde7e9; color: #8a1c1c; text-decoration: line-through; display: block; }
-    .diff .add { background: #e6f4ea; color: #1b5e20; display: block; }
-    .diff .same { color: #666; display: block; }
-    .proposal { border-left: 4px solid #2e7d32; padding: .3rem .8rem; margin: .5rem 0; background: #f6fbf6; }
-    .caveats { color: #666; font-size: .9em; }
-    select { font: inherit; }
-    .check { border-left: 4px solid #999; padding: .2rem .8rem; margin: .3rem 0 .6rem; background: #fafafa; }
-    .check.supported { border-color: #2e7d32; } .check.contradicted { border-color: #b00020; background: #fff5f5; }
-    .check blockquote { margin: .3rem 0; padding-left: .6rem; border-left: 2px solid #ccc; color: #444; font-style: italic; }
-    .badge { display: inline-block; font-size: .8em; padding: 0 .4em; border-radius: 4px; background: #eee; margin-right: .2em; }
-    nav .sep { color: #bbb; margin-right: 1rem; }
-    .pill { display: inline-block; font-size: .8em; font-weight: 600; padding: .05em .5em; border-radius: 10px; text-transform: uppercase; letter-spacing: .03em; }
-    .pill.ok { background: #e6f4ea; color: #1b5e20; }
-    .pill.warn { background: #fff4e5; color: #8a5000; }
-    .pill.fail { background: #fde7e9; color: #8a1c1c; }
-    .pill.skip { background: #eee; color: #555; }
-    .banner { border-radius: 8px; padding: .7rem 1rem; margin: 1rem 0; font-weight: 600; }
-    .banner.ok { background: #e6f4ea; color: #1b5e20; }
-    .banner.warn { background: #fff4e5; color: #8a5000; }
-    .banner.fail { background: #fde7e9; color: #8a1c1c; }
-    .cards { display: flex; flex-wrap: wrap; gap: .6rem; margin: .6rem 0 1.2rem; }
-    .card { flex: 1 1 150px; border: 1px solid #ddd; border-radius: 8px; padding: .5rem .7rem; }
-    .card .n { font-size: 1.4em; font-weight: 600; }
-    pre.log { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; background: #f6f6f6; border: 1px solid #ddd; border-radius: 6px; padding: .5rem; max-height: 20rem; overflow: auto; }
-    .entry { border-top: 1px solid #ddd; padding-top: .5rem; margin-top: 1.5rem; }
-    .entry h2 { margin-bottom: .2rem; }
-    .entry blockquote { margin: .5rem 0; padding-left: .8rem; border-left: 3px solid #ddd; }
-    details.run { border: 1px solid #ddd; border-radius: 8px; padding: .5rem .8rem; margin: .5rem 0; }
-    .badge.contradicted { background: #fde7e9; color: #8a1c1c; } .badge.supported { background: #e6f4ea; color: #1b5e20; }
-    table.cells td.cell { border-left: 3px solid #ddd; }
-    table.cells td.shown { border-left-color: #2e7d32; }
-    table.cells td.unverified, table.cells td.supported { border-left-color: #b26a00; color: #777; }
-    table.cells td.contradicted { border-left-color: #b00020; background: #fff5f5; }
-    #working { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 10; background: #fff8e1; border-bottom: 1px solid #e0c060; padding: .5rem 1rem; font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,.1); }
-    #working.on { display: block; }
-    #working .track { height: 4px; background: #f0e2b0; border-radius: 2px; margin-top: .4rem; overflow: hidden; }
-    #working .fill { height: 100%; width: 30%; background: #b26a00; border-radius: 2px; animation: slide 1.2s ease-in-out infinite; }
-    @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
-    form.busy button, form.busy input, form.busy textarea, form.busy select { opacity: .6; pointer-events: none; }
-    .runbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .6rem 0 1rem; padding: .5rem .8rem; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
+
+    /* status text */
+    .over { color: var(--fail-text); font-weight: bold; }
+    .low { color: var(--fail-text); }
+    .medium { color: var(--warn-text); }
+    .high { color: var(--ok-text); }
+
+    /* --------------------------------------------------------------------------
+       Tables
+       -------------------------------------------------------------------------- */
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-variant-numeric: tabular-nums;
+      background: rgba(10, 3, 26, .6);
+      box-shadow: 0 0 0 1px var(--border-soft);
+    }
+    th, td {
+      text-align: left;
+      padding: .45rem .6rem;
+      border-bottom: 1px solid rgba(166, 120, 255, .17);
+      vertical-align: top;
+    }
+    th {
+      font: 700 .72rem/1.6 var(--font-display);
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: #8ff3f6;
+      background: rgba(45, 226, 230, .07);
+      border-bottom: 1px solid rgba(45, 226, 230, .5);
+    }
+    tr:hover > td { background-color: rgba(255, 60, 190, .045); }
+    caption { padding: .3rem .1rem; text-align: left; }
+    /* an opened "Snapshots as a table": the summary keeps clear of the table's frame */
+    details > summary + table { margin-top: .5rem; }
+    /* the studio's Started cell (date <br> auto/manual): the date on one line when there is room */
+    @media (min-width: 900px) {
+      td.meta:has(> br) { white-space: nowrap; }
+    }
+    /* the radar calendar's date (a day, a month, a quarter): one line, never 2026-10- / 03 */
+    td.when { white-space: nowrap; }
+
+    table.cells td.cell { border-left: 3px solid var(--border); }
+    table.cells td.shown { border-left-color: var(--ok); }
+    table.cells td.unverified, table.cells td.supported { border-left-color: var(--warn); color: var(--muted); }
+    table.cells td.contradicted { border-left-color: var(--fail); background: var(--fail-bg); }
+
+    /* --------------------------------------------------------------------------
+       Posts, diffs, logs
+       -------------------------------------------------------------------------- */
+    .post {
+      white-space: pre-wrap;
+      margin: .45rem 0;
+      padding: .75rem 1rem .75rem 1.15rem;
+      color: var(--text);
+      line-height: 1.62;
+      border: 1px solid rgba(255, 60, 190, .3);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, var(--accent), var(--orange)) left top / 3px 100% no-repeat,
+        linear-gradient(180deg, #1b0c36, #140827);
+      box-shadow: 0 0 22px rgba(255, 60, 190, .07);
+    }
+
+    pre.diff {
+      white-space: pre-wrap;
+      font: 13px/1.5 var(--font-mono);
+      color: var(--text-soft);
+      background: var(--well);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .55rem;
+      margin: .3rem 0;
+    }
+    .diff .del { background: rgba(255, 92, 112, .14); color: #ffb0ba; text-decoration: line-through; text-decoration-color: rgba(255, 176, 186, .55); display: block; }
+    .diff .add { background: rgba(77, 255, 176, .11); color: #a8ffd6; display: block; }
+    .diff .same { color: var(--muted); display: block; }
+
+    /* run output: phosphor green in a CRT well */
+    pre.log {
+      white-space: pre-wrap;
+      font: 12.5px/1.55 var(--font-mono);
+      color: var(--phosphor);
+      background: var(--well);
+      border: 1px solid rgba(77, 255, 176, .26);
+      border-radius: 8px;
+      padding: .6rem .8rem;
+      max-height: 20rem;
+      overflow: auto;
+      overflow-wrap: anywhere;                 /* long URLs wrap inside the box */
+      box-shadow: inset 0 0 26px rgba(0, 0, 0, .7), 0 0 14px rgba(77, 255, 176, .05);
+      scrollbar-color: rgba(77, 255, 176, .4) transparent;
+    }
+    /* documents shown in a log box (the studio's fact base and fact-check log, the
+       feedback report) are read for minutes: calmer ink, more air */
+    summary + pre.log {
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--text-soft);
+      border-color: rgba(166, 120, 255, .3);
+      padding: .75rem 1rem;
+      scrollbar-color: rgba(255, 60, 190, .45) transparent;
+    }
+
+    /* --------------------------------------------------------------------------
+       Status: pills (four shapes as well as four colours), badges, banners,
+       flash, verdicts
+       -------------------------------------------------------------------------- */
+    .pill {
+      display: inline-block;
+      font: 700 .72rem/1.55 var(--font-display);
+      padding: 0 .6em;
+      border: 1px solid rgba(255, 255, 255, .3);
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      color: var(--text-soft);
+      background: rgba(255, 255, 255, .06);
+      vertical-align: .08em;
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    /* ok: a glowing outline */
+    .pill.ok   { color: var(--ok-text);   background: var(--ok-bg);   border-color: var(--ok-line);   box-shadow: 0 0 8px rgba(77, 255, 176, .2); }
+    /* warn: a heavier amber outline, squared off */
+    .pill.warn { color: var(--warn-text); background: var(--warn-bg); border: 2px solid var(--warn-line); border-radius: 4px; line-height: 1.4; box-shadow: 0 0 8px rgba(255, 197, 61, .16); }
+    /* fail: a solid red fill with dark ink */
+    .pill.fail { color: var(--fail-ink);  background: var(--fail-fill); border-color: #ff9aa7;          box-shadow: 0 0 10px rgba(255, 92, 112, .5); }
+    /* skip: a dashed outline, no fill */
+    .pill.skip { color: var(--skip-text); background: transparent;    border: 1px dashed var(--skip-line); }
+    /* the approved page's publishing order ("#1") is information, not a success: cyan, no glow
+       (the markup gives it .pill.ok, the same class as "posted") */
+    .pill.ok[title$="publishing order"] { color: var(--info-text); background: var(--info-bg); border-color: var(--info-line); box-shadow: none; }
+    /* a link pill: room under the underline so it never touches the rounded border */
+    a.pill { padding-bottom: .14em; text-decoration: underline; text-underline-offset: .22em; text-decoration-thickness: 1px; }
+    a.pill:hover { color: #fff; text-shadow: none; }
+    a.pill.fail:hover { color: var(--fail-ink); }
+
+    .badge {
+      display: inline-block;
+      font-size: .8em;
+      padding: 0 .45em;
+      border-radius: 4px;
+      color: var(--text-soft);
+      background: rgba(255, 255, 255, .07);
+      border: 1px solid rgba(255, 255, 255, .18);
+      margin-right: .2em;
+    }
+    .badge.contradicted { color: #ffb0ba; background: var(--fail-bg); border-color: var(--fail-line); }
+    .badge.supported { color: var(--ok-text); background: var(--ok-bg); border-color: var(--ok-line); }
+
+    .banner {
+      border-radius: var(--radius);
+      padding: .7rem 1rem;
+      margin: 1rem 0;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      border-left-width: 5px;
+      background: var(--surface);
+    }
+    .banner.ok   { color: #c2ffe2; background: var(--ok-bg);   border-color: var(--ok-line); }
+    .banner.warn { color: #ffe6a8; background: var(--warn-bg); border-color: var(--warn-line); }
+    .banner.fail { color: #ffd6db; background: var(--fail-bg); border-color: var(--fail-line); box-shadow: 0 0 24px rgba(255, 92, 112, .2); }
+    .banner .meta { color: inherit; opacity: .85; font-weight: 500; }
+
+    /* flash: an information note, cyan, never confused with a warning */
+    .flash {
+      color: var(--info-text);
+      background: var(--info-bg);
+      border: 1px solid var(--info-line);
+      border-left: 4px solid var(--info);
+      padding: .55rem .8rem;
+      border-radius: 8px;
+    }
+    .flash.meta { color: var(--text-soft); }
+    .flash.low, .flash.over { color: #ffc0c8; background: var(--fail-bg); border-color: var(--fail-line); border-left-color: var(--fail); }
+
+    .proposal {
+      border-left: 4px solid var(--ok);
+      padding: .4rem .9rem;
+      margin: .5rem 0;
+      background: rgba(77, 255, 176, .06);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .check {
+      border-left: 4px solid var(--skip);
+      padding: .3rem .9rem .4rem;
+      margin: .35rem 0 .7rem;
+      background: var(--surface-2);
+      border-radius: 0 8px 8px 0;
+    }
+    .check.supported { border-color: var(--ok); }
+    .check.supported > strong { color: var(--ok-text); }
+    .check.contradicted { border-color: var(--fail); background: var(--fail-bg); }
+    .check.contradicted > strong { color: var(--fail-text); }
+    .check.unverified { border-color: var(--warn); }
+    .check.unverified > strong { color: var(--warn-text); }
+    .check blockquote {
+      margin: .3rem 0;
+      padding-left: .6rem;
+      border-left: 2px solid var(--violet);
+      color: #dcd2f4;
+      font-style: italic;
+    }
+
+    /* --------------------------------------------------------------------------
+       Panels: cards, runs, feed entries, run bar
+       -------------------------------------------------------------------------- */
+    .cards { display: flex; flex-wrap: wrap; gap: .7rem; margin: .6rem 0 1.2rem; }
+    .cards > a { text-decoration: none; }
+    .card {
+      flex: 1 1 150px;
+      padding: .55rem .8rem .55rem;
+      border: 1px solid rgba(45, 226, 230, .3);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(90deg, rgba(255, 60, 190, .8), rgba(45, 226, 230, .8)) left top / 100% 1px no-repeat,
+        var(--surface);
+      box-shadow: 0 0 20px rgba(45, 226, 230, .06), inset 0 1px 0 rgba(255, 255, 255, .04);
+    }
+
+    /* arcade-score readouts: the stat cards, the feed's score and the follower count */
+    .card .n,
+    .entry h2 + p > strong:first-child,
+    h2 + p > span[style*="font-size"] {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: .02em;
+      color: var(--sun);
+      background-image: var(--grad-readout);
+      -webkit-background-clip: text;
+              background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 6px rgba(255, 154, 60, .45));
+    }
+    .card .n { font-size: 1.5em; line-height: 1.3; width: fit-content; max-width: 100%; }
+
+    .entry {
+      margin-top: 1.2rem;
+      padding: .5rem 1.1rem .7rem;
+      border: 1px solid var(--border-soft);
+      border-top-color: rgba(255, 60, 190, .5);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .entry blockquote { margin: .5rem 0; padding-left: .8rem; border-left: 3px solid var(--violet); }
+
+    details.run {
+      border: 1px solid var(--border-soft);
+      border-left: 3px solid var(--violet);
+      border-radius: var(--radius);
+      padding: .5rem .8rem;
+      margin: .5rem 0;
+      background: var(--surface);
+    }
+    details.run[open] {
+      border-color: rgba(45, 226, 230, .45);
+      border-left-color: var(--accent-2);
+      box-shadow: 0 0 16px rgba(45, 226, 230, .1);
+    }
+
+    .runbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .5rem;
+      margin: .6rem 0 1rem;
+      padding: .55rem .8rem;
+      border: 1px solid rgba(255, 60, 190, .38);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 0 18px rgba(255, 60, 190, .1);
+    }
+    /* the approved page renders the bar with nothing in it: no empty neon frame */
+    .runbar:not(:has(*)) { display: none; }
     .runbar form.inline { display: inline; margin: 0; }
     .runbar button { margin: 0; }
+
+    /* page-level components the templates style with these variables */
+    .side { background: var(--surface); box-shadow: 0 0 22px rgba(255, 60, 190, .07); }
+    /* the blind pick's "A" and "B" are the only names the two columns have: real headings */
+    .side h2 { font-size: 1.7rem; line-height: 1.15; letter-spacing: .06em; }
+    /* the floated Pick button ends on the same right edge as the posts under it */
+    .side > form > button.pick { margin-right: 0; }
+    .mpost { background: var(--surface); }
+    /* the "I posted it" box: no paragraph margin under its button, so the padding is even */
+    form.mpost > p:last-child { margin-bottom: 0; }
+    /* manual post: the text to copy reads as a post, like .post elsewhere; `main`
+       out-ranks the page-level .mpost pre rule that comes later in the document */
+    main .mpost pre {
+      margin: .4rem 0 .6rem;
+      padding: .7rem 1rem .7rem 1.15rem;
+      line-height: 1.62;
+      color: var(--text);
+      border: 1px solid rgba(255, 60, 190, .3);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, var(--accent), var(--orange)) left top / 3px 100% no-repeat,
+        var(--well);
+    }
+    .copied { text-shadow: 0 0 8px rgba(77, 255, 176, .5); }
+    .reasons dt { color: #fff; }
+
+    figure {
+      padding: .8rem 1rem .5rem;
+      border: 1px solid rgba(45, 226, 230, .3);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    /* the followers sparkline: height from its viewBox (not the height="90" attribute), so
+       the line fills the frame's width and starts where the caption does */
+    figure svg { overflow: visible; height: auto; filter: drop-shadow(0 0 4px rgba(45, 226, 230, .75)); }
+    figcaption { margin-top: .3rem; }
+
+    /* pictures: light charts and dark cards both sit in a dark bezel, never filtered */
+    main img {
+      box-sizing: border-box;
+      max-width: 100%;
+      padding: 6px;
+      background: #0a0318;
+      border-radius: 8px;
+      box-shadow:
+        0 0 0 1px rgba(255, 60, 190, .55),
+        0 0 22px rgba(255, 60, 190, .2),
+        0 12px 30px rgba(0, 0, 0, .5);
+      vertical-align: top;
+    }
+    .cards > a:hover img { box-shadow: 0 0 0 1px var(--accent-2), 0 0 24px rgba(45, 226, 230, .35), 0 12px 30px rgba(0, 0, 0, .5); }
+
+    /* --------------------------------------------------------------------------
+       Forms
+       -------------------------------------------------------------------------- */
+    label { color: var(--text-soft); }
+    /* a checkbox and its words wrap as one unit, and so does the studio form's
+       "Angle" and its select (detail.html's "Why<br><select>" labels stay as they are) */
+    label:has(> input[type$="checkbox"]), label:has(> input[type$="radio"]),
+    form[action$="/studio/topics"] label:has(> select) { display: inline-block; }
+
+    /* one control height: line-height 1.35 makes inputs and selects as tall as the
+       buttons beside them (about 32.5px); textarea takes 1.55 back below. The resting
+       border is 3.4:1 or more on the field, the panel and the cards. */
+    input:not([type$="checkbox"]):not([type$="radio"]):not([type$="hidden"]),
+    textarea,
+    select {
+      font: inherit;
+      line-height: 1.35;
+      color: var(--text);
+      background: #0e0523;
+      border: 1px solid #7458b8;
+      border-radius: 6px;
+      padding: .32rem .55rem;
+      box-sizing: border-box;
+      max-width: 100%;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, .45);
+      transition: border-color .15s, box-shadow .15s;
+    }
+    textarea { width: 100%; box-sizing: border-box; line-height: 1.55; padding: .55rem .7rem; resize: vertical; }
+    select { padding-right: .4rem; cursor: pointer; }
+    select option { background: var(--surface-solid); color: var(--text); }
+    input::placeholder, textarea::placeholder { color: #a093c4; opacity: 1; }
+    input:hover:not(:disabled):not([type$="checkbox"]):not([type$="radio"]), textarea:hover:not(:disabled), select:hover:not(:disabled) { border-color: #a68bea; }
+    input:focus:not([type$="checkbox"]):not([type$="radio"]), textarea:focus, select:focus {
+      outline: none;
+      border-color: var(--accent-2);
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, .45), 0 0 0 3px rgba(45, 226, 230, .25), 0 0 14px rgba(45, 226, 230, .25);
+    }
+    input:focus-visible:not([type$="checkbox"]):not([type$="radio"]), textarea:focus-visible, select:focus-visible {
+      outline: 2px solid var(--accent-2);
+      outline-offset: 1px;
+    }
+    input:disabled, textarea:disabled, select:disabled { opacity: .55; border-style: dashed; cursor: not-allowed; }
+    input[type$="radio"] { accent-color: var(--accent); }
+    input[type$="checkbox"] {
+      -webkit-appearance: none;
+              appearance: none;
+      width: 1.05rem;
+      height: 1.05rem;
+      margin: 0 .35rem 0 0;
+      vertical-align: -.2em;
+      border: 1px solid #9273d8;
+      border-radius: 4px;
+      background: #0e0523 center / 100% 100% no-repeat;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, .5);
+      cursor: pointer;
+    }
+    input[type$="checkbox"]:hover:not(:disabled) { border-color: var(--accent); box-shadow: 0 0 8px rgba(255, 60, 190, .45); }
+    input[type$="checkbox"]:checked {
+      border-color: #ff7ad6;
+      background-color: var(--accent);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.6 8.4l2.9 2.9 5.9-6.6' fill='none' stroke='%23180318' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      box-shadow: 0 0 10px rgba(255, 60, 190, .6);
+    }
+    input[type$="checkbox"]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+    input[type$="checkbox"]:disabled { opacity: .45; border-style: dashed; box-shadow: none; cursor: not-allowed; }
+
+    form.inline { display: inline; }
+    /* a draft's "Edit by hand": Thread, Note and Why each on their own line, with the note
+       field wide enough to show its whole hint */
+    details > form[action$="/edit"] > label { display: block; margin-top: .55rem; }
+    details > form[action$="/edit"] input[name$="note"] { width: min(100%, 30em); }
+    form.revise { display: flex; gap: .4rem; margin-top: .3rem; }
+    /* width 0 lets the queue's revise input shrink in a narrow window; flex 1 still fills the row */
+    form.revise input { flex: 1; width: 0; min-width: 7em; font: inherit; }
     input.order { width: 3.5em; font: inherit; }
+    /* the approved table's narrow Source column: the note and its button on one line */
+    td input[name$="note"] { width: 8.5em; }
+    /* feed: the decision form gets its own row under "Write a studio piece", with
+       space between its controls when they wrap */
+    form.decide { margin-top: .4rem; }
+    form.decide > select, form.decide > input, form.decide > button { margin-top: .15rem; margin-bottom: .15rem; vertical-align: middle; }
+
+    /* buttons: neon tubes, in sentence case */
+    button {
+      margin-right: .5rem;
+      font: 600 .86rem/1.4 var(--font-display);
+      letter-spacing: .02em;
+      color: #ffe8f7;
+      background: linear-gradient(180deg, rgba(255, 60, 190, .26), rgba(255, 60, 190, .09));
+      border: 1px solid #ff5fcf;
+      border-radius: 6px;
+      padding: .36rem .9rem;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(255, 60, 190, .22), inset 0 1px 0 rgba(255, 255, 255, .12);
+      text-shadow: 0 0 6px rgba(255, 60, 190, .4);
+      transition: background .15s, box-shadow .15s, color .15s, border-color .15s;
+    }
+    button:hover:not(:disabled) {
+      color: #fff;
+      background: linear-gradient(180deg, rgba(255, 60, 190, .45), rgba(255, 60, 190, .18));
+      box-shadow: 0 0 16px rgba(255, 60, 190, .55), 0 0 2px #ff9ae4, inset 0 1px 0 rgba(255, 255, 255, .18);
+    }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+    button:disabled {
+      cursor: not-allowed;
+      color: #9a8fb8;
+      background: transparent;
+      border: 1px dashed #5a4a80;
+      box-shadow: none;
+      text-shadow: none;
+    }
+
+    /* the actions with consequences get their own colours (attribute selectors only) */
+
+    /* approve and pick: a cyan laser fill */
+    form[action$="/approve"] button:not(.link),
+    form[action$="/edit"] button:not([name]):not(.link),
+    button.pick {
+      color: #03181b;
+      text-shadow: none;
+      background: var(--grad-laser);
+      border: 1px solid #b4fcff;
+      box-shadow: 0 0 14px rgba(45, 226, 230, .45), inset 0 1px 0 rgba(255, 255, 255, .5);
+    }
+    form[action$="/approve"] button:not(.link):hover:not(:disabled),
+    form[action$="/edit"] button:not([name]):not(.link):hover:not(:disabled),
+    button.pick:hover:not(:disabled) {
+      color: #020f11;
+      background: linear-gradient(180deg, #d6feff 0%, #8af5ff 45%, #4debc4 100%);
+      box-shadow: 0 0 22px rgba(45, 226, 230, .7), inset 0 1px 0 rgba(255, 255, 255, .55);
+    }
+    /* a cyan ring would melt into the cyan glow: these get a white one */
+    form[action$="/approve"] button:not(.link):focus-visible,
+    form[action$="/edit"] button:not([name]):not(.link):focus-visible,
+    button.pick:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    /* the one that posts to X ("Publish now", the only form action ending /now) and its manual
+       twin: the full sunset. Suffix matches throughout, so the stylesheet never repeats a
+       page's own markup (tests look for it) */
+    form[action$="/now"] button:not(.link),
+    form[action$="/done"] button:not(.link) {
+      color: #1a0420;
+      text-shadow: none;
+      font-weight: 700;
+      background: var(--grad-sunset);
+      border: 1px solid #ffc27a;
+      box-shadow: 0 0 16px rgba(255, 120, 90, .5), inset 0 1px 0 rgba(255, 255, 255, .45);
+    }
+    form[action$="/now"] button:not(.link):hover:not(:disabled),
+    form[action$="/done"] button:not(.link):hover:not(:disabled) {
+      color: #12010f;
+      background: linear-gradient(180deg, #ffe27d 0%, #ffad55 45%, #ff55c8 100%);
+      box-shadow: 0 0 24px rgba(255, 120, 90, .75), inset 0 1px 0 rgba(255, 255, 255, .5);
+    }
+
+    /* reject, stop, drop: red tubes */
+    form[action$="/reject"] button:not(.link),
+    form[action$="/runs/cancel"] button:not(.link),
+    form[action$="/drop"] button:not(.link) {
+      color: #ffdde2;
+      text-shadow: none;
+      background: linear-gradient(180deg, rgba(255, 92, 112, .24), rgba(255, 92, 112, .08));
+      border: 1px solid #ff6a7d;
+      box-shadow: 0 0 10px rgba(255, 92, 112, .25);
+    }
+    form[action$="/reject"] button:not(.link):hover:not(:disabled),
+    form[action$="/runs/cancel"] button:not(.link):hover:not(:disabled),
+    form[action$="/drop"] button:not(.link):hover:not(:disabled) {
+      color: #fff;
+      background: linear-gradient(180deg, rgba(255, 92, 112, .44), rgba(255, 92, 112, .16));
+      box-shadow: 0 0 16px rgba(255, 92, 112, .55);
+    }
+
+    /* the coloured buttons keep a visibly disabled state */
+    form[action] button:not(.link):disabled,
+    button.pick:disabled {
+      color: #9a8fb8;
+      background: transparent;
+      border: 1px dashed #5a4a80;
+      box-shadow: none;
+      text-shadow: none;
+    }
+
+    /* a button that reads as a link */
+    button.link {
+      margin: 0;
+      padding: 0;
+      font: inherit;
+      text-transform: none;
+      letter-spacing: normal;
+      color: var(--link);
+      text-decoration: underline;
+      text-decoration-color: rgba(94, 240, 255, .5);
+      text-underline-offset: 3px;
+      background: none;
+      border: none;
+      border-radius: 2px;
+      box-shadow: none;
+      text-shadow: none;
+      cursor: pointer;
+    }
+    button.link:hover:not(:disabled) { color: var(--link-hover); background: none; box-shadow: none; text-shadow: 0 0 10px rgba(255, 60, 190, .55); text-decoration-color: currentColor; }
+    button.link:active:not(:disabled) { transform: none; }
+    form[action$="/discard"] button.link,
+    form[action$="/drop"] button.link { color: var(--fail-text); text-decoration-color: rgba(255, 163, 174, .55); }
+    form[action$="/discard"] button.link:hover:not(:disabled),
+    form[action$="/drop"] button.link:hover:not(:disabled) { color: #ffd0d6; text-shadow: 0 0 10px rgba(255, 92, 112, .6); }
+
+    .actions { margin: 1rem 0; }
+    /* the approved page's order form: the help text keeps its own column beside the
+       buttons. No display on the buttons, so the order-only / order-hide rules still win. */
+    #order-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .4rem .5rem; }
+    #order-form > button { margin: 0; flex: none; }
+    #order-form > .meta { flex: 1 1 18em; min-width: 0; padding-top: .3rem; }
+    /* a draft's action forms each stay in one piece (Reject next to its reason and
+       why?); the row still wraps between forms */
+    .actions form.inline { display: inline-block; white-space: nowrap; margin: 0 .3rem .5rem 0; vertical-align: middle; }
+
+    /* --------------------------------------------------------------------------
+       The working bar (long forms): fixed at the top, sunset progress tube
+       -------------------------------------------------------------------------- */
+    #working {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      padding: .55rem 1rem;
+      font-weight: 600;
+      color: var(--text);
+      background: rgba(14, 4, 34, .97);
+      border-bottom: 1px solid var(--accent);
+      box-shadow: 0 2px 22px rgba(255, 60, 190, .35);
+    }
+    #working.on { display: block; }
+    #working .track { height: 4px; margin-top: .4rem; overflow: hidden; border-radius: 2px; background: rgba(255, 255, 255, .1); }
+    #working .fill {
+      height: 100%;
+      width: 30%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, var(--accent-2), var(--accent), var(--orange));
+      box-shadow: 0 0 10px rgba(255, 60, 190, .8);
+      animation: slide 1.2s ease-in-out infinite;
+    }
+    @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+
+    /* --------------------------------------------------------------------------
+       Scrollbars (WebKit fallback; scrollbar-color covers current Chromium)
+       -------------------------------------------------------------------------- */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: rgba(255, 255, 255, .03); }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 60, 190, .4); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+    ::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 60, 190, .65); }
+
+    /* --------------------------------------------------------------------------
+       Narrow windows
+       -------------------------------------------------------------------------- */
+    /* a half-screen window: wide tables (sources, steps, swarm, feedback) keep
+       inside the panel by tightening the cells and the tracked header labels.
+       Never overflow-wrap:anywhere on cells: it splits words like "backup|s". */
+    @media (max-width: 760px) {
+      main { padding-left: .9rem; padding-right: .9rem; }
+      th, td { padding: .4rem .4rem; }
+      th { letter-spacing: .04em; }
+    }
+    @media (max-width: 640px) {
+      body { padding-left: .6rem; padding-right: .6rem; padding-bottom: 3rem; }
+      main { padding: .1rem .85rem 1rem; border-radius: 12px; }
+      nav { padding: .4rem .7rem; font-size: .72rem; letter-spacing: .08em; }
+      nav a, nav .sep { margin-right: .7rem; }
+      h1 { font-size: 1.6rem; }
+      td input[name$="note"] { width: 100%; }
+      .actions form.inline { white-space: normal; }
+      /* a long pill in a table cell ("read the research") wraps rather than squeeze its row */
+      td > .pill { white-space: normal; letter-spacing: .05em; }
+    }
+
+    /* --------------------------------------------------------------------------
+       Motion off when asked (the targeted rules, then a safety net)
+       -------------------------------------------------------------------------- */
+    @media (prefers-reduced-motion: reduce) {
+      #working .fill {
+        animation: none;
+        width: 100%;
+        margin-left: 0;
+        background: repeating-linear-gradient(90deg, var(--accent) 0 12px, var(--orange) 12px 24px);
+      }
+      button:active:not(:disabled) { transform: none; }
+      *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    }
+
+    /* --------------------------------------------------------------------------
+       Functional rules: kept last so nothing above can override them
+       -------------------------------------------------------------------------- */
+    form.busy button, form.busy input, form.busy textarea, form.busy select { opacity: .6; pointer-events: none; }
     body:not(.ordering) .order-only { display: none; }
     body.ordering .order-hide { display: none; }
   </style>

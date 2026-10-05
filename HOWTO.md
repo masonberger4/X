@@ -790,7 +790,14 @@ and `source_stale_min_hours` to 0 for earlier warnings.
 python run_app.py
 ```
 Open http://localhost:8000. Leave it running in its own window; press Ctrl+C
-to stop it. Four pages:
+to stop it. The panel is dark, in the style of a 1980s synthwave poster: a
+striped sun behind the menu bar, a neon grid at the bottom of the window, and
+every page's content on one dark panel so nothing runs behind the text. Status
+pills differ in shape as well as colour (a solid red fail, an outlined amber
+warn, a dashed skip), and the buttons that post to X ("Publish now", "I posted
+it") are the only ones filled with the sunset colours. Nothing on the page
+moves except the progress bar of a long action; with your system set to reduce
+motion, that bar stands still too. Four pages:
 
 - **Dashboard** (`/`) — the same health checks `python run_ops.py health`
   prints, worst first (`cli` says whether the app can find the Claude Code

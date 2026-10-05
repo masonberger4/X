@@ -455,6 +455,11 @@ carrying `--live`).
   `db.Database` API (as `digest.py` does) to list scored clusters and to write a human
   yes/no decision — the only row the panel writes outside its own pages, and it opens that
   Database inside the route because a `Database` keeps its connection to one thread.
+  The look of every page (panel, queue and studio) is one stylesheet, the `<style>` block of
+  `approval_queue/templates/base.html` (a dark synthwave theme: tokens on `:root`, decoration
+  only in pseudo-elements behind the page's one content panel, the functional rules last); a
+  page template that styles itself uses those tokens with a fallback
+  (`var(--border, #ddd)`, `--surface-2`, `--ok`, `--chart-line`), never a colour of its own.
   It renders through the pure functions in `panel/views.py`
   (`now` is a parameter; no DB, network or clock), and includes the step 2 queue's
   routes into the same app so the queue's own module stays unchanged apart from its

@@ -62,7 +62,7 @@
 <h2>Cards</h2>
 {% if queue_pictures is not none and queue_pictures < cards|length %}<p class="meta">The queue draft carries {{ queue_pictures }} of these {{ cards|length }} cards: the others were dropped there (or a revision has not reached the queue yet). A Revise leaves dropped cards out unless your note asks for them back.</p>{% endif %}
 <div class="cards">
-  {% for c in cards %}<a href="/studio/{{ piece.id }}/card/{{ c.n }}" target="_blank"><img src="/studio/{{ piece.id }}/card/{{ c.n }}" alt="card {{ c.n }}" style="max-width:260px;border:1px solid #ddd;border-radius:6px"></a>{% endfor %}
+  {% for c in cards %}<a href="/studio/{{ piece.id }}/card/{{ c.n }}" target="_blank"><img src="/studio/{{ piece.id }}/card/{{ c.n }}" alt="card {{ c.n }}" style="max-width:260px;border:1px solid var(--border, #ddd);border-radius:6px"></a>{% endfor %}
 </div>
 {% endif %}
 
