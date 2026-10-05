@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import sqlite3
 import uuid
 from collections.abc import Callable
@@ -47,6 +48,8 @@ class Context:
     cfg: dict[str, Any]
     root_cfg: dict[str, Any] | None
     system: str
+    # The shipped reference pieces (studio/exemplars), which every stage copies into the
+    # piece's folder (copy_reference) rather than opening to the session.
     reference_dir: Path
     known_handles: set[str]
     brief_for: Callable[[S.Piece], P.Brief]
@@ -117,6 +120,7 @@ def _run_stage(
 
     launch = ctx.launch or claude_cli.run_session
     try:
+        copy_reference(workspace, ctx.reference_dir)
         result = launch(
             prompt_text,
             model=piece.model,
@@ -129,7 +133,8 @@ def _run_stage(
             effort=piece.effort or None,
             tools=ctx.cfg["tools"],
             allowed=ctx.cfg["tools"],
-            add_dirs=[str(ctx.reference_dir)],
+            # No --add-dir: under --restricted a folder added is one the file tools can
+            # write, and the reference pieces are read from the piece's own copy.
             flags=ctx.cfg["cli_flags"],
             max_turns=stage_max_turns(ctx.cfg, stage),
             timeout=stage_timeout(ctx.cfg, stage),
@@ -142,9 +147,10 @@ def _run_stage(
         _fail(ctx, piece, stage, f"the CLI could not run: {exc}", interrupted=True)
         raise
     except OSError as exc:
-        # The transcript could not be opened or written: the folder was deleted, the data
-        # folder moved, the disk is full. Raised, it would leave the piece mid-stage and end
-        # the run before the editor's other requests and the new piece.
+        # The reference pieces could not be copied or the transcript could not be opened or
+        # written: the folder was deleted, the data folder moved, the disk is full. Raised,
+        # it would leave the piece mid-stage and end the run before the editor's other
+        # requests and the new piece.
         message = (
             folder_missing(piece) + PUT_BACK
             if not workspace.is_dir()
@@ -176,6 +182,23 @@ def _run_stage(
         duration_ms=result.duration_ms,
     )
     return result
+
+
+def copy_reference(workspace: Path, source: Path) -> None:
+    """Give the piece its own copy of the reference pieces (P.REFERENCE_DIR in its folder)
+    when it has none, before a stage runs. The session reads them there instead of in the
+    shipped folder: a folder it can read under --restricted is one its Write and Edit can
+    change, and a web page that talked it into editing a handoff doc would steer every later
+    piece (and change files git tracks). Whatever it does to this copy stays in this piece.
+    The copy is made beside the target and renamed, so one cut short is made again next
+    time. A piece folder that is gone is left alone: the launch says so (folder_missing)."""
+    target = workspace / P.REFERENCE_DIR
+    if target.exists() or not workspace.is_dir() or not source.is_dir():
+        return
+    part = workspace / f"{P.REFERENCE_DIR}.part"
+    shutil.rmtree(part, ignore_errors=True)
+    shutil.copytree(source, part)
+    part.replace(target)
 
 
 def _run_cost(ctx: Context, piece: S.Piece, result: claude_cli.SessionResult) -> float:

@@ -65,7 +65,12 @@ outside its own steps is a human yes/no decision on the feed page, through step 
 is exactly what `digest.py --rate` writes.
 
 There is no authentication. Bind it to localhost and reach it over an SSH tunnel or a
-private network; the run buttons execute the pipeline's CLIs.
+private network; the run buttons execute the pipeline's CLIs. So that a web page open in
+the same browser cannot press them, every POST (on `run_app.py` and `run_queue.py` alike)
+must come from the app's own pages: one whose `Origin`, or `Referer` when it has no
+`Origin`, names another host than the one it was sent to (or `Origin: null`) is refused
+with 403 before any route runs (`approval_queue/app.py:SameOriginOnly`). A request with
+neither header (curl, a script on the machine) goes through.
 
 `run_queue.py` still serves the approval queue on its own for anyone who wants only
 that.
@@ -804,7 +809,9 @@ FEED TEXT markers as outside text, data and never instructions.
 **Isolation**: each session runs from its own folder under `workspace_dir`
 (`studio_pieces/`) with `--safe-mode --restricted --permission-mode dontAsk` and
 only `Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent` (`cli_flags`,
-`tools`): no shell, file tools confined to its folder and the reference folder, no
+`tools`): no shell, file tools confined to its folder (which holds the piece's own copy
+of `studio/exemplars/` as `reference/`, made by `studio/session.py:copy_reference` before a
+stage: no `--add-dir`, so a session can never change the shipped reference pieces), no
 CLAUDE.md, plugins, hooks or MCP servers, and API credentials stripped from its
 environment. The cold fact-checker, a sub-agent that gets none of the session's
 standing instructions, is told by the write and revise prompts that web pages are data

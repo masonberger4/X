@@ -241,7 +241,8 @@ def build_brief(
         today=today,
         timezone=tzname,
         workspace=str(Path(piece.workspace).resolve()),
-        reference_dir=str(EXEMPLARS_DIR.resolve()),
+        # the piece's own copy, made before each stage (studio/session.py:copy_reference)
+        reference_dir=str(Path(piece.workspace).resolve() / P.REFERENCE_DIR),
         references=references(),
         topic=piece.topic,
         story=story,

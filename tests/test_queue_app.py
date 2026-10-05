@@ -698,3 +698,69 @@ def test_release_refused_for_a_draft_that_is_not_approved(client, conn, draft_id
     assert "only an approved draft" in unquote(r.headers["location"])
     assert _schedule_row(conn, draft_id)["status"] == "claimed"
     assert client.post("/drafts/999/release").status_code == 404
+
+
+# ---- requests sent from another site ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Origin": "https://evil.example"},
+        {"Origin": "http://testserver.evil.example"},
+        {"Origin": "http://testserver:8001"},  # another app on the same machine
+        {"Origin": "null"},  # a sandboxed frame or a data: URL
+        {"Referer": "https://evil.example/a-page"},  # no Origin: the Referer decides
+        {"Origin": "https://evil.example", "Referer": "http://testserver/queue"},
+    ],
+)
+def test_a_form_sent_from_another_site_changes_nothing(client, conn, draft_id, headers):
+    """No login: a web page open in the same browser could otherwise press any button."""
+    r = client.post(f"/drafts/{draft_id}/reject", data={"note": "forged"}, headers=headers)
+    assert r.status_code == 403
+    assert "another site" in r.text and "Nothing was changed" in r.text
+    assert store.get_draft(conn, draft_id).status == "pending"
+    assert list(store.list_decisions(conn, draft_id)) == []
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},  # curl, a script on this machine
+        {"Origin": "http://testserver"},
+        {"Origin": "HTTP://TestServer"},
+        {"Referer": "http://testserver/drafts/1?x=1"},
+        {"Origin": "", "Referer": "http://testserver/queue"},
+    ],
+)
+def test_the_apps_own_pages_and_requests_without_a_site_go_through(client, conn, draft_id, headers):
+    r = client.post(f"/drafts/{draft_id}/reject", data={"note": "wrong take"}, headers=headers)
+    assert r.status_code == 303
+    assert store.get_draft(conn, draft_id).status == "rejected"
+
+
+def test_pages_are_read_from_anywhere(client, draft_id):
+    # a link from elsewhere opens a page; only a change is refused
+    assert client.get("/queue", headers={"Origin": "https://evil.example"}).status_code == 200
+    r = client.get(f"/drafts/{draft_id}", headers={"Referer": "https://evil.example/"})
+    assert r.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("host", "sender", "refused"),
+    [
+        ("127.0.0.1:8000", "http://127.0.0.1:8000", False),
+        ("localhost:8000", "http://127.0.0.1:8000", True),  # another name is another site
+        ("[::1]:8000", "http://[::1]:8000", False),
+        ("192.168.1.23:8000", "http://192.168.1.23:8000/queue", False),  # the phone on Wi-Fi
+        ("my-pc:8000", "http://user@my-pc:8000", False),
+        ("my-pc:8000", "http://my-pc:8000@evil.example", True),
+        ("", "http://my-pc:8000", True),  # no Host: nothing to match
+        ("my-pc:8000", "not a url", True),
+    ],
+)
+def test_cross_site_compares_the_sending_host_with_the_requests_own(host, sender, refused):
+    headers = {"host": host, "origin": sender}
+    assert bool(queue_app.cross_site("POST", headers)) is refused
+    assert queue_app.cross_site("GET", headers) == ""
+    assert queue_app.cross_site("HEAD", headers) == ""

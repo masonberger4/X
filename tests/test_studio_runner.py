@@ -930,7 +930,8 @@ def test_the_brief_carries_the_paths_the_settings_and_the_checkers_limits(sconn,
         ZONE,
     )
     assert brief.workspace == str(ws.resolve())
-    assert brief.reference_dir == str(EXEMPLARS_DIR.resolve())
+    # the piece's own copy of the reference pieces, never the shipped folder
+    assert brief.reference_dir == str(ws.resolve() / P.REFERENCE_DIR)
     assert brief.references == runner.references()
     assert brief.playbook == "THE PLAYBOOK"
     # the limits the checker enforces: X's own less the headroom it keeps

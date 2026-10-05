@@ -409,7 +409,8 @@ class Rig:
             today="2026-10-05",
             timezone="America/Los_Angeles",
             workspace=piece.workspace,
-            reference_dir=str(self.ctx.reference_dir),
+            # the piece's own copy, as studio/runner.py:build_brief names it
+            reference_dir=str(Path(piece.workspace) / P.REFERENCE_DIR),
             references=["merck_spr2015"],
             topic=piece.topic,
             shortlist=list(self.shortlist)
@@ -582,7 +583,8 @@ def test_every_stage_runs_in_one_session_started_once(rig):
         assert Path(call.kw["cwd"]) == ws
         assert (call.kw["model"], call.kw["effort"]) == (MODEL, "max")
         assert call.kw["tools"] == call.kw["allowed"] == rig.ctx.cfg["tools"]
-        assert call.kw["add_dirs"] == [str(rig.ctx.reference_dir)]
+        # nothing outside the piece's folder: the reference pieces are copied into it
+        assert not call.kw.get("add_dirs")
         assert call.kw["flags"] == rig.ctx.cfg["cli_flags"]
         assert Path(call.kw["transcript"]) == ws / SS.TRANSCRIPT
         assert call.kw["cfg"] is rig.ctx.root_cfg
@@ -592,6 +594,91 @@ def test_every_stage_runs_in_one_session_started_once(rig):
         "write": (None, 180 * 60.0),
         "polish": (40, 60 * 60.0),
     }
+
+
+# ---- the reference pieces -------------------------------------------------------------
+
+
+def _ship_references(rig) -> Path:
+    """The shipped reference folder, as studio/exemplars holds it: a piece with its handoff
+    doc and a card."""
+    src = rig.ctx.reference_dir
+    (src / "merck_spr2015" / "cards").mkdir(parents=True)
+    (src / "merck_spr2015" / "handoff.md").write_text("THE HANDOFF\n", encoding="utf-8")
+    (src / "merck_spr2015" / "cards" / "card_1.jpg").write_bytes(b"\xff\xd8 a card")
+    return src
+
+
+def test_each_piece_reads_its_own_copy_of_the_reference_pieces(rig):
+    """The session is never handed the shipped reference folder (an --add-dir is a folder
+    its Write and Edit can change, and every later piece reads it as the bar): each stage
+    finds a copy in the piece's own folder, and what the session writes there stays there."""
+    src = _ship_references(rig)
+
+    def research_and_tamper(ws: Path, call: Call) -> None:
+        copy = ws / P.REFERENCE_DIR
+        assert (copy / "merck_spr2015" / "handoff.md").read_text(encoding="utf-8") == (
+            "THE HANDOFF\n"
+        )
+        assert (copy / "merck_spr2015" / "cards" / "card_1.jpg").read_bytes() == (
+            b"\xff\xd8 a card"
+        )
+        # a web page talked the session into "keeping future pieces consistent"
+        (copy / "merck_spr2015" / "handoff.md").write_text("INJECTED\n", encoding="utf-8")
+        (copy / "planted").mkdir()
+        (copy / "planted" / "handoff.md").write_text("INJECTED\n", encoding="utf-8")
+        write_research(ws)
+
+    rig.cli.work["research"] = research_and_tamper
+    piece = rig.new_piece()
+    SS.research(rig.ctx, piece)
+
+    assert rig.cli.stages() == ["research", "write", "polish"]
+    copy = Path(piece.workspace) / P.REFERENCE_DIR
+    for call in rig.cli.calls:
+        assert not call.kw.get("add_dirs")
+        assert str(src) not in call.prompt
+    assert f"The reference folder: {copy} " in rig.cli.of("research")[0].prompt
+    # the shipped pieces are as they were, and nothing was added to them
+    assert (src / "merck_spr2015" / "handoff.md").read_text(encoding="utf-8") == "THE HANDOFF\n"
+    assert sorted(p.name for p in src.iterdir()) == ["merck_spr2015"]
+    # the copy is the piece's own: made once, not put back over what the session did
+    assert (copy / "merck_spr2015" / "handoff.md").read_text(encoding="utf-8") == "INJECTED\n"
+
+    # the next piece starts from the shipped pieces again
+    rig.cli.work["research"] = lambda ws, call: write_research(ws)
+    other = rig.new_piece(topic="Another topic")
+    SS.research(rig.ctx, other)
+    fresh = Path(other.workspace) / P.REFERENCE_DIR
+    assert (fresh / "merck_spr2015" / "handoff.md").read_text(encoding="utf-8") == "THE HANDOFF\n"
+    assert not (fresh / "planted").exists()
+
+
+def test_a_reference_copy_cut_short_is_made_again(rig):
+    src = _ship_references(rig)
+    piece = rig.new_piece(checkpoint=True)
+    ws = Path(piece.workspace)
+    # a stage stopped mid-copy: half a copy beside the folder, never the folder itself
+    (ws / f"{P.REFERENCE_DIR}.part" / "merck_spr2015").mkdir(parents=True)
+
+    SS.research(rig.ctx, piece)
+
+    assert not (ws / f"{P.REFERENCE_DIR}.part").exists()
+    copied = ws / P.REFERENCE_DIR / "merck_spr2015" / "handoff.md"
+    assert copied.read_text(encoding="utf-8") == "THE HANDOFF\n"
+    assert (src / "merck_spr2015" / "handoff.md").is_file()
+
+
+def test_the_reference_copy_never_brings_back_a_folder_that_is_gone(rig):
+    _ship_references(rig)
+    piece = rig.new_piece(checkpoint=True)
+    SS.research(rig.ctx, piece)
+    missing = _gone(piece)
+
+    out = SS.write(rig.ctx, rig.get(piece.id))
+
+    assert not Path(piece.workspace).exists()
+    assert out.stage == S.STAGE_FAILED and out.message == missing + SS.PUT_BACK
 
 
 def test_a_piece_without_an_effort_leaves_the_cli_default(rig):

@@ -2,7 +2,8 @@
 
 Cards are the pictures attached to a piece. They are what stops the scroll, and the
 ones people screenshot and forward, so they get the same care as the text. The
-reference cards in `exemplars/*/cards/` are the bar: look at them before you design.
+reference cards (each reference piece's `cards/` folder, in the reference folder) are
+the bar: look at them before you design.
 The CTLA-4 and Merck cards are the house style. The SMMT cards are light-themed and
 are there for their layouts only.
 

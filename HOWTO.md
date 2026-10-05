@@ -954,7 +954,12 @@ on disk (ask me to commit it), not in the browser.
 
 Anyone who can reach the page can run the pipeline, so keep it on
 `localhost`. `--host` and `--port` move it and `--reload` is for development;
-only use `--host 0.0.0.0` on a network you trust.
+only use `--host 0.0.0.0` on a network you trust. Other websites open in the
+same browser cannot press its buttons: a button press (or form) that comes
+from any page but the app's own is refused with "Refused: this request was
+sent from another site" and changes nothing. If you see that message after
+pressing a button on the app itself, you reached it through something that
+renames it on the way (a proxy); open it by its own address instead.
 
 ### As a desktop app (no browser, no command prompt)
 
@@ -1248,8 +1253,11 @@ and long posts need X Premium.
 12. Cost. One piece is one long session at max effort, often an hour, and it
     uses a lot of your Claude plan; one automatic piece a day is the shipped
     pace. Each stage has a time limit in `studio\config.yaml` (`timeouts:`).
-13. What the session can do on your PC: search and read the web, read the
-    reference pieces, and read and write files inside its own piece folder.
+13. What the session can do on your PC: search and read the web, and read
+    and write files inside its own piece folder. The reference pieces reach it
+    as a copy in that folder (`reference\`, about 2.5 MB, made when a stage
+    starts), so nothing a web page talks it into can change
+    `studio\exemplars\`, which every later piece reads.
     It has no shell, cannot touch anything else on the PC, ignores your
     CLAUDE.md, plugins and hooks, and cannot post (the `cli_flags` in
     `studio\config.yaml`).

@@ -34,6 +34,11 @@ The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., 
 so the operator has one URL for the whole workflow. Everything else this app shows is
 read through `ops/store.py`'s read-only adapters; it owns no tables of its own.
 
+No login, so every request that changes something must come from the panel's own pages:
+the queue's `SameOriginOnly` check is installed on this app too, and refuses (403) a POST
+whose Origin, or Referer without one, names another host (a web page open in the same
+browser cannot press the run, studio or queue buttons).
+
 Read-only by design: the panel never edits config.yaml, voice.md or a draft's text. Its
 run buttons sit on the pages they affect and every log stays on /runs. While it is open it
 also runs everything but publishing on its own at the times in ops/config.yaml
@@ -138,6 +143,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Pipeline control panel", lifespan=lifespan)
+# One check for every route on this app, the queue's and the studio's included.
+app.add_middleware(queue_app.SameOriginOnly)
 
 
 def current_runs() -> list[dict[str, Any]]:

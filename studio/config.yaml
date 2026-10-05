@@ -49,9 +49,10 @@ max_turns:
 # with the remaining problems listed.
 max_polish_rounds: 3
 
-# What the session may use. Read/Write/Edit only reach its own folder and the reference
-# folder; there is no shell. WebSearch/WebFetch are the research; Agent runs the cold
-# fact-check as a fresh sub-agent.
+# What the session may use. Read/Write/Edit only reach its own folder, which holds its own
+# copy of the reference pieces (studio/exemplars is never opened to a session, so nothing
+# it writes can change what later pieces read); there is no shell. WebSearch/WebFetch are
+# the research; Agent runs the cold fact-check as a fresh sub-agent.
 tools: [Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent]
 # CLI switches that isolate the session from this machine: no CLAUDE.md, plugins, hooks
 # or MCP servers (--safe-mode), file tools confined to the working folders and no

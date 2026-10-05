@@ -28,23 +28,30 @@ A studio draft (step 10) is held while the studio works on its piece or a run of
 since the revision replaces the draft's text and cards when it lands.
 
 Form bodies are parsed with urllib so no multipart dependency is needed.
+
+There is no login, so a request that changes anything must come from the app's own pages:
+`SameOriginOnly` answers 403 to a POST whose Origin (or Referer, when it has no Origin)
+names another host than the one it was sent to, so a web page open in the same browser
+cannot press the buttons. The control panel installs the same check on its app.
 """
 
 from __future__ import annotations
 
 import difflib
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 import timeutil
 from approval_queue import choosing, images, publishing, store
@@ -94,7 +101,68 @@ def install_standalone_globals() -> None:
 
 install_standalone_globals()
 
+# Methods that change nothing on these pages; any other one must come from the app itself.
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _host_of(url: str) -> str:
+    """The host[:port] a URL names, lower case, without a user part ("" for none)."""
+    try:
+        netloc = urlsplit(url).netloc
+    except ValueError:
+        return ""
+    return netloc.rpartition("@")[2].lower()
+
+
+def cross_site(method: str, headers: Mapping[str, str]) -> str:
+    """Why a request must be refused as sent from another site ("" when it may go on).
+    `headers` are looked up by lower-case name, as starlette's Headers are.
+
+    The pages have no login, so without this any web page open in the operator's browser
+    could submit a form to them: queue a studio topic and start an Opus session, rewrite the
+    studio's playbook, start a run, approve or edit a draft. A browser says which page a
+    form was sent from in Origin (in Referer when it sends no Origin), and a request that
+    changes anything must come from the host it was sent to (Host): the app's own pages,
+    whatever name or address the browser reached it by (localhost, the LAN, Tailscale).
+    Origin "null" (a sandboxed frame, a data: URL) names no host and is refused. A request
+    with neither header (curl, the tests, a script on this machine) goes on: a browser
+    sends Origin with every cross-site POST."""
+    if method.upper() in SAFE_METHODS:
+        return ""
+    for name in ("origin", "referer"):
+        sender = (headers.get(name) or "").strip()
+        if not sender:
+            continue
+        own = (headers.get("host") or "").strip().lower()
+        if own and _host_of(sender) == own:
+            return ""
+        return (
+            f"Refused: this request was sent from another site ({name.title()}: {sender[:200]}), "
+            f"not from this app's own pages at {own or '(no host)'}. Nothing was changed."
+        )
+    return ""
+
+
+class SameOriginOnly:
+    """ASGI middleware: answers 403 to a request `cross_site` refuses, before any route
+    runs. This app installs it, and so does the control panel, whose own app serves these
+    routes and the studio's (panel/app.py)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            why = cross_site(scope["method"], Headers(scope=scope))
+            if why:
+                log.warning("%s %s: %s", scope["method"], scope.get("path", ""), why)
+                await PlainTextResponse(why, status_code=403)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 app = FastAPI(title="Approval queue")
+app.add_middleware(SameOriginOnly)
 
 
 def get_conn() -> Iterator[store.sqlite3.Connection]:

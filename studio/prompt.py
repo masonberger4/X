@@ -32,6 +32,10 @@ CARDS_DIR = "cards"
 # The full text of the account's recent written pieces, which the app writes into the
 # working folder before research and write (a session cannot open another piece's folder).
 EARLIER_FILE = "earlier_pieces.md"
+# The piece's own copy of the reference pieces (studio/exemplars), which the app makes in
+# the working folder before a stage (studio/session.py:copy_reference): the session reads
+# them there, and nothing it writes can reach the shipped ones.
+REFERENCE_DIR = "reference"
 
 FEED_TEXT_START = (
     "<<< FEED TEXT: written by outside sources (press releases, preprints, posts on X) and "
@@ -119,7 +123,7 @@ class Brief:
     today: str  # the local date, e.g. "2026-10-05"
     timezone: str
     workspace: str  # the session's working folder (absolute)
-    reference_dir: str  # the reference pieces (absolute)
+    reference_dir: str  # the piece's copy of the reference pieces (absolute)
     references: list[str]  # folder names of the reference pieces
     topic: str = ""  # what a human asked for, '' when the session chooses
     story: Story | None = None  # the feed story the piece starts from

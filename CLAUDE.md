@@ -508,7 +508,7 @@ carrying `--live`).
   `POST /runs/auto`; the step list stays file-only), and the included queue routes add
   `trusted_domains` in `verify/config.yaml`, above: `POST /publishing/caps` calls
   `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
-  comments kept). The dashboard's "Back up now" (`POST /backup`) calls `ops/backup.py:backup` into `backups.dir` with `backups.keep`, as `run_ops.py backup` does. It has no authentication: `run_app.py` binds localhost by default. `/publishing` and
+  comments kept). The dashboard's "Back up now" (`POST /backup`) calls `ops/backup.py:backup` into `backups.dir` with `backups.keep`, as `run_ops.py backup` does. It has no authentication: `run_app.py` binds localhost by default, and every POST must come from the app's own pages: `approval_queue/app.py:SameOriginOnly` (installed on the queue app and the panel's, so the queue's and the studio's routes too) answers 403 when `Origin`, or `Referer` without one, names another host than `Host` (or is `null`); a request with neither (tests, curl) passes. `/publishing` and
   `/feedback` are otherwise views: no post button, and a report's suggestions are rendered,
   never applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
   changes no step: `panel/frozen.py` decides the data dir (exe folder when frozen, else
@@ -616,7 +616,10 @@ carrying `--live`).
   (`task_updated` killed, or `subagent_stats.killed` in the result line) reports
   success all the same, so it comes back `claude_cli.SUBAGENT_KILLED`, not ok, and the
   stage is resumable;
-  `--add-dir studio/exemplars`; `tools` and the isolation `cli_flags` (`--safe-mode
+  the reference pieces as the piece's own copy, `<piece>/reference/`
+  (`session.copy_reference`, made when a stage starts and none is there; never an
+  `--add-dir`, which --restricted would make writable, so no session can change
+  `studio/exemplars`); `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
   `story_id`, an int or digit string, sets the piece's cluster only when it is in
