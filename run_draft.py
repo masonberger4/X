@@ -1,6 +1,9 @@
 """CLI: draft every scored candidate above threshold that has no draft yet.
 
 A story the editor said yes to on the feed is drafted whatever its score or age, and first.
+A story the studio holds (a studio piece on it that was not discarded, whatever its stage,
+or a topic queued for it on the studio page) is left to the studio: one story, one piece of
+writing.
 
 Usage: python run_draft.py [--min-score 30] [--since-hours 48] [--limit N] [--dry-run]
                            [--no-examples] [--no-swarm] [--retry-failed] [--retag]
@@ -508,11 +511,17 @@ def main(argv: list[str] | None = None) -> int:
                 rejection_ids,
             )
         candidates = store.fetch_candidates(args.min_score, args.since_hours, conn=conn)
-        todo = [
+        # One story, one piece of writing: a story the studio holds (a piece on it that was
+        # not discarded, at any stage, or a topic queued for it) lands in the queue as the
+        # studio's piece, so it is not drafted as a short thread as well.
+        studio = store.studio_held_clusters(conn)
+        undrafted = [
             c
             for c in candidates
             if not store.has_draft(conn, c.item_id, c.cluster_id, ignore_failed=args.retry_failed)
-        ][: args.limit]
+        ]
+        left_to_studio = [c for c in undrafted if c.cluster_id in studio]
+        todo = [c for c in undrafted if c.cluster_id not in studio][: args.limit]
         log.info(
             "%d candidates >= %.1f in last %.0fh, %d without a draft",
             len(candidates),
@@ -520,6 +529,12 @@ def main(argv: list[str] | None = None) -> int:
             args.since_hours,
             len(todo),
         )
+        if left_to_studio:
+            log.info(
+                "%d left to the studio (a studio piece or queued topic has the story): %s",
+                len(left_to_studio),
+                ", ".join(c.title[:60] for c in left_to_studio),
+            )
         drafted = failed = charts = 0
         for c in todo:
             log.info("%s %.1f %s", c.source, c.total, c.title[:80])

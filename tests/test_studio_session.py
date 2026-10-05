@@ -37,6 +37,7 @@ from studio import render as render_mod
 from studio import session as SS
 from studio import store as S
 from studio.settings import load_studio_config
+from tests.conftest import seed_item
 
 SYSTEM = "STANDING INSTRUCTIONS: who you are, how a piece is made, the voice, the cards."
 MODEL = "writer-model"
@@ -753,6 +754,17 @@ def test_a_story_number_counts_only_when_the_brief_offered_it(rig, story_id, kep
     assert p.meta["offered_stories"] == [42]
     if kept is None:
         assert "research.json names story 7, not one offered; ignored" in rig.log(p)
+
+
+def test_a_story_the_session_picks_is_kept_with_one_of_its_items(rig, conn):
+    # so the piece still holds its story once linking merges it into another cluster
+    story = seed_item(conn, "s1", total=44)
+    rig.shortlist = [P.Story(cluster_id=story, title="Title s1")]
+    rig.cli.work["research"] = lambda ws, call: write_research(ws, {**RESEARCH, "story_id": story})
+    piece = rig.new_piece(checkpoint=True)
+    SS.research(rig.ctx, piece)
+    p = rig.get(piece.id)
+    assert (p.cluster_id, p.story_item) == (story, "s1")
 
 
 def test_a_piece_on_a_topic_is_offered_no_story_to_name(rig):

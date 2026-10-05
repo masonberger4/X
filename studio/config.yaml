@@ -58,20 +58,24 @@ tools: [Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent]
 cli_flags: [--safe-mode, --restricted, --permission-mode, dontAsk]
 
 # Topic choice for automatic pieces: the top scored stories of the last `lookback_hours`
-# from step 1 that no piece has used yet are offered as a shortlist; the session picks
+# from step 1 that the account has not written about yet (no studio piece or queued topic
+# on them, and no draft that did not fail) are offered as a shortlist; the session picks
 # one or finds a better story itself with a news scan.
 topics:
   lookback_hours: 48
   shortlist: 8
   min_score: 30                 # scoring total (0-50) a story needs to be offered
-  avoid_days: 10                # recent pieces' titles and companies are listed to avoid
+  # Every piece started in the last avoid_days days that was not discarded, finished or
+  # still being made (waiting at the checkpoint, stopped), is listed to the research stage
+  # with its title and companies as a topic not to repeat. 0 lists none.
+  avoid_days: 10
 
 # Variety: the session is never offered an angle used in the last N pieces, and is told
 # which hook styles and openers were used recently.
 variety:
   avoid_recent_angles: 3
   avoid_recent_hooks: 2
-  recent_pieces_shown: 8
+  recent_pieces_shown: 8         # the last N written pieces hooks, shapes and openings vary from
 
 # X limits the checker enforces (characters weighted the way X counts them).
 x:

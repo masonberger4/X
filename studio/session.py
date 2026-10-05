@@ -25,6 +25,7 @@ import claude_cli
 from studio import ingest, qa
 from studio import prompt as P
 from studio import store as S
+from studio import topics as T
 from studio.settings import stage_max_turns, stage_timeout
 
 log = logging.getLogger(__name__)
@@ -200,6 +201,8 @@ def research(
         # would do all three to a story the piece is not about.
         if story_id in offered:
             updates["cluster_id"] = story_id
+            # so the story is still found once linking merges it into another cluster
+            updates["story_item"] = T.story_item(story_id)
         else:
             log.warning(
                 "piece %s: research.json names story %s, which was not offered", piece.id, story_id

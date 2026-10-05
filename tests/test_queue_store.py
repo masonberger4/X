@@ -102,6 +102,51 @@ def test_has_draft_covers_whole_cluster(conn):
     assert not store.has_draft(conn, "b")
 
 
+def test_drafted_cluster_ids_are_every_story_with_a_draft_that_did_not_fail(conn):
+    from db import Database
+
+    ids = {}
+    for status in store.STATUSES:
+        ids[status] = seed_item(conn, status, total=9.0)
+        store.insert_draft(
+            conn,
+            item_id=status,
+            cluster_id=ids[status],
+            model="m",
+            draft=make_draft(),
+            status=status,
+        )
+    unclustered = seed_item(conn, "no-cluster-on-the-draft", total=9.0)
+    store.insert_draft(conn, item_id="no-cluster-on-the-draft", model="m", draft=make_draft())
+    # linking folds a drafted story into another cluster: the draft still counts there
+    kept = seed_item(conn, "kept", total=9.0)
+    database = Database(str(store.db_path()))
+    database.merge_clusters(kept, [ids[store.STATUS_APPROVED]])
+    database.close()
+
+    expected = {cid for status, cid in ids.items() if status != store.STATUS_FAILED}
+    assert store.drafted_cluster_ids(conn) == expected | {unclustered, kept}
+
+
+def test_the_studio_holds_no_story_before_its_first_run(conn):
+    assert store.studio_held_clusters(conn) == set()
+
+
+def test_studio_tables_from_before_story_items_still_say_what_they_hold(conn):
+    """A database whose studio tables predate story_item (the studio has not run since the
+    upgrade): the held stories are read from cluster_id alone, never an error."""
+    conn.executescript(
+        """
+        CREATE TABLE studio_pieces (id INTEGER PRIMARY KEY, cluster_id INTEGER, stage TEXT);
+        CREATE TABLE studio_topics (id INTEGER PRIMARY KEY, cluster_id INTEGER, piece_id INTEGER);
+        INSERT INTO studio_pieces (cluster_id, stage) VALUES (5, 'research_ready');
+        INSERT INTO studio_pieces (cluster_id, stage) VALUES (6, 'discarded');
+        INSERT INTO studio_topics (cluster_id, piece_id) VALUES (7, NULL), (8, 1), (NULL, NULL);
+        """
+    )
+    assert store.studio_held_clusters(conn) == {5, 7}
+
+
 def test_insert_get_and_one_draft_per_item(conn):
     seed_item(conn, "i1")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())

@@ -290,7 +290,13 @@ carrying `--live`).
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster: score at or
   above the bar within `--since-hours`, plus every story whose latest human feed rating is
-  yes whatever its score or age, those first). Its own
+  yes whatever its score or age, those first). **One story, one piece of writing**:
+  `run_draft.py` skips a story the studio holds (`store.studio_held_clusters`, read-only
+  on `studio_pieces` / `studio_topics`, empty when they are missing: a piece not
+  discarded at any stage, or an unclaimed queued topic, a merged story followed through
+  its `story_item`), and the studio's shortlist skips a story with a draft that did not
+  fail (`store.drafted_cluster_ids`, followed through the draft's item); the dashboard's
+  feed-yes count (`ops/store.py:fetch_feed_yes_undrafted`) leaves the studio's out. Its own
   tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
   An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
   decision carrying the text and the optional note) puts an approved draft back to
@@ -643,10 +649,19 @@ carrying `--live`).
   `studio/store.py` owns `studio_pieces` (stage, session id, workspace, angle, shape,
   hook, draft id, the editor's pending `request`), `studio_runs` (one per CLI run) and
   `studio_topics` (queued by the editor); its one read of step 1 is `studio/topics.py`
-  through `db.Database`. Variety is code, judgement is the session's: `studio/angles.py`
+  through `db.Database`. Each piece and queued topic keeps one item of its story
+  (`story_item`, guarded migration; recorded by the queue route, `runner.new_piece` and
+  research's `story_id`), and every run first calls `runner.follow_merges`
+  (`topics.merged`, `store.repoint_story`), so a story linking folded into another cluster
+  is written and excluded there; a story-only queued topic whose story is gone is dropped
+  and the next queued topic taken (`runner.take_queued`). Variety is code, judgement is the
+  session's: `studio/angles.py`
   offers every angle in `studio/angles.yaml` except the last `avoid_recent_angles` used (a
   human-named angle is the only one offered) and lists recent hooks, shapes and openings to
-  avoid. `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
+  avoid (from the last `recent_pieces_shown` written pieces, `Brief.recent`); RECENT
+  PIECES in the research prompt is `Brief.topics_to_avoid`, every piece started in the
+  last `topics.avoid_days` days that was not discarded, finished or not
+  (`store.started_within`, an unwritten one with its status). `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
   `interrupted`, acts on `request`s (continue, revise), then starts at most one piece:
   explicit `--topic`/`--story`, else the oldest queued topic, else with `--now` an
   automatic topic, else only when `auto.max_new_per_day` (any 24 hours, automatic pieces),

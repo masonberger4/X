@@ -54,7 +54,8 @@ class Story:
 
 @dataclass
 class RecentPiece:
-    """A piece the account already made, so the next one does not repeat it."""
+    """A piece the account already made, or is still making, so the next one does not
+    repeat it."""
 
     date: str
     title: str
@@ -63,6 +64,7 @@ class RecentPiece:
     hook_style: str = ""
     opening: str = ""
     companies: list[str] = field(default_factory=list)
+    status: str = ""  # '' once it reached the queue; else how far it got
 
     def line(self) -> str:
         bits = [self.date, self.title]
@@ -72,6 +74,8 @@ class RecentPiece:
         out = " · ".join(bits)
         if self.companies:
             out += f" · companies: {', '.join(self.companies)}"
+        if self.status:
+            out += f" · {self.status}"
         if self.opening:
             out += f'\n    opened with: "{" ".join(self.opening.split())[:200]}"'
         return f"- {out}"
@@ -92,7 +96,11 @@ class Brief:
     shortlist: list[Story] = field(default_factory=list)  # stories to choose from
     offer: AngleOffer | None = None
     hooks_to_avoid: list[str] = field(default_factory=list)
+    # The last written pieces, which the write stage varies its shape and opening from.
     recent: list[RecentPiece] = field(default_factory=list)
+    # Every piece of the last few days, finished or still being made, whose topic the
+    # research stage must not repeat.
+    topics_to_avoid: list[RecentPiece] = field(default_factory=list)
     playbook: str = ""
     # The radar (studio/radar.py), for a piece that chooses its own topic: today's scan
     # topics as (radar id, topic), and the catalysts coming up or just passed.
@@ -147,7 +155,10 @@ def _topic_block(b: Brief) -> str:
         )
         lines += [f"- {c.line()}" for c in b.coming_up]
     if b.shortlist:
-        lines.append("THE FEEDS: the top scored stories no piece has used yet.")
+        lines.append(
+            "THE FEEDS: the top scored stories that the account has not written about yet "
+            "(no piece and no drafted thread)."
+        )
         lines += [s.block() for s in b.shortlist]
     if b.radar or b.coming_up or b.shortlist:
         lines.append(
@@ -176,9 +187,9 @@ def _radar_line(radar_id: int, t: Topic) -> str:
 
 
 def _recent_block(b: Brief) -> str:
-    if not b.recent:
+    if not b.topics_to_avoid:
         return "(none yet)"
-    return "\n".join(p.line() for p in b.recent)
+    return "\n".join(p.line() for p in b.topics_to_avoid)
 
 
 def _angles_block(b: Brief) -> str:

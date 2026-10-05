@@ -247,7 +247,9 @@ def fetch_stage_activity(conn: sqlite3.Connection, now: datetime | None = None) 
 def fetch_feed_yes_undrafted(conn: sqlite3.Connection) -> int:
     """Stories the editor said yes to on the feed (latest human rating >= 4, as
     score/editorial.py reads it) with no draft of any status yet: the ones the next
-    `run_draft.py` drafts first, whatever their score. 0 when tables are missing."""
+    `run_draft.py` drafts first, whatever their score. A story the studio holds (a piece on
+    it that was not discarded, or a queued topic no piece took yet) is not counted, since
+    run_draft leaves it to the studio. 0 when tables are missing."""
     present = tables(conn)
     if not {"clusters", "ratings"} <= present:
         return 0
@@ -256,6 +258,13 @@ def fetch_feed_yes_undrafted(conn: sqlite3.Connection) -> int:
         if "drafts" in present
         else ""
     )
+    if {"studio_pieces", "studio_topics"} <= present:
+        no_draft += (
+            " AND NOT EXISTS (SELECT 1 FROM studio_pieces p"
+            " WHERE p.cluster_id = c.id AND p.stage != 'discarded')"
+            " AND NOT EXISTS (SELECT 1 FROM studio_topics t"
+            " WHERE t.cluster_id = c.id AND t.piece_id IS NULL)"
+        )
     return int(
         _scalar(
             conn,

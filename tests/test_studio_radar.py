@@ -20,6 +20,8 @@ from fastapi.testclient import TestClient
 
 import claude_cli
 import run_studio
+from approval_queue import store as queue_store
+from draft.schema import Draft
 from panel import app as panel_app
 from panel.jobs import Job
 from studio import angles as A
@@ -30,6 +32,7 @@ from studio import scan as SC
 from studio import store as S
 from studio import web as studio_web
 from studio.settings import load_studio_config
+from tests.conftest import seed_item
 from tests.test_studio_runner import (  # noqa: F401 (fixtures)
     FakeCLI,
     _display_zone,
@@ -688,6 +691,21 @@ def test_writing_a_radar_topic_queues_it_with_the_scans_reasons(client, sconn, s
     S.drop_topic(sconn, queued.id)
     client.post(f"/studio/radar/topics/{rid}/write", data={"angle": "made_up"})
     assert S.queued_topics(sconn)[0].angle == ""
+
+
+def test_the_radar_pages_feed_stories_leave_out_what_the_drafter_has(client, sconn):
+    """One story, one piece of writing: a story with a waiting draft is not offered."""
+    drafted = seed_item(sconn, "drafted", total=45)
+    seed_item(sconn, "free", total=44)
+    queue_store.insert_draft(
+        sconn,
+        item_id="drafted",
+        cluster_id=drafted,
+        model="m",
+        draft=Draft(thread=["x"], suggested_visual="", why_it_matters=""),
+    )
+    body = client.get("/studio/radar").text
+    assert "Title free" in body and "Title drafted" not in body
 
 
 def test_a_radar_topic_can_be_dismissed(client, sconn):

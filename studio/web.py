@@ -62,6 +62,7 @@ from studio import playbook as PB
 from studio import prompt as P
 from studio import radar as R
 from studio import store as S
+from studio import topics as T
 from studio.settings import DEFAULT_PLAYBOOK, PLAYBOOK_NAME, load_studio_config, playbook_path
 
 log = logging.getLogger(__name__)
@@ -287,7 +288,16 @@ async def studio_queue_topic(request: Request, conn: Conn):
                 return _redirect("/studio", f"unknown angle {angle}")
         except (OSError, ValueError):
             pass
-    S.queue_topic(conn, topic=topic, cluster_id=cluster_id, angle=angle, checkpoint=checkpoint)
+    S.queue_topic(
+        conn,
+        topic=topic,
+        cluster_id=cluster_id,
+        angle=angle,
+        checkpoint=checkpoint,
+        # one of the story's items, so the run still finds the story if linking merges it
+        # into another cluster before the studio gets to it
+        story_item=T.story_item(cluster_id) if cluster_id is not None else "",
+    )
     return _redirect("/studio", _start([STEP_NEW]))
 
 
@@ -500,8 +510,10 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
         "later": [c for c in rows if c.date_start > soon],
     }
     suggested = {c.id: R.catalyst_text(c.to_catalyst(), today=today)[1] for c in rows}
+    from studio.runner import taken_stories  # one story, one piece of writing
+
     feed = T.fetch_shortlist(
-        {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=S.used_cluster_ids(conn)
+        {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=taken_stories(conn)
     )
     return templates.TemplateResponse(
         request,

@@ -19,8 +19,10 @@ Owns four tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline
                  -- render-grade loop in approval_queue/images.py
 
 Never modifies the items or scores tables. Step 7 reads items only through
-fetch_decisions_for_voice / fetch_draft_stats, and only for source and url. The studio's
-studio_pieces is read only by studio_hold (read-only, nothing when the table is missing).
+fetch_decisions_for_voice / fetch_draft_stats, and only for source and url; items.cluster_id
+is also read to follow a story that linking merged (drafted_cluster_ids,
+studio_held_clusters). The studio's studio_pieces and studio_topics are read only by
+studio_hold and studio_held_clusters (read-only, nothing when the tables are missing).
 """
 
 from __future__ import annotations
@@ -562,6 +564,64 @@ def has_draft(
         params += (STATUS_FAILED,)
     row = conn.execute(f"SELECT 1 FROM drafts WHERE {where}", params).fetchone()
     return row is not None
+
+
+def drafted_cluster_ids(conn: sqlite3.Connection) -> set[int]:
+    """Every story with a draft that did not fail the hard rules, whatever else its status
+    (waiting, approved, rejected, posted): the studio's shortlist leaves these out
+    (studio/runner.py:taken_stories), as run_draft leaves the studio's stories alone
+    (`studio_held_clusters`). One story, one piece of writing. A draft's story is also
+    followed through its item to the cluster that holds it now, since story linking folds
+    one cluster into another."""
+    ids = {
+        int(r[0])
+        for r in conn.execute(
+            "SELECT cluster_id FROM drafts WHERE cluster_id IS NOT NULL AND status != ?",
+            (STATUS_FAILED,),
+        )
+    }
+    if step1_tables_present(conn):
+        ids |= {
+            int(r[0])
+            for r in conn.execute(
+                "SELECT i.cluster_id FROM drafts d JOIN items i ON i.id = d.item_id "
+                "WHERE d.status != ? AND i.cluster_id IS NOT NULL",
+                (STATUS_FAILED,),
+            )
+        }
+    return ids
+
+
+def studio_held_clusters(conn: sqlite3.Connection) -> set[int]:
+    """The stories the studio holds, which run_draft leaves to it (one story, one piece of
+    writing): the story of every studio piece that was not discarded, whatever its stage (a
+    piece waiting at the research checkpoint, still running, failed or interrupted lands in
+    the queue later, on that story), and of every topic queued on the studio page that no
+    piece has taken yet. A story that linking merged into another cluster is followed
+    through the item the studio keeps with it (`story_item`), before the next studio run
+    points its rows there. A read-only look at the studio's own studio_pieces and
+    studio_topics (studio/store.py owns them); empty before the studio's first run."""
+    from studio import store as studio_store
+
+    tables = ("studio_pieces", "studio_topics")
+    if not all(_columns(conn, t) for t in tables):  # no columns: the table does not exist
+        return set()
+    discarded = studio_store.STAGE_DISCARDED
+    sql = [
+        "SELECT cluster_id FROM studio_pieces WHERE stage != ? AND cluster_id IS NOT NULL",
+        "SELECT cluster_id FROM studio_topics WHERE piece_id IS NULL AND cluster_id IS NOT NULL",
+    ]
+    args: list[Any] = [discarded]
+    if all("story_item" in _columns(conn, t) for t in tables) and step1_tables_present(conn):
+        sql += [
+            "SELECT i.cluster_id FROM studio_pieces p JOIN items i ON i.id = p.story_item "
+            "WHERE p.stage != ?",
+            "SELECT i.cluster_id FROM studio_topics t JOIN items i ON i.id = t.story_item "
+            "WHERE t.piece_id IS NULL",
+        ]
+        args.append(discarded)
+    rows = conn.execute(" UNION ".join(sql), args).fetchall()
+    return {int(r[0]) for r in rows if r[0] is not None}
 
 
 def delete_failed_drafts(

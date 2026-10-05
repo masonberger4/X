@@ -28,6 +28,7 @@ import claude_cli
 import run_studio
 import timeutil
 from approval_queue import store as queue_store
+from db import Database
 from draft.schema import SHAPE_LONG, Draft
 from ops import lock
 from studio import angles as A
@@ -147,6 +148,16 @@ def get(conn, piece_id: int) -> S.Piece:
     piece = S.get_piece(conn, piece_id)
     assert piece is not None
     return piece
+
+
+def merge(keep: int, *others: int) -> None:
+    """Story linking (filter/link.py) folding `others` into `keep`, through step 1's own
+    Database on the test DB: the items move over and the other clusters are deleted."""
+    database = Database(str(queue_store.db_path()))
+    try:
+        database.merge_clusters(keep, list(others))
+    finally:
+        database.close()
 
 
 def studio_draft(conn, piece: S.Piece) -> int:
@@ -677,6 +688,14 @@ def test_a_new_piece_gets_its_own_folder_and_a_fresh_session(
     )
     assert (piece.topic, piece.cluster_id) == (topic, cluster_id)
     assert (piece.model, piece.effort) == (cfg["model"], cfg["effort"])
+    assert piece.story_item == ""  # story 42 is not in the feed: no item to remember
+
+
+def test_a_new_piece_on_a_feed_story_remembers_one_of_its_items(sconn, cfg):
+    story = seed_item(sconn, "s1", total=44)
+    seed_item(sconn, "s2", cluster_id=story)
+    piece = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, cluster_id=story, checkpoint=True)
+    assert (piece.cluster_id, piece.story_item) in {(story, "s1"), (story, "s2")}
 
 
 def test_a_new_piece_keeps_a_known_angle_and_refuses_an_unknown_one(sconn, cfg, tmp_path):
@@ -760,6 +779,59 @@ def test_the_brief_lists_recent_written_pieces_newest_first(sconn, cfg, tmp_path
     assert brief.hooks_to_avoid == ["question", "juxtaposition"]
 
 
+def test_the_topics_to_avoid_are_every_piece_of_the_window_written_or_not(
+    sconn, cfg, tmp_path, clock
+):
+    """RECENT PIECES lists every piece of the last topics.avoid_days days that was not
+    discarded, with how far an unwritten one got: a piece waiting at the checkpoint, or
+    stopped, still has its topic. Only written pieces count for variety."""
+    cfg["topics"]["avoid_days"] = 10
+    clock.set(T0 - timedelta(days=11))
+    make_piece(sconn, stage=S.STAGE_READY, angle="scorecard", title="Too old to list")
+    clock.set(T0 - timedelta(days=3))
+    ready = make_piece(
+        sconn,
+        stage=S.STAGE_READY,
+        angle="deal_decoder",
+        title="Merck's walked-away bid",
+        draft_id=7,
+    )
+    clock.set(T0 - timedelta(days=2))
+    waiting = make_piece(
+        sconn,
+        topic="",
+        stage=S.STAGE_RESEARCH_READY,
+        title="Iovance's TIL relaunch",
+        meta={"research": {"companies": [{"name": "Iovance", "ticker": "IOVA"}]}},
+    )
+    clock.set(T0 - timedelta(days=1))
+    stopped = make_piece(sconn, topic="CD19 CAR-T in lupus", stage=S.STAGE_INTERRUPTED)
+    failed = make_piece(sconn, topic="Bispecific pricing", stage=S.STAGE_FAILED)
+    make_piece(sconn, topic="Given up", stage=S.STAGE_DISCARDED)
+    clock.set(T0)
+    current = make_piece(sconn, topic="")
+
+    brief = brief_for(sconn, cfg, current)
+
+    assert [(r.title, r.status) for r in brief.topics_to_avoid] == [
+        (failed.label, "not written yet: stopped, may be resumed"),
+        (stopped.label, "not written yet: stopped, may be resumed"),
+        (waiting.label, "not written yet: researched, waiting for the editor"),
+        (ready.label, ""),
+    ]
+    assert brief.topics_to_avoid[2].companies == ["Iovance"]
+    assert brief.topics_to_avoid[3].angle == "deal_decoder"
+    # variety still comes from the written pieces only, whatever their age
+    assert [r.title for r in brief.recent] == [ready.label, "Too old to list"]
+    assert brief.offer.held_back == ["deal_decoder", "scorecard"]
+    prompt = P.research_prompt(brief)
+    assert "Iovance's TIL relaunch · companies: Iovance · not written yet" in prompt
+    assert "Too old to list" not in prompt
+
+    cfg["topics"]["avoid_days"] = 0  # lists none
+    assert brief_for(sconn, cfg, current).topics_to_avoid == []
+
+
 def test_the_recent_list_is_as_long_as_the_settings_say(sconn, cfg, clock):
     cfg["variety"].update(recent_pieces_shown=2, avoid_recent_angles=1, avoid_recent_hooks=1)
     for angle, hook in (("deal_decoder", "story"), ("catalyst_map", "contrarian")):
@@ -841,6 +913,48 @@ def test_an_open_piece_is_offered_the_top_stories_no_piece_has_used(sconn, cfg):
     brief = brief_for(sconn, cfg, piece)
     assert brief.story is None
     assert [s.cluster_id for s in brief.shortlist] == [fresh]
+
+
+def test_an_open_piece_is_not_offered_a_story_the_drafter_already_has(sconn, cfg):
+    """One story, one piece of writing: a story with a draft that did not fail (waiting,
+    in the A/B pick, approved, rejected) is the drafter's; a failed draft leaves it free."""
+    statuses = {
+        "pending": queue_store.STATUS_PENDING,
+        "choosing": queue_store.STATUS_CHOOSING,
+        "approved": queue_store.STATUS_APPROVED,
+        "rejected": queue_store.STATUS_REJECTED,
+        "failed": queue_store.STATUS_FAILED,
+    }
+    stories = {name: seed_item(sconn, name, total=45) for name in statuses}
+    fresh = seed_item(sconn, "fresh", total=40)
+    for name, status in statuses.items():
+        queue_store.insert_draft(
+            sconn,
+            item_id=name,
+            cluster_id=stories[name],
+            model="m",
+            draft=Draft(thread=["x"], suggested_visual="", why_it_matters=""),
+            status=status,
+        )
+    # a drafted story that linking merged into another: the kept cluster is drafted too
+    kept = seed_item(sconn, "kept", total=48)
+    folded = seed_item(sconn, "folded", total=30)
+    queue_store.insert_draft(
+        sconn,
+        item_id="folded",
+        cluster_id=folded,
+        model="m",
+        draft=Draft(thread=["x"], suggested_visual="", why_it_matters=""),
+    )
+    merge(kept, folded)
+
+    brief = brief_for(sconn, cfg, make_piece(sconn, topic=""))
+
+    assert sorted(s.cluster_id for s in brief.shortlist) == sorted([stories["failed"], fresh])
+    assert "that the account has not written about yet" in P.research_prompt(brief)
+    # the radar's scan is given the same stories as leads
+    leads = runner.feed_lines(cfg, sconn)
+    assert sorted(line.split(" (")[0] for line in leads) == ["Title failed", "Title fresh"]
 
 
 def test_a_topic_or_a_later_stage_is_never_offered_a_shortlist(sconn, cfg):
@@ -1054,6 +1168,65 @@ def test_a_queued_story_that_left_the_feed_falls_back_to_its_words_or_is_dropped
     assert runner.run() == 0
     piece = rig.only_piece()
     assert (piece.topic, piece.cluster_id) == (TOPIC, None)
+
+
+def test_a_queued_story_that_linking_merged_is_followed_to_its_new_cluster(rig, sconn):
+    """The Feed queued the story while a session ran; the next score run's linking folded
+    it into an older cluster before the studio got to it. The run writes it all the same,
+    on the cluster that holds it now."""
+    older = seed_item(sconn, "older", total=44)
+    newer = seed_item(sconn, "newer", total=41)
+    # as the Feed's button queues it (tests/test_studio_web.py: the route keeps the item)
+    S.queue_topic(sconn, cluster_id=newer, story_item=T.story_item(newer), checkpoint=True)
+    merge(older, newer)
+
+    assert runner.run(now=True) == 0
+
+    piece = rig.only_piece()
+    assert piece.cluster_id == older
+    assert S.queued_topics(sconn) == []  # claimed by the piece
+    assert f"[story {older}] Title older" in rig.cli.prompt("research")
+
+
+def test_a_dropped_queued_story_lets_the_topic_behind_it_start(rig, sconn, caplog):
+    S.queue_topic(sconn, cluster_id=99998)  # a story alone, gone with nothing to follow
+    behind = S.queue_topic(sconn, topic=TOPIC, checkpoint=True)  # the press was for this
+    with caplog.at_level(logging.WARNING, logger="studio.runner"):
+        assert runner.run(now=True) == 0
+    assert "story 99998 is not in the feed any more" in caplog.text
+    piece = rig.only_piece()
+    assert piece.topic == TOPIC and S.queued_topics(sconn) == []
+    claimed = sconn.execute("SELECT piece_id FROM studio_topics WHERE id = ?", (behind,))
+    assert claimed.fetchone()[0] == piece.id
+
+
+def test_a_run_points_the_studio_at_merged_stories_before_it_offers_any(rig, sconn, cfg):
+    cfg["auto"].update(max_new_per_day=3, min_hours_between=0)
+    older = seed_item(sconn, "older", total=47)
+    newer = seed_item(sconn, "newer", total=45)
+    fresh = seed_item(sconn, "fresh", total=40)
+    used = make_piece(
+        sconn, topic="", cluster_id=newer, story_item="newer", stage=S.STAGE_DISCARDED
+    )
+    waiting = make_piece(sconn, cluster_id=newer, story_item="newer", stage=S.STAGE_READY)
+    merge(older, newer)
+    assert S.used_cluster_ids(sconn) == {newer}  # the dead id, until a run follows it
+
+    assert runner.run() == 0
+
+    assert get(sconn, used.id).cluster_id == older and get(sconn, waiting.id).cluster_id == older
+    prompt = rig.cli.prompt("research")
+    assert f"[story {fresh}]" in prompt and f"[story {older}]" not in prompt
+
+
+def test_a_dry_run_follows_a_merged_queued_story_without_writing(rig, sconn, capsys):
+    older = seed_item(sconn, "older", total=44)
+    newer = seed_item(sconn, "newer", total=41)
+    S.queue_topic(sconn, cluster_id=newer, story_item="newer")
+    merge(older, newer)
+    assert runner.run(dry_run=True) == 0
+    assert f"[story {older}] Title older" in capsys.readouterr().out
+    assert [t.cluster_id for t in S.queued_topics(sconn)] == [newer]  # read-only
 
 
 def test_two_pieces_on_one_topic_in_the_same_second_get_their_own_folders(rig, sconn, cfg):
@@ -1480,10 +1653,36 @@ def test_the_summary_is_the_clusters_longest_abstract(sconn):
     assert T.fetch_story(cid).summary == "B" * 300
 
 
+def test_a_story_item_is_the_stories_earliest_item(sconn):
+    cid = seed_item(sconn, "late", total=40)
+    seed_item(sconn, "early", cluster_id=cid)
+    sconn.execute("UPDATE items SET published_at = '2026-10-01T00:00:00+00:00' WHERE id = 'early'")
+    sconn.commit()
+    assert T.story_item(cid) == "early"
+    assert T.story_item(12345) == ""
+
+
+def test_merged_follows_each_story_item_to_the_cluster_that_holds_it(sconn):
+    keep = seed_item(sconn, "keep", total=44)
+    folded = seed_item(sconn, "folded", total=41)
+    alive = seed_item(sconn, "alive", total=40)
+    merge(keep, folded)
+    stories = [
+        (folded, "folded"),  # merged: followed
+        (alive, "alive"),  # still there: nothing to follow
+        (keep, "keep"),
+        (777, "no-such-item"),  # gone, and its item too
+        (778, ""),  # no item remembered
+    ]
+    assert T.merged(stories) == {folded: keep}
+    assert T.merged([]) == {}
+
+
 def test_no_feed_database_means_no_stories(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "missing" / "pipeline.db"))
     assert T.fetch_shortlist(TCFG, exclude=set()) == []
     assert T.fetch_story(1) is None
+    assert T.story_item(1) == "" and T.merged([(1, "x")]) == {}
     assert not (tmp_path / "missing").exists()
 
 

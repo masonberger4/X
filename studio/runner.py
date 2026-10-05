@@ -111,6 +111,56 @@ def recent(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[S.Piece]:
     return S.recent_pieces(conn, int(cfg["variety"].get("recent_pieces_shown") or 8))
 
 
+# How far a piece that has not reached the queue got, as RECENT PIECES says it: its topic is
+# taken all the same (a piece waiting for Continue, or stopped and resumable, lands later).
+_NOT_WRITTEN = {
+    S.STAGE_RESEARCHING: "not written yet: being researched",
+    S.STAGE_RESEARCH_READY: "not written yet: researched, waiting for the editor",
+    S.STAGE_WRITING: "not written yet: being written",
+    S.STAGE_POLISHING: "not written yet: being written",
+    S.STAGE_FAILED: "not written yet: stopped, may be resumed",
+    S.STAGE_INTERRUPTED: "not written yet: stopped, may be resumed",
+}
+
+
+def _recent_piece(p: S.Piece) -> P.RecentPiece:
+    from timeutil import fmt_date
+
+    return P.RecentPiece(
+        # The display zone's date, as `today` is: a UTC date can read as tomorrow.
+        date=fmt_date(p.created_at),
+        title=p.label,
+        angle=p.angle,
+        shape=p.shape,
+        hook_style=p.hook_style,
+        opening=_opening(p),
+        companies=_companies(p),
+        status="" if p.draft_id is not None else _NOT_WRITTEN.get(p.stage, ""),
+    )
+
+
+def taken_stories(conn: sqlite3.Connection) -> set[int]:
+    """The feed stories a new piece is not offered. One story, one piece of writing: the
+    studio's own (a piece of any stage, a queued topic) and every story with a draft that
+    did not fail, waiting, approved, rejected or posted (approval_queue/store.py's
+    read-only drafted_cluster_ids; run_draft leaves the studio's stories alone in turn)."""
+    from approval_queue import store as queue_store
+
+    return S.used_cluster_ids(conn) | queue_store.drafted_cluster_ids(conn)
+
+
+def follow_merges(conn: sqlite3.Connection) -> int:
+    """Point the studio's pieces and queued topics at the cluster their story is in now.
+    Story linking (run_score.py) folds a cluster into another and deletes it; the item each
+    row remembers (`story_item`) moved with the story, so a queued story is still written
+    and a used one is still left out of the shortlist. Returns the stories moved."""
+    moves = T.merged(S.remembered_stories(conn))
+    for old, new in sorted(moves.items()):
+        S.repoint_story(conn, old, new)
+        log.info("story %s was merged into story %s; the studio follows it", old, new)
+    return len(moves)
+
+
 def build_brief(
     conn: sqlite3.Connection,
     cfg: dict[str, Any],
@@ -122,22 +172,12 @@ def build_brief(
     tzname: str,
     evidence: E.Evidence | None = None,
 ) -> P.Brief:
-    from timeutil import fmt_date
-
+    # Variety (angles, hooks, shapes, openings) comes from the last written pieces; the
+    # topics to avoid from every piece of the last `topics.avoid_days` days, written or not.
     pieces = [p for p in recent(conn, cfg) if p.id != piece.id]
-    recent_pieces = [
-        P.RecentPiece(
-            # The display zone's date, as `today` is: a UTC date can read as tomorrow.
-            date=fmt_date(p.created_at),
-            title=p.label,
-            angle=p.angle,
-            shape=p.shape,
-            hook_style=p.hook_style,
-            opening=_opening(p),
-            companies=_companies(p),
-        )
-        for p in pieces
-    ]
+    recent_pieces = [_recent_piece(p) for p in pieces]
+    days = float(cfg["topics"].get("avoid_days") or 0)
+    avoid = [_recent_piece(p) for p in S.started_within(conn, days) if p.id != piece.id]
     offer = A.offer(
         library,
         [p.angle for p in pieces],
@@ -153,7 +193,7 @@ def build_brief(
     coming: list[R.Catalyst] = []
     if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
         # Only the research stage chooses a story; later stages have one.
-        shortlist = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+        shortlist = T.fetch_shortlist(cfg["topics"], exclude=taken_stories(conn))
         radar, coming = radar_for_brief(conn, cfg, date.fromisoformat(today))
     said, lean = "", None
     if evidence is not None:
@@ -186,6 +226,7 @@ def build_brief(
         offer=offer,
         hooks_to_avoid=hooks,
         recent=recent_pieces,
+        topics_to_avoid=avoid,
         playbook=playbook,
         evidence=said,
         lean=lean,
@@ -393,6 +434,7 @@ def new_piece(
         workspace=str(folder.resolve()),
         model=str(cfg["model"]),
         effort=str(cfg.get("effort") or ""),
+        story_item=T.story_item(cluster_id) if cluster_id is not None else "",
     )
     piece = S.get_piece(conn, piece_id)
     assert piece is not None
@@ -433,6 +475,27 @@ def act_on_requests(ctx: SS.Context) -> int:
     return done
 
 
+def take_queued(conn: sqlite3.Connection) -> tuple[S.QueuedTopic | None, int]:
+    """The oldest queued topic a piece can start on, and how many were dropped on the way.
+    A topic that is only a feed story, whose story left the feed (removed, or merged with
+    no item to follow it by), has nothing left to write about: it is dropped and the next
+    one is taken, since the press that started this run may have been for that one."""
+    dropped = 0
+    while True:
+        queued = S.next_queued_topic(conn)
+        if queued is None or queued.topic or queued.cluster_id is None:
+            return queued, dropped
+        if T.fetch_story(queued.cluster_id) is not None:
+            return queued, dropped
+        log.warning(
+            "story %s is not in the feed any more (merged or removed); queued topic %s dropped",
+            queued.cluster_id,
+            queued.id,
+        )
+        S.drop_topic(conn, queued.id)
+        dropped += 1
+
+
 def run(
     *,
     now: bool = False,
@@ -451,6 +514,8 @@ def run(
             if queued is not None:
                 topic, story = queued.topic, queued.cluster_id
                 angle = queued.angle or angle
+                if story is not None:  # where linking moved it, as the real run follows it
+                    story = T.merged([(story, queued.story_item)]).get(story, story)
             return _dry_run(conn, cfg, topic=topic, story=story, angle=angle)
         finally:
             conn.close()
@@ -467,12 +532,14 @@ def run(
         stale = mark_stale(conn)
         for p in stale:
             log.warning("piece %s was interrupted mid-stage; resume it from the studio page", p.id)
+        follow_merges(conn)
         ctx = make_context(conn, cfg)
         act_on_requests(ctx)
         if resume_only:
             return 0
-        queued = S.next_queued_topic(conn)
-        if topic or story is not None:
+        explicit = bool(topic) or story is not None
+        queued, dropped = (None, 0) if explicit else take_queued(conn)
+        if explicit:
             plan = dict(
                 origin=S.ORIGIN_MANUAL,
                 topic=topic,
@@ -498,6 +565,11 @@ def run(
                     plan["angle"],
                 )
                 plan["angle"] = ""
+        elif dropped:
+            # The queued topics there were had nothing left to write about: the press that
+            # started this run was for one of them, not for a piece of the studio's choosing.
+            log.info("no new piece: the queued topics were dropped")
+            return 0
         elif now:
             plan = dict(
                 origin=S.ORIGIN_MANUAL,
@@ -520,17 +592,14 @@ def run(
             )
         if plan["cluster_id"] is not None and T.fetch_story(plan["cluster_id"]) is None:
             gone = f"story {plan['cluster_id']} is not in the feed any more (merged or removed)"
-            if topic or story is not None or queued is None:
+            if queued is None:  # an explicit --story
                 log.error("%s; nothing started", gone)
                 return 2
-            if not plan["topic"]:
-                log.warning("%s; queued topic %s dropped", gone, queued.id)
-                S.drop_topic(conn, queued.id)
-                return 0
+            # take_queued kept this topic for its words
             log.warning("%s; writing on the queued topic's words alone", gone)
             plan["cluster_id"] = None
         piece = new_piece(conn, cfg, **plan)
-        if queued is not None and not (topic or story is not None):
+        if queued is not None:
             S.claim_topic(conn, queued.id, piece.id)
         log.info("piece %s started in %s", piece.id, piece.workspace)
         out = SS.research(ctx, piece)
@@ -692,8 +761,9 @@ def print_list() -> int:
 
 
 def feed_lines(cfg: dict[str, Any], conn: sqlite3.Connection) -> list[str]:
-    """The feed's top unused stories, one line each, as leads for the scan."""
-    stories = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+    """The feed's top stories nobody has written about (taken_stories), one line each, as
+    leads for the scan."""
+    stories = T.fetch_shortlist(cfg["topics"], exclude=taken_stories(conn))
     return [
         f"{s.title} ({', '.join(x for x in (s.source, s.published) if x)})"
         + (f" [feed score {s.score}/50]" if s.score is not None else "")

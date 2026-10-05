@@ -108,7 +108,11 @@ source only when it is due, and score only scores what is new.
 
 The studio (part 9) is now the main way posts are made: one Opus session per
 piece, researched, fact-checked and with designed cards. The drafter below still
-runs and writes shorter threads for the day's other stories.
+runs and writes shorter threads for the day's other stories. One story gets one
+piece of writing: the drafter skips a story the studio holds (a studio piece on it
+you have not discarded, even one waiting for you at the research checkpoint or
+stopped, or a topic queued for it on the studio page), and the studio never picks a
+story that already has a draft. A run says `N left to the studio` when it skips some.
 
 1. Draft posts for the top stories.
    ```
@@ -1069,13 +1073,16 @@ and long posts need X Premium.
    most `max_new_per_day` (1) in any 24 hours, `min_hours_between` (6) hours after
    the last piece, and never while a piece waits for you at the research
    checkpoint. An automatic piece picks its own story from the top scored stories
-   of the last two days that no piece has used, or finds a better one with its own
-   news scan, and writes straight through (`auto: checkpoint: false`). It is also
-   offered the radar (item 10): the day's scan topics and the catalysts coming up
-   or just passed. The piece is tied to a feed story only when it is one the app
-   offered it (so the drafter leaves that story to the studio); a number it made
-   up ties it to nothing. Expect it in the queue 30 to 90 minutes after the run
-   starts. A session still running at the next run time sits that run out
+   of the last two days that the account has not written about (no studio piece on
+   it and no draft from the drafter), or finds a better one with its own news scan,
+   and writes straight through (`auto: checkpoint: false`). It is also offered the
+   radar (item 10): the day's scan topics and the catalysts coming up or just
+   passed. It is told every piece of the last 10 days (`topics: avoid_days` in
+   `studio\config.yaml`), finished or still waiting for you, so it does not repeat
+   a topic. The piece is tied to a feed story only when it is one the app offered
+   it (so the drafter leaves that story to the studio); a number it made up ties
+   it to nothing. Expect it in the queue 30 to 90 minutes after the run starts. A
+   session still running at the next run time sits that run out
    (`skip_when_busy`) instead of holding the other steps back, and so do the
    steps still waiting behind it in its own run
    (draft, verify, feedback, evolve): that run gets to them when the session
@@ -1085,8 +1092,10 @@ and long posts need X Premium.
    $SMMT"), pick an angle or leave it to the session, and press **Write it**. On
    the **Feed** page, **Write a studio piece** under a story does the same with
    that story. A piece you start stops after research by default (the tick box)
-   so you can read the fact base first. The run shows on the runs page like any
-   other; its Stop button ends it, and the piece can be resumed later.
+   so you can read the fact base first. If the feed merges that story with another
+   before the studio gets to it, the piece follows it to the merged story. The run
+   shows on the runs page like any other; its Stop button ends it, and the piece
+   can be resumed later.
 4. The research checkpoint. When a piece says **read the research**, open it:
    the fact base is there with every source marked opened or seen in search
    results only, the X handles it verified, the corrections it made and the
@@ -1124,7 +1133,8 @@ and long posts need X Premium.
    stopped, Resume goes through a revision first, so your edit is not
    overwritten. **Discard** gives up on a piece: its files stay in the
    `studio_pieces` folder, and a draft of it still pending in the queue is
-   rejected.
+   rejected. A piece discarded before it reached the queue gives its story back to
+   the drafter.
 8. The playbook. **Studio → The playbook** is the short note every session
    reads before it writes: what works on this account and the mistakes the
    fact-checks keep catching. Edit and save it (the box under it says what you

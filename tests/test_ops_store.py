@@ -320,6 +320,48 @@ def test_fetch_feed_yes_undrafted(conn):
     assert store.fetch_feed_yes_undrafted(conn) == 3
 
 
+def test_fetch_feed_yes_undrafted_leaves_out_what_the_studio_holds(conn):
+    """run_draft leaves a story the studio holds to the studio, so the dashboard does not
+    count it as waiting to be drafted: a piece on it that was not discarded (at any stage),
+    or a topic queued for it that no piece took yet."""
+    from studio import store as studio_store
+
+    studio_store.ensure_tables(conn)
+    names = ("waiting", "failed", "queued", "discarded", "claimed", "free")
+    stories = {name: seed_item(conn, name, total=40) for name in names}
+    for cid in stories.values():
+        conn.execute(
+            "INSERT INTO ratings (cluster_id, rating, rated_at, rater) VALUES (?, 5, ?, 'human')",
+            (cid, iso(datetime.now(UTC))),
+        )
+    conn.commit()
+
+    def piece(name, stage):
+        pid = studio_store.create_piece(
+            conn,
+            origin="manual",
+            topic="",
+            cluster_id=stories[name],
+            requested_angle="",
+            checkpoint=True,
+            session_id=f"s-{name}",
+            workspace="/w",
+            model="m",
+            effort="max",
+        )
+        studio_store.update_piece(conn, pid, stage=stage)
+        return pid
+
+    piece("waiting", studio_store.STAGE_RESEARCH_READY)
+    piece("failed", studio_store.STAGE_FAILED)
+    piece("discarded", studio_store.STAGE_DISCARDED)
+    studio_store.queue_topic(conn, cluster_id=stories["queued"])
+    taken = studio_store.queue_topic(conn, cluster_id=stories["claimed"])
+    studio_store.claim_topic(conn, taken, piece("claimed", studio_store.STAGE_DISCARDED))
+
+    assert store.fetch_feed_yes_undrafted(conn) == 3  # discarded, claimed, free
+
+
 def test_fetch_candidates_takes_feed_yes_first(conn):
     from approval_queue import store as qstore
 

@@ -746,7 +746,8 @@ def test_research_from_the_shortlist_lists_every_story_in_order():
     block = _block(P.research_prompt(_brief(shortlist=shortlist)), "THE TOPIC")
     assert block.startswith("Choose the topic yourself.")
     assert block.endswith(
-        "THE FEEDS: the top scored stories no piece has used yet.\n"
+        "THE FEEDS: the top scored stories that the account has not written about yet "
+        "(no piece and no drafted thread).\n"
         + shortlist[0].block()
         + "\n"
         + shortlist[1].block()
@@ -819,20 +820,35 @@ def test_research_json_spec_names_every_key_the_app_reads():
         assert f'"{key}"' in text, key
 
 
-def test_research_lists_recent_pieces_with_their_openings():
-    recent = [
+def test_research_lists_the_topics_to_avoid_with_their_openings():
+    """RECENT PIECES is `topics_to_avoid` (every piece of the last topics.avoid_days days,
+    finished or not), not the written pieces the write stage varies from (`recent`)."""
+    avoid = [
         P.RecentPiece(
             date="2026-10-04",
             title="Merck's $400M bet",
             angle="deal_decoder",
             opening="Merck $MRK just paid $400 million.",
         ),
+        P.RecentPiece(
+            date="2026-10-03",
+            title="Iovance's TIL relaunch",
+            companies=["Iovance"],
+            status="not written yet: researched, waiting for the editor",
+        ),
         P.RecentPiece(date="2026-10-02", title="SMMT catalysts"),
     ]
-    text = P.research_prompt(_brief(topic="t", recent=recent))
+    text = P.research_prompt(_brief(topic="t", topics_to_avoid=avoid))
     head = "RECENT PIECES (do not repeat a topic unless there is genuinely new news on it)"
-    assert _block(text, head) == recent[0].line() + "\n" + recent[1].line()
+    assert _block(text, head) == "\n".join(p.line() for p in avoid)
+    assert avoid[1].line() == (
+        "- 2026-10-03 · Iovance's TIL relaunch · companies: Iovance"
+        " · not written yet: researched, waiting for the editor"
+    )
     assert _block(P.research_prompt(_brief(topic="t")), head) == "(none yet)"
+    # the variety list alone is not a list of topics to avoid
+    only_variety = _brief(topic="t", recent=[avoid[0]])
+    assert _block(P.research_prompt(only_variety), head) == "(none yet)"
 
 
 # ---- prompts: the angles on offer ----------------------------------------------------------

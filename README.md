@@ -721,8 +721,9 @@ first with `--session-id`, every later one with `--resume`, so the session keeps
 everything it read):
 
 1. *Research*: the topic (typed by the editor, a feed story, or chosen by the
-   session from the top scored stories of the last `topics.lookback_hours` that no
-   piece used, or from its own news scan) becomes `factbase.md` (every fact with
+   session from the top scored stories of the last `topics.lookback_hours` that the
+   account has not written about, no studio piece or queued topic on them and no draft
+   that did not fail, or from its own news scan) becomes `factbase.md` (every fact with
    its URL, opened or snippet, knowledge marked, verified X handles, corrections,
    open questions) and `research.json` (topic, why now, companies, candidate
    angles, and the story it used: kept only when it is one the brief offered,
@@ -775,7 +776,15 @@ regulatory decoder, follow the money, patent cliff, origin story, mechanism for
 investors, contrarian take, bull vs bear, one chart, conference playbook, weekly
 watchlist, scorecard). The angles of the last `variety.avoid_recent_angles` pieces
 are not offered, and the session is told the recent hook styles, shapes and
-opening lines to avoid. **Voice and design**: `studio/brief/session.md` (the job),
+opening lines to avoid. The research prompt lists every piece started in the last
+`topics.avoid_days` days that was not discarded, finished or not (one waiting at the
+checkpoint or stopped says so), as topics not to repeat. **One story, one piece of
+writing**: `run_draft.py` skips a story the studio holds (a piece on it that was not
+discarded, at any stage, or a topic queued for it; `approval_queue/store.py:studio_held_clusters`),
+and the studio's shortlist skips a story with a draft that did not fail
+(`drafted_cluster_ids`). Each piece and queued topic keeps one item of its story
+(`story_item`), so a story that linking merges into another cluster is followed there
+(`studio/runner.py:follow_merges`, at the start of every studio run). **Voice and design**: `studio/brief/session.md` (the job),
 `voice.md` and `cards.md` (dark 4:5 cards, Inter and IBM Plex Mono shipped in
 `studio/fonts/`) travel as text appended to Claude Code's system prompt;
 `studio/exemplars/` holds the three hand-made reference pieces (handoff docs and

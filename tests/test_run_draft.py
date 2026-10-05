@@ -286,3 +286,88 @@ def test_run_draft_retry_failed_redrafts_only_with_the_flag(conn, monkeypatch):
     run_draft.main(["--min-score", "7", "--retry-failed"])
     assert store.list_drafts(conn, store.STATUS_FAILED) == []
     assert len(store.list_drafts(conn)) == 1
+
+
+def test_run_draft_leaves_the_studios_stories_to_the_studio(conn, monkeypatch, caplog):
+    """One story, one piece of writing. A studio piece that was not discarded holds its
+    story at any stage (waiting at the research checkpoint, still running, failed or
+    interrupted: each lands in the queue later), and so does a topic queued on the studio
+    page that no piece took yet; the drafter skips them. A story the studio gave up on is
+    drafted as before, and a story linking merged is followed through the studio's item."""
+    import logging
+
+    import run_draft
+    from db import Database
+    from studio import store as studio_store
+
+    studio_store.ensure_tables(conn)
+    names = ("waiting", "running", "failed", "interrupted", "queued", "discarded", "claimed")
+    stories = {name: seed_item(conn, name, total=9.0) for name in (*names, "free")}
+
+    def piece(cluster_id, stage, story_item=""):
+        pid = studio_store.create_piece(
+            conn,
+            origin="manual",
+            topic="",
+            cluster_id=cluster_id,
+            requested_angle="",
+            checkpoint=True,
+            session_id=f"session-{cluster_id}",
+            workspace="/data/studio_pieces/p",
+            model="writer-model",
+            effort="max",
+            story_item=story_item,
+        )
+        studio_store.update_piece(conn, pid, stage=stage)
+        return pid
+
+    piece(stories["waiting"], studio_store.STAGE_RESEARCH_READY)
+    piece(stories["running"], studio_store.STAGE_WRITING)
+    piece(stories["failed"], studio_store.STAGE_FAILED)
+    piece(stories["interrupted"], studio_store.STAGE_INTERRUPTED)
+    piece(stories["discarded"], studio_store.STAGE_DISCARDED)
+    studio_store.queue_topic(conn, cluster_id=stories["queued"])
+    taken = studio_store.queue_topic(conn, cluster_id=stories["claimed"])
+    studio_store.claim_topic(conn, taken, piece(stories["claimed"], studio_store.STAGE_DISCARDED))
+    # linking folds the studio's story into another cluster before the studio runs again
+    kept = seed_item(conn, "kept", total=9.0)
+    folded = seed_item(conn, "folded", total=9.0)
+    piece(folded, studio_store.STAGE_RESEARCH_READY, story_item="folded")
+    database = Database(str(store.db_path()))
+    database.merge_clusters(kept, [folded])
+    database.close()
+
+    calls = []
+
+    def fake_call(system, user, model):
+        calls.append(user)
+        return good_json()
+
+    monkeypatch.setattr(
+        run_draft,
+        "draft_item",
+        lambda **kw: __import__("draft.drafter").drafter.draft_item(
+            call=fake_call, sleep=lambda s: None, **kw
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="run_draft"):
+        assert run_draft.main(["--min-score", "7"]) == 0
+    assert {r.item_id for r in store.list_drafts(conn)} == {"discarded", "claimed", "free"}
+    assert len(calls) == 3
+    assert "6 left to the studio (a studio piece or queued topic has the story)" in caplog.text
+
+
+def test_run_draft_drafts_as_before_without_the_studios_tables(conn, monkeypatch):
+    import run_draft
+
+    assert store.studio_held_clusters(conn) == set()
+    seed_item(conn, "new", total=9.0)
+    monkeypatch.setattr(
+        run_draft,
+        "draft_item",
+        lambda **kw: __import__("draft.drafter").drafter.draft_item(
+            call=lambda s, u, m: good_json(), sleep=lambda s: None, **kw
+        ),
+    )
+    assert run_draft.main(["--min-score", "7"]) == 0
+    assert [r.item_id for r in store.list_drafts(conn)] == ["new"]

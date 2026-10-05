@@ -265,6 +265,15 @@ def test_a_feed_story_is_queued_without_words_or_the_checkpoint(client, sconn, s
     assert (topic.topic, topic.cluster_id, topic.angle, topic.checkpoint) == ("", 42, "", False)
 
 
+def test_a_queued_feed_story_keeps_one_of_its_items(client, sconn):
+    """So the run still finds the story if linking merges its cluster into another before
+    the studio gets to it (studio/runner.py:follow_merges)."""
+    story = seed_item(sconn, "s1", total=44)
+    client.post("/studio/topics", data={"story": str(story)})
+    [topic] = S.queued_topics(sconn)
+    assert (topic.cluster_id, topic.story_item) == (story, "s1")
+
+
 def test_words_and_a_story_go_together(client, sconn):
     client.post("/studio/topics", data={"topic": "why now", "story": "7", "checkpoint": "1"})
     [topic] = S.queued_topics(sconn)
