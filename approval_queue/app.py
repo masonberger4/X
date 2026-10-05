@@ -523,18 +523,19 @@ async def approve(draft_id: int, request: Request, conn: Conn):
     return _redirect_home(notice=notice)
 
 
-def _edit_problem(thread: list[str]) -> str | None:
+def _edit_problem(thread: list[str], limit: int = MAX_POST_CHARS) -> str | None:
     """Why an edited text cannot be saved, naming the post and its length (URLs count as 23),
-    or None when every post fits."""
+    or None when every post fits. `limit` is the draft's own per-post limit: 280, or a long
+    post's (a format genome's, or the studio's X Premium limit)."""
     if not thread:
         return "the thread cannot be empty"
     over = []
     for label, text in [(f"post {i}", p) for i, p in enumerate(thread, 1)]:
         n = tweet_length(text)
-        if n > MAX_POST_CHARS:
+        if n > limit:
             over.append(f"{label} is {n} characters")
     if over:
-        return f"{len(over)} post(s) exceed {MAX_POST_CHARS} characters ({'; '.join(over)})"
+        return f"{len(over)} post(s) exceed {limit} characters ({'; '.join(over)})"
     return None
 
 
@@ -543,7 +544,9 @@ async def edit(draft_id: int, request: Request, conn: Conn):
     _awaiting_pick(conn, draft_id)
     form = await read_form(request)
     thread = _split_thread(form.get("thread", ""))
-    problem = _edit_problem(thread)
+    current = store.get_draft(conn, draft_id)
+    limit = max(MAX_POST_CHARS, current.draft.max_chars) if current is not None else MAX_POST_CHARS
+    problem = _edit_problem(thread, limit)
     if problem is None:
         try:
             category = store.validate_category(form.get("category"))
@@ -588,6 +591,15 @@ async def revise(draft_id: int, request: Request, conn: Conn):
     detail page shows why."""
     _awaiting_pick(conn, draft_id)
     form = await read_form(request)
+    studio_row = store.get_draft(conn, draft_id)
+    if studio_row is not None and studio_row.studio_piece is not None:
+        # The studio wrote it: the drafter would flatten its long posts and drop its cards.
+        # The studio's own Revise resumes the session that wrote it.
+        return _detail_redirect(
+            draft_id,
+            error="This piece was written in the studio; revise it from its studio page "
+            f"(/studio/{studio_row.studio_piece}), which resumes the session that wrote it.",
+        )
 
     def work():
         row = store.get_draft(conn, draft_id)

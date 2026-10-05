@@ -19,6 +19,9 @@ Routes owned here:
   POST /publishing/order  save the approved page's publishing order (schedule.position)
   POST /publishing/caps   save max_posts_per_day / min_gap_minutes into publish/config.yaml
 
+The studio's pages (studio/web.py: /studio, a piece's page, the playbook) are included
+too; their buttons start the studio_now / studio_resume steps through the same runs.
+
 The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., /voice),
 so the operator has one URL for the whole workflow. Everything else this app shows is
 read through `ops/store.py`'s read-only adapters; it owns no tables of its own.
@@ -66,6 +69,7 @@ from panel.frozen import data_dir, step_interpreter
 from panel.jobs import JobError, JobManager
 from publish import scheduler as publish_scheduler
 from score import editorial
+from studio import web as studio_web
 
 log = logging.getLogger(__name__)
 
@@ -626,3 +630,30 @@ def _adopt_queue_routes() -> None:
 
 
 _adopt_queue_routes()
+
+
+def _start_studio(steps: list[str]) -> str:
+    """The studio page's buttons: run its configured steps (studio_now / studio_resume) like
+    any other run, so the log and the Stop button are on the runs page."""
+    try:
+        job = JOBS.start(steps)
+    except JobError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return f"started run {job.id} ({', '.join(job.steps)}); its log is on the runs page"
+
+
+def _adopt_studio_routes() -> None:
+    """The studio's pages (studio/web.py), rendered with the shared layout and run bar."""
+    studio_web.configure(start_steps=_start_studio, queue_templates=QUEUE_TEMPLATES_DIR)
+    env = studio_web.templates.env
+    env.globals["HAS_PANEL"] = True
+    env.globals["current_run"] = current_run
+    env.globals["current_runs"] = current_runs
+    env.globals["busy_steps"] = busy_steps
+    env.globals["publish_live"] = publish_live
+    env.globals["publish_running"] = publish_running
+    timeutil.install_jinja_filters(env)
+    app.include_router(studio_web.router)
+
+
+_adopt_studio_routes()

@@ -25,6 +25,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -302,3 +306,290 @@ def _failure_reason(proc: subprocess.CompletedProcess[str]) -> str:
         except (ValueError, AttributeError):
             pass
     return (proc.stderr or out).strip()[:300]
+
+
+# --- long agentic sessions (the studio) ------------------------------------------------
+
+# Credentials that would make the CLI bill a metered API key instead of the logged-in
+# account. The app talks to Claude only through the CLI and its login, so they never reach
+# the child process even when a .env still carries one.
+_API_KEY_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def cli_env() -> dict[str, str]:
+    """The environment a CLI child runs with: ours, minus any API credentials."""
+    return {k: v for k, v in os.environ.items() if k not in _API_KEY_ENV}
+
+
+@dataclass
+class SessionResult:
+    """How one agentic CLI invocation ended. `ok` is a clean finish; every other outcome
+    keeps the session id so the caller can resume the same session."""
+
+    session_id: str
+    ok: bool
+    subtype: str = ""  # success | error_max_turns | error_during_execution | killed | ...
+    text: str = ""
+    terminal_reason: str = ""
+    num_turns: int = 0
+    cost_usd: float = 0.0
+    duration_ms: int = 0
+    returncode: int | None = None
+    stderr_tail: str = ""
+
+    @property
+    def detail(self) -> str:
+        if self.ok:
+            return "finished"
+        reason = self.terminal_reason or self.subtype or "error"
+        tail = " ".join((self.text or self.stderr_tail).split())[:300]
+        return f"{reason}: {tail}" if tail else reason
+
+
+def session_argv(
+    binary: str,
+    *,
+    model: str,
+    session_id: str,
+    resume: bool,
+    effort: str | None,
+    tools: list[str],
+    allowed: list[str],
+    add_dirs: list[str],
+    system_file: str | None,
+    max_turns: int | None,
+    flags: list[str],
+) -> list[str]:
+    """argv for one long agentic invocation. stream-json, so progress can be shown and
+    stored as it happens; a fixed session id (new) or --resume (continuing), so a killed
+    run can always be picked up again. Tools are made available with --tools and
+    pre-approved with --allowedTools; `flags` carry the isolation switches (studio/config.yaml
+    `cli_flags`: --safe-mode, --restricted, --permission-mode dontAsk). The prompt goes on
+    stdin, since --tools, --allowedTools and --add-dir take any number of values."""
+    argv = [binary, "-p", "--output-format", "stream-json", "--verbose", "--model", model]
+    argv += ["--resume", session_id] if resume else ["--session-id", session_id]
+    argv += ["--tools", ",".join(tools)]
+    if allowed:
+        argv += ["--allowedTools", ",".join(allowed)]
+    for d in add_dirs:
+        argv += ["--add-dir", d]
+    if system_file:
+        argv += ["--append-system-prompt-file", system_file]
+    if effort:
+        argv += ["--effort", effort]
+    if max_turns:
+        argv += ["--max-turns", str(int(max_turns))]
+    return argv + [str(f) for f in flags]
+
+
+def describe_event(event: dict[str, Any]) -> list[str]:
+    """Short readable lines for one stream-json event (the session starting, each tool call,
+    the assistant's text, the end), for the runs page and the studio's session log."""
+    lines: list[str] = []
+    etype = event.get("type")
+    if etype == "system" and event.get("subtype") == "init":
+        tools = ", ".join(str(t) for t in event.get("tools") or [])
+        lines.append(f"session started ({event.get('model')}); tools: {tools}")
+    elif etype == "assistant":
+        content = (event.get("message") or {}).get("content") or []
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                args = block.get("input") if isinstance(block.get("input"), dict) else {}
+                lines.append(f"[{block.get('name')}] {_tool_summary(args)}".rstrip())
+            elif block.get("type") == "text" and str(block.get("text") or "").strip():
+                text = " ".join(str(block["text"]).split())
+                lines.append(text[:240] + ("..." if len(text) > 240 else ""))
+    elif etype == "result":
+        lines.append(f"stage ended: {event.get('subtype')} after {event.get('num_turns')} turns")
+    return lines
+
+
+def _tool_summary(args: dict[str, Any]) -> str:
+    for key in ("query", "url", "file_path", "pattern", "description", "prompt"):
+        if args.get(key):
+            value = " ".join(str(args[key]).split())
+            return value[:160] + ("..." if len(value) > 160 else "")
+    return ""
+
+
+def run_session(
+    prompt: str,
+    *,
+    model: str,
+    cwd: str | os.PathLike[str],
+    session_id: str,
+    resume: bool = False,
+    system: str = "",
+    effort: str | None = None,
+    tools: list[str] | None = None,
+    allowed: list[str] | None = None,
+    add_dirs: list[str] | None = None,
+    flags: list[str] | None = None,
+    max_turns: int | None = None,
+    timeout: float | None = None,
+    transcript: str | os.PathLike[str] | None = None,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+    cfg: dict[str, Any] | None = None,
+) -> SessionResult:
+    """One long agentic invocation of the CLI (a studio stage), run from `cwd` so the
+    session's files and its stored conversation stay together. `system` is appended to
+    Claude Code's own system prompt on the first invocation; a resume reuses what the
+    session recorded. Every stream-json line is appended to `transcript` as it arrives and
+    handed to `on_event`. `timeout` None or <= 0 means no limit; on expiry the CLI and what
+    it started are killed and the result says so (the session can still be resumed).
+    Raises ClaudeCliUnavailable when the CLI cannot start; any other failure is returned."""
+    settings = cli_settings(cfg)
+    binary = resolve_binary(settings)
+    system_file = None
+    if system and not resume:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=".md", prefix="claude-system-", delete=False
+        ) as fh:
+            fh.write(system)
+            system_file = fh.name
+    argv = session_argv(
+        binary,
+        model=model,
+        session_id=session_id,
+        resume=resume,
+        effort=effort,
+        tools=list(tools or []),
+        allowed=list(allowed if allowed is not None else (tools or [])),
+        add_dirs=[str(d) for d in (add_dirs or [])],
+        system_file=system_file,
+        max_turns=max_turns,
+        flags=list(flags or []) + settings["extra_args"],
+    )
+    log.debug("starting session %s in %s", session_id, cwd)
+    try:
+        return _stream_session(argv, prompt, cwd, session_id, timeout, transcript, on_event)
+    finally:
+        if system_file:
+            try:
+                os.unlink(system_file)
+            except OSError:
+                pass
+
+
+def _stream_session(
+    argv: list[str],
+    prompt: str,
+    cwd: str | os.PathLike[str],
+    session_id: str,
+    timeout: float | None,
+    transcript: str | os.PathLike[str] | None,
+    on_event: Callable[[dict[str, Any]], None] | None,
+) -> SessionResult:
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(cwd),
+            env=cli_env(),
+            **no_window_kwargs(),
+        )
+    except OSError as exc:
+        raise ClaudeCliUnavailable(f"could not start {argv[0]!r}: {exc}") from exc
+    stderr_lines: list[str] = []
+    finished = threading.Event()
+    timed_out = threading.Event()
+
+    def drain_stderr() -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            stderr_lines.append(line)
+            del stderr_lines[:-200]
+
+    def watchdog() -> None:
+        if not finished.wait(timeout) and proc.poll() is None:
+            timed_out.set()
+            _kill_tree(proc)
+
+    err_thread = threading.Thread(target=drain_stderr, daemon=True)
+    err_thread.start()
+    if timeout and timeout > 0:
+        threading.Thread(target=watchdog, daemon=True).start()
+    result_event: dict[str, Any] | None = None
+    out = open(transcript, "a", encoding="utf-8") if transcript else None  # noqa: SIM115
+    try:
+        assert proc.stdin is not None and proc.stdout is not None
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except OSError:
+            pass  # the CLI died at start-up; its exit code and stderr say why
+        for line in proc.stdout:
+            if out is not None:
+                out.write(line)
+                out.flush()
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "result":
+                result_event = event
+            if on_event is not None:
+                try:
+                    on_event(event)
+                except Exception:  # a display hook must never end the session
+                    log.debug("on_event failed", exc_info=True)
+        proc.wait()
+    except BaseException:
+        _kill_tree(proc)
+        raise
+    finally:
+        finished.set()
+        if out is not None:
+            out.close()
+        err_thread.join(timeout=5)
+    stderr_tail = "".join(stderr_lines)[-2000:]
+    if result_event is None:
+        return SessionResult(
+            session_id=session_id,
+            ok=False,
+            subtype="killed" if timed_out.is_set() else "no_result",
+            terminal_reason="timed out" if timed_out.is_set() else f"CLI exited {proc.returncode}",
+            returncode=proc.returncode,
+            stderr_tail=stderr_tail,
+        )
+    subtype = str(result_event.get("subtype") or "")
+    reason = str(result_event.get("terminal_reason") or "")
+    text = str(result_event.get("result") or "")
+    ok = subtype == "success" and not result_event.get("is_error") and proc.returncode == 0
+    if not ok and is_refusal(f"{reason} {text}"):
+        subtype = "refused"
+    return SessionResult(
+        session_id=str(result_event.get("session_id") or session_id),
+        ok=ok,
+        subtype=subtype,
+        text=text,
+        terminal_reason="" if reason in ("", "completed", "success") else reason,
+        num_turns=int(result_event.get("num_turns") or 0),
+        cost_usd=float(result_event.get("total_cost_usd") or 0.0),
+        duration_ms=int(result_event.get("duration_ms") or 0),
+        returncode=proc.returncode,
+        stderr_tail=stderr_tail,
+    )
+
+
+def session_started(transcript: str | os.PathLike[str], session_id: str) -> bool:
+    """Whether the CLI ever started `session_id` (its init event is in the transcript), so
+    the next invocation must --resume it rather than create it."""
+    path = Path(transcript)
+    if not path.is_file():
+        return False
+    needle = f'"session_id":"{session_id}"'
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if '"init"' in line and needle in line.replace(" ", ""):
+                return True
+    return False

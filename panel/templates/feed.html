@@ -54,6 +54,12 @@ nothing about what gets drafted today.</p>
   {% if e.human_rating %}
   <p class="high">You said {{ e.human_rating.decision }}{% if e.human_rating.note %} — {{ e.human_rating.note }}{% endif %}</p>
   {% endif %}
+  <form method="post" action="/studio/topics" class="inline">
+    <input type="hidden" name="story" value="{{ e.cluster_id }}">
+    <input type="hidden" name="checkpoint" value="1">
+    <button type="submit" title="queue this story for a studio piece (one Opus session: research, fact base, post, cards) and start it; it stops after research for you to read">Write a studio piece</button>
+    <span class="meta">story {{ e.cluster_id }}</span>
+  </form>
   <form method="post" action="/feed/{{ e.cluster_id }}/rate" class="decide">
     <input type="hidden" name="back" value="hours={{ hours }}&amp;top={{ top_n }}{% if show_all %}&amp;all=1{% endif %}{% if hide_decided %}&amp;hide_decided=1{% endif %}">
     <select name="decision" aria-label="decision">

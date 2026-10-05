@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Studio · playbook{% endblock %}
+{% block content %}
+<p><a href="/studio">&larr; Studio</a></p>
+<h1>Playbook</h1>
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+<p class="meta">Every studio session reads this before it writes. Where it disagrees with the
+voice guide, the playbook wins. {% if editable_copy %}This is your edited copy ({{ path }}).{% else %}This is the shipped seed; saving creates your own copy in the data folder.{% endif %}</p>
+<form method="post" action="/studio/playbook">
+  <p><textarea name="text" rows="40" style="font: 13px/1.45 ui-monospace, monospace">{{ text }}</textarea></p>
+  <p><button type="submit">Save</button></p>
+</form>
+{% if editable_copy %}
+<form method="post" action="/studio/playbook/reset" class="inline"><button class="link" type="submit">go back to the shipped seed</button></form>
+{% endif %}
+{% endblock %}

@@ -47,6 +47,10 @@ class Step:
     timeout_seconds: int = 600  # 0 = no limit: the step runs until it exits or is stopped
     lock: str = ""  # the step's lock name; empty means its own name
     manual: bool = False  # only when named: a button or --only, never a plain run or the timer
+    # The automatic runs leave this step out of a time slot while an earlier run of it is
+    # still going, instead of making the whole slot wait for it (the studio: one session
+    # can outlast the gap between run times, and the step paces itself anyway).
+    skip_when_busy: bool = False
 
     @property
     def lock_name(self) -> str:
@@ -66,6 +70,7 @@ class Step:
             timeout_seconds=int(raw.get("timeout_seconds", 600)),
             lock=str(raw.get("lock") or ""),
             manual=bool(raw.get("manual", False)),
+            skip_when_busy=bool(raw.get("skip_when_busy", False)),
         )
 
 

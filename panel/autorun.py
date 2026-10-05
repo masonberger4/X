@@ -196,9 +196,20 @@ class AutoRunner:
             self.pending = self.wait_reason = None
             return REASON_IDLE
         busy = sorted(set(names) & self.jobs.busy_steps())
+        # A step marked skip_when_busy (the studio) sits this slot out rather than holding
+        # every other step back until it finishes.
+        skippable = {s.name for s in self.jobs.steps() if s.skip_when_busy}
+        for name in [b for b in busy if b in skippable]:
+            names = [n for n in names if n != name]
+            dropped[name] = "still running from an earlier run"
+        busy = [b for b in busy if b not in skippable]
         if busy:
             self.wait_reason = f"{', '.join(busy)} still running"
             return f"waiting: {self.wait_reason}"
+        if not names:
+            self._note(self.pending, now, "skipped: every step is still running")
+            self.pending = self.wait_reason = None
+            return REASON_IDLE
         note = "; ".join(f"left out {n}: {why}" for n, why in dropped.items()) or None
         try:
             job = self.jobs.start(names, auto=True, note=note)
