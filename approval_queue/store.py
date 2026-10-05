@@ -22,7 +22,8 @@ Never modifies the items or scores tables. Step 7 reads items only through
 fetch_decisions_for_voice / fetch_draft_stats, and only for source and url; items.cluster_id
 is also read to follow a story that linking merged (drafted_cluster_ids,
 studio_held_clusters). The studio's studio_pieces and studio_topics are read only by
-studio_hold and studio_held_clusters (read-only, nothing when the tables are missing).
+studio_hold, studio_held_clusters and studio_researching_offers (read-only, nothing when
+the tables are missing).
 """
 
 from __future__ import annotations
@@ -593,7 +594,7 @@ def drafted_cluster_ids(conn: sqlite3.Connection) -> set[int]:
     return ids
 
 
-def studio_held_clusters(conn: sqlite3.Connection) -> set[int]:
+def studio_held_clusters(conn: sqlite3.Connection, *, offered: bool = True) -> set[int]:
     """The stories the studio holds, which run_draft leaves to it (one story, one piece of
     writing): the story of every studio piece that was not discarded, whatever its stage (a
     piece waiting at the research checkpoint, still running, failed or interrupted lands in
@@ -601,12 +602,19 @@ def studio_held_clusters(conn: sqlite3.Connection) -> set[int]:
     piece has taken yet. A story that linking merged into another cluster is followed
     through the item the studio keeps with it (`story_item`), before the next studio run
     points its rows there. A read-only look at the studio's own studio_pieces and
-    studio_topics (studio/store.py owns them); empty before the studio's first run."""
+    studio_topics (studio/store.py owns them); empty before the studio's first run.
+
+    With `offered`, also every story offered to a piece still researching on no story yet
+    (`offered_stories` in its meta, recorded before its session starts): the session may
+    name any of them, and they are the undrafted top stories the drafter would take next.
+    They are released when research names one or stops. offered=False is the stories a
+    piece or topic is on, for run_draft's last look before it stores a draft."""
     from studio import store as studio_store
 
     tables = ("studio_pieces", "studio_topics")
     if not all(_columns(conn, t) for t in tables):  # no columns: the table does not exist
         return set()
+    held = studio_researching_offers(conn) if offered else set()
     discarded = studio_store.STAGE_DISCARDED
     sql = [
         "SELECT cluster_id FROM studio_pieces WHERE stage != ? AND cluster_id IS NOT NULL",
@@ -622,7 +630,29 @@ def studio_held_clusters(conn: sqlite3.Connection) -> set[int]:
         ]
         args.append(discarded)
     rows = conn.execute(" UNION ".join(sql), args).fetchall()
-    return {int(r[0]) for r in rows if r[0] is not None}
+    return held | {int(r[0]) for r in rows if r[0] is not None}
+
+
+def studio_researching_offers(conn: sqlite3.Connection) -> set[int]:
+    """The stories offered to the studio pieces still researching on no story yet (read
+    from the meta studio/session.py:research writes; JSON parsed here, so no SQLite JSON
+    functions are needed). Empty when the studio's table is missing."""
+    from studio import store as studio_store
+
+    if "meta_json" not in _columns(conn, "studio_pieces"):
+        return set()
+    held: set[int] = set()
+    for (meta,) in conn.execute(
+        "SELECT meta_json FROM studio_pieces WHERE stage = ? AND cluster_id IS NULL",
+        (studio_store.STAGE_RESEARCHING,),
+    ):
+        try:
+            ids = json.loads(meta or "{}").get("offered_stories")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(ids, list):
+            held |= {i for i in ids if isinstance(i, int) and not isinstance(i, bool)}
+    return held
 
 
 def delete_failed_drafts(

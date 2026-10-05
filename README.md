@@ -768,7 +768,10 @@ everything it read):
    post, each `recheck_before_posting` fact a `Re-check before posting:` line of
    `why_it_matters` that the copy-paste posting page lists). Publish chains a thread
    of long posts as replies, unnumbered. Each ingest records what it put in the
-   queue (`queued` in the piece's meta).
+   queue (`queued` in the piece's meta) as soon as the text is in, with the cards
+   attached so far: a card that cannot be copied (a full disk, a picture another
+   program holds open) fails the piece without its own revision ever reading as the
+   editor's hand edit, and Resume polishes again and attaches the rest.
 5. *Revise*: the studio page's Revise resumes the session with the editor's notes,
    re-checks and replaces the queue draft: a pending one, or a rejected one that
    comes back to pending (never one live on X; its old publishing order is
@@ -793,9 +796,15 @@ opening lines to avoid. The research prompt lists every piece started in the las
 `topics.avoid_days` days that was not discarded, finished or not (one waiting at the
 checkpoint or stopped says so), as topics not to repeat. **One story, one piece of
 writing**: `run_draft.py` skips a story the studio holds (a piece on it that was not
-discarded, at any stage, or a topic queued for it; `approval_queue/store.py:studio_held_clusters`),
+discarded, at any stage, a topic queued for it, or a story offered to a piece still
+researching on no story, its `offered_stories`; `approval_queue/store.py:studio_held_clusters`),
 and the studio's shortlist skips a story with a draft that did not fail
-(`drafted_cluster_ids`). Each piece and queued topic keeps one item of its story
+(`drafted_cluster_ids`). A draft run looks at the hold again before each story, so a
+studio session started beside it is left the stories it has not reached. The one story
+both can be on is the one the run was already writing when the research started: a
+research that names it after its draft landed fails (`story N got a draft from the
+drafter while this research ran`; Resume researches another), and a draft whose story
+a piece's research named meanwhile is not stored (`studio_held_clusters(offered=False)`). Each piece and queued topic keeps one item of its story
 (`story_item`), so a story that linking merges into another cluster is followed there
 (`studio/runner.py:follow_merges`, at the start of every studio run). **Voice and design**: `studio/brief/session.md` (the job),
 `voice.md` and `cards.md` (dark 4:5 cards, Inter and IBM Plex Mono shipped in

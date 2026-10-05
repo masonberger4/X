@@ -50,7 +50,9 @@ steps:
   # piece when studio/config.yaml's `auto` limits allow (at most one a day as shipped). In
   # the automatic runs it sits right after score so it sees the freshest stories, and
   # before draft so a story it takes is not also drafted as a short thread (run_draft.py
-  # skips a story a studio piece or queued topic holds, whatever the piece's stage). No
+  # skips a story a studio piece or queued topic holds, whatever the piece's stage, and
+  # every story offered to a piece still researching, so a draft step running beside a
+  # session, as under cron, leaves those alone too). No
   # time limit (0): a session is research, writing, a cold fact-check and cards, often an
   # hour; each stage has its own limit in studio/config.yaml, and a stopped piece resumes
   # from the studio page. skip_when_busy: in the automatic runs a session still running at

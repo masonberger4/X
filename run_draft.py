@@ -2,8 +2,10 @@
 
 A story the editor said yes to on the feed is drafted whatever its score or age, and first.
 A story the studio holds (a studio piece on it that was not discarded, whatever its stage,
-or a topic queued for it on the studio page) is left to the studio: one story, one piece of
-writing.
+a topic queued for it on the studio page, or a story offered to a studio piece still
+researching beside this run) is left to the studio: one story, one piece of writing. The
+hold is looked at again before each story, and a draft whose story a studio piece took
+while it was being written is not stored.
 
 Usage: python run_draft.py [--min-score 30] [--since-hours 48] [--limit N] [--dry-run]
                            [--no-examples] [--no-swarm] [--retry-failed] [--retag]
@@ -548,6 +550,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         drafted = failed = charts = 0
         for c in todo:
+            if c.cluster_id in store.studio_held_clusters(conn):
+                # The studio took the story while this run drafted the ones before it (a
+                # studio session started researching beside it and was offered the story).
+                log.info("left to the studio since this run started: %s", c.title[:80])
+                continue
             log.info("%s %.1f %s", c.source, c.total, c.title[:80])
             if args.dry_run:
                 continue
@@ -599,6 +606,16 @@ def main(argv: list[str] | None = None) -> int:
                 break
             except Exception:
                 log.exception("model call failed drafting %s; will retry next run", c.item_id)
+                continue
+            if c.cluster_id in store.studio_held_clusters(conn, offered=False):
+                # The studio took this story while it was being drafted (a piece's
+                # research named it, or the editor started or queued a piece on it): the
+                # piece will write it, so the thread is not stored. A draft that lands
+                # first is caught by the research instead, which refuses the story.
+                log.warning(
+                    "%s: the studio took this story while it was drafted; draft not stored",
+                    c.item_id,
+                )
                 continue
             if isinstance(result, HumanChoice):
                 store_for_pick(conn, c, result, run_id, edit_ids, rejection_ids)

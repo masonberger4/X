@@ -373,6 +373,122 @@ def test_run_draft_drafts_as_before_without_the_studios_tables(conn, monkeypatch
     assert [r.item_id for r in store.list_drafts(conn)] == ["new"]
 
 
+def _studio_piece(conn, *, stage, cluster_id=None, offered=()):
+    """A studio piece as studio/session.py:research leaves it: the stories it was offered in
+    its meta, its own story once research named one."""
+    from studio import store as studio_store
+
+    studio_store.ensure_tables(conn)
+    pid = studio_store.create_piece(
+        conn,
+        origin="auto",
+        topic="",
+        cluster_id=None,
+        requested_angle="",
+        checkpoint=False,
+        session_id=f"session-{stage}-{len(offered)}",
+        workspace="/data/studio_pieces/p",
+        model="writer-model",
+        effort="max",
+    )
+    studio_store.update_piece(
+        conn, pid, stage=stage, cluster_id=cluster_id, meta={"offered_stories": list(offered)}
+    )
+    return pid
+
+
+def _draft_by_hand(monkeypatch, on_call):
+    import run_draft
+
+    monkeypatch.setattr(
+        run_draft,
+        "draft_item",
+        lambda **kw: __import__("draft.drafter").drafter.draft_item(
+            call=on_call, sleep=lambda s: None, **kw
+        ),
+    )
+
+
+def test_run_draft_leaves_the_stories_a_researching_piece_was_offered(conn, monkeypatch, caplog):
+    """A studio piece researching on no story yet may name any story it was offered, and
+    those are the undrafted top stories: the drafter leaves them alone until research names
+    one (or stops), then drafts the rest."""
+    import logging
+
+    import run_draft
+    from studio import store as studio_store
+
+    offered = [seed_item(conn, name, total=9.0) for name in ("offer-a", "offer-b")]
+    stopped = seed_item(conn, "offered-to-a-stopped-research", total=9.0)
+    seed_item(conn, "free", total=9.0)
+    pid = _studio_piece(conn, stage=studio_store.STAGE_RESEARCHING, offered=offered)
+    _studio_piece(conn, stage=studio_store.STAGE_FAILED, offered=[stopped])
+    _draft_by_hand(monkeypatch, lambda s, u, m: good_json())
+
+    with caplog.at_level(logging.INFO, logger="run_draft"):
+        assert run_draft.main(["--min-score", "7"]) == 0
+    drafted = {r.item_id for r in store.list_drafts(conn)}
+    assert drafted == {"offered-to-a-stopped-research", "free"}
+    assert "2 left to the studio" in caplog.text
+
+    # research named offer-a: offer-b is the drafter's again
+    studio_store.update_piece(conn, pid, cluster_id=offered[0])
+    assert run_draft.main(["--min-score", "7"]) == 0
+    assert {r.item_id for r in store.list_drafts(conn)} == drafted | {"offer-b"}
+
+
+def test_run_draft_looks_at_the_studios_hold_again_before_each_story(conn, monkeypatch, caplog):
+    """A draft step works through its list for an hour; a studio session that starts
+    researching beside it (cron's studio entry, Start now on the panel) is offered the
+    stories the step has not reached yet, and the step leaves them to it."""
+    import logging
+
+    import run_draft
+    from studio import store as studio_store
+
+    first = seed_item(conn, "first", total=9.5)
+    later = seed_item(conn, "later", total=9.0)
+    calls = []
+
+    def call(system, user, model):
+        if not calls:  # the studio starts while the first story is being drafted
+            _studio_piece(conn, stage=studio_store.STAGE_RESEARCHING, offered=[first, later])
+        calls.append(user)
+        return good_json()
+
+    _draft_by_hand(monkeypatch, call)
+    with caplog.at_level(logging.INFO, logger="run_draft"):
+        assert run_draft.main(["--min-score", "7"]) == 0
+
+    # the story already in hand is stored (a research that names it is refused instead)
+    assert [r.item_id for r in store.list_drafts(conn)] == ["first"]
+    assert len(calls) == 1
+    assert "left to the studio since this run started: Title later" in caplog.text
+
+
+def test_a_draft_whose_story_a_studio_piece_took_meanwhile_is_not_stored(conn, monkeypatch, caplog):
+    """A studio research that names the story the drafter is still writing wins it: the
+    piece goes on to write it, so the drafter's thread is not stored, and the next run
+    leaves the story alone too."""
+    import logging
+
+    import run_draft
+    from studio import store as studio_store
+
+    story = seed_item(conn, "taken", total=9.0)
+
+    def call(system, user, model):
+        _studio_piece(conn, stage=studio_store.STAGE_WRITING, cluster_id=story, offered=[story])
+        return good_json()
+
+    _draft_by_hand(monkeypatch, call)
+    with caplog.at_level(logging.WARNING, logger="run_draft"):
+        assert run_draft.main(["--min-score", "7"]) == 0
+
+    assert conn.execute("SELECT COUNT(*) FROM drafts").fetchone()[0] == 0
+    assert "taken: the studio took this story while it was drafted" in caplog.text
+
+
 # --- the CLI failing is not the model failing --------------------------------------------
 
 

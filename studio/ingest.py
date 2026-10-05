@@ -282,14 +282,29 @@ def to_queue(
             model=model,
             note=note or "revised in the studio",
         )
-    _attach_cards(conn, draft_id, report)
     assert report.piece is not None  # build_draft refused a piece without one
-    S.update_piece(
-        conn,
-        piece.id,
-        meta={"queued": _record(draft_id, Path(piece.workspace), report.piece), "hand_edit": None},
-    )
+    # The record says what the queue holds, from the moment the text is in: a card that
+    # cannot be attached (a full disk, a picture another program holds open) fails the
+    # piece after its new text replaced the old, and a record of the last ingest would then
+    # read the session's own text and cards as the editor's hand edits on the next Resume.
+    record = _record(draft_id, Path(piece.workspace), report.piece)
+    _remember(conn, piece, record, attached=0)
+    try:
+        _attach_cards(conn, draft_id, report)
+    finally:
+        row = queue_store.get_draft(conn, draft_id)
+        _remember(conn, piece, record, attached=len(row.images) if row else 0)
     return draft_id
+
+
+def _remember(
+    conn: sqlite3.Connection, piece: S.Piece, record: dict[str, Any], *, attached: int
+) -> None:
+    """Store an ingest's record with the cards that are attached so far: they are
+    attached in order, so those are the first `attached` of the record's. A Resume then
+    finds no hand edit and polishes again, which attaches the rest."""
+    kept = {**record, "cards": record["cards"][:attached]}
+    S.update_piece(conn, piece.id, meta={"queued": kept, "hand_edit": None})
 
 
 def _attach_cards(conn: sqlite3.Connection, draft_id: int, report: qa.Report) -> None:

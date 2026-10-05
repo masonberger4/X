@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import claude_cli
+from approval_queue import store as queue_store
 from studio import ingest, qa
 from studio import prompt as P
 from studio import store as S
@@ -328,15 +329,29 @@ def research(
         # that has a draft, the studio's shortlist skips one a piece used, and the weekly
         # report reads that story's scores for the post. An invented or mistyped number
         # would do all three to a story the piece is not about.
-        if story_id in offered:
-            updates["cluster_id"] = story_id
-            # so the story is still found once linking merges it into another cluster
-            updates["story_item"] = T.story_item(story_id)
-        else:
+        if story_id not in offered:
             log.warning(
                 "piece %s: research.json names story %s, which was not offered", piece.id, story_id
             )
             _write_log(workspace, f"research.json names story {story_id}, not one offered; ignored")
+        elif story_id in queue_store.drafted_cluster_ids(ctx.conn):
+            # The drafter wrote it while research ran: a draft step was already on the
+            # story when the offers were made (approval_queue/store.py:studio_held_clusters
+            # holds them from then on). One story, one piece of writing, so the piece stops
+            # here rather than write the story a second time.
+            S.update_piece(ctx.conn, piece.id, **updates)
+            return _fail(
+                ctx,
+                piece,
+                "research",
+                f"story {story_id} got a draft from the drafter while this research ran, "
+                "and a story gets one piece of writing; Resume to research another story "
+                "from the shortlist, or discard the piece",
+            )
+        else:
+            updates["cluster_id"] = story_id
+            # so the story is still found once linking merges it into another cluster
+            updates["story_item"] = T.story_item(story_id)
     S.update_piece(ctx.conn, piece.id, **updates)
     piece = S.get_piece(ctx.conn, piece.id) or piece
     if ctx.harvest is not None:

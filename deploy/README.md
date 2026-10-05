@@ -35,7 +35,8 @@ day (the crontab's `10 6,12,18` line, or `pipeline-studio.timer`), and a plain
 or more: inside the plain run it would hold back every step after it, and the next fires
 would exit 2 on the run lock (or, under systemd, not start at all while the oneshot unit is
 still running). Its own entry takes only the studio's lock, so the pipeline keeps running
-beside it. `pipeline-studio.service` has no unit time limit (`TimeoutStartSec=infinity`):
+beside it; the plain run's draft step leaves alone every story the session was offered while
+it researches, so the two never write the same story. `pipeline-studio.service` has no unit time limit (`TimeoutStartSec=infinity`):
 each stage has its own in `studio/config.yaml`, and a unit limit would kill a session
 mid-stage. Keep `pipeline.service`'s one hour for the plain run.
 

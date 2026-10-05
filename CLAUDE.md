@@ -300,8 +300,12 @@ carrying `--live`).
   `run_draft.py` skips a story the studio holds (`store.studio_held_clusters`, read-only
   on `studio_pieces` / `studio_topics`, empty when they are missing: a piece not
   discarded at any stage, or an unclaimed queued topic, a merged story followed through
-  its `story_item`), and the studio's shortlist skips a story with a draft that did not
-  fail (`store.drafted_cluster_ids`, followed through the draft's item); the dashboard's
+  its `story_item`, and every story offered to a piece still researching on no story,
+  `store.studio_researching_offers` over its `offered_stories`), looked at again before
+  each story, and does not store a draft whose story a piece's research named meanwhile
+  (`offered=False`); the studio's shortlist skips a story with a draft that did not
+  fail (`store.drafted_cluster_ids`, followed through the draft's item), and research
+  fails a piece whose named story got such a draft while it ran; the dashboard's
   feed-yes count (`ops/store.py:fetch_feed_yes_undrafted`) leaves the studio's out. Its own
   tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
   An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
@@ -632,7 +636,9 @@ carrying `--live`).
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
   `story_id`, an int or digit string, sets the piece's cluster only when it is in
-  `offered_stories`, the shortlist ids every research run of the piece was offered), an
+  `offered_stories`, the shortlist ids every research run of the piece was offered,
+  recorded before the session starts so the drafter holds off them, and has no draft
+  that did not fail), an
   optional checkpoint (`research_ready`, the editor's Continue), write (`posts/NN.txt`,
   `cards/card_N.html`, a cold fact-check by a fresh sub-agent logged in `factcheck.md`,
   in the foreground since `cli_env` disables background tasks and told by the prompt

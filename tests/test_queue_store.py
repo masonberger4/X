@@ -147,6 +147,30 @@ def test_studio_tables_from_before_story_items_still_say_what_they_hold(conn):
     assert store.studio_held_clusters(conn) == {5, 7}
 
 
+def test_a_researching_piece_holds_the_stories_it_was_offered_until_it_names_one(conn):
+    """studio/session.py:research records the shortlist in the piece's meta before the
+    session starts; while the piece researches on no story those are held (run_draft's
+    `offered=False` look before storing a draft leaves them out). Unreadable meta holds
+    nothing."""
+    conn.executescript(
+        """
+        CREATE TABLE studio_pieces (id INTEGER PRIMARY KEY, cluster_id INTEGER, stage TEXT,
+                                    meta_json TEXT NOT NULL DEFAULT '{}');
+        CREATE TABLE studio_topics (id INTEGER PRIMARY KEY, cluster_id INTEGER, piece_id INTEGER);
+        INSERT INTO studio_pieces (cluster_id, stage, meta_json) VALUES
+            (NULL, 'researching', '{"offered_stories": [1, 2, true, "3"]}'),
+            (4, 'researching', '{"offered_stories": [4, 5]}'),
+            (NULL, 'failed', '{"offered_stories": [6]}'),
+            (NULL, 'research_ready', '{"offered_stories": [7]}'),
+            (NULL, 'researching', '{not json'),
+            (NULL, 'researching', '[8]');
+        """
+    )
+    assert store.studio_researching_offers(conn) == {1, 2}
+    assert store.studio_held_clusters(conn) == {1, 2, 4}
+    assert store.studio_held_clusters(conn, offered=False) == {4}
+
+
 def test_insert_get_and_one_draft_per_item(conn):
     seed_item(conn, "i1")
     did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())

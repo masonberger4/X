@@ -111,8 +111,15 @@ piece, researched, fact-checked and with designed cards. The drafter below still
 runs and writes shorter threads for the day's other stories. One story gets one
 piece of writing: the drafter skips a story the studio holds (a studio piece on it
 you have not discarded, even one waiting for you at the research checkpoint or
-stopped, or a topic queued for it on the studio page), and the studio never picks a
-story that already has a draft. A run says `N left to the studio` when it skips some.
+stopped, a topic queued for it on the studio page, or a story offered to a studio
+piece still researching, until the research picks one), and the studio never picks a
+story that already has a draft. A run says `N left to the studio` when it skips some,
+and looks again before each story, so a studio session that starts beside a long
+draft run gets the stories the run has not reached (`left to the studio since this
+run started`). Only the story the run is already writing can meet the studio's
+research: if the run's thread lands first, the piece stops before writing and says
+so (Resume researches another story); if the research picks the story first, the
+run does not keep its thread.
 
 1. Draft posts for the top stories.
    ```
@@ -1117,8 +1124,13 @@ and long posts need X Premium.
    the last 10 days (`topics: avoid_days` in `studio\config.yaml`), finished or
    still waiting for you, so it does not repeat a topic. The piece is tied to a
    feed story only when it is one the app offered it (so the drafter leaves that
-   story to the studio); a number it made up ties it to nothing. Expect it in the
-   queue 30 to 90 minutes after the run starts. A
+   story to the studio); a number it made up ties it to nothing. While it
+   researches, the drafter leaves every story it was offered alone (a draft run
+   beside it, such as cron's 30-minute run, skips them too). If the drafter had
+   already started the story the piece picks and its thread lands first, the
+   piece stops before writing with `story N got a draft from the drafter while
+   this research ran`: Resume researches another story, Discard ends it. Expect
+   it in the queue 30 to 90 minutes after the run starts. A
    session still running at the next run time sits that run out
    (`skip_when_busy`) instead of holding the other steps back, and so do the
    steps still waiting behind it in its own run
@@ -1165,7 +1177,9 @@ and long posts need X Premium.
 7. When something stops. A piece marked `interrupted` (stopped, timed out, the
    PC slept, Claude Code could not start, or Claude Code stopped the cold
    fact-check before it reported) or `failed` (the checker still found a
-   blocking problem after the polish rounds) has **Resume where it stopped**: the
+   blocking problem after the polish rounds, or a card could not be copied into
+   the queue because the disk was full or another program held the picture open)
+   has **Resume where it stopped**: the
    same session carries on with everything it already read, and anything you type
    in the box goes to it. If you edited its queue draft by hand while it was
    stopped, Resume goes through a revision first, so your edit is not

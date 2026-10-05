@@ -30,7 +30,7 @@ import pytest
 
 import claude_cli
 from approval_queue import store as queue_store
-from draft.schema import SHAPE_LONG
+from draft.schema import SHAPE_LONG, Draft
 from publish import store as publish_store
 from studio import ingest, qa
 from studio import prompt as P
@@ -938,6 +938,75 @@ def test_a_story_the_session_picks_is_kept_with_one_of_its_items(rig, conn):
     SS.research(rig.ctx, piece)
     p = rig.get(piece.id)
     assert (p.cluster_id, p.story_item) == (story, "s1")
+
+
+def test_the_stories_offered_to_a_research_are_held_from_the_drafter_while_it_runs(rig, conn):
+    # Recorded before the session starts, so a draft step beside it leaves them alone
+    # (approval_queue/store.py:studio_held_clusters); once research names one, the rest go
+    # back to the drafter.
+    story, other = seed_item(conn, "s1", total=44), seed_item(conn, "s2", total=40)
+    rig.shortlist = [P.Story(cluster_id=story, title="s1"), P.Story(cluster_id=other, title="s2")]
+    seen: dict[str, Any] = {}
+
+    def research(ws: Path, call: Call) -> None:
+        seen["held"] = queue_store.studio_held_clusters(conn)
+        seen["named"] = queue_store.studio_held_clusters(conn, offered=False)
+        write_research(ws, {**RESEARCH, "story_id": story})
+
+    rig.cli.work["research"] = research
+    SS.research(rig.ctx, rig.new_piece(checkpoint=True))
+
+    assert seen == {"held": {story, other}, "named": set()}
+    assert queue_store.studio_held_clusters(conn) == {story}
+
+
+@pytest.mark.parametrize(
+    ("status", "refused"), [(queue_store.STATUS_PENDING, True), (queue_store.STATUS_FAILED, False)]
+)
+def test_a_story_the_drafter_wrote_while_research_ran_is_not_written_twice(
+    rig, conn, status, refused
+):
+    # A draft step already on the story when the offers were made stores its thread during
+    # the research. One story, one piece of writing: the piece stops before writing, says
+    # why, and a Resume researches another story. A draft that failed holds nothing.
+    story, other = seed_item(conn, "s1", total=44), seed_item(conn, "s2", total=40)
+    rig.shortlist = [P.Story(cluster_id=story, title="s1"), P.Story(cluster_id=other, title="s2")]
+
+    def research(ws: Path, call: Call) -> None:
+        queue_store.insert_draft(
+            conn,
+            item_id="s1",
+            cluster_id=story,
+            model="m",
+            draft=Draft(["x"], "", ""),
+            status=status,
+        )
+        write_research(ws, {**RESEARCH, "story_id": story})
+
+    rig.cli.work["research"] = research
+    piece = rig.new_piece()
+
+    out = SS.research(rig.ctx, piece)
+
+    p = rig.get(piece.id)
+    if not refused:
+        assert out.stage == S.STAGE_READY and p.cluster_id == story
+        return
+    assert out.stage == S.STAGE_FAILED and rig.cli.stages() == ["research"]
+    assert f"story {story} got a draft from the drafter while this research ran" in out.message
+    assert (p.cluster_id, p.meta["failed_stage"]) == (None, "research")
+    assert p.meta["research"]["story_id"] == story  # what the session found, kept to read
+    assert rig.no_draft(p)
+    assert queue_store.studio_held_clusters(conn) == set()  # a stopped research holds nothing
+
+    rig.shortlist = [P.Story(cluster_id=other, title="s2")]
+    rig.cli.work["research"] = lambda ws, call: write_research(ws, {**RESEARCH, "story_id": other})
+    out = SS.resume_interrupted(rig.ctx, p)
+
+    assert out.stage == S.STAGE_READY, out.message
+    assert rig.cli.of("research")[-1].resumed
+    assert "got a draft from the drafter" in rig.cli.of("research")[-1].prompt
+    assert rig.get(piece.id).cluster_id == other
 
 
 def test_a_piece_on_a_topic_is_offered_no_story_to_name(rig):
@@ -1883,6 +1952,46 @@ def test_the_queue_door_never_reverts_a_hand_edit_the_session_did_not_see(rig):
         ingest.to_queue(rig.conn, rig.get(piece.id), report, max_chars=MAX_CHARS)
 
     assert rig.draft(rig.get(piece.id)).draft.thread == [POST_1_FIXED, POST_2]
+
+
+def test_a_card_that_could_not_be_attached_is_never_read_as_the_editors_hand_edit(rig, monkeypatch):
+    # The revision's text replaced the draft's, then the second card could not be copied
+    # (a full disk, a picture an image viewer holds open): the piece fails while polishing.
+    # The record must say what the queue holds now, or Resume would take the session's own
+    # revision for the editor's hand edit, revise again and drop the card it never attached.
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    locked = {queue_store.image_file(draft_id, 1)}
+    real_copy = shutil.copyfile
+
+    def copyfile(src, dst, *a, **kw):
+        if Path(dst) in locked:
+            raise PermissionError(13, "The process cannot access the file", str(dst))
+        return real_copy(src, dst, *a, **kw)
+
+    monkeypatch.setattr(ingest.shutil, "copyfile", copyfile)
+    revised = [POST_SINGLE, POST_2]
+    rig.cli.work["revise"] = lambda ws, call: write_piece(ws, posts=revised)
+
+    out = SS.revise(rig.ctx, rig.get(piece.id), "Open with the one-line summary.")
+
+    assert out.stage == S.STAGE_FAILED and "could not put the piece in the queue" in out.message
+    row = rig.draft(rig.get(piece.id))
+    assert row.draft.thread == revised and [i["alt"] for i in row.images] == [CARD_1.alt]
+    assert ingest.hand_edits(rig.conn, rig.get(piece.id)) is None
+
+    locked.clear()  # the viewer let go of the picture
+    rig.cli.work["revise"] = lambda ws, call: None
+    calls = len(rig.cli.calls)
+    out = SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+
+    assert out.stage == S.STAGE_READY, out.message
+    assert rig.cli.stages()[calls:] == ["polish"]  # no revision of an edit nobody made
+    row = rig.draft(rig.get(piece.id))
+    assert row.draft.thread == revised
+    assert [(i["alt"], i["anchor"]) for i in row.images] == [(CARD_1.alt, 1), (CARD_2.alt, 2)]
+    files = json.loads((Path(piece.workspace) / P.PIECE_FILE).read_text(encoding="utf-8"))
+    assert [c["file"] for c in files["cards"]] == ["cards/card_1.html", "cards/card_2.html"]
 
 
 def test_no_hand_edit_means_nothing_is_written_back(rig):
