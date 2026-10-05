@@ -712,6 +712,11 @@ to stop it. Four pages:
   "Back up now" under Storage saves a copy of the database right away, the
   same verified copy `run_ops.py backup` makes, into the same `backups\`
   folder (the oldest beyond `backups: keep` in `ops\config.yaml` are removed).
+  Under Drafting, how many stories you said yes to on the feed have no draft
+  yet. A yes sends a story to drafting whatever its score or age: the next
+  draft run takes those first, then the best-scored new stories (score at
+  `scoring: threshold` in `config.yaml` or above, scored in the last 48
+  hours), at most `--limit` (10) a run.
 - **Sources** (`/sources`) — every source from `config.yaml`: when it last
   ran, how many items it fetched, how many were new, and the last error if
   it failed. A source in red has been failing; one in amber has not run for

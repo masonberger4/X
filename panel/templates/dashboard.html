@@ -12,6 +12,13 @@
   {% if last_auto %}· last automatic run {{ last_auto.started_at|localtime }}: <span class="pill {{ last_auto.status }}">{{ last_auto.summary }}</span>{% endif %}
   · <a href="/runs">settings</a></p>
 
+<h2>Drafting</h2>
+<div class="cards">
+  <div class="card"><div class="n">{{ yes_undrafted }}</div><div class="meta">approved on the feed, waiting to be drafted</div></div>
+</div>
+<p class="meta">The next draft run takes these first, whatever their score, then the best-scored new stories
+(at most 10 a run). <a href="/feed">Feed</a></p>
+
 <h2>Checks</h2>
 <table>
   <tr><th>Check</th><th>Status</th><th>Summary</th></tr>

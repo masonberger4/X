@@ -223,6 +223,7 @@ def dashboard(request: Request, conn: Conn, backed_up: str = "", backup_error: s
             "checks": views.check_rows(report),
             "steps": views.step_rows(JOBS.steps(), last_runs, now),
             "counts": ops_store.table_counts(conn),
+            "yes_undrafted": ops_store.fetch_feed_yes_undrafted(conn),
             "db_path": str(db_path),
             "db_size_mb": db_path.stat().st_size / (1024 * 1024) if db_path.exists() else 0.0,
             "disk_free_mb": _disk_free_mb(db_path),
