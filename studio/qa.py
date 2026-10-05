@@ -88,7 +88,7 @@ def _items(value: Any) -> list[Any]:
     return [value] if isinstance(value, str) and value.strip() else []
 
 
-def _inside(root: Path, rel: str) -> Path | None:
+def inside(root: Path, rel: str) -> Path | None:
     """`rel` resolved under `root`, or None when it points outside (or is absolute)."""
     if not rel or Path(rel).is_absolute():
         return None
@@ -138,7 +138,7 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
         problems.append(f"{PIECE_FILE}: posts must list the post files in order")
         posts = []
     for i, rel in enumerate(posts, start=1):
-        f = _inside(workspace, _str(rel))
+        f = inside(workspace, _str(rel))
         if f is None:
             problems.append(f"{PIECE_FILE}: post {i} path {rel!r} is not inside your folder")
             continue
@@ -163,7 +163,7 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
         if not isinstance(c, dict):
             minor.append(f"{PIECE_FILE}: card {i} must be an object")
             continue
-        f = _inside(workspace, _str(c.get("file")))
+        f = inside(workspace, _str(c.get("file")))
         if f is None or f.suffix.lower() not in (".html", ".htm"):
             minor.append(f"{PIECE_FILE}: card {i} file must be an .html file in your folder")
             continue

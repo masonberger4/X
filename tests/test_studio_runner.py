@@ -7,7 +7,8 @@ explicit topic or story, then a queued topic, then `--now`, then the automatic l
 and hold the studio lock while it does. The Claude Code CLI is faked (`FakeCLI` in place
 of claude_cli.run_session, which tests/conftest.py otherwise refuses): it tells the stage
 from the first line of its prompt and writes that stage's files in the piece's folder. No
-test draws a card (the pieces here have none, and make_renderer is replaced), and the DB
+test draws a card (the pieces here have none, and make_renderer is replaced by one that is
+never asked; `rig.renderer = None` is a machine without a browser), and the DB
 is a temp file (DB_PATH), so the data folder, the workspace root and the lock all live in
 tmp_path.
 """
@@ -17,10 +18,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
+import sys
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -28,8 +33,10 @@ import claude_cli
 import run_studio
 import timeutil
 from approval_queue import store as queue_store
+from db import Database
 from draft.schema import SHAPE_LONG, Draft
 from ops import lock
+from publish import store as publish_store
 from studio import angles as A
 from studio import prompt as P
 from studio import qa, runner
@@ -149,6 +156,16 @@ def get(conn, piece_id: int) -> S.Piece:
     return piece
 
 
+def merge(keep: int, *others: int) -> None:
+    """Story linking (filter/link.py) folding `others` into `keep`, through step 1's own
+    Database on the test DB: the items move over and the other clusters are deleted."""
+    database = Database(str(queue_store.db_path()))
+    try:
+        database.merge_clusters(keep, list(others))
+    finally:
+        database.close()
+
+
 def studio_draft(conn, piece: S.Piece) -> int:
     """The piece's pending draft in the approval queue, as studio/ingest.py inserts it."""
     draft_id = queue_store.insert_draft(
@@ -235,9 +252,11 @@ class FakeCLI:
     def __call__(self, prompt: str, **kw: Any) -> claude_cli.SessionResult:
         stage = stage_of(prompt)
         self.calls.append((stage, prompt, kw))
+        ws = Path(kw["cwd"])
+        if not ws.is_dir():  # the real launcher opens the transcript there before it starts
+            raise FileNotFoundError(2, "No such file or directory", str(kw["transcript"]))
         if stage in self.results:
             return self.results[stage]
-        ws = Path(kw["cwd"])
         if stage == "research":
             write_research(ws)
         elif stage in ("write", "revise"):
@@ -254,11 +273,18 @@ class FakeCLI:
         )
 
 
+def never_draws(html: Path, png: Path) -> render_mod.RenderResult:
+    """The rig machine's card browser: found, and never asked (no rig piece has cards)."""
+    raise AssertionError(f"a card was drawn: {html}")
+
+
 class Rig:
     def __init__(self, conn, cli: FakeCLI, root: Path) -> None:
         self.conn = conn
         self.cli = cli
         self.root = root  # the workspace root, where the studio lock lives too
+        # What make_renderer finds on this machine; None: no browser to draw cards with.
+        self.renderer: qa.Renderer | None = never_draws
 
     def pieces(self) -> list[S.Piece]:
         return S.list_pieces(self.conn)
@@ -273,10 +299,13 @@ class Rig:
 def rig(sconn, cfg, monkeypatch, tmp_path) -> Rig:
     """runner.run() over the temp DB with the fake CLI and the test's own settings."""
     cli = FakeCLI()
+    rig = Rig(sconn, cli, tmp_path / "studio_pieces")
     monkeypatch.setattr(runner, "load_studio_config", lambda *a, **k: cfg)
     monkeypatch.setattr(claude_cli, "run_session", cli)
-    monkeypatch.setattr(runner, "make_renderer", lambda c: None)
-    return Rig(sconn, cli, tmp_path / "studio_pieces")
+    monkeypatch.setattr(runner, "make_renderer", lambda c: rig.renderer)
+    # a run that finds the studio lock taken waits this long for it (10 s shipped)
+    monkeypatch.setattr(runner, "LOCK_WAIT_SECONDS", 0.3)
+    return rig
 
 
 # ---- allowed_to_start: the automatic run's limits --------------------------------------
@@ -293,31 +322,66 @@ def test_an_empty_studio_may_start_a_piece(sconn, cfg):
     assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
 
 
-def test_the_daily_cap_counts_only_automatic_pieces_of_the_last_24_hours(sconn, cfg, clock):
+def test_the_daily_cap_counts_only_automatic_pieces_of_the_local_calendar_day(sconn, cfg, clock):
+    """`max_new_per_day` counts the automatic pieces started on today's date in the display
+    zone (Los Angeles here), the zone the automatic run times are typed in."""
     cfg["auto"].update(max_new_per_day=2, min_hours_between=0)
-    clock.set(T0 - timedelta(hours=30))
-    make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)  # a day and more ago
-    clock.set(T0 - timedelta(hours=23))
+    clock.set(datetime(2026, 10, 5, 6, 59, tzinfo=UTC))  # 23:59 on 10-04 in Los Angeles
+    make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+    clock.set(datetime(2026, 10, 5, 7, 0, tzinfo=UTC))  # midnight: 10-05 there
     make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
     for _ in range(3):  # the editor's pieces never use up the automatic allowance
         make_piece(sconn, origin=S.ORIGIN_MANUAL, stage=S.STAGE_READY)
-    assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
+    morning = datetime(2026, 10, 5, 13, 5, tzinfo=UTC)  # 06:05 on 10-05
+    assert runner.allowed_to_start(sconn, cfg, morning) == (True, "")
 
-    clock.set(T0 - timedelta(hours=1))
+    clock.set(morning)
     make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
-    blocked = (False, "2 automatic piece(s) in the last 24 hours (limit 2)")
-    assert runner.allowed_to_start(sconn, cfg, T0) == blocked
-    # a piece exactly 24 hours old still counts; a second later it has left the window
-    assert runner.allowed_to_start(sconn, cfg, T0 + timedelta(hours=1)) == blocked
-    later = T0 + timedelta(hours=1, seconds=1)
-    assert runner.allowed_to_start(sconn, cfg, later) == (True, "")
+    blocked = (False, "2 automatic piece(s) today (limit 2)")
+    assert runner.allowed_to_start(sconn, cfg, morning) == blocked
+    # the rest of that day stays blocked; the next day starts with a fresh allowance
+    late = datetime(2026, 10, 6, 6, 59, 59, tzinfo=UTC)  # 23:59:59 on 10-05
+    assert runner.allowed_to_start(sconn, cfg, late) == blocked
+    next_day = datetime(2026, 10, 6, 7, 0, tzinfo=UTC)
+    assert runner.allowed_to_start(sconn, cfg, next_day) == (True, "")
+
+
+def test_one_automatic_piece_a_day_whatever_minute_the_run_reaches_the_studio(sconn, cfg, clock):
+    """The shipped pace at the shipped run times (06:00, 12:00 and 18:00 local, the studio
+    step a few minutes after each, sooner some days than others): a piece every day at the
+    day's first run time. Counted over a rolling 24 hours, 06:03 was refused because
+    yesterday's piece started at 06:06, so the piece slid through the day, and each slide
+    off the evening run lost a whole day."""
+    cfg["auto"].update(max_new_per_day=1, min_hours_between=6)
+    zone = ZoneInfo(ZONE)
+    started = []
+    for day in range(10):
+        delay = 6 if day % 2 == 0 else 3  # minutes after the run time
+        for hour in (6, 12, 18):
+            when = datetime(2026, 10, 5 + day, hour, delay, tzinfo=zone).astimezone(UTC)
+            if runner.allowed_to_start(sconn, cfg, when)[0]:
+                clock.set(when)
+                make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+                started.append(when.astimezone(zone).strftime("%m-%d %H:%M"))
+    assert started == [f"10-{5 + d:02d} 06:0{6 if d % 2 == 0 else 3}" for d in range(10)]
+
+
+def test_the_daily_cap_follows_the_display_zone(sconn, cfg, clock):
+    """The same instant is another day in another zone: 01:00 UTC on 10-06 is still 10-05
+    in Los Angeles, where a piece started at 08:00 UTC on 10-05 used up the day."""
+    clock.set(datetime(2026, 10, 5, 8, 0, tzinfo=UTC))
+    make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+    cfg["auto"].update(max_new_per_day=1, min_hours_between=0)
+    when = datetime(2026, 10, 6, 1, 0, tzinfo=UTC)
+    assert runner.allowed_to_start(sconn, cfg, when)[0] is False
+    assert runner.allowed_to_start(sconn, cfg, when, ZoneInfo("UTC")) == (True, "")
 
 
 def test_a_cap_of_zero_starts_nothing_automatically(sconn, cfg):
     cfg["auto"]["max_new_per_day"] = 0
     assert runner.allowed_to_start(sconn, cfg, T0) == (
         False,
-        "0 automatic piece(s) in the last 24 hours (limit 0)",
+        "0 automatic piece(s) today (limit 0)",
     )
 
 
@@ -632,7 +696,9 @@ def test_continue_writes_the_piece_in_its_own_session_with_the_editors_note(
 
     assert rig.cli.stages() == ["write"]  # clean at once: no polish round
     kw = rig.cli.kw("write")
-    assert (kw["session_id"], kw["resume"], kw["system"]) == (piece.session_id, True, "")
+    # the standing instructions go with a resume too (they outlast a compaction that way)
+    assert (kw["session_id"], kw["resume"]) == (piece.session_id, True)
+    assert kw["system"] == runner.system_text()
     assert Path(kw["cwd"]) == ws.resolve()
     assert f"THE EDITOR READ YOUR FACT BASE AND SAYS\n{NOTE}" in rig.cli.prompt("write")
     after = get(sconn, piece.id)
@@ -677,6 +743,32 @@ def test_a_new_piece_gets_its_own_folder_and_a_fresh_session(
     )
     assert (piece.topic, piece.cluster_id) == (topic, cluster_id)
     assert (piece.model, piece.effort) == (cfg["model"], cfg["effort"])
+    assert piece.story_item == ""  # story 42 is not in the feed: no item to remember
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="making a link needs privileges there")
+def test_a_piece_folder_keeps_the_data_folders_own_path(sconn, cfg, db_file, monkeypatch):
+    """The data folder reached through a link (on Windows, a mapped network drive Z: that
+    resolve() would turn into \\\\server\\share, where the npm claude.cmd cannot start) is
+    the folder the piece's session is started in and the prompt names: never resolved."""
+    mapped = db_file.parent / "Z"
+    mapped.symlink_to(db_file.parent, target_is_directory=True)
+    monkeypatch.setenv("DB_PATH", str(mapped / db_file.name))
+
+    piece = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, checkpoint=True)
+
+    ws = Path(piece.workspace)
+    assert ws.parent == mapped / "studio_pieces" and ws.is_dir()
+    brief = brief_for(sconn, cfg, piece)
+    assert brief.workspace == piece.workspace
+    assert brief.reference_dir == str(mapped / "studio_pieces" / ws.name / P.REFERENCE_DIR)
+
+
+def test_a_new_piece_on_a_feed_story_remembers_one_of_its_items(sconn, cfg):
+    story = seed_item(sconn, "s1", total=44)
+    seed_item(sconn, "s2", cluster_id=story)
+    piece = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, cluster_id=story, checkpoint=True)
+    assert (piece.cluster_id, piece.story_item) in {(story, "s1"), (story, "s2")}
 
 
 def test_a_new_piece_keeps_a_known_angle_and_refuses_an_unknown_one(sconn, cfg, tmp_path):
@@ -760,6 +852,59 @@ def test_the_brief_lists_recent_written_pieces_newest_first(sconn, cfg, tmp_path
     assert brief.hooks_to_avoid == ["question", "juxtaposition"]
 
 
+def test_the_topics_to_avoid_are_every_piece_of_the_window_written_or_not(
+    sconn, cfg, tmp_path, clock
+):
+    """RECENT PIECES lists every piece of the last topics.avoid_days days that was not
+    discarded, with how far an unwritten one got: a piece waiting at the checkpoint, or
+    stopped, still has its topic. Only written pieces count for variety."""
+    cfg["topics"]["avoid_days"] = 10
+    clock.set(T0 - timedelta(days=11))
+    make_piece(sconn, stage=S.STAGE_READY, angle="scorecard", title="Too old to list")
+    clock.set(T0 - timedelta(days=3))
+    ready = make_piece(
+        sconn,
+        stage=S.STAGE_READY,
+        angle="deal_decoder",
+        title="Merck's walked-away bid",
+        draft_id=7,
+    )
+    clock.set(T0 - timedelta(days=2))
+    waiting = make_piece(
+        sconn,
+        topic="",
+        stage=S.STAGE_RESEARCH_READY,
+        title="Iovance's TIL relaunch",
+        meta={"research": {"companies": [{"name": "Iovance", "ticker": "IOVA"}]}},
+    )
+    clock.set(T0 - timedelta(days=1))
+    stopped = make_piece(sconn, topic="CD19 CAR-T in lupus", stage=S.STAGE_INTERRUPTED)
+    failed = make_piece(sconn, topic="Bispecific pricing", stage=S.STAGE_FAILED)
+    make_piece(sconn, topic="Given up", stage=S.STAGE_DISCARDED)
+    clock.set(T0)
+    current = make_piece(sconn, topic="")
+
+    brief = brief_for(sconn, cfg, current)
+
+    assert [(r.title, r.status) for r in brief.topics_to_avoid] == [
+        (failed.label, "not written yet: stopped, may be resumed"),
+        (stopped.label, "not written yet: stopped, may be resumed"),
+        (waiting.label, "not written yet: researched, waiting for the editor"),
+        (ready.label, ""),
+    ]
+    assert brief.topics_to_avoid[2].companies == ["Iovance"]
+    assert brief.topics_to_avoid[3].angle == "deal_decoder"
+    # variety still comes from the written pieces only, whatever their age
+    assert [r.title for r in brief.recent] == [ready.label, "Too old to list"]
+    assert brief.offer.held_back == ["deal_decoder", "scorecard"]
+    prompt = P.research_prompt(brief)
+    assert "Iovance's TIL relaunch · companies: Iovance · not written yet" in prompt
+    assert "Too old to list" not in prompt
+
+    cfg["topics"]["avoid_days"] = 0  # lists none
+    assert brief_for(sconn, cfg, current).topics_to_avoid == []
+
+
 def test_the_recent_list_is_as_long_as_the_settings_say(sconn, cfg, clock):
     cfg["variety"].update(recent_pieces_shown=2, avoid_recent_angles=1, avoid_recent_hooks=1)
     for angle, hook in (("deal_decoder", "story"), ("catalyst_map", "contrarian")):
@@ -804,7 +949,8 @@ def test_the_brief_carries_the_paths_the_settings_and_the_checkers_limits(sconn,
         ZONE,
     )
     assert brief.workspace == str(ws.resolve())
-    assert brief.reference_dir == str(EXEMPLARS_DIR.resolve())
+    # the piece's own copy of the reference pieces, never the shipped folder
+    assert brief.reference_dir == str(ws.resolve() / P.REFERENCE_DIR)
     assert brief.references == runner.references()
     assert brief.playbook == "THE PLAYBOOK"
     # the limits the checker enforces: X's own less the headroom it keeps
@@ -843,6 +989,48 @@ def test_an_open_piece_is_offered_the_top_stories_no_piece_has_used(sconn, cfg):
     assert [s.cluster_id for s in brief.shortlist] == [fresh]
 
 
+def test_an_open_piece_is_not_offered_a_story_the_drafter_already_has(sconn, cfg):
+    """One story, one piece of writing: a story with a draft that did not fail (waiting,
+    in the A/B pick, approved, rejected) is the drafter's; a failed draft leaves it free."""
+    statuses = {
+        "pending": queue_store.STATUS_PENDING,
+        "choosing": queue_store.STATUS_CHOOSING,
+        "approved": queue_store.STATUS_APPROVED,
+        "rejected": queue_store.STATUS_REJECTED,
+        "failed": queue_store.STATUS_FAILED,
+    }
+    stories = {name: seed_item(sconn, name, total=45) for name in statuses}
+    fresh = seed_item(sconn, "fresh", total=40)
+    for name, status in statuses.items():
+        queue_store.insert_draft(
+            sconn,
+            item_id=name,
+            cluster_id=stories[name],
+            model="m",
+            draft=Draft(thread=["x"], suggested_visual="", why_it_matters=""),
+            status=status,
+        )
+    # a drafted story that linking merged into another: the kept cluster is drafted too
+    kept = seed_item(sconn, "kept", total=48)
+    folded = seed_item(sconn, "folded", total=30)
+    queue_store.insert_draft(
+        sconn,
+        item_id="folded",
+        cluster_id=folded,
+        model="m",
+        draft=Draft(thread=["x"], suggested_visual="", why_it_matters=""),
+    )
+    merge(kept, folded)
+
+    brief = brief_for(sconn, cfg, make_piece(sconn, topic=""))
+
+    assert sorted(s.cluster_id for s in brief.shortlist) == sorted([stories["failed"], fresh])
+    assert "that the account has not written about yet" in P.research_prompt(brief)
+    # the radar's scan is given the same stories as leads
+    leads = runner.feed_lines(cfg, sconn)
+    assert sorted(line.split(" (")[0] for line in leads) == ["Title failed", "Title fresh"]
+
+
 def test_a_topic_or_a_later_stage_is_never_offered_a_shortlist(sconn, cfg):
     seed_item(sconn, "s1", total=44)
     asked = make_piece(sconn, topic=TOPIC)
@@ -876,7 +1064,7 @@ def test_the_context_reads_the_data_folders_playbook_and_wires_the_queue(rig, sc
     cfg["x"].update(long_post_max=30000, thread_post_max=25000)
     ctx = runner.make_context(sconn, cfg)
     assert ctx.launch is None  # claude_cli.run_session, looked up at call time
-    assert ctx.renderer is None and ctx.reference_dir == EXEMPLARS_DIR
+    assert ctx.renderer is rig.renderer and ctx.reference_dir == EXEMPLARS_DIR
     assert ctx.system == runner.system_text() and ctx.system.strip()
     assert ctx.stop_after_research is False
     assert runner.make_context(sconn, cfg, stop_after_research=True).stop_after_research
@@ -892,6 +1080,13 @@ def test_the_context_reads_the_data_folders_playbook_and_wires_the_queue(rig, sc
     assert draft.item_id == queue_store.studio_item_id(piece.id)
     assert (draft.draft.shape, draft.draft.max_chars) == (SHAPE_LONG, 30000)
     assert draft.model == "writer-model (studio)"
+    # the queue's own questions before a revision: may it land, and what did the editor
+    # change there meanwhile (the revision starts from that)
+    piece = S.get_piece(sconn, piece.id)
+    assert ctx.revisable(piece) == "" and ctx.queue_edits(piece) is None
+    queue_store.edit(sconn, draft.id, thread=["Changed by hand."], approve_after=False)
+    edits = ctx.queue_edits(piece)
+    assert edits is not None and edits.posts == ["Changed by hand."]
 
 
 def test_make_renderer_draws_with_the_configured_browser_and_timeout(monkeypatch, cfg):
@@ -1047,6 +1242,65 @@ def test_a_queued_story_that_left_the_feed_falls_back_to_its_words_or_is_dropped
     assert runner.run() == 0
     piece = rig.only_piece()
     assert (piece.topic, piece.cluster_id) == (TOPIC, None)
+
+
+def test_a_queued_story_that_linking_merged_is_followed_to_its_new_cluster(rig, sconn):
+    """The Feed queued the story while a session ran; the next score run's linking folded
+    it into an older cluster before the studio got to it. The run writes it all the same,
+    on the cluster that holds it now."""
+    older = seed_item(sconn, "older", total=44)
+    newer = seed_item(sconn, "newer", total=41)
+    # as the Feed's button queues it (tests/test_studio_web.py: the route keeps the item)
+    S.queue_topic(sconn, cluster_id=newer, story_item=T.story_item(newer), checkpoint=True)
+    merge(older, newer)
+
+    assert runner.run(now=True) == 0
+
+    piece = rig.only_piece()
+    assert piece.cluster_id == older
+    assert S.queued_topics(sconn) == []  # claimed by the piece
+    assert f"[story {older}] Title older" in rig.cli.prompt("research")
+
+
+def test_a_dropped_queued_story_lets_the_topic_behind_it_start(rig, sconn, caplog):
+    S.queue_topic(sconn, cluster_id=99998)  # a story alone, gone with nothing to follow
+    behind = S.queue_topic(sconn, topic=TOPIC, checkpoint=True)  # the press was for this
+    with caplog.at_level(logging.WARNING, logger="studio.runner"):
+        assert runner.run(now=True) == 0
+    assert "story 99998 is not in the feed any more" in caplog.text
+    piece = rig.only_piece()
+    assert piece.topic == TOPIC and S.queued_topics(sconn) == []
+    claimed = sconn.execute("SELECT piece_id FROM studio_topics WHERE id = ?", (behind,))
+    assert claimed.fetchone()[0] == piece.id
+
+
+def test_a_run_points_the_studio_at_merged_stories_before_it_offers_any(rig, sconn, cfg):
+    cfg["auto"].update(max_new_per_day=3, min_hours_between=0)
+    older = seed_item(sconn, "older", total=47)
+    newer = seed_item(sconn, "newer", total=45)
+    fresh = seed_item(sconn, "fresh", total=40)
+    used = make_piece(
+        sconn, topic="", cluster_id=newer, story_item="newer", stage=S.STAGE_DISCARDED
+    )
+    waiting = make_piece(sconn, cluster_id=newer, story_item="newer", stage=S.STAGE_READY)
+    merge(older, newer)
+    assert S.used_cluster_ids(sconn) == {newer}  # the dead id, until a run follows it
+
+    assert runner.run() == 0
+
+    assert get(sconn, used.id).cluster_id == older and get(sconn, waiting.id).cluster_id == older
+    prompt = rig.cli.prompt("research")
+    assert f"[story {fresh}]" in prompt and f"[story {older}]" not in prompt
+
+
+def test_a_dry_run_follows_a_merged_queued_story_without_writing(rig, sconn, capsys):
+    older = seed_item(sconn, "older", total=44)
+    newer = seed_item(sconn, "newer", total=41)
+    S.queue_topic(sconn, cluster_id=newer, story_item="newer")
+    merge(older, newer)
+    assert runner.run(dry_run=True) == 0
+    assert f"[story {older}] Title older" in capsys.readouterr().out
+    assert [t.cluster_id for t in S.queued_topics(sconn)] == [newer]  # read-only
 
 
 def test_two_pieces_on_one_topic_in_the_same_second_get_their_own_folders(rig, sconn, cfg):
@@ -1221,6 +1475,215 @@ def test_the_lock_is_released_even_when_the_run_raises(rig, sconn):
     held.release()
 
 
+def test_a_run_waits_a_moment_for_a_page_that_holds_the_lock(rig, sconn):
+    """A studio page checking for a stopped run (settle_stopped) holds the lock for as long
+    as a few updates take; a run starting then waits for it rather than skipping its turn
+    as if another run were in progress."""
+    held = lock.acquire(rig.root / runner.LOCK_NAME, trust_os_lock=True)
+    assert held is not None
+    timer = threading.Timer(0.1, held.release)
+    timer.start()
+    try:
+        assert runner.run(topic=TOPIC) == 0
+    finally:
+        timer.join()
+    assert rig.cli.stages() == ["research"] and len(rig.pieces()) == 1
+
+
+# ---- settle_stopped: a run that was stopped, seen from the pages ------------------------
+
+
+def test_with_no_run_alive_a_piece_left_mid_stage_is_interrupted_at_once(rig, sconn):
+    """The Stop button killed run_studio.py mid-stage; the lock went with its process. The
+    piece is interrupted, its open run closed, without waiting for the next studio run."""
+    stuck = make_piece(sconn, stage=S.STAGE_WRITING)
+    S.start_run(sconn, stuck.id, "write")
+    done = make_piece(sconn, stage=S.STAGE_READY)
+
+    marked = runner.settle_stopped(sconn, load_studio_config())
+
+    assert [p.id for p in marked] == [stuck.id]
+    after = get(sconn, stuck.id)
+    assert after.stage == S.STAGE_INTERRUPTED and after.meta["failed_stage"] == "write"
+    assert after.error == (
+        "the write stage stopped before it finished (stopped, timed out or crashed)"
+    )
+    assert [r.outcome for r in S.list_runs(sconn, stuck.id)] == ["interrupted"]
+    assert get(sconn, done.id).stage == S.STAGE_READY
+    # the lock is free again for the next run
+    again = lock.acquire(rig.root / runner.LOCK_NAME, trust_os_lock=True)
+    assert again is not None
+    again.release()
+
+
+def test_while_a_run_holds_the_lock_its_pieces_are_left_alone(rig, sconn):
+    stuck = make_piece(sconn, stage=S.STAGE_POLISHING)
+    held = lock.acquire(rig.root / runner.LOCK_NAME, trust_os_lock=True)
+    assert held is not None
+    try:
+        assert runner.settle_stopped(sconn, load_studio_config()) == []
+    finally:
+        held.release()
+    assert get(sconn, stuck.id).stage == S.STAGE_POLISHING
+
+
+def test_with_nothing_mid_stage_the_lock_is_not_even_looked_at(rig, sconn):
+    make_piece(sconn, stage=S.STAGE_READY)
+    assert runner.settle_stopped(sconn, load_studio_config()) == []
+    assert not rig.root.exists()  # no lock file made
+
+
+# ---- a piece whose folder is gone, inside a run -----------------------------------------
+
+
+def test_a_piece_whose_folder_is_gone_fails_and_the_run_goes_on(rig, sconn, tmp_path, caplog):
+    """Two Continue requests; the first piece's folder was deleted. That piece fails and
+    says why, the second is written, and the run ends normally."""
+    pieces = []
+    for name in ("gone", "here"):
+        ws = tmp_path / "studio_pieces" / name
+        write_research(ws)
+        piece = make_piece(sconn, stage=S.STAGE_RESEARCH_READY, workspace=ws.resolve())
+        S.request(sconn, piece.id, S.REQUEST_CONTINUE, NOTE)
+        pieces.append(piece)
+    gone, here = pieces
+    shutil.rmtree(gone.workspace)
+
+    assert runner.run(resume_only=True) == 0
+
+    after = get(sconn, gone.id)
+    assert (after.stage, after.request) == (S.STAGE_FAILED, "")
+    assert after.error == f"the piece's folder {gone.workspace} is missing" + SS.PUT_BACK
+    assert S.list_runs(sconn, gone.id)[-1].finished_at is not None
+    assert get(sconn, here.id).stage == S.STAGE_READY
+    # and the next run finds nothing to mark: the piece is not left mid-stage
+    assert runner.run(resume_only=True) == 0
+    assert get(sconn, gone.id).stage == S.STAGE_FAILED
+
+
+# ---- the date and the playbook, per stage ----------------------------------------------
+
+
+def test_each_stage_is_told_the_date_and_the_playbook_as_they_are_when_it_starts(
+    rig, sconn, cfg, tmp_path, monkeypatch
+):
+    """One run acts on every request before it starts a piece, hours of sessions that can
+    cross midnight; a stage starting after it is told the new date, and a playbook the
+    editor saved meanwhile."""
+    days = iter([("2026-10-05", ZONE), ("2026-10-06", ZONE)])
+    monkeypatch.setattr(runner, "_today", lambda: next(days))
+    ctx = runner.make_context(sconn, cfg)
+    piece = make_piece(sconn, stage=S.STAGE_WRITING, workspace=tmp_path / "studio_pieces" / "p")
+    first = ctx.brief_for(piece)
+    (tmp_path / "studio_playbook.md").write_text("SAVED DURING THE RUN\n", encoding="utf-8")
+    second = ctx.brief_for(piece)
+    assert (first.today, second.today) == ("2026-10-05", "2026-10-06")
+    assert first.playbook != second.playbook == "SAVED DURING THE RUN\n"
+    assert "Today is 2026-10-06 (America/Los_Angeles)." in P.write_prompt(second)
+
+
+# ---- what the app knows that the session cannot look up ---------------------------------
+
+
+def test_every_stage_is_told_the_handles_the_app_has_verified(rig, sconn, monkeypatch):
+    """config.yaml gives Immunocore its @Immunocore, though the company's own site links no
+    X account: qa accepts the handle without a page, and voice.md lets the session use one
+    the app gives it as verified, so research and write are told every one of them."""
+    root = {
+        "companies": {
+            "feeds": [{"key": "imcr", "name": "Immunocore", "x": "Immunocore", "url": ""}]
+        },
+        "mentions": [
+            {"name": "Johnson & Johnson", "handle": "@JNJNews", "aliases": ["J&J", "Janssen"]},
+            {"name": "No handle here"},
+        ],
+    }
+    monkeypatch.setattr(runner, "_root_config", lambda: root)
+    assert runner.app_handles(root) == [
+        ("Immunocore", "Immunocore"),
+        ("JNJNews", "Johnson & Johnson, J&J, Janssen"),
+    ]
+    assert {h.lower() for h, _ in runner.app_handles(root)} == runner.known_handles(root)
+
+    assert runner.run(topic=TOPIC, checkpoint=False) == 0
+
+    for stage in ("research", "write"):
+        prompt = rig.cli.prompt(stage)
+        assert "X HANDLES THE APP HAS VERIFIED" in prompt, stage
+        assert "- @Immunocore = Immunocore\n- @JNJNews = Johnson & Johnson, J&J, Janssen" in prompt
+
+
+def test_a_new_piece_reads_the_accounts_earlier_pieces_in_its_own_folder(rig, sconn):
+    """--restricted keeps a session out of other pieces' folders, and a scorecard grades an
+    outcome against the bar the account set in an earlier piece: the app copies the recent
+    pieces' text, as the queue holds it, into the new piece's folder, saying which went
+    out on X."""
+    assert runner.run(topic="the first piece", checkpoint=False) == 0
+    first = rig.only_piece()
+    assert not (Path(first.workspace) / P.EARLIER_FILE).exists()  # nothing written before it
+    assert "EARLIER PIECES" not in rig.cli.prompt("research")
+    publish_store.connect().close()  # step 3's tables, as its first run makes them
+    publish_store.record_post(
+        sconn,
+        draft_id=first.draft_id,
+        text=POST,
+        kind=publish_store.KIND_THREAD,
+        position=1,
+        slot=None,
+        tweet_id="1790000000000000001",
+    )
+    edited = make_piece(sconn, stage=S.STAGE_READY, angle="deal_decoder", title="Merck's bet")
+    queue_store.edit(
+        sconn, studio_draft(sconn, edited), thread=["The editor's own words."], approve_after=False
+    )
+    make_piece(sconn, stage=S.STAGE_READY, angle="the_race", title="Never queued")
+    rig.cli.calls.clear()
+
+    assert runner.run(topic=TOPIC, checkpoint=False) == 0
+
+    newest = S.list_pieces(sconn)[0]
+    earlier = (Path(newest.workspace) / P.EARLIER_FILE).read_text(encoding="utf-8")
+    assert earlier.index("Merck's bet") < earlier.index(TITLE)  # newest first
+    assert (
+        "· Merck's bet (deal_decoder)\n\nwaiting in the approval queue, not posted\n\n"
+        "The editor's own words." in earlier
+    )
+    assert f"· {TITLE} (class_deep_dive, long_post, hard_number)\n\nposted on X\n\n{POST}" in (
+        earlier
+    )
+    assert "Never queued" not in earlier
+    for stage in ("research", "write"):
+        assert f"is in {P.EARLIER_FILE} in your working folder" in rig.cli.prompt(stage), stage
+
+
+# ---- an automatic piece needs a browser to draw its cards with -------------------------
+
+
+def test_without_a_browser_no_automatic_piece_is_started(rig, sconn, caplog):
+    """Its research and writing would be spent before polish stopped it for want of a
+    browser, every day. The run fails instead, so the runs page shows why."""
+    rig.renderer = None
+    with caplog.at_level(logging.ERROR, logger="studio.runner"):
+        assert runner.run() == 1
+    assert rig.pieces() == [] and rig.cli.calls == []
+    assert f"no new piece: {qa.NO_BROWSER}; install Edge, Chrome or Chromium" in caplog.text
+
+
+def test_without_a_browser_the_editors_requests_and_buttons_still_run(rig, sconn, cfg, tmp_path):
+    """Only the automatic piece waits: a Continue is acted on, and --now starts a piece
+    (one without cards needs no browser; one with cards stops before polish, resumable)."""
+    rig.renderer = None
+    cfg["auto"]["min_hours_between"] = 0  # the Continue's piece started just now
+    ws = tmp_path / "studio_pieces" / "waiting"
+    write_research(ws)
+    waiting = make_piece(sconn, stage=S.STAGE_RESEARCH_READY, workspace=ws.resolve())
+    S.request(sconn, waiting.id, S.REQUEST_CONTINUE, NOTE)
+    assert runner.run() == 1
+    assert get(sconn, waiting.id).stage == S.STAGE_READY
+    assert runner.run(now=True) == 0
+    assert len(rig.pieces()) == 2
+
+
 def test_a_dry_run_prints_the_first_prompt_and_starts_nothing(rig, sconn, capsys):
     queued = S.queue_topic(sconn, topic="a queued topic")
     assert runner.run(dry_run=True, topic=TOPIC, angle="class_deep_dive") == 0
@@ -1366,6 +1829,31 @@ def test_an_abbreviated_flag_is_refused(cli_calls, capsys, argv):
     assert cli_calls == {}
 
 
+def test_a_character_a_windows_pipe_cannot_show_never_ends_a_print(monkeypatch):
+    """On Windows the runs page, run_ops.py and Task Scheduler's log give run_studio.py a
+    cp1252 stdout that raises on an arrow, a >= sign or a Greek letter: such a character
+    is written as its escape instead, and --list (here) prints every piece."""
+    import io
+
+    title = "ORR ≥ 40% → TGF-β trap"
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="cp1252", errors="strict", write_through=True)
+    monkeypatch.setattr(sys, "stdout", console)
+
+    def listing() -> int:
+        print(f"piece 1: {title}")
+        print("piece 2: a plain title")
+        return 0
+
+    monkeypatch.setattr(runner, "print_list", listing)
+
+    assert run_studio.main(["--list"]) == 0
+    assert raw.getvalue().decode("cp1252").splitlines() == [
+        "piece 1: ORR \\u2265 40% \\u2192 TGF-\\u03b2 trap",
+        "piece 2: a plain title",
+    ]
+
+
 def test_a_story_must_be_a_number(cli_calls, capsys):
     with pytest.raises(SystemExit) as stop:
         run_studio.main(["--story", "abc"])
@@ -1473,10 +1961,36 @@ def test_the_summary_is_the_clusters_longest_abstract(sconn):
     assert T.fetch_story(cid).summary == "B" * 300
 
 
+def test_a_story_item_is_the_stories_earliest_item(sconn):
+    cid = seed_item(sconn, "late", total=40)
+    seed_item(sconn, "early", cluster_id=cid)
+    sconn.execute("UPDATE items SET published_at = '2026-10-01T00:00:00+00:00' WHERE id = 'early'")
+    sconn.commit()
+    assert T.story_item(cid) == "early"
+    assert T.story_item(12345) == ""
+
+
+def test_merged_follows_each_story_item_to_the_cluster_that_holds_it(sconn):
+    keep = seed_item(sconn, "keep", total=44)
+    folded = seed_item(sconn, "folded", total=41)
+    alive = seed_item(sconn, "alive", total=40)
+    merge(keep, folded)
+    stories = [
+        (folded, "folded"),  # merged: followed
+        (alive, "alive"),  # still there: nothing to follow
+        (keep, "keep"),
+        (777, "no-such-item"),  # gone, and its item too
+        (778, ""),  # no item remembered
+    ]
+    assert T.merged(stories) == {folded: keep}
+    assert T.merged([]) == {}
+
+
 def test_no_feed_database_means_no_stories(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "missing" / "pipeline.db"))
     assert T.fetch_shortlist(TCFG, exclude=set()) == []
     assert T.fetch_story(1) is None
+    assert T.story_item(1) == "" and T.merged([(1, "x")]) == {}
     assert not (tmp_path / "missing").exists()
 
 

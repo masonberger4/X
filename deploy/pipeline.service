@@ -18,6 +18,8 @@ EnvironmentFile=/home/pipeline/x/.env
 # that user). If `claude` is not in /usr/local/bin or /usr/bin, add its folder here, or set
 # claude_code.binary in config.yaml to its full path.
 #Environment=PATH=/home/pipeline/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+# A plain run: every step but the manual ones and the studio, whose sessions run in
+# pipeline-studio.service so this unit never waits an hour or more behind one.
 ExecStart=/home/pipeline/x/.venv/bin/python run_ops.py run
 # A held lock exits 2 (an overlapping run); do not treat that as a unit failure.
 SuccessExitStatus=2

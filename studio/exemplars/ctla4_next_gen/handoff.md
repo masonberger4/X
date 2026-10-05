@@ -445,7 +445,7 @@ CTLA-4 was never the wrong target. The first drug was a blunt instrument. The se
 
 Which next-gen CTLA-4 are you watching? 👇
 
-Not investment or medical advice. Data from company releases, SEC filings, ClinicalTrials.gov, WCLC 2026, Nature Medicine and SITC 2025, as of Oct 3, 2026.
+Not investment or medical advice. Data from company releases, SEC filings, the NIH trial registry, WCLC 2026, Nature Medicine and SITC 2025, as of Oct 3, 2026.
 
 @BioNTech_Group @bmsnews @AstraZeneca @Merck @myESMO @IASLC
 

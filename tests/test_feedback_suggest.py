@@ -143,3 +143,40 @@ def test_off_slot_group_targets_breaking_rules():
 def test_unknown_kind_rejected():
     with pytest.raises(ValueError):
         sg.Suggestion("magic", "x", "y", "z")
+
+
+def test_studio_posts_name_no_feed_and_never_sway_the_feeds_comparison():
+    # The studio's posts (source 'studio', step 10) far out-earn one real feed's.
+    def studio(i):
+        return row(i, 0, source=sg.STUDIO_SOURCE, head=Metrics(likes=200, replies=30))
+
+    rows = [studio(i) for i in range(5)] + [
+        row(i, 0, source="company_merck", head=Metrics(likes=20, replies=3)) for i in range(5, 10)
+    ]
+    out = sg.suggest(analysis(rows, kpi="conversation"), min_posts=5)
+    targets = {s.target for s in out}
+    # no sources[studio] key exists, and merck is not slowed down for being out-earned by
+    # posts the feeds never drafted
+    assert not any("sources[" in t for t in targets), targets
+
+
+def test_feeds_are_still_compared_with_each_other_when_studio_posts_are_in_the_window():
+    rows = (
+        [row(i, 1000 + i, source="fda_press") for i in range(5)]
+        + [row(i, 100 + i, source="pubmed") for i in range(5, 10)]
+        + [row(i, 50_000, source=sg.STUDIO_SOURCE, edited=True) for i in range(10, 15)]
+        + [row(i, 10, source="unknown") for i in range(15, 20)]
+    )
+    out = sg.suggest(analysis(rows), min_posts=5, effect_ratio=2.0)
+    cadence = {s.target: s for s in out if s.kind == sg.KIND_CADENCE}
+    assert set(cadence) == {
+        "config.yaml: sources[fda_press].cadence_minutes",
+        "config.yaml: sources[pubmed].cadence_minutes",
+    }
+    # the drafter's posts only: 15 of them, the studio's 5 left out
+    assert (
+        "everything else: n=10"
+        in cadence["config.yaml: sources[fda_press].cadence_minutes"].evidence
+    )
+    # the studio's hand-edited posts say nothing about the drafter's voice guide
+    assert not [s for s in out if s.target == "draft/voice.md"]

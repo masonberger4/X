@@ -83,6 +83,31 @@ def test_starting_a_run_redirects_and_a_refused_one_says_why(client, monkeypatch
     assert "already in progress" in unquote_plus(r.headers["location"])
 
 
+def test_a_run_cannot_be_started_from_another_site(client, monkeypatch):
+    """No login: a web page open in the same browser must not press the run buttons."""
+    started = []
+    monkeypatch.setattr(panel_app.JOBS, "start", lambda steps: started.append(steps))
+    for headers in (
+        {"Origin": "https://evil.example"},
+        {"Origin": "null"},
+        {"Referer": "https://evil.example/page"},
+    ):
+        r = client.post("/runs", data={"step": ["studio_now"]}, headers=headers)
+        assert r.status_code == 403 and "another site" in r.text
+        assert client.post("/runs/cancel", headers=headers).status_code == 403
+    assert started == []
+    r = client.post("/runs", data={"step": ["ingest"]}, headers={"Origin": "http://testserver"})
+    assert r.status_code == 303 and started == [["ingest"]]
+
+
+def test_the_queue_routes_on_the_panel_refuse_another_site_too(client, conn, draft_id):
+    r = client.post(
+        f"/drafts/{draft_id}/approve", data={"note": "forged"}, headers={"Origin": "https://e.x"}
+    )
+    assert r.status_code == 403
+    assert queue_store.get_draft(conn, draft_id).status == "pending"
+
+
 def test_the_run_fragment_reports_whether_a_run_is_in_flight(client):
     assert 'data-running="0"' in client.get("/runs/current").text
 

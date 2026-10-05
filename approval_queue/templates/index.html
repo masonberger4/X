@@ -73,6 +73,7 @@
         {% set first = d.draft.thread[0] if d.draft.thread else "" %}
         <div class="meta">{{ first[:400] }}{% if first|length > 400 %}…{% endif %}</div>
         {% if d.rejection_reason %}<div class="meta over">{{ d.rejection_reason }}</div>{% endif %}
+        {% if studio_holds is defined and studio_holds.get(d.id) %}<div class="meta"><span class="pill warn">on hold</span> {{ studio_holds[d.id] }}</div>{% endif %}
         {% set k = checks.get(d.id) %}
         {% if k %}<div class="meta">claims:
           {% if k.contradicted %}<span class="badge contradicted">{{ k.contradicted }} contradicted</span>{% endif %}

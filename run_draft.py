@@ -1,13 +1,21 @@
 """CLI: draft every scored candidate above threshold that has no draft yet.
 
 A story the editor said yes to on the feed is drafted whatever its score or age, and first.
+A story the studio holds (a studio piece on it that was not discarded, whatever its stage,
+a topic queued for it on the studio page, or a story offered to a studio piece still
+researching beside this run) is left to the studio: one story, one piece of writing. The
+hold is looked at again before each story, and a draft whose story a studio piece took
+while it was being written is not stored.
 
 Usage: python run_draft.py [--min-score 30] [--since-hours 48] [--limit N] [--dry-run]
                            [--no-examples] [--no-swarm] [--retry-failed] [--retag]
 
 Drafts that pass every hard rule are stored as pending. Drafts the model could not get
 past the hard rules are stored as status=failed with the reason, so they are not retried
-on the next run and the reviewer can see why.
+on the next run and the reviewer can see why; so is a story the CLI's usage-policy
+safeguard refuses (the same prompt is refused every time). A story whose model call failed
+(an outage, a usage limit) is tried again next run, and a CLI that cannot start at all ends
+the run.
 
 Every draft is a 3-6 post thread with exactly one visual, a chart or a table (the drafter
 retries a draft that has neither, or whose chart holds a number the source does not). A
@@ -40,6 +48,7 @@ from datetime import UTC, datetime, timedelta
 
 from dotenv import load_dotenv
 
+import claude_cli
 from approval_queue import choosing, images, store
 from draft.chart import Style
 from draft.drafter import (
@@ -66,6 +75,9 @@ from swarm.settings import load_swarm_config
 from verify import store as verify_store
 
 log = logging.getLogger("run_draft")
+
+# The reason a story the safeguard refused is stored as failed under (run_draft.main).
+REFUSED = "refused by the usage-policy safeguard"
 
 
 def build_examples(
@@ -208,6 +220,10 @@ def draft_with_swarm(
             )
         except DraftRejected as exc:
             control_problem = exc.reasons
+        except claude_cli.ClaudeCliRefused as exc:
+            # The same prompt is refused every run: a failed control, so the swarm's draft
+            # still wins, or the story is stored failed rather than retried for ever.
+            control_problem = [f"{REFUSED}: {exc}"]
         # any other exception propagates: the caller retries the story next run
 
     calls = swarm_result.calls if swarm_result else 0
@@ -508,11 +524,17 @@ def main(argv: list[str] | None = None) -> int:
                 rejection_ids,
             )
         candidates = store.fetch_candidates(args.min_score, args.since_hours, conn=conn)
-        todo = [
+        # One story, one piece of writing: a story the studio holds (a piece on it that was
+        # not discarded, at any stage, or a topic queued for it) lands in the queue as the
+        # studio's piece, so it is not drafted as a short thread as well.
+        studio = store.studio_held_clusters(conn)
+        undrafted = [
             c
             for c in candidates
             if not store.has_draft(conn, c.item_id, c.cluster_id, ignore_failed=args.retry_failed)
-        ][: args.limit]
+        ]
+        left_to_studio = [c for c in undrafted if c.cluster_id in studio]
+        todo = [c for c in undrafted if c.cluster_id not in studio][: args.limit]
         log.info(
             "%d candidates >= %.1f in last %.0fh, %d without a draft",
             len(candidates),
@@ -520,8 +542,19 @@ def main(argv: list[str] | None = None) -> int:
             args.since_hours,
             len(todo),
         )
+        if left_to_studio:
+            log.info(
+                "%d left to the studio (a studio piece or queued topic has the story): %s",
+                len(left_to_studio),
+                ", ".join(c.title[:60] for c in left_to_studio),
+            )
         drafted = failed = charts = 0
         for c in todo:
+            if c.cluster_id in store.studio_held_clusters(conn):
+                # The studio took the story while this run drafted the ones before it (a
+                # studio session started researching beside it and was offered the story).
+                log.info("left to the studio since this run started: %s", c.title[:80])
+                continue
             log.info("%s %.1f %s", c.source, c.total, c.title[:80])
             if args.dry_run:
                 continue
@@ -544,8 +577,16 @@ def main(argv: list[str] | None = None) -> int:
                         rationale=c.rationale,
                         examples_block=examples_block,
                     )
-            except DraftRejected as exc:
+            except (DraftRejected, claude_cli.ClaudeCliRefused) as exc:
+                # Rejected: the model never got past the hard rules. Refused: the safeguard
+                # refuses this story's prompt every time. Stored failed, so neither is sent
+                # again each run (--retry-failed tries it once more).
                 failed += 1
+                if isinstance(exc, DraftRejected):
+                    reasons = exc.reasons
+                else:
+                    log.error("%s: %s: %s", c.item_id, REFUSED, exc)
+                    reasons = [f"{REFUSED}: {exc}"]
                 draft_id = store.insert_draft(
                     conn,
                     item_id=c.item_id,
@@ -553,14 +594,28 @@ def main(argv: list[str] | None = None) -> int:
                     model=exc.__class__.__name__,
                     draft=Draft([], "", ""),
                     status=store.STATUS_FAILED,
-                    rejection_reason="; ".join(exc.reasons),
+                    rejection_reason="; ".join(reasons),
                 )
                 store.record_examples(conn, draft_id, edit_ids, rejection_ids)
                 if run_id is not None:
                     swarm_store.set_run_draft(conn, run_id, draft_id)
                 continue
+            except claude_cli.ClaudeCliUnavailable as exc:
+                # Not installed or cannot start: every other story would fail the same way.
+                log.error("stopping: %s", exc)
+                break
             except Exception:
                 log.exception("model call failed drafting %s; will retry next run", c.item_id)
+                continue
+            if c.cluster_id in store.studio_held_clusters(conn, offered=False):
+                # The studio took this story while it was being drafted (a piece's
+                # research named it, or the editor started or queued a piece on it): the
+                # piece will write it, so the thread is not stored. A draft that lands
+                # first is caught by the research instead, which refuses the story.
+                log.warning(
+                    "%s: the studio took this story while it was drafted; draft not stored",
+                    c.item_id,
+                )
                 continue
             if isinstance(result, HumanChoice):
                 store_for_pick(conn, c, result, run_id, edit_ids, rejection_ids)

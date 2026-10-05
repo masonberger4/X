@@ -26,7 +26,7 @@ _DEFAULTS: dict[str, Any] = {
     "auto_run_backup_hours": 0,  # 0: automatic runs take no backup
     "run_log_tail_chars": 4000,
     "health": {},
-    "backups": {"dir": "./backups", "keep": 14},
+    "backups": {"dir": "./backups", "keep": 14, "with_db": []},
     "alerts": {
         "cooldown_hours": 6,
         "min_status": "warn",

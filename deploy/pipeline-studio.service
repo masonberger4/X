@@ -1,0 +1,31 @@
+# The studio's own entry (step 10): one long Claude Code session per post. Install beside
+# pipeline.service:
+#   sudo cp deploy/pipeline-studio.service deploy/pipeline-studio.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pipeline-studio.timer
+# Edit User, WorkingDirectory and the venv path first. Logs: journalctl -u pipeline-studio.
+#
+# Not inside pipeline.service: a session runs for an hour or more, and a oneshot unit is not
+# started again while it is still running, so the pipeline's own runs would stop for as
+# long. `run --only studio` takes only the studio's lock, never the pipeline's run lock.
+[Unit]
+Description=Cancer-research X pipeline: the studio (one long session per post; posts nothing)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pipeline
+WorkingDirectory=/home/pipeline/x
+EnvironmentFile=/home/pipeline/x/.env
+# The same PATH as pipeline.service: the session runs the Claude Code CLI as User.
+#Environment=PATH=/home/pipeline/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/pipeline/x/.venv/bin/python run_ops.py run --only studio
+SuccessExitStatus=2
+# No unit time limit: a session is research, writing and a fact-check, and each stage has
+# its own limit in studio/config.yaml (`timeouts:`). A start limit here would kill the
+# session mid-stage, and its piece would wait for a human to press Resume.
+TimeoutStartSec=infinity
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

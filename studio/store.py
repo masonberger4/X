@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS studio_pieces (
     origin          TEXT NOT NULL,
     topic           TEXT NOT NULL DEFAULT '',
     cluster_id      INTEGER,
+    story_item      TEXT NOT NULL DEFAULT '',
     requested_angle TEXT NOT NULL DEFAULT '',
     angle           TEXT NOT NULL DEFAULT '',
     shape           TEXT NOT NULL DEFAULT '',
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS studio_topics (
     created_at TEXT NOT NULL,
     topic      TEXT NOT NULL DEFAULT '',
     cluster_id INTEGER,
+    story_item TEXT NOT NULL DEFAULT '',
     angle      TEXT NOT NULL DEFAULT '',
     checkpoint INTEGER NOT NULL DEFAULT 1,
     piece_id   INTEGER
@@ -195,6 +197,15 @@ PLAYBOOK_SOURCES = (
 )
 MANUAL_METRICS = ("impressions", "likes", "reposts", "replies", "quotes", "bookmarks")
 
+# Guarded migrations: columns added after the tables first shipped.
+# story_item: one item (step 1's items.id) of the feed story beside cluster_id. Story
+# linking (filter/link.py) folds a cluster into another and deletes it, and the items move
+# with it, so the item finds the story again (runner.follow_merges).
+_MIGRATIONS = (
+    ("studio_pieces", "story_item", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_topics", "story_item", "TEXT NOT NULL DEFAULT ''"),
+)
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -202,6 +213,10 @@ def _now() -> str:
 
 def ensure_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    for table, column, decl in _MIGRATIONS:
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     conn.commit()
 
 
@@ -237,6 +252,7 @@ class Piece:
     request: str
     request_note: str
     error: str
+    story_item: str = ""  # one item of the story at cluster_id ('' when none is known)
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -274,6 +290,7 @@ def _row(r: sqlite3.Row) -> Piece:
         request=r["request"],
         request_note=r["request_note"],
         error=r["error"],
+        story_item=r["story_item"] or "",
         meta=meta if isinstance(meta, dict) else {},
     )
 
@@ -290,18 +307,21 @@ def create_piece(
     workspace: str,
     model: str,
     effort: str,
+    story_item: str = "",
 ) -> int:
     now = _now()
     cur = conn.execute(
         """INSERT INTO studio_pieces (created_at, updated_at, origin, topic, cluster_id,
-               requested_angle, stage, checkpoint, session_id, workspace, model, effort)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               story_item, requested_angle, stage, checkpoint, session_id, workspace, model,
+               effort)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             now,
             now,
             origin,
             topic,
             cluster_id,
+            story_item,
             requested_angle,
             STAGE_RESEARCHING,
             int(checkpoint),
@@ -339,6 +359,7 @@ _UPDATABLE = {
     "error",
     "topic",
     "cluster_id",
+    "story_item",
     "session_id",
 }
 
@@ -402,6 +423,21 @@ def recent_pieces(conn: sqlite3.Connection, limit: int) -> list[Piece]:
     return [_row(r) for r in rows]
 
 
+def started_within(conn: sqlite3.Connection, days: float) -> list[Piece]:
+    """The pieces started in the last `days` days that were not discarded, finished or not
+    (waiting at the research checkpoint, stopped, failed), newest first: the topics a new
+    piece is told not to repeat (`topics.avoid_days`). A piece still being made holds its
+    topic as much as one in the queue does. Nothing for `days` of 0 or less."""
+    if days <= 0:
+        return []
+    since = datetime.fromisoformat(_now()) - timedelta(days=days)
+    rows = conn.execute(
+        "SELECT * FROM studio_pieces WHERE created_at >= ? AND stage != ? ORDER BY id DESC",
+        (since.isoformat(timespec="seconds"), STAGE_DISCARDED),
+    ).fetchall()
+    return [_row(r) for r in rows]
+
+
 def pieces_since(conn: sqlite3.Connection, since_iso: str, origin: str | None = None) -> int:
     sql = "SELECT COUNT(*) FROM studio_pieces WHERE created_at >= ?"
     args: list[Any] = [since_iso]
@@ -422,6 +458,32 @@ def used_cluster_ids(conn: sqlite3.Connection) -> set[int]:
         "UNION SELECT cluster_id FROM studio_topics WHERE cluster_id IS NOT NULL"
     ).fetchall()
     return {int(r[0]) for r in rows}
+
+
+def remembered_stories(conn: sqlite3.Connection) -> list[tuple[int, str]]:
+    """Every (cluster id, story item) pair the studio's rows hold where the item is known:
+    what runner.follow_merges needs to find a story that linking moved to another cluster."""
+    rows = conn.execute(
+        "SELECT cluster_id, story_item FROM studio_pieces "
+        "WHERE cluster_id IS NOT NULL AND story_item != '' "
+        "UNION SELECT cluster_id, story_item FROM studio_topics "
+        "WHERE cluster_id IS NOT NULL AND story_item != '' ORDER BY 1, 2"
+    ).fetchall()
+    return [(int(r[0]), str(r[1])) for r in rows]
+
+
+def repoint_story(conn: sqlite3.Connection, old: int, new: int) -> int:
+    """Point every piece and queued topic on story `old` at `new`, the cluster story linking
+    folded it into. Returns the rows changed."""
+    n = 0
+    for table in ("studio_pieces", "studio_topics"):
+        cur = conn.execute(
+            f"UPDATE {table} SET cluster_id = ? WHERE cluster_id = ?",  # noqa: S608
+            (new, old),
+        )
+        n += cur.rowcount
+    conn.commit()
+    return n
 
 
 # --- runs -----------------------------------------------------------------------------
@@ -510,6 +572,20 @@ class QueuedTopic:
     angle: str
     checkpoint: bool
     piece_id: int | None
+    story_item: str = ""  # one item of the story at cluster_id ('' when none is known)
+
+
+def _topic_row(r: sqlite3.Row) -> QueuedTopic:
+    return QueuedTopic(
+        id=int(r["id"]),
+        created_at=r["created_at"],
+        topic=r["topic"],
+        cluster_id=r["cluster_id"],
+        angle=r["angle"],
+        checkpoint=bool(r["checkpoint"]),
+        piece_id=r["piece_id"],
+        story_item=r["story_item"] or "",
+    )
 
 
 def queue_topic(
@@ -519,13 +595,14 @@ def queue_topic(
     cluster_id: int | None = None,
     angle: str = "",
     checkpoint: bool = True,
+    story_item: str = "",
 ) -> int:
     if not topic.strip() and cluster_id is None:
         raise ValueError("a queued topic needs words or a story")
     cur = conn.execute(
-        "INSERT INTO studio_topics (created_at, topic, cluster_id, angle, checkpoint) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (_now(), topic.strip(), cluster_id, angle.strip(), int(checkpoint)),
+        "INSERT INTO studio_topics (created_at, topic, cluster_id, story_item, angle, checkpoint) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (_now(), topic.strip(), cluster_id, story_item, angle.strip(), int(checkpoint)),
     )
     conn.commit()
     return int(cur.lastrowid)
@@ -535,33 +612,12 @@ def next_queued_topic(conn: sqlite3.Connection) -> QueuedTopic | None:
     r = conn.execute(
         "SELECT * FROM studio_topics WHERE piece_id IS NULL ORDER BY id LIMIT 1"
     ).fetchone()
-    if r is None:
-        return None
-    return QueuedTopic(
-        id=int(r["id"]),
-        created_at=r["created_at"],
-        topic=r["topic"],
-        cluster_id=r["cluster_id"],
-        angle=r["angle"],
-        checkpoint=bool(r["checkpoint"]),
-        piece_id=r["piece_id"],
-    )
+    return _topic_row(r) if r is not None else None
 
 
 def queued_topics(conn: sqlite3.Connection) -> list[QueuedTopic]:
     rows = conn.execute("SELECT * FROM studio_topics WHERE piece_id IS NULL ORDER BY id").fetchall()
-    return [
-        QueuedTopic(
-            id=int(r["id"]),
-            created_at=r["created_at"],
-            topic=r["topic"],
-            cluster_id=r["cluster_id"],
-            angle=r["angle"],
-            checkpoint=bool(r["checkpoint"]),
-            piece_id=r["piece_id"],
-        )
-        for r in rows
-    ]
+    return [_topic_row(r) for r in rows]
 
 
 def claim_topic(conn: sqlite3.Connection, topic_id: int, piece_id: int) -> None:

@@ -5,6 +5,7 @@
 {% if d.studio_piece %}
 <h1>Studio piece {{ d.studio_piece }}</h1>
 <p class="banner ok">Written in the {% if HAS_PANEL %}<a href="/studio/{{ d.studio_piece }}">studio</a>{% else %}studio (open the control panel, run_app.py, for its page){% endif %} by one {{ d.model }} session: its fact base, fact-check log and session log are on the studio page, and so is Revise, which resumes that session.</p>
+{% if studio_hold %}<p class="banner warn">On hold: {{ studio_hold }}. Approve, edit, reject and dropping a picture wait until then.</p>{% endif %}
 {% else %}
 <h1>{{ d.title or d.item_id }}</h1>
 {% endif %}

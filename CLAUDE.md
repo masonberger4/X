@@ -102,7 +102,11 @@ carrying `--live`).
   CLI always runs on its own login, drops `CLAUDE_AUTO_BACKGROUND_TASKS` and sets
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so nothing a call starts (a studio
   session's fact-check agent) is moved to the background and killed unfinished when
-  the call ends), and `publish/client.py`
+  the call ends; each one-shot call runs from a new private folder removed afterwards,
+  `claude_cli.private_workdir`, never the repo or the shared temp folder, with
+  `--safe-mode` from the root `claude_code.safe_mode`, on unless false, so the operator's
+  CLAUDE.md files, hooks, MCP servers and output styles never reach a call), and
+  `publish/client.py`
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
   `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
@@ -160,11 +164,13 @@ carrying `--live`).
   `feedback/store.py:day_of`'s `captured_on` bucket; relative ages are zone-independent.
   `publish/config.yaml` and `feedback/config.yaml` keep their own `timezone:` because
   those drive behaviour (posting slots, the "hour posted" column), not display; all
-  three are set to the same zone. The one behaviour that follows the root `timezone:` is
+  three are set to the same zone. The behaviour that follows the root `timezone:` is
   `auto_run_times` in `ops/config.yaml` (the panel's automatic runs): the human types and
   reads those times on the same page, so `panel/autorun.py` reads the zone through
   `timeutil.display_tz()` (never config.yaml itself) and `ops/autorun.py` takes it as a
-  parameter; a zone change needs a restart, as `timezone_name` is cached.
+  parameter; a zone change needs a restart, as `timezone_name` is cached. The studio's
+  `auto.max_new_per_day` counts by the date in that zone too (`studio/runner.py:
+  allowed_to_start(tz=)`), since the automatic runs it rides on are timed in it.
 - Read secrets from `.env` via python-dotenv; never commit `.env`.
 - Logging: stdlib `logging`. INFO for per-source counts, DEBUG for items.
 - Ask before adding a dependency not already in `pyproject.toml`.
@@ -204,8 +210,9 @@ carrying `--live`).
   reference only. `run_unlink.py` is the one-off operator pass over queued drafts written
   before the rule (`hook.strip_links`, pure: the link and the lead-in that introduced it
   come out, a post that was only a link is dropped; `store.edit` with the status unchanged,
-  no model call), as `run_scrub_notes.py` is for captions. Publish's re-check and
-  human-approved texts are untouched.
+  no model call; studio drafts are skipped), as `run_scrub_notes.py` is for captions. Both
+  leave alone what `approval_queue/publishing.py:block_reason` says step 3 holds (live on X,
+  posted, partial or claimed). Publish's re-check and human-approved texts are untouched.
 - **Posts talk like a human** (`draft/style.py:style_problems`, pure; rule 13 in
   `draft/prompt.py:hard_rules`, enforced per post from `check_hard_rules` and per cell from
   `swarm/cells.py:cell_problems`). No colon (one between digits, 8:30 or 2:1, is fine) and
@@ -289,7 +296,17 @@ carrying `--live`).
 - Step 2 reads step 1's tables only through
   `approval_queue/store.py:fetch_candidates` (one candidate per cluster: score at or
   above the bar within `--since-hours`, plus every story whose latest human feed rating is
-  yes whatever its score or age, those first). Its own
+  yes whatever its score or age, those first). **One story, one piece of writing**:
+  `run_draft.py` skips a story the studio holds (`store.studio_held_clusters`, read-only
+  on `studio_pieces` / `studio_topics`, empty when they are missing: a piece not
+  discarded at any stage, or an unclaimed queued topic, a merged story followed through
+  its `story_item`, and every story offered to a piece still researching on no story,
+  `store.studio_researching_offers` over its `offered_stories`), looked at again before
+  each story, and does not store a draft whose story a piece's research named meanwhile
+  (`offered=False`); the studio's shortlist skips a story with a draft that did not
+  fail (`store.drafted_cluster_ids`, followed through the draft's item), and research
+  fails a piece whose named story got such a draft while it ran; the dashboard's
+  feed-yes count (`ops/store.py:fetch_feed_yes_undrafted`) leaves the studio's out. Its own
   tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
   An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
   decision carrying the text and the optional note) puts an approved draft back to
@@ -336,7 +353,8 @@ carrying `--live`).
   `draft/config.yaml`; `decisions.category` is added by a guarded migration in
   `approval_queue/store.py:connect`; `draft_examples` records what each draft
   was shown. Step 7 reads `items` only through `fetch_decisions_for_voice` /
-  `fetch_draft_stats` (source and url).
+  `fetch_draft_stats` (source and url); both leave studio drafts (`studio:%` item ids)
+  out, so the drafter learns from its own drafts only.
 - Step 2b (`verify/`) checks `claims_to_verify` against the web. Its only
   network call is `verify/verifier.py:call_model` (the CLI with
   `tools=["WebSearch","WebFetch"]` under `verify/config.yaml`'s own `timeout_seconds`;
@@ -396,11 +414,21 @@ carrying `--live`).
   settings live in `feedback/config.yaml`. `feedback/client.py` is the only
   module that calls the X API (httpx, `X_BEARER_TOKEN`, read-only). Reports
   PROPOSE rubric/prefilter/slot changes; a human applies them and bumps
-  `PROMPT_VERSION`. Analysis and suggestions are pure (no DB, no network).
+  `PROMPT_VERSION`. Analysis and suggestions are pure (no DB, no network). Studio posts
+  are the report group `studio` (`fetch_post_context`); the feed (`sources[...]`) and
+  voice-guide proposals compare the drafter's posts only (`suggest.NOT_A_FEED`,
+  `_drafter_rows`).
 - Step 5 (`ops/`) never imports another step's modules: `run_ops.py run`
   executes the other CLIs as subprocesses (order, timeouts, enabled/required in
   `ops/config.yaml`, which must never contain `--live`; a test asserts it) under
-  an `fcntl` lock. It reads other steps' tables only through the read-only
+  an `fcntl` lock. A plain `run` leaves out `manual` steps and `skip_when_busy` ones (the
+  studio: a session would hold the run and its lock for an hour or more, and Task Scheduler
+  and a systemd oneshot never start a run still going), which run with `--only`; the
+  studio's own schedule entry is `run --only studio` (`deploy/pipeline-studio.service`,
+  `TimeoutStartSec=infinity`), and a run of `skip_when_busy` steps alone takes no run
+  lock, only the step's own. `REPO_ROOT` here and in `panel/frozen.py` (and the frozen
+  `data_dir`) is `os.path.abspath`, never `resolve()`: on Windows that would turn a mapped
+  drive into a UNC path, where the npm `claude.cmd` cannot start a studio session. It reads other steps' tables only through the read-only
   adapters in `ops/store.py` (each returns empty when a table is missing) and
   owns `pipeline_runs`, `health_checks`, `alerts_sent`. `ops/health.py` is pure
   (`now` is a parameter; its `cli` check, `check_cli(binary, found)`, is handed the
@@ -480,7 +508,9 @@ carrying `--live`).
   releasing its mutex through the `backup` callable (`panel/app.py:_backup_now`, the same
   `ops/backup.py:backup` as "Back up now"), noting "backup saved/failed" in the outcomes;
   `ops/backup.py` writes `<name>.part` and renames it after `integrity_check`, so a backup cut
-  short never counts as the newest. The runs page shows it and posts `POST /runs/auto` (switch and times only);
+  short never counts as the newest; it also copies each file named in `backups.with_db`
+  (shipped: `studio_playbook.md`) from the database's folder beside the backup as
+  `pipeline-<stamp>.<name>`, and `rotate` removes those with their backup. The runs page shows it and posts `POST /runs/auto` (switch and times only);
   the dashboard shows the state and `ops/store.py:last_auto_run`. `tests/conftest.py`
   disables `AutoRunner.start` for every test; `tests/test_autorun.py` drives `tick`.
   "Set schedule" on the approved page (`POST /publishing/order`, `panel/publishing.py`)
@@ -496,7 +526,7 @@ carrying `--live`).
   `POST /runs/auto`; the step list stays file-only), and the included queue routes add
   `trusted_domains` in `verify/config.yaml`, above: `POST /publishing/caps` calls
   `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
-  comments kept). The dashboard's "Back up now" (`POST /backup`) calls `ops/backup.py:backup` into `backups.dir` with `backups.keep`, as `run_ops.py backup` does. It has no authentication: `run_app.py` binds localhost by default. `/publishing` and
+  comments kept). The dashboard's "Back up now" (`POST /backup`) calls `ops/backup.py:backup` into `backups.dir` with `backups.keep`, as `run_ops.py backup` does. It has no authentication: `run_app.py` binds localhost by default, and every POST must come from the app's own pages: `approval_queue/app.py:SameOriginOnly` (installed on the queue app and the panel's, so the queue's and the studio's routes too) answers 403 when `Origin`, or `Referer` without one, names another host than `Host` (or is `null`); a request with neither (tests, curl) passes. `/publishing` and
   `/feedback` are otherwise views: no post button, and a report's suggestions are rendered,
   never applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
   changes no step: `panel/frozen.py` decides the data dir (exe folder when frozen, else
@@ -593,14 +623,32 @@ carrying `--live`).
   never writes or rewrites the post. Every stage is `claude_cli.run_session` (the second
   place that spawns the CLI, beside `run_claude`: stream-json into
   `<piece>/session.ndjson`, a fixed `--session-id` on the first run and `--resume` after,
-  so the session keeps what it read; `cwd` is the piece folder; `--append-system-prompt-file`
-  with `studio/brief/session.md` + `voice.md` + `cards.md` once, recorded by the CLI;
-  `--add-dir studio/exemplars`; `tools` and the isolation `cli_flags` (`--safe-mode
+  so the session keeps what it read; a `--resume` the CLI answers "No conversation found"
+  (`claude_cli.session_lost`: Claude Code cleans old sessions up) goes to
+  `session.fresh_session`, a new id the piece keeps (`lost_sessions` in its meta), the
+  standing instructions again and `prompt.fresh_session_prompt`, which has it read the
+  piece's files first; `cwd` is the piece folder; `--append-system-prompt-file`
+  with `studio/brief/session.md` + `voice.md` + `cards.md` on every launch, resumes
+  included (the CLI reuses its record of the first launch's prompt only until the
+  conversation is compacted); a run whose CLI stopped a sub-agent unfinished
+  (`task_updated` killed, or `subagent_stats.killed` in the result line) reports
+  success all the same, so it comes back `claude_cli.SUBAGENT_KILLED`, not ok, and the
+  stage is resumable;
+  the reference pieces as the piece's own copy, `<piece>/reference/`
+  (`session.copy_reference`, made when a stage starts and none is there; never an
+  `--add-dir`, which --restricted would make writable, so no session can change
+  `studio/exemplars`); `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
-  `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`), an
+  `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
+  `story_id`, an int or digit string, sets the piece's cluster only when it is in
+  `offered_stories`, the shortlist ids every research run of the piece was offered,
+  recorded before the session starts so the drafter holds off them, and has no draft
+  that did not fail), an
   optional checkpoint (`research_ready`, the editor's Continue), write (`posts/NN.txt`,
   `cards/card_N.html`, a cold fact-check by a fresh sub-agent logged in `factcheck.md`,
-  in the foreground since `cli_env` disables background tasks, `piece.json`; a piece
+  in the foreground since `cli_env` disables background tasks and told by the prompt
+  that pages are data and that it changes no file (`prompt.CHECKER_RULES`: a sub-agent
+  gets none of the standing instructions), `piece.json`; a piece
   without that log blocks, `qa.NO_FACTCHECK`), polish rounds (`studio/qa.py`: `piece.json` shape, X-weighted length from
   `studio/xcount.py` with `x.headroom`, `studio/safety.py` blocking lines (investment or
   medical advice, links incl. bare domains), an @handle without a verifying page, cards
@@ -609,8 +657,22 @@ carrying `--live`).
   review round always shows the session its PNGs), then `studio/ingest.py`: a pending draft
   with `item_id` `studio:<piece id>` (`approval_queue/store.py:studio_item_id`,
   `DraftRow.studio_piece`), shape `long` at `x.long_post_max`, no claims (step 2b skips
-  it), every card copied to `image_file(id, k)` and anchored to its post; a revision
-  (`store.revise`, pending drafts only) replaces text and cards. The queue's revise route
+  it), every card copied to `image_file(id, k)` and anchored to its post, each
+  `recheck_before_posting` fact a `store.RECHECK_PREFIX` line of `why_it_matters`
+  (`store.recheck_lines`, listed by the panel's copy-paste page through
+  `Approved.why_it_matters`); a revision (`store.revise`) replaces text and cards of a
+  pending draft, or of a rejected one that `store.reopen` brings back (refused when
+  `approval_queue/publishing.py:is_live` or `block_reason` says step 3 holds it, followed
+  by `publishing.forget`, as the queue's Reopen does). Every ingest records what it put in
+  (`queued` in the piece's meta); `ingest.hand_edits` compares the draft with it (the
+  editor's text, cards dropped), `session.revise` writes those changes into the piece's
+  files once (`write_back`, recorded as `hand_edit`) and names them in `revise_prompt`,
+  a Resume with unsynced changes goes through a revision, and `to_queue` refuses to
+  replace a draft whose changes the session never saw. The studio page shows the queue's
+  text when it differs from the files. The queue holds a studio draft while its piece is
+  in a running stage or has a request waiting (`store.studio_hold`, read-only on
+  `studio_pieces`): approve, edit, reject and the picture drops answer 409, and the list
+  and detail pages say "on hold". The queue's revise route
   refuses a studio draft and points at `/studio/<id>`; its edit route takes a long draft's
   own `max_chars`. `studio/render.py` is the only place that launches a browser (Edge,
   Chrome or Chromium, `render.browser` / `STUDIO_BROWSER`), always headless with the
@@ -625,22 +687,54 @@ carrying `--live`).
   and painted leaf boxes projected on the vertical axis; a box holding other elements is
   not content) is a fixable layout problem.
   `studio/store.py` owns `studio_pieces` (stage, session id, workspace, angle, shape,
-  hook, draft id, the editor's pending `request`), `studio_runs` (one per CLI run) and
+  hook, draft id, the editor's pending `request`), `studio_runs` (one per CLI run, its
+  `cost_usd` that run's own: the CLI reports the session's running total, so
+  `session._run_cost` subtracts the total the piece's session last reported) and
   `studio_topics` (queued by the editor); its one read of step 1 is `studio/topics.py`
-  through `db.Database`. Variety is code, judgement is the session's: `studio/angles.py`
+  through `db.Database`. Each piece and queued topic keeps one item of its story
+  (`story_item`, guarded migration; recorded by the queue route, `runner.new_piece` and
+  research's `story_id`), and every run first calls `runner.follow_merges`
+  (`topics.merged`, `store.repoint_story`), so a story linking folded into another cluster
+  is written and excluded there; a story-only queued topic whose story is gone is dropped
+  and the next queued topic taken (`runner.take_queued`). Variety is code, judgement is the
+  session's: `studio/angles.py`
   offers every angle in `studio/angles.yaml` except the last `avoid_recent_angles` used (a
   human-named angle is the only one offered) and lists recent hooks, shapes and openings to
-  avoid. `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
+  avoid (from the last `recent_pieces_shown` written pieces, `Brief.recent`); RECENT
+  PIECES in the research prompt is `Brief.topics_to_avoid`, every piece started in the
+  last `topics.avoid_days` days that was not discarded, finished or not
+  (`store.started_within`, an unwritten one with its status). Research and write both
+  carry the playbook, the handles `config.yaml` gives (`runner.app_handles`, the set
+  `known_handles` lets qa accept) and, when there are some, a pointer to
+  `prompt.EARLIER_FILE`, which `session.write_earlier` puts in the piece folder before
+  each of them: the `Brief.recent` pieces' text as the queue holds it and whether it went
+  out on X (`ingest.queued_text`), since `--restricted` keeps a session out of other
+  pieces' folders and the scorecard angle grades against the account's own bar. Feed
+  stories are quoted between `prompt.FEED_TEXT_START` / `FEED_TEXT_END` as data. `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
   `interrupted`, acts on `request`s (continue, revise), then starts at most one piece:
   explicit `--topic`/`--story`, else the oldest queued topic, else with `--now` an
-  automatic topic, else only when `auto.max_new_per_day` (any 24 hours, automatic pieces),
-  `auto.min_hours_between` (any piece) and no checkpoint wait allow; one run at a time
-  (`<workspace_dir>/.studio.lock`). `ops/config.yaml` has the automatic `studio` step
+  automatic topic, else only when `auto.max_new_per_day` (automatic pieces per calendar
+  day in the root `timezone:`), `auto.min_hours_between` (any piece) and no checkpoint
+  wait allow, and a card browser was found (`make_renderer`; without one the automatic run
+  exits 1 rather than spend research and writing on a piece polish would stop); one run at
+  a time (`<workspace_dir>/.studio.lock`, which a run waits `LOCK_WAIT_SECONDS` for). A
+  killed run (Stop, a reboot, a crash) cannot mark its piece: `runner.settle_stopped`
+  does, under the studio lock and only while no run holds it, when a studio page shows or
+  acts on a piece in a running stage (`web._current_piece`, the index) and when the panel
+  sees a run of `run_studio.py` end (`JobManager.on_finish` = `panel/app.py:_after_run`).
+  Every brief reads the date and the playbook when its stage starts. A piece's folder is
+  `runner.absolute` (the data folder as given, never resolved: a mapped drive stays one).
+  `render.render_card` turns a file it cannot write (a PNG an image viewer holds open)
+  into a `RenderError`, and `session._echo` / `run_studio.safe_console` keep a character a
+  cp1252 console cannot show from costing a line. A piece folder that
+  is gone fails the piece (`session.folder_missing`; `_run_stage` turns the OSError into a
+  failed result, so the run goes on), and a Resume of a polish whose draft the queue would
+  refuse (`ctx.revisable`) runs no round. `ops/config.yaml` has the automatic `studio` step
   (after `score`, `skip_when_busy`: `panel/autorun.py` leaves a busy one out of a slot
   rather than waiting, and also the steps an earlier run still has queued behind it,
   `JobManager.queued_behind`, so a long session never makes a run time skip ingest and
-  score) and the manual `studio_now` / `studio_resume` steps, all under the
-  `studio` lock (the learning steps below have their own); `run_studio.py` is in `ops/autorun.AUTO_SCRIPTS`. The panel includes
+  score; a plain `run_ops.py run` leaves it out, see step 5) and the manual `studio_now` / `studio_resume` steps, all under the
+  `studio` lock (the radar's and the learning steps have their own); `run_studio.py` is in `ops/autorun.AUTO_SCRIPTS`. The panel includes
   `studio/web.py`'s router (`/studio`, a piece's page, its cards, `/studio/playbook`); its
   buttons write studio rows and start those steps through `panel/app.py:_start_studio`,
   and the playbook editor writes only `studio_playbook.md` next to the database (the
@@ -769,7 +863,8 @@ ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
           backup.py, store.py (pipeline_runs, health_checks, alerts_sent +
           read-only adapters)
 assets/   logos/<company key>.png (human-supplied company logos for table cells)
-deploy/   crontab.example, pipeline.service, pipeline.timer, desktop.spec, README.md
+deploy/   crontab.example, pipeline.service, pipeline.timer, pipeline-studio.service,
+          pipeline-studio.timer, desktop.spec, README.md
 studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, variety),
           brief/ (session.md, voice.md, cards.md: the appended system prompt), playbook.md
           (seed), exemplars/ (reference pieces), fonts/, prompt.py (pure stage prompts),

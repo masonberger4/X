@@ -19,7 +19,11 @@ Owns four tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline
                  -- render-grade loop in approval_queue/images.py
 
 Never modifies the items or scores tables. Step 7 reads items only through
-fetch_decisions_for_voice / fetch_draft_stats, and only for source and url.
+fetch_decisions_for_voice / fetch_draft_stats, and only for source and url; items.cluster_id
+is also read to follow a story that linking merged (drafted_cluster_ids,
+studio_held_clusters). The studio's studio_pieces and studio_topics are read only by
+studio_hold, studio_held_clusters and studio_researching_offers (read-only, nothing when
+the tables are missing).
 """
 
 from __future__ import annotations
@@ -486,6 +490,59 @@ def studio_piece_id(item_id: str | None) -> int | None:
     return int(tail) if tail.isdigit() else None
 
 
+#: A studio draft's why_it_matters carries each fast-moving fact to re-check on posting day
+#: as a line of its own starting with this (studio/ingest.py writes them); the copy-paste
+#: posting page lists them above the posts.
+RECHECK_PREFIX = "Re-check before posting: "
+
+
+def recheck_lines(why_it_matters: str | None) -> list[str]:
+    """The re-check lines of a draft's why_it_matters (pure); empty for a drafter draft."""
+    return [
+        line[len(RECHECK_PREFIX) :].strip()
+        for line in (why_it_matters or "").splitlines()
+        if line.startswith(RECHECK_PREFIX) and line[len(RECHECK_PREFIX) :].strip()
+    ]
+
+
+def studio_hold(conn: sqlite3.Connection, row: DraftRow) -> str:
+    """Why the queue must leave a studio draft alone right now, or "" when it may act on it:
+    the studio is working on the piece (a running stage, a revision most often), or the
+    editor asked for a studio run that has not started yet. When that run lands it replaces
+    the draft's text and cards, so an approval, an edit, a dropped picture or a rejection
+    made meanwhile would be overwritten or make the revision fail after an hour's work.
+    A read-only look at the studio's own studio_pieces (studio/store.py owns it); "" for a
+    drafter draft, or before the studio's first run when the table does not exist."""
+    piece_id = row.studio_piece
+    if piece_id is None:
+        return ""
+    from studio import store as studio_store
+
+    present = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'studio_pieces'"
+    ).fetchone()
+    if present is None:
+        return ""
+    r = conn.execute(
+        "SELECT stage, request FROM studio_pieces WHERE id = ?", (piece_id,)
+    ).fetchone()
+    if r is None:
+        return ""
+    if r["stage"] in studio_store.RUNNING_STAGES:
+        return (
+            f"the studio is working on piece {piece_id} right now ({r['stage']}); when it "
+            "finishes it replaces this draft's text and cards. Wait for it, or stop the run on "
+            "the runs page first (a piece whose run was stopped is let go as soon as the panel "
+            f"sees the run end, or its page /studio/{piece_id} is opened)"
+        )
+    if r["request"]:
+        return (
+            f"piece {piece_id} has a studio run waiting ({r['request']} asked for on its "
+            "studio page); it replaces this draft's text and cards when it lands. Wait for it"
+        )
+    return ""
+
+
 def find_by_item(conn: sqlite3.Connection, item_id: str) -> DraftRow | None:
     """The draft written for this item_id, if there is one (item_id is unique)."""
     r = conn.execute("SELECT id FROM drafts WHERE item_id = ?", (item_id,)).fetchone()
@@ -509,6 +566,93 @@ def has_draft(
         params += (STATUS_FAILED,)
     row = conn.execute(f"SELECT 1 FROM drafts WHERE {where}", params).fetchone()
     return row is not None
+
+
+def drafted_cluster_ids(conn: sqlite3.Connection) -> set[int]:
+    """Every story with a draft that did not fail the hard rules, whatever else its status
+    (waiting, approved, rejected, posted): the studio's shortlist leaves these out
+    (studio/runner.py:taken_stories), as run_draft leaves the studio's stories alone
+    (`studio_held_clusters`). One story, one piece of writing. A draft's story is also
+    followed through its item to the cluster that holds it now, since story linking folds
+    one cluster into another."""
+    ids = {
+        int(r[0])
+        for r in conn.execute(
+            "SELECT cluster_id FROM drafts WHERE cluster_id IS NOT NULL AND status != ?",
+            (STATUS_FAILED,),
+        )
+    }
+    if step1_tables_present(conn):
+        ids |= {
+            int(r[0])
+            for r in conn.execute(
+                "SELECT i.cluster_id FROM drafts d JOIN items i ON i.id = d.item_id "
+                "WHERE d.status != ? AND i.cluster_id IS NOT NULL",
+                (STATUS_FAILED,),
+            )
+        }
+    return ids
+
+
+def studio_held_clusters(conn: sqlite3.Connection, *, offered: bool = True) -> set[int]:
+    """The stories the studio holds, which run_draft leaves to it (one story, one piece of
+    writing): the story of every studio piece that was not discarded, whatever its stage (a
+    piece waiting at the research checkpoint, still running, failed or interrupted lands in
+    the queue later, on that story), and of every topic queued on the studio page that no
+    piece has taken yet. A story that linking merged into another cluster is followed
+    through the item the studio keeps with it (`story_item`), before the next studio run
+    points its rows there. A read-only look at the studio's own studio_pieces and
+    studio_topics (studio/store.py owns them); empty before the studio's first run.
+
+    With `offered`, also every story offered to a piece still researching on no story yet
+    (`offered_stories` in its meta, recorded before its session starts): the session may
+    name any of them, and they are the undrafted top stories the drafter would take next.
+    They are released when research names one or stops. offered=False is the stories a
+    piece or topic is on, for run_draft's last look before it stores a draft."""
+    from studio import store as studio_store
+
+    tables = ("studio_pieces", "studio_topics")
+    if not all(_columns(conn, t) for t in tables):  # no columns: the table does not exist
+        return set()
+    held = studio_researching_offers(conn) if offered else set()
+    discarded = studio_store.STAGE_DISCARDED
+    sql = [
+        "SELECT cluster_id FROM studio_pieces WHERE stage != ? AND cluster_id IS NOT NULL",
+        "SELECT cluster_id FROM studio_topics WHERE piece_id IS NULL AND cluster_id IS NOT NULL",
+    ]
+    args: list[Any] = [discarded]
+    if all("story_item" in _columns(conn, t) for t in tables) and step1_tables_present(conn):
+        sql += [
+            "SELECT i.cluster_id FROM studio_pieces p JOIN items i ON i.id = p.story_item "
+            "WHERE p.stage != ?",
+            "SELECT i.cluster_id FROM studio_topics t JOIN items i ON i.id = t.story_item "
+            "WHERE t.piece_id IS NULL",
+        ]
+        args.append(discarded)
+    rows = conn.execute(" UNION ".join(sql), args).fetchall()
+    return held | {int(r[0]) for r in rows if r[0] is not None}
+
+
+def studio_researching_offers(conn: sqlite3.Connection) -> set[int]:
+    """The stories offered to the studio pieces still researching on no story yet (read
+    from the meta studio/session.py:research writes; JSON parsed here, so no SQLite JSON
+    functions are needed). Empty when the studio's table is missing."""
+    from studio import store as studio_store
+
+    if "meta_json" not in _columns(conn, "studio_pieces"):
+        return set()
+    held: set[int] = set()
+    for (meta,) in conn.execute(
+        "SELECT meta_json FROM studio_pieces WHERE stage = ? AND cluster_id IS NULL",
+        (studio_store.STAGE_RESEARCHING,),
+    ):
+        try:
+            ids = json.loads(meta or "{}").get("offered_stories")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(ids, list):
+            held |= {i for i in ids if isinstance(i, int) and not isinstance(i, bool)}
+    return held
 
 
 def delete_failed_drafts(
@@ -1356,6 +1500,10 @@ def _since_text(since: datetime | str | None) -> str:
     return str(since)
 
 
+#: Every studio draft's item_id, as a LIKE pattern (the prefix holds no wildcard).
+_STUDIO_LIKE = STUDIO_ITEM_PREFIX + "%"
+
+
 def _items_table_present(conn: sqlite3.Connection) -> bool:
     row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='items'").fetchone()
     return row is not None
@@ -1370,6 +1518,10 @@ def fetch_decisions_for_voice(
     draft_status, draft_created_at, item_id, source, url. Oldest first. On a database without
     step 1's items table, source and url are empty strings. This (with fetch_draft_stats) is
     the ONLY place step 7 reads the items table, and only for source and url.
+
+    Studio drafts (item_id `studio:<piece id>`) are left out: the drafter learns its voice
+    from its own drafts, and a studio long post written in the studio's voice (or a Discard's
+    app-written rejection) is no example of what it should or should not write.
     """
     if _items_table_present(conn):
         item_cols = "COALESCE(i.source, '') AS source, COALESCE(i.url, '') AS url"
@@ -1385,10 +1537,10 @@ def fetch_decisions_for_voice(
         FROM decisions x
         JOIN drafts d ON d.id = x.draft_id
         {item_join}
-        WHERE x.created_at >= ?
+        WHERE x.created_at >= ? AND d.item_id NOT LIKE ?
         ORDER BY x.created_at, x.id
     """
-    return conn.execute(sql, (_since_text(since),)).fetchall()
+    return conn.execute(sql, (_since_text(since), _STUDIO_LIKE)).fetchall()
 
 
 def fetch_draft_stats(
@@ -1396,7 +1548,8 @@ def fetch_draft_stats(
 ) -> list[sqlite3.Row]:
     """Drafts created at or after `since`: id, item_id, source, status, created_at, model.
 
-    source is '' when step 1's items table is absent. Oldest first.
+    source is '' when step 1's items table is absent. Oldest first. Studio drafts are left
+    out, as in fetch_decisions_for_voice.
     """
     if _items_table_present(conn):
         source_col = "COALESCE(i.source, '') AS source"
@@ -1408,7 +1561,7 @@ def fetch_draft_stats(
         SELECT d.id, d.item_id, {source_col}, d.status, d.created_at, d.model
         FROM drafts d
         {item_join}
-        WHERE d.created_at >= ?
+        WHERE d.created_at >= ? AND d.item_id NOT LIKE ?
         ORDER BY d.created_at, d.id
     """
-    return conn.execute(sql, (_since_text(since),)).fetchall()
+    return conn.execute(sql, (_since_text(since), _STUDIO_LIKE)).fetchall()

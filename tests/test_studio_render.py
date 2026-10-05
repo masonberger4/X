@@ -605,6 +605,93 @@ def test_a_browser_that_cannot_start_raises(tmp_path):
         )
 
 
+def _held_open(monkeypatch, method: str) -> None:
+    """Make card_1.png refuse `method` as Windows does while another program (an image
+    viewer opened from the piece's folder) has it open: a sharing violation."""
+    real = getattr(Path, method)
+
+    def refuse(self, *args, **kwargs):
+        if self.name == "card_1.png":
+            raise PermissionError(13, "the file is being used by another process", str(self))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, method, refuse)
+
+
+def test_a_picture_held_open_by_another_program_is_a_render_error(stand_in, tmp_path, monkeypatch):
+    """The last round's picture cannot be removed: no card could be drawn, which the
+    checker reports as such (qa.check_cards catches RenderError), rather than an OSError
+    that ends the whole studio run with the piece stuck mid-polish."""
+    png = tmp_path / "card_1.png"
+    png.write_bytes(png_header(2160, 2700))  # drawn in an earlier polish round
+    _held_open(monkeypatch, "unlink")
+    with pytest.raises(
+        render.RenderError,
+        match=r"could not be read or written: .*being used by another process.*"
+        r"a program with card_1\.png open",
+    ):
+        render.render_card(write(tmp_path, page("x")), png, browser=stand_in.path)
+    assert stand_in.calls() == []  # given up before any browser ran
+
+
+def test_a_picture_that_cannot_be_cut_back_to_the_card_is_a_render_error(
+    stand_in, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("FAKE_CHROME", "0,87")  # the window is grown, the picture cut back
+    monkeypatch.setenv("FAKE_PNG", "window")
+    monkeypatch.setenv("FAKE_PNG_FULL", "1")
+    _held_open(monkeypatch, "write_bytes")
+    with pytest.raises(render.RenderError, match="being used by another process"):
+        render.render_card(
+            write(tmp_path, page("x")), tmp_path / "card_1.png", browser=stand_in.path
+        )
+
+
+def test_a_held_picture_reaches_the_editor_as_a_card_that_could_not_be_drawn(
+    stand_in, tmp_path, monkeypatch
+):
+    from studio import qa
+
+    html = write(tmp_path, page("x"))
+    png = tmp_path / "card_1.png"
+    png.write_bytes(png_header(2160, 2700))
+    _held_open(monkeypatch, "unlink")
+    piece = qa.PieceFiles(cards=[qa.Card(html=html, png=png, post=1)])
+    report = qa.Report()
+
+    qa.check_cards(piece, report, lambda h, p: render.render_card(h, p, browser=stand_in.path))
+
+    [problem] = report.blocking
+    assert problem.startswith("card card_1.html could not be drawn: a file could not be read")
+    assert report.pictures == []
+
+
+def test_a_profile_folder_the_browser_still_holds_never_costs_the_card(
+    stand_in, tmp_path, monkeypatch
+):
+    """The browser's crash handler can keep its profile folder busy a moment after it
+    exits (Windows): the temp folder's clean-up gives up on it, and the card stands."""
+    import os
+
+    real_rmdir = os.rmdir
+
+    def busy(path, *args, **kwargs):
+        if os.path.basename(os.fsdecode(path)).startswith("studio-card-"):
+            raise OSError(16, "Device or resource busy", path)
+        return real_rmdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "rmdir", busy)
+    result = render.render_card(
+        write(tmp_path, page("x")), tmp_path / "card_1.png", browser=stand_in.path
+    )
+    monkeypatch.undo()
+    assert result.png.is_file() and result.problems == []
+    [profile] = {
+        a.split("=", 1)[1] for c in stand_in.calls() for a in c["args"] if "user-data-dir" in a
+    }
+    shutil.rmtree(Path(profile).parent)  # what the clean-up left behind
+
+
 @pytest.mark.parametrize(
     "meta",
     [

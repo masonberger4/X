@@ -4,10 +4,12 @@ editor's requests, and decide whether to start a new piece (and on what)."""
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sqlite3
+import time
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,9 @@ SCAN_LOCK_NAME = ".studio_scan.lock"
 RADAR_IN_BRIEF = 8  # radar topics an open piece is shown
 COMING_UP_IN_BRIEF = 20  # catalysts an open piece is shown
 LEARN_LOCK_NAME = ".studio_learn.lock"
+# How long a run waits for the studio lock before it takes another run to be in progress
+# (a page checking for a stopped run holds it for a moment: settle_stopped).
+LOCK_WAIT_SECONDS = 10.0
 
 _STAGE_OF = {
     S.STAGE_RESEARCHING: "research",
@@ -64,7 +69,18 @@ def _db_conn() -> sqlite3.Connection:
 def _data_folder() -> Path:
     from approval_queue import store as queue_store
 
-    return queue_store.db_path().resolve().parent
+    return absolute(queue_store.db_path()).parent
+
+
+def absolute(path: str | Path) -> Path:
+    r"""`path` made absolute as written, never resolved. A piece's folder is its session's
+    working folder, and resolve() follows links: on Windows it turns a mapped network drive
+    (Z:\Pipeline) into its UNC form (\\server\share\Pipeline). The npm install's
+    claude.cmd runs through cmd.exe, which cannot start in a UNC folder and starts in
+    C:\Windows instead, where the session may write nothing: every piece would end without
+    its fact base. The drive letter the data folder was given is kept. (panel/frozen.py and
+    run_ops.py keep it the same way for the folder each step runs in.)"""
+    return Path(os.path.abspath(path))
 
 
 def references() -> list[str]:
@@ -77,6 +93,15 @@ def known_handles(root_cfg: dict[str, Any]) -> set[str]:
     from draft.tags import load_handles
 
     return {h.handle.lower() for h in load_handles(root_cfg)}
+
+
+def app_handles(root_cfg: dict[str, Any] | None) -> list[tuple[str, str]]:
+    """The handles the root config gives (the same ones qa accepts without a page), as the
+    stage prompts list them: (handle, the names it stands for). voice.md lets the session
+    use a handle the app gives it as verified, which only works if it is told them."""
+    from draft.tags import load_handles
+
+    return [(h.handle, ", ".join(h.names)) for h in load_handles(root_cfg)]
 
 
 def system_text() -> str:
@@ -111,6 +136,66 @@ def recent(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[S.Piece]:
     return S.recent_pieces(conn, int(cfg["variety"].get("recent_pieces_shown") or 8))
 
 
+# How far a piece that has not reached the queue got, as RECENT PIECES says it: its topic is
+# taken all the same (a piece waiting for Continue, or stopped and resumable, lands later).
+_NOT_WRITTEN = {
+    S.STAGE_RESEARCHING: "not written yet: being researched",
+    S.STAGE_RESEARCH_READY: "not written yet: researched, waiting for the editor",
+    S.STAGE_WRITING: "not written yet: being written",
+    S.STAGE_POLISHING: "not written yet: being written",
+    S.STAGE_FAILED: "not written yet: stopped, may be resumed",
+    S.STAGE_INTERRUPTED: "not written yet: stopped, may be resumed",
+}
+
+
+def _recent_piece(p: S.Piece, conn: sqlite3.Connection | None = None) -> P.RecentPiece:
+    """How a stage prompt lists a piece. With `conn`, a piece that reached the queue also
+    brings its whole text and where its draft stands (EARLIER_FILE)."""
+    from timeutil import fmt_date
+
+    posts: list[str] = []
+    where = ""
+    if conn is not None and p.draft_id is not None:
+        from studio import ingest
+
+        posts, where = ingest.queued_text(conn, p)
+    return P.RecentPiece(
+        # The display zone's date, as `today` is: a UTC date can read as tomorrow.
+        date=fmt_date(p.created_at),
+        title=p.label,
+        angle=p.angle,
+        shape=p.shape,
+        hook_style=p.hook_style,
+        opening=_opening(p),
+        companies=_companies(p),
+        status="" if p.draft_id is not None else _NOT_WRITTEN.get(p.stage, ""),
+        text="\n\n".join(t.strip() for t in posts if t.strip()),
+        where=where,
+    )
+
+
+def taken_stories(conn: sqlite3.Connection) -> set[int]:
+    """The feed stories a new piece is not offered. One story, one piece of writing: the
+    studio's own (a piece of any stage, a queued topic) and every story with a draft that
+    did not fail, waiting, approved, rejected or posted (approval_queue/store.py's
+    read-only drafted_cluster_ids; run_draft leaves the studio's stories alone in turn)."""
+    from approval_queue import store as queue_store
+
+    return S.used_cluster_ids(conn) | queue_store.drafted_cluster_ids(conn)
+
+
+def follow_merges(conn: sqlite3.Connection) -> int:
+    """Point the studio's pieces and queued topics at the cluster their story is in now.
+    Story linking (run_score.py) folds a cluster into another and deletes it; the item each
+    row remembers (`story_item`) moved with the story, so a queued story is still written
+    and a used one is still left out of the shortlist. Returns the stories moved."""
+    moves = T.merged(S.remembered_stories(conn))
+    for old, new in sorted(moves.items()):
+        S.repoint_story(conn, old, new)
+        log.info("story %s was merged into story %s; the studio follows it", old, new)
+    return len(moves)
+
+
 def build_brief(
     conn: sqlite3.Connection,
     cfg: dict[str, Any],
@@ -121,23 +206,15 @@ def build_brief(
     today: str,
     tzname: str,
     evidence: E.Evidence | None = None,
+    handles: list[tuple[str, str]] | None = None,
 ) -> P.Brief:
-    from timeutil import fmt_date
-
+    # Variety (angles, hooks, shapes, openings) comes from the last written pieces, which
+    # also bring their text (EARLIER_FILE); the topics to avoid from every piece of the
+    # last `topics.avoid_days` days, written or not.
     pieces = [p for p in recent(conn, cfg) if p.id != piece.id]
-    recent_pieces = [
-        P.RecentPiece(
-            # The display zone's date, as `today` is: a UTC date can read as tomorrow.
-            date=fmt_date(p.created_at),
-            title=p.label,
-            angle=p.angle,
-            shape=p.shape,
-            hook_style=p.hook_style,
-            opening=_opening(p),
-            companies=_companies(p),
-        )
-        for p in pieces
-    ]
+    recent_pieces = [_recent_piece(p, conn) for p in pieces]
+    days = float(cfg["topics"].get("avoid_days") or 0)
+    avoid = [_recent_piece(p) for p in S.started_within(conn, days) if p.id != piece.id]
     offer = A.offer(
         library,
         [p.angle for p in pieces],
@@ -153,7 +230,7 @@ def build_brief(
     coming: list[R.Catalyst] = []
     if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
         # Only the research stage chooses a story; later stages have one.
-        shortlist = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+        shortlist = T.fetch_shortlist(cfg["topics"], exclude=taken_stories(conn))
         radar, coming = radar_for_brief(conn, cfg, date.fromisoformat(today))
     said, lean = "", None
     if evidence is not None:
@@ -175,8 +252,11 @@ def build_brief(
         piece_id=piece.id,
         today=today,
         timezone=tzname,
-        workspace=str(Path(piece.workspace).resolve()),
-        reference_dir=str(EXEMPLARS_DIR.resolve()),
+        # The folder as the session is started in it (absolute, not resolved), so the
+        # paths the prompt names are the ones its working folder has.
+        workspace=str(absolute(piece.workspace)),
+        # the piece's own copy, made before each stage (studio/session.py:copy_reference)
+        reference_dir=str(absolute(piece.workspace) / P.REFERENCE_DIR),
         references=references(),
         topic=piece.topic,
         story=story,
@@ -186,9 +266,11 @@ def build_brief(
         offer=offer,
         hooks_to_avoid=hooks,
         recent=recent_pieces,
+        topics_to_avoid=avoid,
         playbook=playbook,
         evidence=said,
         lean=lean,
+        handles=list(handles or []),
         # The limits the checker enforces (qa.check_text keeps `headroom` under X's own),
         # so a post written to the number it is given is never sent back as too long.
         long_post_max=int(x["long_post_max"]) - int(x.get("headroom") or 0),
@@ -246,11 +328,15 @@ def make_context(
 
     root_cfg = _root_config()
     library = A.load_angles()
-    playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
-    today, tzname = _today()
     evidence = measure_quietly(conn, cfg)
+    handles = app_handles(root_cfg)
 
     def brief_for(piece: S.Piece) -> P.Brief:
+        # The date and the playbook as they are when this stage starts, not when the run
+        # did: one run acts on every request before it starts a piece, hours of sessions
+        # that can cross midnight, and the editor may save the playbook meanwhile.
+        today, tzname = _today()
+        playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
         brief = build_brief(
             conn,
             cfg,
@@ -260,6 +346,7 @@ def make_context(
             today=today,
             tzname=tzname,
             evidence=evidence,
+            handles=handles,
         )
         if brief.lean is not None and piece.meta.get("lean") != brief.lean.as_dict():
             # Kept with the piece, so the performance page can show what it was offered.
@@ -286,7 +373,11 @@ def make_context(
         # Asked by every revision, a resumed one too, before its session runs: a draft
         # approved or rejected meanwhile would refuse the result after an hour's work.
         revisable=lambda piece: ingest.revise_blocker(conn, piece),
-        harvest=lambda piece, info: _harvest(conn, cfg, piece, info, today),
+        # The catalysts and radar topic research found, dated by the day research ended.
+        harvest=lambda piece, info: _harvest(conn, cfg, piece, info, _today()[0]),
+        # The editor's hand edits and dropped cards in the queue, which a revision starts
+        # from instead of putting the session's old text back.
+        queue_edits=lambda piece: ingest.hand_edits(conn, piece),
     )
 
 
@@ -313,7 +404,7 @@ def measure_quietly(conn: sqlite3.Connection, cfg: dict[str, Any]) -> E.Evidence
 
 
 def mark_stale(conn: sqlite3.Connection) -> list[S.Piece]:
-    """Pieces left mid-stage by a run that died. This process holds the studio lock, so
+    """Pieces left mid-stage by a run that died. The caller holds the studio lock, so
     no other run can be working on them."""
     stale = S.running_pieces(conn)
     for p in stale:
@@ -329,18 +420,65 @@ def mark_stale(conn: sqlite3.Connection) -> list[S.Piece]:
     return stale
 
 
+def settle_stopped(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[S.Piece]:
+    """Mark the pieces a stopped run left mid-stage `interrupted`, when no studio run is
+    alive. The Stop button, a stage the ops runner timed out, a reboot or a crash kills
+    run_studio.py with no chance to say so, and the piece keeps its running stage: no
+    Resume, no discard. The OS frees the studio lock with its process, so while the lock
+    can be taken no run is working on any piece. The studio's pages call this when they
+    show or act on a piece in a running stage, and the panel when a studio run ends, so the
+    editor can Resume or discard it at once rather than at the next studio run. Returns
+    the pieces marked ([] while a run holds the lock, or none was left running)."""
+    if not S.running_pieces(conn):
+        return []
+    held = lock.acquire(workspace_root(_data_folder(), cfg) / LOCK_NAME, trust_os_lock=True)
+    if held is None:
+        return []  # a run is alive and working on them
+    try:
+        stale = mark_stale(conn)
+    finally:
+        held.release()
+    for p in stale:
+        log.warning("piece %s: its run stopped mid-stage; it can be resumed", p.id)
+    return stale
+
+
+def _take_lock(path: Path) -> lock.Lock | None:
+    """The studio lock, waiting a moment for it: a page checking for a stopped run
+    (settle_stopped) holds it for as long as a few updates take, and a run starting in that
+    moment must not skip its turn as if another run were in progress."""
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        held = lock.acquire(path, trust_os_lock=True)
+        if held is not None or time.monotonic() >= deadline:
+            return held
+        time.sleep(0.2)
+
+
 def allowed_to_start(
-    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime, tz: tzinfo | None = None
 ) -> tuple[bool, str]:
-    """May the automatic run start a new piece? (A button press skips this.)"""
+    """May the automatic run start a new piece? (A button press skips this.)
+
+    The cap counts the automatic pieces started on `now`'s calendar day in `tz` (the
+    display zone, the one the automatic run times are typed in). A rolling 24 hours drifts
+    against fixed run times: the studio step starts a few minutes after its run time, a
+    little sooner or later each day, and whenever today's start came sooner than
+    yesterday's, yesterday's piece was still inside the window and the piece slid to the
+    next run time, from the evening one to the next morning a whole day lost."""
     auto = cfg["auto"]
     if not auto.get("enabled"):
         return False, "automatic pieces are off (studio/config.yaml auto.enabled)"
     cap = int(auto.get("max_new_per_day") or 0)
-    since = (now - timedelta(hours=24)).isoformat(timespec="seconds")
+    if tz is None:
+        from timeutil import display_tz
+
+        tz = display_tz()
+    midnight = now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    since = midnight.astimezone(UTC).isoformat(timespec="seconds")
     made = S.pieces_since(conn, since, origin=S.ORIGIN_AUTO)
     if cap <= 0 or made >= cap:
-        return False, f"{made} automatic piece(s) in the last 24 hours (limit {cap})"
+        return False, f"{made} automatic piece(s) today (limit {cap})"
     gap = float(auto.get("min_hours_between") or 0)
     last = S.last_started(conn)
     if last and gap > 0:
@@ -387,9 +525,10 @@ def new_piece(
         requested_angle=angle,
         checkpoint=checkpoint,
         session_id=session_id,
-        workspace=str(folder.resolve()),
+        workspace=str(absolute(folder)),
         model=str(cfg["model"]),
         effort=str(cfg.get("effort") or ""),
+        story_item=T.story_item(cluster_id) if cluster_id is not None else "",
     )
     piece = S.get_piece(conn, piece_id)
     assert piece is not None
@@ -430,6 +569,27 @@ def act_on_requests(ctx: SS.Context) -> int:
     return done
 
 
+def take_queued(conn: sqlite3.Connection) -> tuple[S.QueuedTopic | None, int]:
+    """The oldest queued topic a piece can start on, and how many were dropped on the way.
+    A topic that is only a feed story, whose story left the feed (removed, or merged with
+    no item to follow it by), has nothing left to write about: it is dropped and the next
+    one is taken, since the press that started this run may have been for that one."""
+    dropped = 0
+    while True:
+        queued = S.next_queued_topic(conn)
+        if queued is None or queued.topic or queued.cluster_id is None:
+            return queued, dropped
+        if T.fetch_story(queued.cluster_id) is not None:
+            return queued, dropped
+        log.warning(
+            "story %s is not in the feed any more (merged or removed); queued topic %s dropped",
+            queued.cluster_id,
+            queued.id,
+        )
+        S.drop_topic(conn, queued.id)
+        dropped += 1
+
+
 def run(
     *,
     now: bool = False,
@@ -448,6 +608,8 @@ def run(
             if queued is not None:
                 topic, story = queued.topic, queued.cluster_id
                 angle = queued.angle or angle
+                if story is not None:  # where linking moved it, as the real run follows it
+                    story = T.merged([(story, queued.story_item)]).get(story, story)
             return _dry_run(conn, cfg, topic=topic, story=story, angle=angle)
         finally:
             conn.close()
@@ -455,7 +617,7 @@ def run(
     root.mkdir(parents=True, exist_ok=True)
     # One studio run at a time on this data folder, however it was started (the ops step,
     # a button, a terminal): a second run would resume the same sessions.
-    held = lock.acquire(root / LOCK_NAME, trust_os_lock=True)
+    held = _take_lock(root / LOCK_NAME)
     if held is None:
         log.info("another studio run is in progress; nothing to do")
         return 0
@@ -464,12 +626,14 @@ def run(
         stale = mark_stale(conn)
         for p in stale:
             log.warning("piece %s was interrupted mid-stage; resume it from the studio page", p.id)
+        follow_merges(conn)
         ctx = make_context(conn, cfg)
         act_on_requests(ctx)
         if resume_only:
             return 0
-        queued = S.next_queued_topic(conn)
-        if topic or story is not None:
+        explicit = bool(topic) or story is not None
+        queued, dropped = (None, 0) if explicit else take_queued(conn)
+        if explicit:
             plan = dict(
                 origin=S.ORIGIN_MANUAL,
                 topic=topic,
@@ -495,6 +659,11 @@ def run(
                     plan["angle"],
                 )
                 plan["angle"] = ""
+        elif dropped:
+            # The queued topics there were had nothing left to write about: the press that
+            # started this run was for one of them, not for a piece of the studio's choosing.
+            log.info("no new piece: the queued topics were dropped")
+            return 0
         elif now:
             plan = dict(
                 origin=S.ORIGIN_MANUAL,
@@ -508,6 +677,16 @@ def run(
             if not ok:
                 log.info("no new piece: %s", why)
                 return 0
+            if ctx.renderer is None:
+                # Its research and writing would be spent before polish stopped it for want
+                # of a browser, every day: an automatic piece waits for one. The step
+                # fails, so the runs page shows it; a button press still starts a piece.
+                log.error(
+                    "no new piece: %s; install Edge, Chrome or Chromium, or turn automatic "
+                    "pieces off (studio/config.yaml auto.enabled)",
+                    qa.NO_BROWSER,
+                )
+                return 1
             plan = dict(
                 origin=S.ORIGIN_AUTO,
                 topic="",
@@ -517,17 +696,14 @@ def run(
             )
         if plan["cluster_id"] is not None and T.fetch_story(plan["cluster_id"]) is None:
             gone = f"story {plan['cluster_id']} is not in the feed any more (merged or removed)"
-            if topic or story is not None or queued is None:
+            if queued is None:  # an explicit --story
                 log.error("%s; nothing started", gone)
                 return 2
-            if not plan["topic"]:
-                log.warning("%s; queued topic %s dropped", gone, queued.id)
-                S.drop_topic(conn, queued.id)
-                return 0
+            # take_queued kept this topic for its words
             log.warning("%s; writing on the queued topic's words alone", gone)
             plan["cluster_id"] = None
         piece = new_piece(conn, cfg, **plan)
-        if queued is not None and not (topic or story is not None):
+        if queued is not None:
             S.claim_topic(conn, queued.id, piece.id)
         log.info("piece %s started in %s", piece.id, piece.workspace)
         out = SS.research(ctx, piece)
@@ -576,6 +752,7 @@ def _dry_run(
         today=today,
         tzname=tzname,
         evidence=measure_quietly(conn, cfg),
+        handles=app_handles(_root_config()),
     )
     print(P.research_prompt(brief))
     return 0
@@ -689,8 +866,9 @@ def print_list() -> int:
 
 
 def feed_lines(cfg: dict[str, Any], conn: sqlite3.Connection) -> list[str]:
-    """The feed's top unused stories, one line each, as leads for the scan."""
-    stories = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+    """The feed's top stories nobody has written about (taken_stories), one line each, as
+    leads for the scan."""
+    stories = T.fetch_shortlist(cfg["topics"], exclude=taken_stories(conn))
     return [
         f"{s.title} ({', '.join(x for x in (s.source, s.published) if x)})"
         + (f" [feed score {s.score}/50]" if s.score is not None else "")

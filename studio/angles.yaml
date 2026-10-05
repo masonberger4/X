@@ -213,4 +213,5 @@ scorecard:
   cards: [bar_vs_result, headline_stat]
   notes: >
     Name the earlier bar plainly (including the account's own earlier piece when there
-    is one) and grade the outcome against it. Credibility is the product here.
+    is one, quoted from earlier_pieces.md in the working folder, never from memory) and
+    grade the outcome against it. Credibility is the product here.

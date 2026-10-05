@@ -44,6 +44,41 @@ def test_a_frozen_build_uses_the_exe_folder_and_the_console_build(frozen_at):
     assert frozen.step_interpreter() == str(app / "pipeline-cli.exe")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="making a link needs privileges there")
+def test_the_data_dir_keeps_the_path_the_exe_was_started_from(frozen_at, tmp_path, monkeypatch):
+    """Pipeline.exe run from a mapped network drive (Z:): resolve() would hand the steps
+    the drive's UNC form, a working folder the npm claude.cmd cannot start a studio session
+    in. A link stands in for the drive here."""
+    app, _ = frozen_at
+    mapped = tmp_path / "Z"
+    mapped.symlink_to(app, target_is_directory=True)
+    monkeypatch.setattr(sys, "executable", str(mapped / "Pipeline.exe"))
+    assert frozen.data_dir() == mapped
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="making a link needs privileges there")
+def test_a_checkout_reached_through_a_link_runs_its_steps_there(tmp_path):
+    """The repo on a mapped drive, as above: the folder steps run in (run_ops.py's and the
+    panel's) is the path the code was loaded from, not its resolved form."""
+    import subprocess
+
+    mapped = tmp_path / "Z"
+    mapped.symlink_to(frozen.REPO_ROOT, target_is_directory=True)
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); "
+        "import run_ops; from panel import frozen; "
+        "print(run_ops.REPO_ROOT); print(frozen.REPO_ROOT); print(frozen.data_dir())"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code, str(mapped)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    assert out == [str(mapped)] * 3
+
+
 def test_the_manifest_names_every_settings_file_template_and_cli():
     root = frozen.REPO_ROOT
     datas, hidden = frozen.bundle_manifest(root)
@@ -245,3 +280,28 @@ def test_closing_the_window_stops_a_run_in_progress(db_file, monkeypatch):
     monkeypatch.setattr(panel_app.JOBS, "cancel", lambda reason: cancelled.setdefault("r", reason))
     assert run_desktop.main(["--port", "0"]) == 0
     assert "closed" in cancelled["r"]
+
+
+def test_the_rebuild_docs_keep_everything_the_app_keeps_beside_itself():
+    """Rebuilding into dist\\Pipeline deletes the folder: HOWTO part 8 ("Where the data
+    lives" and both ways to keep it) and deploy/README.md must name every file and folder
+    the app keeps beside the exe, the studio's pieces and playbook included."""
+    from studio import settings as studio_settings
+
+    root = frozen.REPO_ROOT
+    howto = (root / "HOWTO.md").read_text(encoding="utf-8")
+    part8 = howto.split("**Where the data lives.**")[1].split("### Using it from your phone")[0]
+    where, rebuild = part8.split("**Rebuilding.**")
+    from_dist = rebuild.split("- or run it from `dist\\Pipeline`")[1]
+    deploy = (root / "deploy" / "README.md").read_text(encoding="utf-8")
+    desktop = deploy.split("## Desktop build (Windows)")[1]
+    pieces = studio_settings.DEFAULTS["workspace_dir"] + "\\"
+    kept = ["`.env`", "`pipeline.db`", "`backups\\`", "`images\\`", f"`{pieces}`"]
+    kept.append(f"`{studio_settings.PLAYBOOK_NAME}`")
+    for name in kept:
+        assert name in where, f"{name} missing from HOWTO 'Where the data lives'"
+        assert name in rebuild.split("Two ways to")[0], (
+            f"{name} missing from what a rebuild deletes"
+        )
+        assert name in from_dist, f"{name} missing from the copy-out list"
+        assert name in desktop, f"{name} missing from deploy/README.md's desktop build"

@@ -18,10 +18,15 @@ a test checks it against the files on disk so a new settings file cannot be forg
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+# Absolute as written, never resolved: steps run in the data dir, and resolve() turns a
+# mapped network drive (Z:) into its UNC form on Windows, in which the npm install's
+# claude.cmd cannot start (cmd.exe refuses a UNC working folder; see studio/runner.py's
+# `absolute`, the studio session's working folder).
+REPO_ROOT = Path(os.path.abspath(__file__)).parent.parent
 
 # Every project CLI the console build can run, by script name. pipeline_cli.py dispatches
 # on this list and the spec bundles each as a hidden import plus a marker file.
@@ -57,7 +62,7 @@ def bundle_dir() -> Path | None:
 def data_dir() -> Path:
     """Where pipeline.db, .env, the lock and backups live."""
     if is_frozen():
-        return Path(sys.executable).resolve().parent
+        return Path(os.path.abspath(sys.executable)).parent
     return REPO_ROOT
 
 

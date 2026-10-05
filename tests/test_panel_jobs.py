@@ -156,6 +156,31 @@ def test_cancel_ends_a_running_job_and_records_why(tmp_path):
     assert manager.cancel() is False, "nothing left to cancel"
 
 
+def test_the_after_run_hook_sees_every_run_once_its_steps_are_over(tmp_path):
+    """on_finish runs when the steps are over, a stopped run's too, while the run still
+    holds its steps (panel/app.py's _after_run tidies up after a studio run there), and a
+    hook that raises takes nothing down."""
+    cfg = _cfg(tmp_path, [_step("ok", "print(1)"), _step("slow", "import time; time.sleep(30)")])
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    seen: list[tuple[str, list[str], bool]] = []
+
+    def hook(job):
+        seen.append((job.id, [r.name for r in job.results], job in manager.running()))
+        raise RuntimeError("a broken hook")
+
+    manager.on_finish = hook
+    done = _wait(manager.start(["ok"]))
+    assert done.state == STATE_DONE and seen == [(done.id, ["ok"], True)]
+
+    slow = manager.start(["slow"])
+    deadline = time.monotonic() + 10
+    while slow.active_step != "slow" and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert manager.cancel("stopped by a test")
+    _wait(slow)
+    assert slow.state == STATE_STOPPED and seen[-1] == (slow.id, ["slow"], True)
+
+
 def test_results_appear_on_the_job_step_by_step(tmp_path):
     """The runs page polls while a run is in flight; it must see finished steps and
     the live one before the whole run returns, not one block at the end."""

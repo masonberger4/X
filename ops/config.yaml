@@ -26,15 +26,6 @@ steps:
     # No time limit (0): a large backlog is ~25s per batch of 10 and can run past an hour.
     # Scores are stored per batch, so the Stop button loses only the batch in flight.
     timeout_seconds: 0
-  # Step 10, the studio (run_studio.py, studio/config.yaml): one long Opus session per
-  # post. A plain run acts on the editor's requests from the studio page, then starts a
-  # new piece when studio/config.yaml's `auto` limits allow (at most one a day as
-  # shipped). It sits right after score so it sees the freshest stories, and before draft
-  # so a story it takes is not also drafted as a short thread. No time limit (0): a
-  # session is research, writing, a cold fact-check and cards, often an hour; each stage
-  # has its own limit in studio/config.yaml, and a stopped piece resumes from the studio
-  # page. skip_when_busy: a session still running at the next run time sits that run out
-  # instead of holding the other steps back.
   # Step 10's radar (studio/config.yaml `radar`): at most once a day (scan_every_hours),
   # one call on the writer's model with web search proposes the next topics and reports
   # dated catalysts for the calendar on /studio/radar. Right before the studio step, so
@@ -54,6 +45,21 @@ steps:
     required: false
     manual: true
     timeout_seconds: 0
+  # Step 10, the studio (run_studio.py, studio/config.yaml): one long Opus session per
+  # post. Each run acts on the editor's requests from the studio page, then starts a new
+  # piece when studio/config.yaml's `auto` limits allow (at most one a day as shipped). In
+  # the automatic runs it sits right after score so it sees the freshest stories, and
+  # before draft so a story it takes is not also drafted as a short thread (run_draft.py
+  # skips a story a studio piece or queued topic holds, whatever the piece's stage, and
+  # every story offered to a piece still researching, so a draft step running beside a
+  # session, as under cron, leaves those alone too). No
+  # time limit (0): a session is research, writing, a cold fact-check and cards, often an
+  # hour; each stage has its own limit in studio/config.yaml, and a stopped piece resumes
+  # from the studio page. skip_when_busy: in the automatic runs a session still running at
+  # the next run time sits that run out instead of holding the other steps back. A plain
+  # `run_ops.py run` (cron, Task Scheduler, systemd) leaves it out: it has a schedule
+  # entry of its own, `run_ops.py run --only studio` (HOWTO part 6, deploy/), which takes
+  # only the studio lock, never the run lock the pipeline's fires take.
   - name: studio
     lock: studio
     argv: ["python", "run_studio.py"]
@@ -214,6 +220,12 @@ health:
 backups:
   dir: ./backups
   keep: 14                       # newest N copies are kept (daily -> two weeks)
+  # Files in the database's folder that only live there, copied with every backup as
+  # pipeline-<stamp>.<name> and rotated with it; one that is not there yet is skipped. The
+  # studio's playbook is the editor's own text, written on the studio page. (Each studio
+  # piece's folder, studio_pieces/, is too big to copy every day: keep it when the data
+  # folder is moved or the desktop app rebuilt, HOWTO part 8.)
+  with_db: [studio_playbook.md]
 
 alerts:
   cooldown_hours: 6              # same check, same status: do not re-send within this window

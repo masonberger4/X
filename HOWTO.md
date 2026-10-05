@@ -108,7 +108,18 @@ source only when it is due, and score only scores what is new.
 
 The studio (part 9) is now the main way posts are made: one Opus session per
 piece, researched, fact-checked and with designed cards. The drafter below still
-runs and writes shorter threads for the day's other stories.
+runs and writes shorter threads for the day's other stories. One story gets one
+piece of writing: the drafter skips a story the studio holds (a studio piece on it
+you have not discarded, even one waiting for you at the research checkpoint or
+stopped, a topic queued for it on the studio page, or a story offered to a studio
+piece still researching, until the research picks one), and the studio never picks a
+story that already has a draft. A run says `N left to the studio` when it skips some,
+and looks again before each story, so a studio session that starts beside a long
+draft run gets the stories the run has not reached (`left to the studio since this
+run started`). Only the story the run is already writing can meet the studio's
+research: if the run's thread lands first, the piece stops before writing and says
+so (Resume researches another story); if the research picks the story first, the
+run does not keep its thread.
 
 1. Draft posts for the top stories.
    ```
@@ -171,7 +182,9 @@ runs and writes shorter threads for the day's other stories.
    only introduced it, "Full results:") from every post and drop a post that was
    nothing but the link. It is pure text: no model call, no network, pictures
    untouched, the draft keeps its status, and each change is logged as an edit
-   holding the before and after. A draft already posted is left alone, and one
+   holding the before and after. A draft already posted (or one a publish run
+   has claimed) is left alone, and so is a studio piece (part 9: its session
+   writes without links, and a ticker like `ROG.SW/RHHBY` is not one); a draft
    whose every post is nothing but a link is named in the log for you to revise
    by hand in the queue. By default it covers pending and approved drafts;
    `--status STATUS` (repeatable) narrows it, `-v` shows per draft detail.
@@ -471,7 +484,10 @@ runs and writes shorter threads for the day's other stories.
    discarded and the next `run_verify.py` (or the scheduler) checks the new
    or changed claims.
 4. After a couple of weeks, see what your edits are asking for and paste the
-   suggestions you agree with into `draft\voice.md`.
+   suggestions you agree with into `draft\voice.md`. Only the drafter's own
+   drafts count here and in the examples the drafter is shown: a studio piece
+   (part 9) is written in the studio's voice, so its edits and rejections stay
+   out of both.
    ```
    python -m draft.voice_report
    python -m draft.voice_report --weeks 8 --out voice.md
@@ -519,6 +535,9 @@ the X API:
 - each post of the thread with a **Copy text** button (numbered exactly as the
   publisher would post it), and under it its picture(s) with **Copy picture**,
   a download link and the alt text for X's "Add description";
+- for a studio piece (part 9), above the posts, the fast-moving facts its
+  session flagged to **re-check before posting** (a date that may have moved, a
+  figure that changes daily): confirm each still holds before you paste;
 - a link to x.com's composer. Paste post 1's text and picture, press **+** for
   each next post, and post it;
 - back on the page, optionally paste the link to the first post (feedback can
@@ -598,7 +617,8 @@ You may not need this part. While the control panel or desktop window is open it
 already runs ingest, score, studio_scan, studio, draft, verify, feedback, evolve and studio_learn on
 its own at 06:00, 12:00 and 18:00 (part 8, "Automatic runs"), and it never publishes. Task
 Scheduler is the other way: it runs even with the app closed and can wake the
-PC, but it needs the tasks below. Pick one for `pipeline-run`. Running both is
+PC, but it needs the tasks below. Pick one for `pipeline-run` and
+`pipeline-studio`. Running both is
 safe (a step that is already running is skipped, never run twice) but wasteful.
 The automatic runs also back the database up once a day (the first run each
 day), and each one records a health check and alerts when one fails, but they
@@ -609,7 +629,13 @@ task from step 2 if you want that. `pipeline-backup` is not needed with them. Th
 and `source_stale_min_hours` to 0 for earlier warnings.
 
 1. Try the orchestrator by hand first. It runs ingest, score, draft and
-   verify in order and records each step. Each step takes its own lock
+   verify in order and records each step. It leaves the `studio` step out:
+   one studio session runs for an hour or more, and the whole run (and every
+   `pipeline-run` after it, which Task Scheduler does not start while one is
+   still going) would wait for it. The studio has a task of its own,
+   `pipeline-studio` in step 2, which runs `run_ops.py run --only studio` and
+   holds only the studio's own lock, so the pipeline runs on beside it.
+   Each step takes its own lock
    (`<lock_path>.<lock name>`) while it runs, so a step the control panel is
    already running is skipped as `locked` and the rest carry on.
    The `draft_retry` step is `manual: true`: a plain `run_ops.py run` and the
@@ -628,6 +654,7 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    mkdir logs
    python run_ops.py run --dry-run
    python run_ops.py run
+   python run_ops.py run --only studio --dry-run
    python run_ops.py status
    python run_ops.py health
    python run_ops.py backup
@@ -637,8 +664,13 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    schtasks /Create /TN "pipeline-run" /SC MINUTE /MO 30 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py run >> logs\ops.log 2>&1"
    schtasks /Create /TN "pipeline-health" /SC HOURLY /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py health --alert >> logs\ops.log 2>&1"
    schtasks /Create /TN "pipeline-backup" /SC DAILY /ST 03:00 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py backup >> logs\ops.log 2>&1"
+   schtasks /Create /TN "pipeline-studio" /SC DAILY /ST 06:10 /RI 360 /DU 12:30 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py run --only studio >> logs\ops.log 2>&1"
    ```
-   In the Task Scheduler app, open each task and tick "Run whether user is
+   `pipeline-studio` runs at 06:10, 12:10 and 18:10; it starts at most one
+   piece a day (part 9) and otherwise only acts on what you asked for on the
+   studio page. Each backup also keeps a copy of your studio playbook
+   (`backups\pipeline-<stamp>.studio_playbook.md`, `with_db` under `backups:`
+   in `ops\config.yaml`). In the Task Scheduler app, open each task and tick "Run whether user is
    logged on or not" and "Wake the computer to run this task". The PC must be
    on for them to fire. Keep each task running as your own Windows user, the
    one that ran `claude login` in part 1: every model call uses that login.
@@ -680,6 +712,9 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    posting slots and voice guide. It applies none of them; tell me which you
    want and I will commit them. The studio learns from the same snapshots on its
    own (part 9, "What X says"); without this tier, type its numbers in there.
+   Studio posts show as their own `studio` group in the tables, but the feed and
+   voice-guide proposals compare the drafter's posts only: there is no `studio`
+   feed to slow down or speed up.
 
    Every table in it is ranked by one KPI, `kpi:` in `feedback\config.yaml`.
    The shipped value is `conversation`: not a number X reports, but a weighted
@@ -772,7 +807,8 @@ motion, that bar stands still too. Four pages:
   something looks wrong.
   "Back up now" under Storage saves a copy of the database right away, the
   same verified copy `run_ops.py backup` makes, into the same `backups\`
-  folder (the oldest beyond `backups: keep` in `ops\config.yaml` are removed).
+  folder, with your studio playbook beside it (the oldest beyond
+  `backups: keep` in `ops\config.yaml` are removed, playbook copies too).
   Under Drafting, how many stories you said yes to on the feed have no draft
   yet. A yes sends a story to drafting whatever its score or age: the next
   draft run takes those first, then the best-scored new stories (score at
@@ -946,7 +982,12 @@ on disk (ask me to commit it), not in the browser.
 
 Anyone who can reach the page can run the pipeline, so keep it on
 `localhost`. `--host` and `--port` move it and `--reload` is for development;
-only use `--host 0.0.0.0` on a network you trust.
+only use `--host 0.0.0.0` on a network you trust. Other websites open in the
+same browser cannot press its buttons: a button press (or form) that comes
+from any page but the app's own is refused with "Refused: this request was
+sent from another site" and changes nothing. If you see that message after
+pressing a button on the app itself, you reached it through something that
+renames it on the way (a proxy); open it by its own address instead.
 
 ### As a desktop app (no browser, no command prompt)
 
@@ -987,8 +1028,12 @@ the whole folder wherever you like; inside it:
   so make lasting changes in the repo and rebuild.
 
 **Where the data lives.** The exe keeps its data next to itself, NOT in the
-repo: `.env`, `pipeline.db`, `backups\`, `images\` and `desktop.log` all sit in
-the folder that holds `Pipeline.exe`. Copy your `.env` in before the first
+repo: `.env`, `pipeline.db`, `backups\`, `images\`, `studio_pieces\` (every
+studio piece: its fact base, posts, cards, fact-check log and session),
+`studio_playbook.md` (your studio playbook, once you have saved it) and
+`desktop.log` all sit in the folder that holds `Pipeline.exe`. Each backup keeps
+a copy of the playbook beside the database's; `studio_pieces\` is in no backup,
+so copy it yourself when you move the app. Copy your `.env` in before the first
 start (and `pipeline.db` too if you want the stories and drafts you already
 have from running the scripts in the repo folder; otherwise the app starts
 with an empty database). `desktop.log` is where messages go, since there is
@@ -999,16 +1044,20 @@ settings change in the repo, rebuild; the exe does not update itself. Close
 `Pipeline.exe` first. PyInstaller asks
 `The output directory "...\dist\Pipeline" and ALL ITS CONTENTS will be
 REMOVED! Continue?` and means it: if you have been running the app from
-`dist\Pipeline`, its `.env`, `pipeline.db`, `backups\` and `images\` go with
-it. Two ways to keep them:
+`dist\Pipeline`, its `.env`, `pipeline.db`, `backups\`, `images\`,
+`studio_pieces\` and `studio_playbook.md` go with it. A studio piece whose
+folder is gone can no longer be resumed or revised (its page says the folder
+is missing), and the studio falls back to the shipped playbook. Two ways to
+keep them:
 - keep the app outside `dist\` (say `C:\Users\you\Pipeline`): answer `y`,
   then copy `Pipeline.exe`, `pipeline-cli.exe` and `_internal\` from
   `dist\Pipeline` over the top of that folder. Its data files are never in
   the way. This is the simplest habit.
 - or run it from `dist\Pipeline`: answer `N`, copy `.env`, `pipeline.db`,
-  `backups\` and `images\` somewhere safe, rebuild with `y`, and copy them
-  back. If the copy says `The system cannot find the file specified`, that
-  file was never there and there is nothing to keep.
+  `backups\`, `images\`, `studio_pieces\` and `studio_playbook.md` somewhere
+  safe, rebuild with `y`, and copy them back. If the copy says `The system
+  cannot find the file specified`, that file was never there and there is
+  nothing to keep.
 Everything else is the same as in the browser, including the rule
 that publishing stays off unless you turn it on in `ops\config.yaml`.
 
@@ -1058,20 +1107,40 @@ and long posts need X Premium.
    in part 1, and the cards are drawn by Microsoft Edge, which comes with
    Windows (Chrome or Chromium work too). If a piece says `no Chromium-family
    browser found`, put the browser's full path on `render: browser:` in
-   `studio\config.yaml`, or on `STUDIO_BROWSER=` in `.env`.
+   `studio\config.yaml`, between the single quotes that are there:
+   `browser: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`
+   (never double quotes: they turn each `\` into an escape and the studio stops
+   loading its settings), or on `STUDIO_BROWSER=` in `.env`. Until a browser is
+   found no automatic piece starts: the `studio` step fails on the runs page with
+   `no new piece: no browser to draw the cards with`, rather than spend a
+   session's research and writing on a piece whose cards cannot be drawn.
 2. It runs on its own. The `studio` step sits in the automatic runs (part 8)
-   right after `score`, so each run first acts on anything you asked for on the
+   right after `score` (with Task Scheduler instead, it is the `pipeline-studio`
+   task of part 6), so each run first acts on anything you asked for on the
    studio page, then starts a new piece if `studio\config.yaml` allows one: at
-   most `max_new_per_day` (1) in any 24 hours, `min_hours_between` (6) hours after
-   the last piece, and never while a piece waits for you at the research
-   checkpoint. An automatic piece picks its own story from the top scored stories
-   of the last two days that no piece has used, or finds a better one with its own
-   news scan, and writes straight through (`auto: checkpoint: false`). It is also
-   offered the radar (item 9): the day's scan topics and the catalysts coming up
-   or just passed. Expect it in
-   the queue 30 to 90 minutes after the run starts. A session still running at
-   the next run time sits that run out (`skip_when_busy`) instead of holding the
-   other steps back, and so do the steps still waiting behind it in its own run
+   most `max_new_per_day` (1) a day, `min_hours_between` (6) hours after the last
+   piece, and never while a piece waits for you at the research checkpoint. A day
+   is the calendar date in the `timezone:` of the root `config.yaml`, the clock the
+   run times are set in, so the day's first run that may start a piece does,
+   whatever minute yesterday's started at. An automatic piece picks its own story
+   from the top scored stories of the last two days that the account has not
+   written about (no studio piece on it and no draft from the drafter), or finds a
+   better one with its own news scan, and writes straight through (`auto:
+   checkpoint: false`). It is also offered the radar (item 10): the day's scan
+   topics and the catalysts coming up or just passed. It is told every piece of
+   the last 10 days (`topics: avoid_days` in `studio\config.yaml`), finished or
+   still waiting for you, so it does not repeat a topic. The piece is tied to a
+   feed story only when it is one the app offered it (so the drafter leaves that
+   story to the studio); a number it made up ties it to nothing. While it
+   researches, the drafter leaves every story it was offered alone (a draft run
+   beside it, such as cron's 30-minute run, skips them too). If the drafter had
+   already started the story the piece picks and its thread lands first, the
+   piece stops before writing with `story N got a draft from the drafter while
+   this research ran`: Resume researches another story, Discard ends it. Expect
+   it in the queue 30 to 90 minutes after the run starts. A
+   session still running at the next run time sits that run out
+   (`skip_when_busy`) instead of holding the other steps back, and so do the
+   steps still waiting behind it in its own run
    (draft, verify, feedback, evolve): that run gets to them when the session
    ends, and the new run says so in its note on the runs page.
 3. Or start one yourself. Open **Studio** in the panel's top bar, type a topic
@@ -1079,8 +1148,10 @@ and long posts need X Premium.
    $SMMT"), pick an angle or leave it to the session, and press **Write it**. On
    the **Feed** page, **Write a studio piece** under a story does the same with
    that story. A piece you start stops after research by default (the tick box)
-   so you can read the fact base first. The run shows on the runs page like any
-   other; its Stop button ends it, and the piece can be resumed later.
+   so you can read the fact base first. If the feed merges that story with another
+   before the studio gets to it, the piece follows it to the merged story. The run
+   shows on the runs page like any other; its Stop button ends it, and the piece
+   shows `interrupted` with Resume and Discard as soon as the run has stopped.
 4. The research checkpoint. When a piece says **read the research**, open it:
    the fact base is there with every source marked opened or seen in search
    results only, the X handles it verified, the corrections it made and the
@@ -1089,29 +1160,63 @@ and long posts need X Premium.
 5. Review. The piece's page shows the post exactly as it will be posted, the
    cards, the fact-check log (every finding, what changed, what stayed
    unverified) and the session's own log. The same draft is on the pending page;
-   approve it there.
+   approve it there. Once you change the text by hand in the queue, the piece's
+   page shows the queue's text as the post, with the session's own files folded
+   away below it.
 6. Changes. Type them on the piece's page and press **Revise**: the session that
    wrote it rewrites it, fact-checks what changed and replaces the queue draft.
    A draft you rejected comes back to pending with the revision; one you already
    approved has to be reopened on the approved page first (the piece says
    `not revised: draft N is approved ...` otherwise, and no session is spent).
    The queue's own Revise button would flatten a studio piece, so it points you
-   here instead. Hand edits on the queue page still work; keep each section
-   apart with a blank line, since a line of only `---` splits a post there.
+   here instead. Hand edits on the queue page still work, and a Revise keeps
+   them: before the session runs, the app writes the queue's text into the
+   piece's post files and tells the session the editor changed it by hand and
+   the changes stay; a card you dropped in the queue is taken out of the piece
+   and stays out unless your note asks for it back. Keep each section apart with
+   a blank line, since a line of only `---` splits a post there. A rejected
+   draft comes back only if none of it reached X (a posted one would never be
+   posted again, so no session is spent on it), and without the publishing
+   order it had before. While the studio works on a piece, or a run you asked
+   for waits to start, its queue draft is **on hold**: Approve, Edit, Reject and
+   Drop picture say so instead of acting, since the revision replaces the draft
+   when it lands.
 7. When something stops. A piece marked `interrupted` (stopped, timed out, the
-   PC slept, Claude Code could not start) or `failed` (the checker still found a
-   blocking problem after the polish rounds) has **Resume where it stopped**: the
+   PC slept, Claude Code could not start, or Claude Code stopped the cold
+   fact-check before it reported) or `failed` (the checker still found a
+   blocking problem after the polish rounds, or a card could not be copied into
+   the queue because the disk was full or another program held the picture open)
+   has **Resume where it stopped**: the
    same session carries on with everything it already read, and anything you type
-   in the box goes to it. **Discard** gives up on a piece: its files stay in the
-   `studio_pieces` folder, and a draft of it still pending in the queue is
-   rejected.
+   in the box goes to it. If you edited its queue draft by hand while it was
+   stopped, Resume goes through a revision first, so your edit is not
+   overwritten; if you approved the draft a stopped revision would replace,
+   Resume says so and runs nothing until you reopen it. A piece whose
+   run was stopped (the Stop button, the desktop window closed, the PC restarted)
+   turns `interrupted` as soon as you open its page or the studio page, or the
+   panel sees the run end; while a studio run is still going, its pieces keep
+   their stage. Claude Code deletes sessions it has not used for 30 days, so a
+   piece resumed or revised after that is picked up by a fresh session that
+   reads the piece's own files (fact base, posts, cards, fact-check log) first;
+   the piece's session log says when that happened. **Discard** gives up on a
+   piece: its files stay in the `studio_pieces` folder, and a draft of it still
+   pending in the queue is
+   rejected. A piece discarded before it reached the queue gives its story back to
+   the drafter.
 8. The playbook. **Studio → The playbook** is the short note every session
-   reads before it writes: what works on this account and the mistakes the
-   fact-checks keep catching. Edit and save it (the box under it says what you
-   changed, for the history); the next session reads your version (it lives in
-   `studio_playbook.md` next to `pipeline.db`). Every version is kept: yours, the
-   learning loop's (below) and the shipped seed, and any one can be put back from
-   the performance page.
+   reads when it researches and when it writes: what works on this account and
+   the mistakes the fact-checks keep catching. Edit and save it (the box under it
+   says what you changed, for the history); the next piece written reads your
+   version, even one whose run is already going (it lives in `studio_playbook.md`
+   next to `pipeline.db`, and every backup keeps a copy:
+   `backups\pipeline-<stamp>.studio_playbook.md`; to restore one, copy it back
+   as `studio_playbook.md`, or put a version back on the performance page). Every
+   version is kept: yours, the learning loop's (below) and the shipped seed, and
+   any one can be put back from the performance page. The session is also given
+   the X handles in `config.yaml` as already verified, and a copy of the
+   account's recent pieces as they stand in the queue (`earlier_pieces.md` in the
+   piece's folder, each marked posted or not), so a follow-up or a scorecard
+   quotes what the account actually wrote.
 9. What X says. **Studio → what X says** (`/studio/performance`) is the
    dashboard for the posted pieces, and what it shows is fed back into the next
    session. Each piece is measured on its first post 48 hours after it went out
@@ -1155,8 +1260,8 @@ and long posts need X Premium.
      it** queues the topic, with the scan's reasons and sources, and the angle you
      leave selected ("the session chooses" works too), then starts the studio.
      **Dismiss** takes a topic off. **Scan now** runs a scan at once.
-   - **From the feeds.** The top scored stories no piece has used, each with
-     **Write it**.
+   - **From the feeds.** The top scored stories the account has not written
+     about (no piece and no draft), each with **Write it**.
    - **The catalyst calendar.** Dated events: PDUFA dates, readouts, conference
      presentations, advisory committees. Each scan reports the ones it finds, and
      every piece's research adds the ones its session confirmed, with the source.
@@ -1198,8 +1303,11 @@ and long posts need X Premium.
 12. Cost. One piece is one long session at max effort, often an hour, and it
     uses a lot of your Claude plan; one automatic piece a day is the shipped
     pace. Each stage has a time limit in `studio\config.yaml` (`timeouts:`).
-13. What the session can do on your PC: search and read the web, read the
-    reference pieces, and read and write files inside its own piece folder.
+13. What the session can do on your PC: search and read the web, and read
+    and write files inside its own piece folder. The reference pieces reach it
+    as a copy in that folder (`reference\`, about 2.5 MB, made when a stage
+    starts), so nothing a web page talks it into can change
+    `studio\exemplars\`, which every later piece reads.
     It has no shell, cannot touch anything else on the PC, ignores your
     CLAUDE.md, plugins and hooks, and cannot post (the `cli_flags` in
     `studio\config.yaml`).
@@ -1233,20 +1341,28 @@ reference pieces in `studio\exemplars\`.
 | A company feed says `404 Not Found` | the company moved or retired its RSS feed. Open its press page, find the current feed and edit that company's `url` in `companies.feeds` in `config.yaml` (Cellectis, for one, now publishes at `/en/feed/?post_type=press_release`) |
 | `clinicaltrials_oncology` says `403 Forbidden` | ClinicalTrials.gov blocks a Python program that calls itself a browser. Its entry in `config.yaml` has its own `user_agent` starting with `python-httpx/` for that reason; if the line was removed, put it back |
 | A score run logs `safeguards flagged this message` | the CLI's usage-policy check tripped on a batch full of biology abstracts. The scorer does not retry the same prompt; it halves the batch and scores each half in a fresh call, down to single stories. A single story still refused is logged and left for the next run. `scorer_effort` / `drafter_effort` in `config.yaml` set how hard the model thinks (`low` is the cheapest) |
+| A draft shows as failed with `refused by the usage-policy safeguard` | the CLI's usage-policy check refuses that story's prompt, and would every time, so it is not sent again on every run. To try it once more: `python run_draft.py --retry-failed`, or write it in the studio |
+| Score, draft or verify runs fail at once with `unknown option '--safe-mode'` | your Claude Code is older than the pipeline expects: `npm install -g @anthropic-ai/claude-code`, then run again. As a stopgap set `safe_mode: false` under `claude_code:` in `config.yaml` (your own CLAUDE.md and hooks then reach every call) |
 | Want a completely fresh start | delete `pipeline.db`, then `python run_ingest.py --force` |
 | The dashboard's `cli` check says `'claude' not found on PATH` | every model call runs the Claude Code CLI; install it and log in (part 1, step 3). If `claude` works in a Command Prompt but not from the app or a scheduled task, put its full path on `binary:` under `claude_code:` in `config.yaml` (`where claude` lists it; use the line ending in `claude.cmd`) |
 | A step keeps running after you closed the app (a `claude` window keeps reopening) | that was the behaviour before the Stop button; on an old checkout, `taskkill /F /IM pythonw.exe` ends it (or `python.exe` if you started the app from a command prompt) |
 | A draft sits on the approved page marked `claimed` and never posts | the run that claimed it died before it posted (a sleep, a power cut, the Stop button). Press "Release" beside it once the claim is over 30 minutes old, or run `python run_publish.py --release-failed`; check on the publishing page first that no part of it reached X |
 | The control panel says a step is already running, or a run's step is marked `locked` | that step is running in this window, another window or the scheduler (part 6); wait for it and press the button again. Other steps can run meanwhile |
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
-| A studio piece says `no browser to draw the cards with` (its run's log: `no Chromium-family browser found`) | the cards are drawn by Edge, Chrome or Chromium; put the browser's full path on `render: browser:` in `studio\config.yaml` (Edge is usually `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`) and press Resume on the piece. The piece stops before polishing, its cards as written |
+| A studio piece says `no browser to draw the cards with` (its run's log: `no Chromium-family browser found`) | the cards are drawn by Edge, Chrome or Chromium; put the browser's full path on `render: browser:` in `studio\config.yaml` between single quotes (Edge is usually `browser: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`) and press Resume on the piece. The piece stops before polishing, its cards as written |
+| A studio piece says `card card_1.html could not be drawn: a file could not be read or written` | another program has that card's picture open (an image viewer you opened from the piece's folder): close it; the next polish round draws the card again, and a piece that failed meanwhile has Resume |
+| `run_ops.py run` never runs the studio | on purpose: a session runs an hour or more and would hold the whole run. Create the `pipeline-studio` task (part 6), which runs `run_ops.py run --only studio` |
 | A studio piece fails at once with `unknown option '--restricted'` (or `--safe-mode`) | your Claude Code is older than the studio expects: `npm install -g @anthropic-ai/claude-code`, then Resume. As a stopgap remove that flag from `cli_flags` in `studio\config.yaml` |
 | The radar page says the last scan `failed` | the line beside it says why (Claude Code not logged in, the time limit, an answer that was not JSON). Nothing was stored from it; press **Scan now**, or the next automatic run tries again. `radar: timeout_minutes` in `studio\config.yaml` gives a slow scan longer |
 | The calendar shows one event twice with different dates | the date moved and both reports were kept. **Dismiss** the old one |
 | The studio's performance page says `no snapshot yet` under a posted piece | the feedback step fetches numbers only with the X API read tier (part 7). Open **type the numbers X shows** under the piece and copy them from the post on x.com, about 48 hours after posting |
 | The runs page shows `studio_learn` failed with `the rewritten playbook was not used` (or `the playbook rewrite call failed`) | nothing changed: the sessions keep the playbook they had, and the next run tries again. The log line says why (cut short, a section missing, Claude Code not logged in); **Rewrite the playbook now** on the performance page retries at once |
 | A learned playbook made the pieces worse | on the performance page, **put this version back** under the version you want; it becomes the newest version and the next session reads it. `learn: playbook: propose` in `studio\config.yaml` makes every rewrite wait for you instead |
-| A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept). Press Resume on its page; the session keeps everything it already read |
+| A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept or restarted). Press Resume on its page; the session keeps everything it already read |
+| A studio piece says `interrupted: the CLI stopped 1 sub-agent(s) before they finished` | Claude Code ended the cold fact-check before it reported (an old Claude Code, or one started with background tasks on), so the stage did not finish. Press Resume: the session runs the stage again, fact-check included |
+| A studio piece still says `writing` (or researching, polishing, revising) after its run was stopped | another studio run holds the studio lock (a `run_studio.py` in a command prompt, or a run in a second window): the piece belongs to it until it ends. Otherwise reload the page: with no studio run going, opening it marks the piece `interrupted` |
+| A studio piece says `the piece's folder ... is missing` | its folder under `studio_pieces` was deleted or moved (moving the data folder moves them all). Put the folder back at that path and press Resume, or discard the piece |
+| A studio piece's log says `the CLI no longer has session ...` | Claude Code cleaned up the piece's session (it keeps 30 days by default). Nothing to do: a fresh session took the piece over from its files and carried on |
 | A studio piece says `failed: still blocked after polishing` | the page lists what the checker still found (advice wording, a link, a post over the limit). Resume with a note saying how to fix it, or Discard |
 | `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |
 | Building the exe fails with `No module named PyInstaller` | `pip install -e ".[desktop]"` in the venv first |
@@ -1255,7 +1371,9 @@ reference pieces in `studio\exemplars\`.
 
 Everything lives in `config.yaml` (sources, keywords, models, caps;
 `claude_code:` is the Claude Code CLI every model call runs through, by name
-or full path, with its time limit per call; a source
+or full path, with its time limit per call, and `safe_mode: true`, which keeps your
+own Claude Code set-up (your CLAUDE.md, hooks, plugins) out of the pipeline's calls;
+a source
 can set its own `min_abstract_chars` when its feed only carries a one-line
 summary, as the Fierce Biotech and BioPharma Dive entries do; `linking:` is the
 story-linking pass that merges a release with the trade-press write-ups of it

@@ -566,19 +566,29 @@ def generate(
 ) -> DraftResult:
     """The shared attempt loop behind draft_item and revise_item, public so step 9's swarm
     assembly runs through the same schema check, hard rules, chart check and retries.
-    `fmt` (phase four) is what validate_output and check_hard_rules require."""
+    `fmt` (phase four) is what validate_output and check_hard_rules require.
+
+    Raises DraftRejected only when the model's own output was the last thing that failed.
+    When the call itself failed last (an outage, a usage limit, a timeout), that error is
+    raised instead, so the caller tries the story again later rather than storing it as
+    failed with an earlier attempt's reasons. A safeguard refusal (the same prompt is
+    refused every time) and a CLI that cannot start are raised at once, never retried."""
     last_reasons: list[str] = []
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             limit = fmt.max_chars if fmt is not None else MAX_POST_CHARS
             raw = call(system, retry_prompt(user, last_reasons, limit), model)
+        except (claude_cli.ClaudeCliRefused, claude_cli.ClaudeCliUnavailable):
+            raise
         except Exception as exc:  # CLI failure, timeout or usage limit
             last_exc = exc
             log.warning("attempt %d: model call failed: %s", attempt, exc)
             if attempt < max_attempts:
                 _sleep_backoff(attempt, sleep)
             continue
+        # The model answered: whatever fails from here is its output, not the call.
+        last_exc = None
         try:
             draft = validate_output(parse_json_response(raw), fmt)
         except (json.JSONDecodeError, SchemaError) as exc:
@@ -596,11 +606,10 @@ def generate(
         if flagged:
             log.info("numbers not found in source, flagged for review: %s", flagged)
         return DraftResult(draft=draft, model=model, attempts=attempt, flagged_numbers=flagged)
-    if last_reasons:
-        log.error("draft rejected for %r after %d attempts: %s", url, max_attempts, last_reasons)
-        raise DraftRejected(last_reasons)
-    assert last_exc is not None
-    raise last_exc
+    if last_exc is not None:
+        raise last_exc
+    log.error("draft rejected for %r after %d attempts: %s", url, max_attempts, last_reasons)
+    raise DraftRejected(last_reasons)
 
 
 _generate = generate  # the pre-step-9 private name
