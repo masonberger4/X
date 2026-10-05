@@ -17,6 +17,11 @@
 <p class="flash low">Do not post this: the text fails a hard check ({{ d.error }}). Reopen the draft and fix it.</p>
 {% else %}
 <p class="meta">{{ d.title }}</p>
+{% if d.recheck %}
+<div class="banner warn">Re-check before posting (fast-moving facts the session flagged; confirm each still holds today):
+  <ul>{% for r in d.recheck %}<li>{{ r }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
 {% if d.blocked %}<p class="flash">Heads up: the publishing limits say wait ({{ d.blocked }}). You can still post it.</p>{% endif %}
 <ol class="meta">
   <li>Open <a href="https://x.com/compose/post" target="_blank" rel="noopener noreferrer">x.com/compose/post</a>.</li>

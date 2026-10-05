@@ -23,24 +23,35 @@ Routes:
 Step 7: the edit and reject forms take an optional category (why the draft was edited or
 rejected); the detail page shows a before/after diff for every edit.
 
+A studio draft (step 10) is held while the studio works on its piece or a run of it waits
+(store.studio_hold): approve, edit, reject and the picture drops answer 409 with the reason,
+since the revision replaces the draft's text and cards when it lands.
+
 Form bodies are parsed with urllib so no multipart dependency is needed.
+
+There is no login, so a request that changes anything must come from the app's own pages:
+`SameOriginOnly` answers 403 to a POST whose Origin (or Referer, when it has no Origin)
+names another host than the one it was sent to, so a web page open in the same browser
+cannot press the buttons. The control panel installs the same check on its app.
 """
 
 from __future__ import annotations
 
 import difflib
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 import timeutil
 from approval_queue import choosing, images, publishing, store
@@ -90,7 +101,68 @@ def install_standalone_globals() -> None:
 
 install_standalone_globals()
 
+# Methods that change nothing on these pages; any other one must come from the app itself.
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _host_of(url: str) -> str:
+    """The host[:port] a URL names, lower case, without a user part ("" for none)."""
+    try:
+        netloc = urlsplit(url).netloc
+    except ValueError:
+        return ""
+    return netloc.rpartition("@")[2].lower()
+
+
+def cross_site(method: str, headers: Mapping[str, str]) -> str:
+    """Why a request must be refused as sent from another site ("" when it may go on).
+    `headers` are looked up by lower-case name, as starlette's Headers are.
+
+    The pages have no login, so without this any web page open in the operator's browser
+    could submit a form to them: queue a studio topic and start an Opus session, rewrite the
+    studio's playbook, start a run, approve or edit a draft. A browser says which page a
+    form was sent from in Origin (in Referer when it sends no Origin), and a request that
+    changes anything must come from the host it was sent to (Host): the app's own pages,
+    whatever name or address the browser reached it by (localhost, the LAN, Tailscale).
+    Origin "null" (a sandboxed frame, a data: URL) names no host and is refused. A request
+    with neither header (curl, the tests, a script on this machine) goes on: a browser
+    sends Origin with every cross-site POST."""
+    if method.upper() in SAFE_METHODS:
+        return ""
+    for name in ("origin", "referer"):
+        sender = (headers.get(name) or "").strip()
+        if not sender:
+            continue
+        own = (headers.get("host") or "").strip().lower()
+        if own and _host_of(sender) == own:
+            return ""
+        return (
+            f"Refused: this request was sent from another site ({name.title()}: {sender[:200]}), "
+            f"not from this app's own pages at {own or '(no host)'}. Nothing was changed."
+        )
+    return ""
+
+
+class SameOriginOnly:
+    """ASGI middleware: answers 403 to a request `cross_site` refuses, before any route
+    runs. This app installs it, and so does the control panel, whose own app serves these
+    routes and the studio's (panel/app.py)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            why = cross_site(scope["method"], Headers(scope=scope))
+            if why:
+                log.warning("%s %s: %s", scope["method"], scope.get("path", ""), why)
+                await PlainTextResponse(why, status_code=403)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 app = FastAPI(title="Approval queue")
+app.add_middleware(SameOriginOnly)
 
 
 def get_conn() -> Iterator[store.sqlite3.Connection]:
@@ -190,6 +262,7 @@ def index(request: Request, conn: Conn, notice: str = ""):
             "drafts": drafts,
             "status": "pending",
             "checks": _check_summaries(conn, drafts),
+            "studio_holds": _studio_holds(conn, drafts),
             "publish": {},
             "hidden_posted": 0,
             "show_posted": False,
@@ -197,6 +270,12 @@ def index(request: Request, conn: Conn, notice: str = ""):
             "choosing": len(store.list_drafts(conn, store.STATUS_CHOOSING)),
         },
     )
+
+
+def _studio_holds(conn, drafts) -> dict[int, str]:
+    """Per studio draft the studio is working on: why it is held (store.studio_hold)."""
+    holds = {d.id: store.studio_hold(conn, d) for d in drafts if d.studio_piece is not None}
+    return {draft_id: why for draft_id, why in holds.items() if why}
 
 
 def _check_summaries(conn, drafts) -> dict[int, dict[str, int]]:
@@ -239,6 +318,7 @@ def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
             "drafts": drafts,
             "status": status,
             "checks": _check_summaries(conn, drafts),
+            "studio_holds": _studio_holds(conn, drafts),
             "publish": publish,
             "releasable": _releasable(conn, drafts, publish),
             "hidden_posted": hidden,
@@ -308,6 +388,7 @@ def _render_detail(
         "detail.html",
         {
             "d": row,
+            "studio_hold": store.studio_hold(conn, row),
             "publish": publish_info,
             "releasable": _releasable(conn, [row], publish_states).get(draft_id, False),
             "table_checks": table_checks,
@@ -354,6 +435,17 @@ def _awaiting_pick(conn, draft_id: int) -> None:
     row = store.get_draft(conn, draft_id)
     if row is not None and row.status == store.STATUS_CHOOSING:
         raise HTTPException(409, "pick A or B first (/choose)")
+
+
+def _studio_held(request: Request, conn, draft_id: int) -> HTMLResponse | None:
+    """The detail page with a 409 when the studio is working on this draft's piece (or a
+    run of it is waiting): what the editor does here meanwhile would be overwritten by the
+    revision, or make it fail after an hour's work. None when the draft is free."""
+    row = store.get_draft(conn, draft_id)
+    hold = store.studio_hold(conn, row) if row is not None else ""
+    if not hold:
+        return None
+    return _render_detail(request, conn, draft_id, error=f"Not done: {hold}.", status_code=409)
 
 
 @app.get("/choose", response_class=HTMLResponse)
@@ -492,6 +584,9 @@ def _redirect_home(*, notice: str = "") -> RedirectResponse:
 async def approve(draft_id: int, request: Request, conn: Conn):
     _awaiting_pick(conn, draft_id)
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     if verify_store.has_contradiction(conn, draft_id) and not form.get("override"):
         return _render_detail(
             request,
@@ -543,6 +638,9 @@ def _edit_problem(thread: list[str], limit: int = MAX_POST_CHARS) -> str | None:
 async def edit(draft_id: int, request: Request, conn: Conn):
     _awaiting_pick(conn, draft_id)
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     thread = _split_thread(form.get("thread", ""))
     current = store.get_draft(conn, draft_id)
     limit = max(MAX_POST_CHARS, current.draft.max_chars) if current is not None else MAX_POST_CHARS
@@ -724,6 +822,9 @@ def image_at(draft_id: int, index: int, conn: Conn):
 async def drop_image(draft_id: int, request: Request, conn: Conn):
     """Post the text without the chart: forgets the spec, deletes the PNG, logs a decision."""
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     try:
         store.drop_image(conn, draft_id, note=_note(form))
     except KeyError as exc:
@@ -738,6 +839,9 @@ async def drop_one_image(draft_id: int, index: int, request: Request, conn: Conn
     down a place; the spec that made it (the chart or table for index 0, the extra chart
     after) goes with it and the text is untouched."""
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     try:
         store.drop_image(conn, draft_id, note=_note(form), index=index)
     except KeyError as exc:
@@ -895,6 +999,9 @@ async def edit_table(draft_id: int, request: Request, conn: Conn):
 @app.post("/drafts/{draft_id}/reject")
 async def reject(draft_id: int, request: Request, conn: Conn):
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     try:
         store.reject(conn, draft_id, note=_note(form), category=_category(form))
     except KeyError as exc:

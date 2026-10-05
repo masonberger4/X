@@ -59,8 +59,10 @@ alone.
   help; never several in a sentence.
 
 ## Tags
-- $CASHTAG at each public company's first mention ($MRK, $BNTX). Hong Kong and other
-  non-US listings as codes (9926.HK), not cashtags.
+- $CASHTAG at each public company's first mention ($MRK, $BNTX). Hong Kong listings as
+  their number codes (9926.HK), not cashtags. A code with letters before the dot
+  (GMAB.CO, BAYN.DE, UCB.BR) is a link on X: give that company's US cashtag where it has
+  one, else the exchange and the ticker in words (Copenhagen: GMAB).
 - @handle only for an account you verified this session on the company's or
   organisation's own website (or that the app gives you as verified). Never guess a
   handle; a company you could not verify is named in words with its ticker.
@@ -77,6 +79,8 @@ alone.
 - Preprints are called preprints. Early data are called early. Cross-trial comparisons
   are called cross-trial comparisons.
 - No links in the post. Sources are named in words (X shows linked posts to fewer
-  people). The fact base keeps every URL.
+  people). A bare domain is a link too: X links ClinicalTrials.gov or stockanalysis.com
+  as it links a URL, so write "the NIH trial registry" or the site's name without its
+  domain. The fact base keeps every URL.
 - Never fabricate a number, a quote, a date or a handle. If you cannot source it, leave
   it out or label it as your estimate.

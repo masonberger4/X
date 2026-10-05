@@ -247,7 +247,10 @@ def fetch_stage_activity(conn: sqlite3.Connection, now: datetime | None = None) 
 def fetch_feed_yes_undrafted(conn: sqlite3.Connection) -> int:
     """Stories the editor said yes to on the feed (latest human rating >= 4, as
     score/editorial.py reads it) with no draft of any status yet: the ones the next
-    `run_draft.py` drafts first, whatever their score. 0 when tables are missing."""
+    `run_draft.py` drafts first, whatever their score. A story the studio holds (a piece on
+    it that was not discarded, a queued topic no piece took yet, or a story offered to a
+    piece still researching on no story) is not counted, since run_draft leaves it to the
+    studio. 0 when tables are missing."""
     present = tables(conn)
     if not {"clusters", "ratings"} <= present:
         return 0
@@ -256,6 +259,17 @@ def fetch_feed_yes_undrafted(conn: sqlite3.Connection) -> int:
         if "drafts" in present
         else ""
     )
+    offered: list[int] = []
+    if {"studio_pieces", "studio_topics"} <= present:
+        no_draft += (
+            " AND NOT EXISTS (SELECT 1 FROM studio_pieces p"
+            " WHERE p.cluster_id = c.id AND p.stage != 'discarded')"
+            " AND NOT EXISTS (SELECT 1 FROM studio_topics t"
+            " WHERE t.cluster_id = c.id AND t.piece_id IS NULL)"
+        )
+        offered = sorted(_studio_offers(conn))
+        if offered:
+            no_draft += f" AND c.id NOT IN ({','.join('?' for _ in offered)})"
     return int(
         _scalar(
             conn,
@@ -265,9 +279,31 @@ def fetch_feed_yes_undrafted(conn: sqlite3.Connection) -> int:
                                             AND (rater IS NULL OR rater = 'human')
                                           ORDER BY id DESC LIMIT 1)
                 WHERE r.rating >= 4 {no_draft}""",
+            tuple(offered),
         )
         or 0
     )
+
+
+def _studio_offers(conn: sqlite3.Connection) -> set[int]:
+    """The stories offered to studio pieces still researching on no story yet (their
+    meta's `offered_stories`, as approval_queue/store.py:studio_researching_offers reads it
+    for run_draft). Empty for a studio table without them."""
+    out: set[int] = set()
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(studio_pieces)").fetchall()}
+    if not {"meta_json", "stage", "cluster_id"} <= cols:
+        return out
+    rows = conn.execute(
+        "SELECT meta_json FROM studio_pieces WHERE stage = 'researching' AND cluster_id IS NULL"
+    ).fetchall()
+    for (meta,) in rows:
+        try:
+            ids = json.loads(meta or "{}").get("offered_stories")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(ids, list):
+            out |= {i for i in ids if isinstance(i, int) and not isinstance(i, bool)}
+    return out
 
 
 def fetch_publish_state(conn: sqlite3.Connection, now: datetime | None = None) -> PublishState:

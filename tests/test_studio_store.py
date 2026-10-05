@@ -92,6 +92,39 @@ def test_connect_creates_the_three_tables_and_can_be_repeated(tmp_path):
         again.close()
 
 
+def test_an_older_database_gains_the_story_item_columns(tmp_path):
+    """A database made before story_item existed (the tables as they first shipped) keeps
+    its rows and gains the column on both tables, empty for the rows already there."""
+    path = tmp_path / "pipeline.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        S._SCHEMA.replace("    story_item      TEXT NOT NULL DEFAULT '',\n", "").replace(
+            "    story_item TEXT NOT NULL DEFAULT '',\n", ""
+        )
+    )
+    old.execute(
+        "INSERT INTO studio_pieces (created_at, updated_at, origin, cluster_id, stage, "
+        "session_id, workspace, model) VALUES ('t', 't', 'manual', 5, 'ready', 's', 'w', 'm')"
+    )
+    old.execute("INSERT INTO studio_topics (created_at, cluster_id) VALUES ('t', 9)")
+    old.commit()
+    for table in ("studio_pieces", "studio_topics"):
+        assert "story_item" not in {r[1] for r in old.execute(f"PRAGMA table_info({table})")}
+    old.close()
+
+    conn = S.connect(path)
+    try:
+        for table in ("studio_pieces", "studio_topics"):
+            assert "story_item" in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        [piece] = S.list_pieces(conn)
+        assert (piece.cluster_id, piece.story_item) == (5, "")
+        [topic] = S.queued_topics(conn)
+        assert (topic.cluster_id, topic.story_item) == (9, "")
+        S.ensure_tables(conn)  # and again: nothing to add
+    finally:
+        conn.close()
+
+
 def test_the_tables_sit_beside_the_queue_tables(sconn):
     tables = _tables(sconn)
     assert {"studio_pieces", "studio_runs", "studio_topics"} <= tables
@@ -312,6 +345,30 @@ def test_recent_pieces_are_written_pieces_newest_first(sconn):
     assert [p.id for p in S.recent_pieces(sconn, 2)] == [failed, written[-1]]
 
 
+def test_started_within_lists_every_piece_of_the_window_but_the_discarded(sconn, clock):
+    """The topics a new piece must not repeat: every piece started in the last N days that
+    was not discarded, finished or not (topics.avoid_days)."""
+    clock.advance(days=-11)
+    _piece(sconn, topic="too old")
+    clock.advance(days=1)  # ten days before T0: the boundary counts
+    edge = _piece(sconn, topic="ten days ago")
+    clock.advance(days=5)
+    waiting = _piece(sconn, topic="waiting")
+    S.update_piece(sconn, waiting, stage=S.STAGE_RESEARCH_READY)
+    failed = _piece(sconn, topic="failed")
+    S.update_piece(sconn, failed, stage=S.STAGE_FAILED)
+    gone = _piece(sconn, topic="given up")
+    S.update_piece(sconn, gone, stage=S.STAGE_DISCARDED)
+    clock.advance(days=5)
+    ready = _piece(sconn, topic="in the queue")
+    S.update_piece(sconn, ready, angle="deal_decoder", stage=S.STAGE_READY)
+    running = _piece(sconn, topic="researching")
+
+    assert [p.id for p in S.started_within(sconn, 10)] == [running, ready, failed, waiting, edge]
+    assert [p.id for p in S.started_within(sconn, 0.5)] == [running, ready]
+    assert S.started_within(sconn, 0) == [] and S.started_within(sconn, -1) == []
+
+
 def test_pieces_since_counts_by_start_time_and_origin(sconn, clock):
     first = _piece(sconn, origin=S.ORIGIN_AUTO)
     t1 = clock.advance(hours=1)
@@ -356,6 +413,46 @@ def test_used_cluster_ids_count_every_piece_and_queued_topic(sconn):
 
 def test_used_cluster_ids_is_empty_on_a_new_database(sconn):
     assert S.used_cluster_ids(sconn) == set()
+
+
+def test_the_story_item_is_kept_with_a_piece_and_a_topic(sconn):
+    pid = _piece(sconn, cluster_id=5, story_item="item-5")
+    assert (_get(sconn, pid).cluster_id, _get(sconn, pid).story_item) == (5, "item-5")
+    S.update_piece(sconn, pid, cluster_id=6, story_item="item-6")
+    assert (_get(sconn, pid).cluster_id, _get(sconn, pid).story_item) == (6, "item-6")
+    assert _get(sconn, _piece(sconn)).story_item == ""
+    S.queue_topic(sconn, cluster_id=9, story_item="item-9")
+    [topic] = S.queued_topics(sconn)
+    assert (topic.cluster_id, topic.story_item) == (9, "item-9")
+    assert S.next_queued_topic(sconn).story_item == "item-9"
+
+
+def test_remembered_stories_are_the_rows_with_a_known_item(sconn):
+    _piece(sconn, cluster_id=5, story_item="a")
+    gone = _piece(sconn, cluster_id=7, story_item="b")
+    S.update_piece(sconn, gone, stage=S.STAGE_DISCARDED)  # still a used story
+    _piece(sconn, cluster_id=8)  # made before story items were kept: nothing to follow
+    _piece(sconn, cluster_id=None, story_item="")
+    S.queue_topic(sconn, cluster_id=9, story_item="c")
+    claimed = S.queue_topic(sconn, cluster_id=11, story_item="d")
+    S.claim_topic(sconn, claimed, gone)
+    S.queue_topic(sconn, cluster_id=5, story_item="a")  # the same story twice is one pair
+    S.queue_topic(sconn, topic="words only")
+
+    assert S.remembered_stories(sconn) == [(5, "a"), (7, "b"), (9, "c"), (11, "d")]
+
+
+def test_repoint_story_moves_every_piece_and_topic_on_it(sconn):
+    first = _piece(sconn, cluster_id=5, story_item="a")
+    second = _piece(sconn, cluster_id=5, story_item="a")
+    other = _piece(sconn, cluster_id=6, story_item="b")
+    topic = S.queue_topic(sconn, cluster_id=5, story_item="a")
+
+    assert S.repoint_story(sconn, 5, 3) == 3
+    assert [_get(sconn, p).cluster_id for p in (first, second, other)] == [3, 3, 6]
+    assert [(t.id, t.cluster_id) for t in S.queued_topics(sconn)] == [(topic, 3)]
+    assert S.used_cluster_ids(sconn) == {3, 6}
+    assert S.repoint_story(sconn, 5, 3) == 0
 
 
 # ---- runs --------------------------------------------------------------------------
@@ -446,6 +543,7 @@ def test_a_queued_topic_is_stored_trimmed_with_its_checkpoint(sconn, clock):
         angle="class_deep_dive",
         checkpoint=True,
         piece_id=None,
+        story_item="",
     )
     assert (second.id, second.topic, second.cluster_id) == (story, "", 42)
     assert second.checkpoint is False

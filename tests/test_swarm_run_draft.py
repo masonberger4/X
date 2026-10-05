@@ -266,3 +266,43 @@ def test_the_queue_pick_page_is_blind_and_the_pick_route_moves_on(conn, monkeypa
     assert "Nothing to pick right now" in r.text and "both rejected" in r.text
     runs = {r.draft_id: r.winner for r in swarm_store.list_runs(conn)}
     assert runs[first.id] in ("swarm", "control") and runs[second.id] is None
+
+
+def test_a_refused_control_loses_to_the_swarm(conn, monkeypatch):
+    """The control's prompt is refused (every run alike): it counts as a failed variant,
+    so the swarm's draft still wins."""
+    import claude_cli
+    import run_draft
+
+    seed_item(conn, "s5", total=9.0)
+    _wire(monkeypatch, FakeModel(), jury_pick="control")
+
+    def refused(**kw):
+        raise claude_cli.ClaudeCliRefused("CLI exited 1: safeguards flagged this message")
+
+    monkeypatch.setattr(run_draft, "draft_item", refused)
+    assert run_draft.main(["--min-score", "7"]) == 0
+    [d] = store.list_drafts(conn)
+    assert d.status == "pending" and d.model == "swarm:cheap"
+    run = swarm_store.list_runs(conn)[0]
+    assert run.winner == "swarm" and run.draft_id == d.id
+    control = swarm_store.list_variants(conn, run.id)[1]
+    assert control["role"] == "control" and control["ok"] == 0
+    assert run_draft.REFUSED in control["problems"]
+
+
+def test_a_refused_control_and_a_failed_swarm_store_the_story_failed(conn, monkeypatch):
+    import claude_cli
+    import run_draft
+
+    seed_item(conn, "s6", total=9.0)
+    _wire(monkeypatch, FakeModel(bad_every=1), jury_pick="swarm")
+    monkeypatch.setattr(
+        run_draft,
+        "draft_item",
+        lambda **kw: (_ for _ in ()).throw(claude_cli.ClaudeCliRefused("safeguards flagged")),
+    )
+    assert run_draft.main(["--min-score", "7"]) == 0
+    [failed] = store.list_drafts(conn, store.STATUS_FAILED)
+    assert failed.rejection_reason.startswith(f"{run_draft.REFUSED}: safeguards flagged")
+    assert store.list_drafts(conn) == []

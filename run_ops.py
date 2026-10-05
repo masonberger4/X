@@ -6,6 +6,11 @@
   python run_ops.py status
   python run_ops.py prune --days N                 # ops-owned tables only
 
+A plain `run` leaves out the `manual` steps (buttons) and the `skip_when_busy` ones (the
+studio, whose session runs for an hour or more): those run with --only, and the studio has
+a schedule entry of its own (`run --only studio`), which takes no run lock, only the
+step's own.
+
 Exit codes for `run`: 0 ok, 1 a required step failed (or a step carries --live), 2 the lock
 was held. Nothing here posts to X, calls Claude, or edits pipeline content:
 posting is manual only, so `run` refuses to start when any selected step in
@@ -15,6 +20,7 @@ ops/config.yaml carries run_publish.py's live flag.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -34,7 +40,10 @@ from ops.config import load_ops_config
 
 log = logging.getLogger("run_ops")
 
-REPO_ROOT = Path(__file__).resolve().parent
+# Where the steps run. Absolute as written, never resolved: on Windows resolve() turns a
+# mapped network drive into its UNC form, in which the npm install's claude.cmd cannot
+# start a studio session (panel/frozen.py keeps the drive the same way).
+REPO_ROOT = Path(os.path.abspath(__file__)).parent
 
 # Posting is manual only: a human presses "Publish now" on the panel or runs
 # run_publish.py --live by hand. A scheduled run never posts, however the config got edited.
@@ -145,8 +154,16 @@ def cmd_run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
             POSTING_FLAG,
         )
         return 1
-    if not only:  # a manual step (draft_retry) runs only when --only names it
-        steps = [s for s in steps if not s.manual]
+    if not only:
+        # A manual step (draft_retry) runs only when --only names it. A skip_when_busy step
+        # (the studio, whose session runs for an hour or more) has a schedule entry of its
+        # own, `run_ops.py run --only studio`: in this run it would hold back every step
+        # after it and the next fires, which exit 2 on the run lock, or are not started at
+        # all by Task Scheduler and systemd while this run is still going.
+        own = [s.name for s in steps if s.skip_when_busy and not s.manual]
+        if own:
+            log.info("left out of a plain run (run them with --only): %s", ", ".join(own))
+        steps = [s for s in steps if not s.manual and not s.skip_when_busy]
     tail = int(cfg.get("run_log_tail_chars", 4000))
 
     if args.dry_run:
@@ -155,11 +172,18 @@ def cmd_run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
             print(f"{r.name:<10} {r.skipped_reason:<16} {' '.join(r.argv)}")
         return 0
 
-    held = lock.acquire(cfg["lock_path"])
-    if held is None:
-        log.error("another run holds the lock %s; exiting", cfg["lock_path"])
-        return 2
-    with held:
+    # The run lock keeps two fires of the pipeline apart. A run of skip_when_busy steps
+    # alone (the studio's own entry) goes without it: each such step takes its own lock
+    # (<lock_path>.studio) as it starts, and holding the run lock through a session would
+    # make every pipeline fire in the meantime exit 2.
+    selected = [s for s in steps if not only or s.name in only]
+    held = None
+    if any(not s.skip_when_busy for s in selected):
+        held = lock.acquire(cfg["lock_path"])
+        if held is None:
+            log.error("another run holds the lock %s; exiting", cfg["lock_path"])
+            return 2
+    with held or contextlib.nullcontext():
         run_id = f"{_now().strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
         log.info("run %s starting (%s)", run_id, ", ".join(only or [s.name for s in steps]))
         results = runner.run_steps(
@@ -198,7 +222,9 @@ def cmd_health(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
 def cmd_backup(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
     keep = args.keep if args.keep is not None else int(cfg["backups"]["keep"])
     try:
-        out = backup.backup(_db_path(args), cfg["backups"]["dir"], keep)
+        out = backup.backup(
+            _db_path(args), cfg["backups"]["dir"], keep, with_db=cfg["backups"].get("with_db") or []
+        )
     except (FileNotFoundError, RuntimeError) as exc:
         log.error("backup failed: %s", exc)
         return 1

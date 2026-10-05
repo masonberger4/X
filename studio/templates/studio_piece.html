@@ -46,13 +46,21 @@
   {% for a in research.candidate_angles %}{{ a.angle }}{% if a.why %} ({{ a.why }}){% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 {% endif %}
 
-{% if posts %}
+{% if queue_posts %}
+<h2>The post in the queue{% if queue_posts|length > 1 %} ({{ queue_posts|length }} posts){% endif %}</h2>
+<p class="banner warn">This is what <a href="/drafts/{{ queue_draft }}">draft {{ queue_draft }}</a> would post, and it differs from the session's files: the text was changed by hand in the queue, or the session has revised its files and the revision has not reached the queue yet. A Revise starts from the queue's text and keeps the hand edits.</p>
+{% for p in queue_posts %}<div class="post">{{ p }}</div>{% endfor %}
+{% if posts %}<details><summary><strong>The session's files</strong> ({{ posts|length }} post{{ 's' if posts|length != 1 }})</summary>
+{% for p in posts %}<div class="post">{{ p }}</div>{% endfor %}
+</details>{% endif %}
+{% elif posts %}
 <h2>The post{% if posts|length > 1 %} ({{ posts|length }} posts){% endif %}</h2>
 {% for p in posts %}<div class="post">{{ p }}</div>{% endfor %}
 {% endif %}
 
 {% if cards %}
 <h2>Cards</h2>
+{% if queue_pictures is not none and queue_pictures < cards|length %}<p class="meta">The queue draft carries {{ queue_pictures }} of these {{ cards|length }} cards: the others were dropped there (or a revision has not reached the queue yet). A Revise leaves dropped cards out unless your note asks for them back.</p>{% endif %}
 <div class="cards">
   {% for c in cards %}<a href="/studio/{{ piece.id }}/card/{{ c.n }}" target="_blank"><img src="/studio/{{ piece.id }}/card/{{ c.n }}" alt="card {{ c.n }}" style="max-width:260px;border:1px solid #ddd;border-radius:6px"></a>{% endfor %}
 </div>

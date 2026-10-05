@@ -2,13 +2,16 @@
 own `db.Database` API (as digest.py and the panel's feed do), never raw SQL here.
 
 `fetch_shortlist` is what an automatic piece is offered: the top scored clusters of the
-last `topics.lookback_hours` that no piece has used. `fetch_story` is one cluster, for a
-piece started from the feed.
+last `topics.lookback_hours` that the account has not written about (the caller's
+`exclude`: the studio's own stories and every story with a draft). `fetch_story` is one
+cluster, for a piece started from the feed. `story_item` and `merged` follow a story that
+story linking folded into another cluster.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 from studio.prompt import Story
@@ -89,3 +92,49 @@ def fetch_story(cluster_id: int) -> Story | None:
         return _story(db, cluster, score)
     finally:
         db.close()
+
+
+def story_item(cluster_id: int) -> str:
+    """One item of a feed story (its earliest published), kept beside the story's cluster id so the
+    story can be found again after linking merges it into another cluster. '' when the story
+    has no items or the feed cannot be read."""
+    try:
+        db = _database()
+    except Exception as exc:
+        log.warning("no feed database: %s", exc)
+        return ""
+    try:
+        items = db.items_in_cluster(int(cluster_id))
+        return str(items[0].id) if items else ""
+    except Exception as exc:
+        log.warning("could not read story %s: %s", cluster_id, exc)
+        return ""
+    finally:
+        db.close()
+
+
+def merged(stories: Iterable[tuple[int, str]]) -> dict[int, int]:
+    """Where story linking moved these stories: {old cluster id: the cluster that holds the
+    story's item now}, for each (cluster id, item) whose cluster is gone. Linking
+    (filter/link.py, db.merge_clusters) moves a cluster's items to the cluster it keeps and
+    deletes the other, so the item is the trail. A story whose item is gone too, or whose
+    cluster still exists, is left out; nothing when the feed cannot be read."""
+    out: dict[int, int] = {}
+    try:
+        db = _database()
+    except Exception as exc:
+        log.warning("no feed database: %s", exc)
+        return out
+    try:
+        for cluster_id, item_id in stories:
+            if not item_id or db.get_cluster(int(cluster_id)) is not None:
+                continue
+            item = db.get_item(item_id)
+            now = item.cluster_id if item is not None else None
+            if now is not None and now != cluster_id and db.get_cluster(int(now)) is not None:
+                out[int(cluster_id)] = int(now)
+    except Exception as exc:
+        log.warning("could not follow merged feed stories: %s", exc)
+    finally:
+        db.close()
+    return out

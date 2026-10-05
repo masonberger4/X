@@ -320,6 +320,109 @@ def test_fetch_feed_yes_undrafted(conn):
     assert store.fetch_feed_yes_undrafted(conn) == 3
 
 
+def test_fetch_feed_yes_undrafted_leaves_out_what_the_studio_holds(conn):
+    """run_draft leaves a story the studio holds to the studio, so the dashboard does not
+    count it as waiting to be drafted: a piece on it that was not discarded (at any stage),
+    or a topic queued for it that no piece took yet."""
+    from studio import store as studio_store
+
+    studio_store.ensure_tables(conn)
+    names = ("waiting", "failed", "queued", "discarded", "claimed", "free")
+    stories = {name: seed_item(conn, name, total=40) for name in names}
+    for cid in stories.values():
+        conn.execute(
+            "INSERT INTO ratings (cluster_id, rating, rated_at, rater) VALUES (?, 5, ?, 'human')",
+            (cid, iso(datetime.now(UTC))),
+        )
+    conn.commit()
+
+    def piece(name, stage):
+        pid = studio_store.create_piece(
+            conn,
+            origin="manual",
+            topic="",
+            cluster_id=stories[name],
+            requested_angle="",
+            checkpoint=True,
+            session_id=f"s-{name}",
+            workspace="/w",
+            model="m",
+            effort="max",
+        )
+        studio_store.update_piece(conn, pid, stage=stage)
+        return pid
+
+    piece("waiting", studio_store.STAGE_RESEARCH_READY)
+    piece("failed", studio_store.STAGE_FAILED)
+    piece("discarded", studio_store.STAGE_DISCARDED)
+    studio_store.queue_topic(conn, cluster_id=stories["queued"])
+    taken = studio_store.queue_topic(conn, cluster_id=stories["claimed"])
+    studio_store.claim_topic(conn, taken, piece("claimed", studio_store.STAGE_DISCARDED))
+
+    assert store.fetch_feed_yes_undrafted(conn) == 3  # discarded, claimed, free
+
+
+def test_fetch_feed_yes_undrafted_leaves_out_what_a_researching_piece_was_offered(conn):
+    """A studio piece researching on no story yet holds every story it was offered, which
+    run_draft leaves alone, so the dashboard does not count them as waiting either. A
+    research that stopped, or named its story, holds no other."""
+    from studio import store as studio_store
+
+    studio_store.ensure_tables(conn)
+    names = ("offered", "named", "offered-then-named", "stopped", "free")
+    stories = {name: seed_item(conn, name, total=40) for name in names}
+    for cid in stories.values():
+        conn.execute(
+            "INSERT INTO ratings (cluster_id, rating, rated_at, rater) VALUES (?, 5, ?, 'human')",
+            (cid, iso(datetime.now(UTC))),
+        )
+    conn.commit()
+
+    def piece(stage, offered, cluster_id=None):
+        pid = studio_store.create_piece(
+            conn,
+            origin="auto",
+            topic="",
+            cluster_id=None,
+            requested_angle="",
+            checkpoint=False,
+            session_id=f"s-{stage}-{cluster_id}",
+            workspace="/w",
+            model="m",
+            effort="max",
+        )
+        studio_store.update_piece(
+            conn,
+            pid,
+            stage=stage,
+            cluster_id=cluster_id,
+            meta={"offered_stories": [stories[n] for n in offered]},
+        )
+
+    piece(studio_store.STAGE_RESEARCHING, ["offered"])
+    piece(studio_store.STAGE_RESEARCHING, ["named", "offered-then-named"], stories["named"])
+    piece(studio_store.STAGE_FAILED, ["stopped"])
+
+    assert store.fetch_feed_yes_undrafted(conn) == 3  # offered-then-named, stopped, free
+
+
+def test_fetch_feed_yes_undrafted_reads_studio_tables_without_a_meta_column(conn):
+    """Never raises: studio tables from before the piece meta count what they can."""
+    conn.executescript(
+        """
+        CREATE TABLE studio_pieces (id INTEGER PRIMARY KEY, cluster_id INTEGER, stage TEXT);
+        CREATE TABLE studio_topics (id INTEGER PRIMARY KEY, cluster_id INTEGER, piece_id INTEGER);
+        """
+    )
+    cid = seed_item(conn, "yes", total=40)
+    conn.execute(
+        "INSERT INTO ratings (cluster_id, rating, rated_at, rater) VALUES (?, 5, ?, 'human')",
+        (cid, iso(datetime.now(UTC))),
+    )
+    conn.commit()
+    assert store.fetch_feed_yes_undrafted(conn) == 1
+
+
 def test_fetch_candidates_takes_feed_yes_first(conn):
     from approval_queue import store as qstore
 

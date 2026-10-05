@@ -3,7 +3,7 @@
 import run_unlink
 from approval_queue import store
 from draft.chart import Chart
-from draft.hook import strip_links
+from draft.hook import link_problems, strip_links
 from draft.schema import Draft, long_format, single_format
 from tests.conftest import URL, seed_item
 
@@ -85,3 +85,34 @@ def test_a_draft_that_is_only_a_url_is_reported_not_changed(conn, caplog):
     with caplog.at_level("WARNING"):
         assert run_unlink.unlink(conn, [store.STATUS_PENDING], dry_run=False) == 0
     assert "left alone" in caplog.text
+
+
+def test_a_studio_draft_is_left_alone(conn, caplog):
+    # A studio post may name a foreign ticker the drafter's bare-domain test reads as a link;
+    # the studio's own checker already blocks real links, so its text is never touched here.
+    text = "Swiss pharma is where the cash sits. Roche (ROG.SW/RHHBY) has said so."
+    assert link_problems(text)  # what made run_unlink strip it
+    did = store.insert_draft(
+        conn,
+        item_id=store.studio_item_id(3),
+        model="opus (studio)",
+        draft=_draft(text, long_format(25000)),
+    )
+    store.approve(conn, did)
+    with caplog.at_level("INFO"):
+        assert run_unlink.unlink(conn, [store.STATUS_PENDING, store.STATUS_APPROVED], False) == 0
+    assert store.get_draft(conn, did).draft.thread == [text]
+    assert f"draft {did}: a studio piece, left alone" in caplog.text
+
+
+def test_a_draft_already_on_x_is_left_alone(conn, caplog):
+    from publish import store as publish_store
+
+    did = _insert(conn, "i1", f"ORR 88% held up. {URL}")
+    store.approve(conn, did)
+    publish_store.connect().close()  # step 3's tables
+    assert publish_store.record_manual(conn, did, [f"ORR 88% held up. {URL}"])
+    with caplog.at_level("INFO"):
+        assert run_unlink.unlink(conn, [store.STATUS_APPROVED], dry_run=False) == 0
+    assert store.get_draft(conn, did).draft.thread == [f"ORR 88% held up. {URL}"]
+    assert "posted or being posted, left alone" in caplog.text
