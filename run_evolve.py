@@ -337,7 +337,7 @@ def cmd_breed(
                     child = mutate.breed_format(target.genome, taken, rng)
                 else:
                     child = mutate.breed_designer(target.genome, taken, rng)
-            except Exception:  # an invalid child or an API error: the gap stays for next run
+            except Exception:  # an invalid child or a CLI error: the gap stays for next run
                 log.exception("breed: %s child of %s failed", kind, target.genome.name)
                 continue
             taken.add(child.name)

@@ -4,15 +4,27 @@
 sudo useradd -m pipeline && sudo -iu pipeline
 git clone <repo-url> x && cd x
 python3 -m venv .venv && .venv/bin/pip install -e .
-cp .env.example .env && nano .env            # ANTHROPIC_API_KEY, optional ALERT_WEBHOOK_URL / SMTP_*
+npm config set prefix ~/.npm-global && npm install -g @anthropic-ai/claude-code
+echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.profile && . ~/.profile
+claude login                                 # every model call runs this CLI, as this user
+cp .env.example .env && nano .env            # optional ALERT_WEBHOOK_URL / SMTP_*; no Claude key
 mkdir -p logs backups
 .venv/bin/python run_ops.py run --dry-run    # shows the argv per step; runs nothing
 .venv/bin/python run_ops.py run              # first real run (ingest -> score -> draft)
 .venv/bin/python run_ops.py status
 ```
 
+Every model call (scoring, linking, drafting, grading, claim checks) runs the Claude
+Code CLI (Node.js needed for the npm install) on the login of the user that runs the
+pipeline, so log in as `pipeline` as above. There is no API key: an `ANTHROPIC_API_KEY`
+in `.env` is ignored, kept out of the CLI's environment. cron and systemd start with a
+short PATH that misses the npm folder: add `/home/pipeline/.npm-global/bin` to the
+`PATH=` line in `deploy/crontab.example` or uncomment the `Environment=PATH=` line in
+`deploy/pipeline.service`, or set `claude_code.binary` in `config.yaml` to the full
+path. `run_ops.py health` has a `cli` check that fails while the CLI cannot be found.
+
 Then schedule it, either with cron (`crontab -e`, paste `deploy/crontab.example`,
-fix `REPO`/`VENV`) or with systemd (`sudo cp deploy/pipeline.service deploy/pipeline.timer
+fix `REPO`/`VENV`/`PATH`) or with systemd (`sudo cp deploy/pipeline.service deploy/pipeline.timer
 /etc/systemd/system/ && sudo systemctl enable --now pipeline.timer`; add cron lines
 for `health --alert`, `backup` and `prune` or copy the service/timer pattern).
 
@@ -52,8 +64,8 @@ schtasks /Create /TN "pipeline-backup" /SC DAILY /ST 03:00 /TR "cmd /c cd /d C:\
 Create the `logs` folder first (`mkdir logs`). The PC must be awake for tasks to
 fire; in Task Scheduler's GUI, tick "Run whether user is logged on or not" and
 "Wake the computer to run this task" for each. `schtasks /Query /TN pipeline-run`
-shows the next run; `schtasks /Delete /TN pipeline-run` removes one. If you use
-the `claude_code` backend, the tasks must run as the Windows user that ran
+shows the next run; `schtasks /Delete /TN pipeline-run` removes one. Every model
+call runs the Claude Code CLI, so the tasks must run as the Windows user that ran
 `claude login`.
 
 ## Desktop build (Windows)

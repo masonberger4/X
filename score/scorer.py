@@ -1,10 +1,10 @@
-"""Score clusters with the Anthropic API via tool use, in batches, with retry/backoff.
+"""Score clusters with Claude through the Claude Code CLI, in batches, with retry/backoff.
 
-Network is confined to `Scorer.create_message`, which tests replace. With
-`models.backend: claude_code` (or LLM_BACKEND=claude_code) the same method runs the
-Claude Code CLI through `claude_cli.run_claude` instead and asks for the tool's JSON
-as plain text; the reply is validated in code and wrapped in a response-like object
-so the rest of the scorer is unchanged.
+Network is confined to `Scorer.create_message`, which tests replace. It runs the CLI
+through `claude_cli.run_claude` (the app's only way to reach Claude) and asks for the
+scoring tool's input as a plain JSON reply, since print mode has no tool calling: the
+schema travels in the system prompt, the reply is validated in code and wrapped in a
+response-like object so the rest of the scorer reads it like a tool call.
 """
 
 from __future__ import annotations
@@ -15,8 +15,6 @@ import time
 from datetime import UTC
 from typing import Any
 
-import anthropic
-
 import claude_cli
 from db import Cluster, Database, Score
 from filter.prefilter import cluster_text
@@ -25,12 +23,9 @@ from score import rubric
 
 log = logging.getLogger(__name__)
 
-RETRYABLE = (
-    anthropic.RateLimitError,
-    anthropic.APIConnectionError,
-    anthropic.InternalServerError,
-    claude_cli.ClaudeCliError,
-)
+# A CLI failure (a usage limit, an API error inside the CLI, a timeout) is worth another
+# try after a pause; ClaudeCliUnavailable and ClaudeCliRefused are not (see create_with_retry).
+RETRYABLE = (claude_cli.ClaudeCliError,)
 
 HEADLESS_FORMAT_NOTE = (
     "\n\nYou are running without tool calling. Instead of calling the `{tool}` tool, reply "
@@ -44,7 +39,7 @@ class ScoringError(RuntimeError):
 
 
 class HeadlessToolUse:
-    """Mimics the SDK's ToolUseBlock for extract_scores()."""
+    """The scoring tool call, as extract_scores() reads it."""
 
     type = "tool_use"
 
@@ -54,8 +49,8 @@ class HeadlessToolUse:
 
 
 class HeadlessResponse:
-    """What create_message returns on the claude_code backend. raw_json() stores the
-    verbatim CLI text next to the parsed scores, like the API path stores the SDK dump."""
+    """What create_message returns. raw_json() stores the verbatim CLI text next to the
+    parsed scores (scores.raw_response)."""
 
     stop_reason = "tool_use"
 
@@ -65,13 +60,47 @@ class HeadlessResponse:
         self.content = [HeadlessToolUse(rubric.TOOL_NAME, data)]
 
     def model_dump_json(self) -> str:
-        return json.dumps(
-            {"backend": claude_cli.CLAUDE_CODE, "model": self.model, "text": self.text}
-        )
+        return json.dumps({"backend": "claude_code", "model": self.model, "text": self.text})
+
+
+_SCORED_FIELDS = (*rubric.DIMENSIONS, "hype_risk")
+
+
+def _whole_number(value: Any) -> int | None:
+    """An integer the reply wrote as 7, 7.0 or "7"; None for anything else (a bool too)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
+
+def entry_problem(entry: Any) -> str:
+    """Why one entry of the scoring reply cannot be stored, or "" when it can. The CLI has
+    no strict tool schema, so the checks the schema made (every field there, each score a
+    whole number from 0 to 10, a known evidence level) are made here."""
+    if not isinstance(entry, dict):
+        return "not an object"
+    for key in _SCORED_FIELDS:
+        n = _whole_number(entry.get(key))
+        if n is None:
+            return f"{key} is not a whole number ({entry.get(key)!r})"
+        if not 0 <= n <= 10:
+            return f"{key} is {n}, outside 0-10"
+    if entry.get("evidence_level") not in rubric.EVIDENCE_LEVELS:
+        return f"evidence_level {entry.get('evidence_level')!r} is not a known level"
+    for key in ("rationale", "suggested_angle"):
+        if not isinstance(entry.get(key), str):
+            return f"{key} is missing"
+    return ""
 
 
 class Scorer:
-    def __init__(self, cfg: dict[str, Any], client: anthropic.Anthropic | None = None):
+    def __init__(self, cfg: dict[str, Any]):
         self.cfg = cfg
         self.model: str = cfg["models"]["scorer"]
         self.effort: str | None = (
@@ -79,47 +108,16 @@ class Scorer:
         )
         sc = cfg.get("scoring") or {}
         self.batch_size = int(sc.get("batch_size", 10))
-        self.max_tokens = int(sc.get("max_tokens", 4096))
         self.max_retries = int(sc.get("max_retries", 5))
         self.backoff = float(sc.get("backoff_seconds", 2))
-        self.force_tool_choice = bool(sc.get("force_tool_choice", True))
         self.abstract_max_chars = int(sc.get("abstract_max_chars", 2500))
         self.system_prompt = rubric.build_system_prompt(cfg.get("expertise") or {})
-        self.backend = claude_cli.llm_backend(cfg)
-        self._client = client
-
-    @property
-    def client(self) -> anthropic.Anthropic:
-        if self._client is None:
-            self._client = anthropic.Anthropic()
-        return self._client
 
     # ---- network ----------------------------------------------------------
-    def create_message(self, user_content: str) -> Any:
-        if self.backend == claude_cli.CLAUDE_CODE:
-            return self.create_message_headless(user_content)
-        kwargs: dict[str, Any] = dict(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=self.system_prompt,
-            tools=[rubric.TOOL],
-            messages=[{"role": "user", "content": user_content}],
-        )
-        if self.force_tool_choice:
-            kwargs["tool_choice"] = {"type": "tool", "name": rubric.TOOL_NAME}
-        if self.effort:
-            kwargs["output_config"] = {"effort": self.effort}
-        return self.client.messages.create(**kwargs)
-
-    def headless_system_prompt(self) -> str:
-        return self.system_prompt + HEADLESS_FORMAT_NOTE.format(
-            tool=rubric.TOOL_NAME, schema=json.dumps(rubric.TOOL["input_schema"])
-        )
-
-    def create_message_headless(self, user_content: str) -> HeadlessResponse:
-        """claude_code backend: no tool schema is enforced server-side, so the JSON reply is
-        checked here. A malformed reply is a ScoringError (not retried: the batch is logged
-        and skipped); a CLI failure is a ClaudeCliError (retried like an API error)."""
+    def create_message(self, user_content: str) -> HeadlessResponse:
+        """One scoring call through the CLI: the JSON reply is checked here. A malformed
+        reply is a ScoringError (not retried: the batch is logged and skipped); a CLI
+        failure is a ClaudeCliError (retried)."""
         text = claude_cli.run_claude(
             user_content,
             system=self.headless_system_prompt(),
@@ -130,10 +128,15 @@ class Scorer:
         try:
             data = _parse_json_object(text)
         except json.JSONDecodeError as exc:
-            raise ScoringError(f"claude_code reply is not JSON: {text[:200]!r}") from exc
+            raise ScoringError(f"CLI reply is not JSON: {text[:200]!r}") from exc
         if not isinstance(data, dict) or not isinstance(data.get("scores"), list):
-            raise ScoringError("claude_code reply lacks a 'scores' list")
+            raise ScoringError("CLI reply lacks a 'scores' list")
         return HeadlessResponse(text, data, self.model)
+
+    def headless_system_prompt(self) -> str:
+        return self.system_prompt + HEADLESS_FORMAT_NOTE.format(
+            tool=rubric.TOOL_NAME, schema=json.dumps(rubric.TOOL["input_schema"])
+        )
 
     def create_with_retry(self, user_content: str) -> Any:
         for attempt in range(self.max_retries + 1):
@@ -148,7 +151,7 @@ class Scorer:
                     raise
                 delay = self.backoff * (2**attempt)
                 log.warning(
-                    "API error (%s: %s); retry %d/%d in %.1fs",
+                    "CLI error (%s: %s); retry %d/%d in %.1fs",
                     type(exc).__name__,
                     str(exc)[:200],
                     attempt + 1,
@@ -199,13 +202,26 @@ class Scorer:
         payload = self.batch_payload(db, clusters)
         response = self.create_with_retry(rubric.build_user_message(payload))
         raw = self.raw_json(response)
-        by_index = {int(s["index"]): s for s in self.extract_scores(response)}
+        by_index: dict[int, Any] = {}
+        for entry in self.extract_scores(response):
+            index = _whole_number(entry.get("index")) if isinstance(entry, dict) else None
+            if index is None:
+                log.warning("model output entry without a usable index; skipping: %.200r", entry)
+                continue
+            by_index[index] = entry
         now = utcnow().astimezone(UTC)
         out: list[Score] = []
         for i, p in enumerate(payload):
             s = by_index.get(i)
             if s is None:
                 log.warning("cluster %s missing from model output; skipping", p["cluster_id"])
+                continue
+            problem = entry_problem(s)
+            if problem:
+                # One bad entry costs its own cluster (scored again next run), not the batch.
+                log.warning(
+                    "cluster %s: unusable model output (%s); skipping", p["cluster_id"], problem
+                )
                 continue
             score = Score(
                 cluster_id=p["cluster_id"],
@@ -289,7 +305,7 @@ class Scorer:
             except claude_cli.ClaudeCliUnavailable as exc:
                 log.error("stopping: %s", exc)
                 break
-            except (ScoringError, anthropic.APIError, claude_cli.ClaudeCliError) as exc:
+            except (ScoringError, claude_cli.ClaudeCliError) as exc:
                 log.error("batch %d-%d failed: %s", i, i + len(batch), exc)
         log.info("scored %d clusters", len(scores))
         return scores

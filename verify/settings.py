@@ -1,5 +1,5 @@
-"""Load verify/config.yaml (this step's own settings; the root config.yaml still names the
-LLM backend and the company feeds)."""
+"""Load verify/config.yaml (this step's own settings; the root config.yaml still holds the
+Claude Code CLI settings and the company feeds)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ DEFAULTS: dict[str, Any] = {
     "model": "",
     "effort": "medium",
     "max_claims_per_draft": 6,
-    "max_searches_per_claim": 5,
     "timeout_seconds": 240,
     "trusted_domains": [],
     "tables": {"enabled": True, "max_cells_per_draft": 30, "min_supported_ratio": 0.6},

@@ -1,6 +1,6 @@
 """Comparison tables: the spec, the pure decision rules, the run_verify table pass with a
-fake model (source-backed cells skip the web, blanked cells, drops), the stored alt text,
-the queue page, approval and revision. No network."""
+fake model or a fake CLI run (source-backed cells skip the web, blanked cells, drops), the
+stored alt text, the queue page, approval and revision. No network."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+import claude_cli
 import run_verify
 from approval_queue import images, store
 from approval_queue.app import app
@@ -210,6 +211,36 @@ def test_run_verify_checks_cells_blanks_one_and_renders(conn, monkeypatch):
     calls.clear()
     run_verify.main([])
     assert calls == []
+
+
+def test_each_cell_the_article_does_not_back_is_one_cli_run_with_web_search(conn, monkeypatch):
+    """Through the real verify_claim with only the CLI run replaced: every cell the article
+    does not back is one Claude Code CLI run with WebSearch and WebFetch, asked about that
+    cell alone; the two source-backed "phase 2" cells never reach the CLI; the verdicts it
+    returns are stored and the table is drawn."""
+    did = _seed(conn)
+    table = validate_table(TABLE)
+    every = [tables.cell_claim(table, r, c) for r, c, _ in table.cells()]
+    asked = []
+
+    def fake_run(user, *, system, model, cfg, effort, tools):
+        asked.append((user, tools))
+        return json.dumps(
+            {"verdict": "supported", "source_url": "https://sec.gov/x", "quote": "q", "note": "n"}
+        )
+
+    monkeypatch.setattr(claude_cli, "run_claude", fake_run)
+    monkeypatch.setattr(run_verify, "_root_config", lambda: {})
+    assert run_verify.main(["--no-auto-revise"]) == 0
+    about = [[c for c in every if c in user] for user, _ in asked]
+    assert all(len(cells) == 1 for cells in about)  # one cell per run
+    backed = {tables.cell_claim(table, r, c) for r, c in [(0, 2), (2, 2)]}
+    assert sorted(cells[0] for cells in about) == sorted(set(every) - backed)
+    assert all(tools == ["WebSearch", "WebFetch"] for _, tools in asked)
+    checks = vstore.table_checks_for_draft(conn, did)
+    assert len(checks) == 9 and all(k.verdict == "supported" and k.trusted for k in checks)
+    assert sum(k.model == tables.SOURCE_MODEL for k in checks) == 2
+    assert store.get_draft(conn, did).image_path == f"draft_{did}.png"
 
 
 def test_run_verify_keeps_a_contradicted_table_and_the_reviser_fixes_it(conn, monkeypatch):

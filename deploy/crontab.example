@@ -11,9 +11,16 @@
 # Logs: append to logs/ops.log (create the directory once: mkdir -p logs).
 # Rotate with logrotate or `find logs -mtime +30 -delete` if it grows.
 
+# Every model call runs the Claude Code CLI (`claude`), logged in with your account: run
+# `claude login` once as the user that owns this crontab. cron starts with PATH=/usr/bin:/bin,
+# so PATH below must include the folder `claude` lives in (`command -v claude` shows it), or
+# set claude_code.binary in config.yaml to its full path. `run_ops.py health` has a "cli"
+# check that fails when the CLI cannot be found.
+
 REPO=/home/pipeline/x
 VENV=/home/pipeline/x/.venv
 PY=$VENV/bin/python
+PATH=/usr/local/bin:/usr/bin:/bin
 MAILTO=""
 
 # Run the pipeline (ingest -> score -> draft [-> publish -> feedback]) every 30 min.

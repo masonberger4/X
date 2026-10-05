@@ -55,6 +55,10 @@ This is the heart of it. Each story goes to Claude, the AI, with a very
 specific persona: you are a PhD immuno-oncologist who now works as a biotech
 analyst at a hedge fund. Read this and score it.
 
+It talks to Claude the same way every step below does: through Claude Code,
+Anthropic's command-line app, on my computer and logged in with my own
+account. No separate API key, nothing extra to look after.
+
 It scores on seven things: is it new, does it matter clinically, would our
 audience care, is it in our lane, is it timely, how strong is the evidence,
 and how much hype is in the writing. Those combine into a number out of 50.

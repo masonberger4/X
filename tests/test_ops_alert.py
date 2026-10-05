@@ -88,7 +88,7 @@ def test_min_status_fail_suppresses_warn(hook):
 
 def test_payload_never_contains_env_values(hook, monkeypatch):
     monkeypatch.setenv("OPS_TEST_SECRET", SENTINEL)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", SENTINEL + "-anthropic")
+    monkeypatch.setenv("X_BEARER_TOKEN", SENTINEL + "-bearer")
     rep = Report.build(
         NOW, [Check("env", "fail", "missing env: X_API_KEY"), Check("s", "warn", "w")]
     )

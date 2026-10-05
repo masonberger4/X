@@ -37,7 +37,6 @@ DEFAULTS: dict[str, Any] = {
     "window_hours": 48,
     "max_clusters": 200,
     "abstract_chars": 300,
-    "max_tokens": 4000,
 }
 
 SYSTEM = """You are a news editor's desk assistant for an immuno-oncology biotech account. You are given a numbered list of recent news clusters (title, source, date, a snippet). Several of them may be different outlets reporting the SAME news event: a company's press release, a wire-service copy of it, and one or more trade-press articles about it, each with its own headline.
@@ -126,9 +125,7 @@ def choose_keep(db: Database, ids: list[int]) -> int:
 
 
 def call_model(system: str, user: str, model: str, effort: str | None, cfg: dict) -> str:
-    return rater.call_model(
-        system, user, model, effort, cfg, max_tokens=int(settings(cfg)["max_tokens"])
-    )
+    return rater.call_model(system, user, model, effort, cfg)
 
 
 def link_recent(db: Database, cfg: dict[str, Any], call: CallFn = call_model) -> LinkResult:

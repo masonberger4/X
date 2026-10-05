@@ -1,6 +1,6 @@
 """The draft's image: a chart or table the model SPECIFIES and code RENDERS.
 
-The Anthropic API does not generate pictures, and a picture the pipeline cannot audit would
+The model does not generate pictures, and a picture the pipeline cannot audit would
 break "never fabricate numbers". So the drafter returns a small chart spec (title, labels,
 values, unit) next to the post text; every number in it is checked against the source the
 same way the post text is (draft.drafter.verify_chart), and a spec with an unverifiable

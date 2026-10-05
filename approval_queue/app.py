@@ -619,7 +619,7 @@ async def revise(draft_id: int, request: Request, conn: Conn):
         except drafter.DraftRejected as exc:
             log.warning("draft %d: revision broke a hard rule: %s", draft_id, exc)
             return _detail_redirect(draft_id, error=f"the revision broke a hard rule: {exc}")
-        except Exception as exc:  # API / network errors: keep the draft as it was
+        except Exception as exc:  # CLI or network errors: keep the draft as it was
             log.error("draft %d: revision failed: %s", draft_id, exc)
             return _detail_redirect(draft_id, error=f"revision failed: {exc}")
         note = instructions

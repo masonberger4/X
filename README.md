@@ -104,9 +104,15 @@ order, from install to scheduled publishing, with Windows commands.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env        # add ANTHROPIC_API_KEY (and optionally NCBI_API_KEY)
+cp .env.example .env        # optional NCBI_EMAIL / NCBI_API_KEY; nothing for Claude
+npm install -g @anthropic-ai/claude-code && claude login   # every model call runs this CLI
 ruff check . && ruff format --check . && pytest
 ```
+
+Every model call runs through the Claude Code CLI, logged in with your own
+account; there is no API key to set, and an `ANTHROPIC_API_KEY` left in `.env`
+is ignored (see [Claude Code CLI](#claude-code-cli)). The tests replace every
+model call, so `pytest` runs without the CLI.
 
 Edit `config.yaml` to change feeds, PubMed queries, company list, keywords,
 cadences, the score threshold, the scoring model, or `timezone:` (see
@@ -171,7 +177,7 @@ Suggested cron: `run_ingest.py` every 30 min, `run_score.py` hourly, read
 2. **Dedup / cluster** (`filter/dedup.py`): exact hash -> DOI -> near-duplicate
    title. One cluster per story; a cluster records every source that covered it.
 3. **Prefilter** (`filter/prefilter.py`): keyword allow/deny, short-abstract
-   drop, daily cap. Cheap and deterministic; runs before any API call. A source
+   drop, daily cap. Cheap and deterministic; runs before any model call. A source
    may set its own `min_abstract_chars` (the trade-press feeds do: their items
    carry a one-line summary); a cluster is held to the lowest floor among its
    sources.
@@ -183,7 +189,9 @@ Suggested cron: `run_ingest.py` every 30 min, `run_score.py` hourly, read
    that already has a score so the story is not scored twice. A failed call is
    logged and scoring goes on unmerged; `--no-link` skips it.
 4. **Score** (`score/`): batches of ~10 clusters go to the model named in
-   `models.scorer` via tool use with a strict JSON schema. Each row stores the
+   `models.scorer` through the Claude Code CLI, with the scoring tool's strict
+   JSON schema (`score/rubric.py:TOOL`) in the system prompt and the reply
+   checked in code. Each row stores the
    model, prompt version, raw response, five 0-10 dimensions, evidence level,
    hype risk, rationale and suggested angle. `total` = sum of dimensions minus
    half the hype risk (0-50).
@@ -220,7 +228,7 @@ image that actually ships is a **chart the model specifies and code renders**
 (`draft/chart.py`) or a table (below): the output JSON must carry exactly one of
 `chart` (title, labels, values, unit, note) and `table`; an output with neither
 fails the schema check and the drafter retries, so every draft comes with a
-visual. The Anthropic API draws nothing, and a picture the pipeline cannot audit
+visual. The model draws nothing, and a picture the pipeline cannot audit
 would break "never fabricate numbers", so:
 
 - every number in the chart (values, title, labels, note) is checked verbatim
@@ -273,9 +281,9 @@ would break "never fabricate numbers", so:
 
 `draft/` flags every fact the model added from its own knowledge as a claim to
 verify. `run_verify.py` sends each claim to Claude with web search enabled
-(`verify/verifier.py:call_model`, the only network call: the CLI with
-`--tools WebSearch,WebFetch` on the `claude_code` backend, the server-side
-`web_search` tool on the API) and stores a verdict (`supported`,
+(`verify/verifier.py:call_model`, the only network call: one Claude Code CLI run
+with `--tools WebSearch,WebFetch`, under `verify/config.yaml`'s own
+`timeout_seconds`) and stores a verdict (`supported`,
 `contradicted`, `unverified`), the source URL, the verbatim sentence and a note
 in its own table `claim_checks` (`verify/store.py`). A verdict counts as
 verified only when the source host is in `verify/config.yaml`
@@ -303,7 +311,7 @@ failures`), supported verdicts are carried over, the new claims are checked,
 and so on until all are supported or `max_rounds` per run /
 `max_rounds_per_draft` for life (0 = uncapped, the shipped value) is hit. A revision that keeps the claim set
 unchanged is discarded. The queue badges each draft with its automatic round
-count. Tables are not part of the loop.
+count. A table's contradicted cells join the round too (blanked cells never do).
 
 ```bash
 python run_verify.py             # pending drafts with unchecked claims
@@ -398,8 +406,8 @@ keywords, source cadences), `publish/config.yaml` (slots) or
 
 `run_ops.py` runs the whole pipeline unattended under cron or a systemd timer,
 detects when a source or stage has silently stopped, backs up the database, and
-tells you when something needs attention. It never posts, never calls the
-Anthropic API, and never edits content; it runs the other CLIs as subprocesses.
+tells you when something needs attention. It never posts, never calls
+Claude, and never edits content; it runs the other CLIs as subprocesses.
 
 ```bash
 python run_ops.py run                 # lock; ingest -> score -> draft [-> publish -> feedback]
@@ -421,10 +429,13 @@ tighten them if a scheduler runs every 30 minutes. The `publish` step is
 a dry run and stays one: posting is manual only, so `run_ops.py run` refuses to start when
 any step carries `--live` (post from the panel's approved page instead). Steps whose CLI has not merged yet are skipped with a warning.
 
-Health checks: sources (error / never ran / stale), staleness of ingest, score
+Health checks: the Claude Code CLI (`cli`: fails when `claude_code.binary` from
+`config.yaml` is not found on PATH; it does not test the login), sources (error /
+never ran / stale), staleness of ingest, score
 and draft, unscored backlog and pending-draft age, per-day scoring and drafting
 budget, publish `partial`/`failed`/stuck claims, feedback snapshots, backup age,
-DB size and disk free, and required env var names (never values). Alerts go to
+DB size and disk free, and required env var names (never values; `required_env`
+ships empty, since Claude needs no key). Alerts go to
 the log always, and optionally to a webhook (`ALERT_WEBHOOK_URL`, works for
 Slack/Discord/Mattermost incoming webhooks) or email (`SMTP_*`,
 `ALERT_EMAIL_FROM/TO`). A check that keeps failing is re-sent only after
@@ -437,8 +448,8 @@ locations, how to restore a backup).
 
 ## Conference abstracts and KOL list (step 6)
 
-Two more ingest sources plus retry in the HTTP layer. Nothing here calls the
-Anthropic API or writes to X.
+Two more ingest sources plus retry in the HTTP layer. Nothing here calls
+Claude or writes to X.
 
 **HTTP retry.** `ingest/http.py` retries 429 and 5xx responses and transport
 errors (connection failures, timeouts) up to three attempts with exponential
@@ -502,7 +513,7 @@ it back: `run_draft.py` turns recent human edits into BEFORE/AFTER few-shot
 examples in the drafting prompt, the queue records **why** a draft was edited
 or rejected (`voice`, `factual`, `not_newsworthy`, `hard_rule`, `other`), and
 a voice report tells you which `draft/voice.md` changes the edits are asking
-for. Nothing posts; the Anthropic API is called only where step 2 already
+for. Nothing posts; Claude is called only where step 2 already
 calls it, with a longer system prompt.
 
 ```bash
@@ -579,7 +590,8 @@ Settings live in `swarm/config.yaml` (cheap `model`, `assembler_model`,
 `control.enabled`). `parallel_calls` runs a layer's cells and a tournament round's
 judge matches side by side; slots and layers stay in order, so it only changes the wall
 clock.
-Every call goes through `draft/drafter.py:call_anthropic`. Tables (step 9's
+Every call goes through `draft/drafter.py:call_anthropic`, one Claude Code CLI
+run per call. Tables (step 9's
 own): `swarm_genomes` (the heritable slots and topology; phase three writes
 children), `swarm_runs` (genome, winner, call count and the full cell and
 tournament log per story) and `swarm_variants` (both drafts of a run and
@@ -683,53 +695,78 @@ rule), and bred without a model by stepping one field (shape, picture count,
 an anchor, the post range) to a neighbour. The panel's `/swarm` page has a
 Formats table.
 
-## Headless backend (optional)
+## Claude Code CLI
 
-By default the scorer and drafter call the Anthropic API with `ANTHROPIC_API_KEY`
-(metered, pay as you go). As an alternative for personal, low-volume use, the
-same two call sites can run the Claude Code CLI in print mode instead, so the
-calls are covered by whatever account the CLI is logged in with:
+Every model call the pipeline makes runs the Claude Code CLI in print mode,
+logged in with your own account (`claude login`, see [Setup](#setup)): the
+scorer, the story linker, the `--auto-rate` rater, the drafter (revisions, the
+swarm's cells and its breeding included), the image grader and the claim
+verifier. There is no API key and no other backend, so every call counts
+against that account's usage. The CLI's settings live in the root `config.yaml`:
 
 ```yaml
-# config.yaml
-models:
-  backend: claude_code     # default: api
 claude_code:
-  binary: claude           # must be on PATH and logged in (`claude login`)
-  timeout_seconds: 600
-  extra_args: []
+  binary: claude           # on PATH, or its full path if a scheduler's PATH lacks it (cron's usually does)
+  timeout_seconds: 600     # per call; verify/config.yaml sets its own for a claim check
+  extra_args: []           # appended verbatim, e.g. ["--fallback-model", "sonnet"]
 ```
 
-or `LLM_BACKEND=claude_code` in `.env` (the env var wins). Nothing else changes:
-`run_score.py` and `run_draft.py` behave the same, the score rows record
-`backend: claude_code` in `raw_response`, and every draft still goes through
-`check_hard_rules`.
+`.env` holds nothing for Claude. An `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`
+in `.env` or the environment is ignored: `claude_cli.cli_env` strips both from the
+CLI's environment, so a stale key can never switch it to metered API billing. An
+`LLM_BACKEND` line left in an older `.env` does nothing either. `run_ops.py health`
+and the dashboard carry a `cli` check that fails when `claude_code.binary` is not
+found on PATH; it does not test the login, which a step's log reports as
+`Not logged in` (run `claude login` again).
 
-How it works: `claude_cli.run_claude` launches
-`claude -p --output-format json --bare --tools "" --model <model>` with the
-system prompt as an argument and the user prompt on stdin, reads the JSON
-envelope, and returns the reply text. The scorer, which normally relies on a
-strict tool schema, instead inlines that schema into the system prompt and
-validates the reply in code: a malformed reply fails the batch (logged, skipped,
-picked up next run); a CLI failure (not logged in, rate limited, timeout) is
-retried with the same backoff as an API error. A safeguard verdict (`safeguards
-flagged this message`) is `ClaudeCliRefused`: it is deterministic for a given prompt,
-so it is never retried; instead `Scorer.score_batch_splitting` halves the batch and
-scores each half in its own call, down to single clusters, and a cluster refused on
-its own is logged and left unscored. `models.scorer_effort`, `models.drafter_effort`,
-`models.rater_effort` and `verify/config.yaml:effort` set the effort level per phase
-(`--effort` on the CLI, `output_config.effort` on the API; blank means the model's
-default).
+How it works: `claude_cli.run_claude` is the only place that spawns the CLI. It
+writes the system prompt to a temp file (deleted after the call) and runs the argv
+`claude_cli.build_argv` builds,
 
-Trade-offs, so you can decide with eyes open:
+```
+claude -p --output-format json --verbose --no-session-persistence \
+  --tools <list> --model <model> [--allowedTools <list>] \
+  [--system-prompt-file <file>] [--effort <level>] [extra_args...]
+```
 
-- The subscription's rolling usage limits are shared with your own Claude Code
-  sessions; a limit hit stalls scoring until it resets.
-- The machine running cron needs Claude Code installed and kept logged in.
+with the user prompt on stdin. The tool list is empty for every caller but two, and
+whatever it names is pre-approved with `--allowedTools`, since print mode cannot
+answer a permission prompt: the claim verifier (`WebSearch,WebFetch`) and the image
+grader (`Read`, to open the PNG). The system prompt travels in a file because it is
+long and full of quotes, which a Windows `.cmd` wrapper cannot pass safely. The CLI
+runs in the temp directory, not the repo, so this project's `CLAUDE.md` never reaches
+the prompt; `--bare` is not used because it would also skip the stored login.
+`--verbose` returns the whole transcript, so when the final turn comes back empty the
+last assistant text (or the input of the last tool call it made) is recovered
+(`claude_cli.parse_envelope`). On Windows the npm `claude.cmd` wrapper is resolved to
+its full path, the child opens no console window, and a timeout kills its whole
+process tree.
+
+Print mode has no tool calling, so the scorer puts the scoring tool's strict JSON
+schema (`score/rubric.py:TOOL`) into the system prompt and checks the reply in code:
+a reply that is not a JSON object with a `scores` list fails the batch (logged,
+skipped, picked up next run); a CLI failure (a usage limit, an error inside the CLI,
+a timeout) is retried with exponential backoff (`scoring.max_retries`,
+`scoring.backoff_seconds`); a CLI that cannot be found or started stops the scoring
+run. Score rows keep the CLI's verbatim reply in `raw_response`
+(`{"backend": "claude_code", "model": ..., "text": ...}`). A safeguard verdict
+(`safeguards flagged this message`) is `ClaudeCliRefused`: it is deterministic for a
+given prompt, so it is never retried; instead `Scorer.score_batch_splitting` halves the
+batch and scores each half in its own call, down to single clusters, and a cluster
+refused on its own is logged and left unscored. `models.scorer_effort`,
+`models.drafter_effort`, `models.rater_effort` and `verify/config.yaml:effort` set the
+effort level per phase (the CLI's `--effort`; blank means the model's default).
+
+Trade-offs of running everything through the CLI:
+
+- The account's rolling usage limits are shared with your own Claude Code
+  sessions; a limit hit stalls scoring and drafting until it resets.
+- The machine that runs the pipeline (the panel, cron or Task Scheduler) needs
+  Claude Code installed and kept logged in, as the user the steps run as.
 - Reply shape is requested, not enforced; expect an occasional skipped batch.
 - Anthropic's terms treat consumer subscriptions as covering their own products,
-  not programmatic use. A scheduled pipeline sits in a grey area; the API backend
-  is the clearly supported path and costs roughly $5-15/month at this volume.
+  not programmatic use. A scheduled pipeline sits in a grey area; check the terms
+  of the plan the CLI is logged in with.
 
 ## Database
 

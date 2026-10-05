@@ -1,12 +1,16 @@
-"""Headless backend (claude_cli) and its use by the scorer and drafter. No subprocess is
-ever spawned: subprocess.run / run_claude are replaced."""
+"""The Claude Code CLI (claude_cli), the app's only way to reach Claude, and its use by the
+scorer and drafter. The CLI is never spawned: run_claude, _run_with_timeout or Popen are
+replaced (the timeout and environment tests start a short Python child instead)."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -16,31 +20,101 @@ from draft import drafter
 from score import rubric
 from score.scorer import HeadlessResponse, Scorer, ScoringError
 
-# ---- backend selection ---------------------------------------------------------
+ROOT = Path(__file__).resolve().parents[1]
+API_CREDENTIALS = {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+
+# ---- the CLI is the only way to Claude -------------------------------------------
 
 
-def test_backend_defaults_to_api(monkeypatch):
-    monkeypatch.delenv("LLM_BACKEND", raising=False)
-    assert claude_cli.llm_backend({}) == "api"
-    assert claude_cli.llm_backend({"models": {"scorer": "x"}}) == "api"
-    assert claude_cli.llm_backend({"models": {"backend": "claude_code"}}) == "claude_code"
-
-
-def test_backend_env_overrides_config_and_rejects_unknown(monkeypatch):
-    monkeypatch.setenv("LLM_BACKEND", "claude_code")
-    assert claude_cli.llm_backend({"models": {"backend": "api"}}) == "claude_code"
-    monkeypatch.setenv("LLM_BACKEND", "bogus")
-    with pytest.raises(ValueError):
-        claude_cli.llm_backend({})
-
-
-def test_shipped_config_defaults_to_api(monkeypatch):
-    monkeypatch.delenv("LLM_BACKEND", raising=False)
+def test_shipped_config_runs_the_logged_in_cli():
     import config
 
     cfg = config.load_config()
-    assert claude_cli.llm_backend(cfg) == "api"
     assert claude_cli.cli_settings(cfg)["binary"] == "claude"
+    assert "backend" not in cfg["models"]  # no switch left that could point at the API
+
+
+def test_no_app_module_imports_the_anthropic_sdk():
+    """Not a dependency, and not imported anywhere, not even lazily inside a function."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    extras = project.get("optional-dependencies", {}).values()
+    requirements = [r for group in [project["dependencies"], *extras] for r in group]
+    assert not [r for r in requirements if re.match(r"anthropic(?![\w.-])", r, re.I)]
+
+    modules = list(ROOT.glob("*.py"))
+    for package in sorted(ROOT.iterdir()):
+        if package.name != "tests" and (package / "__init__.py").is_file():
+            modules += package.rglob("*.py")
+    sdk_import = re.compile(r"^\s*(?:import|from)\s+anthropic\b", re.M)
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in modules
+        if sdk_import.search(path.read_text(encoding="utf-8"))
+    ]
+    assert len(modules) > 50 and offenders == []
+
+
+# ---- the child's environment ------------------------------------------------------
+
+
+def test_cli_env_strips_api_credentials_and_keeps_the_rest(monkeypatch):
+    for name in API_CREDENTIALS:
+        monkeypatch.delenv(name, raising=False)
+    assert claude_cli.cli_env() == dict(os.environ)  # nothing to strip: an exact copy
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api-stale")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-gateway-token")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "account-login")  # the CLI's own login
+    monkeypatch.setenv("PIPELINE_TEST_VAR", "kept")
+    env = claude_cli.cli_env()
+    assert set(os.environ) - set(env) == API_CREDENTIALS
+    assert all(env[name] == os.environ[name] for name in env)  # the rest is untouched
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "account-login"
+    assert env["PIPELINE_TEST_VAR"] == "kept" and env["PATH"] == os.environ["PATH"]
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-api-stale"  # a copy: ours is unchanged
+
+
+def test_run_claude_hands_popen_the_env_without_api_credentials(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api-stale")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-gateway-token")
+    seen = {}
+
+    class FakeProc:
+        pid = 1
+        returncode = 0
+
+        def communicate(self, stdin, timeout=None):
+            seen["stdin"] = stdin
+            return json.dumps({"subtype": "success", "result": "answer"}), ""
+
+    def fake_popen(argv, **kwargs):
+        seen["argv"], seen["kwargs"] = argv, kwargs
+        return FakeProc()
+
+    monkeypatch.setattr(claude_cli.shutil, "which", lambda b: "/usr/bin/" + b)
+    monkeypatch.setattr(claude_cli.subprocess, "Popen", fake_popen)
+    assert claude_cli.run_claude("USER", model="m") == "answer"
+    assert seen["argv"][0] == "/usr/bin/claude" and seen["stdin"] == "USER"
+    env = seen["kwargs"]["env"]
+    assert not API_CREDENTIALS & set(env)
+    assert env == claude_cli.cli_env() and env["PATH"] == os.environ["PATH"]
+
+
+def test_the_cli_child_never_sees_an_api_key(monkeypatch):
+    """A real child process: whatever an old .env put in our environment, the CLI runs on
+    its own login and never bills a metered API key."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api-stale")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-gateway-token")
+    monkeypatch.setenv("PIPELINE_TEST_VAR", "kept")
+    names = sorted(API_CREDENTIALS | {"PIPELINE_TEST_VAR"})
+    code = f"import json, os; print(json.dumps({{k: os.environ.get(k) for k in {names!r}}}))"
+    proc = claude_cli._run_with_timeout([sys.executable, "-c", code], "", timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == {
+        "ANTHROPIC_API_KEY": None,
+        "ANTHROPIC_AUTH_TOKEN": None,
+        "PIPELINE_TEST_VAR": "kept",
+    }
 
 
 # ---- argv and envelope ----------------------------------------------------------
@@ -115,8 +189,10 @@ def test_run_claude_pipes_prompt_on_stdin(monkeypatch):
 
 def test_run_claude_failures_become_cli_errors(monkeypatch):
     monkeypatch.setattr(claude_cli.shutil, "which", lambda b: None)
-    with pytest.raises(claude_cli.ClaudeCliUnavailable, match="not found"):
+    with pytest.raises(claude_cli.ClaudeCliUnavailable, match="not found") as missing:
         claude_cli.run_claude("u", model="m")
+    assert "claude login" in str(missing.value)  # names the fix...
+    assert "backend" not in str(missing.value)  # ...and no API fallback to switch to
 
     monkeypatch.setattr(claude_cli.shutil, "which", lambda b: b)
 
@@ -162,10 +238,10 @@ def test_run_claude_failures_become_cli_errors(monkeypatch):
         claude_cli.run_claude("u", model="m")
 
 
-# ---- scorer on the headless backend ----------------------------------------------
+# ---- scorer through the CLI ------------------------------------------------------
 
 CFG = {
-    "models": {"scorer": "claude-haiku-4-5", "backend": "claude_code"},
+    "models": {"scorer": "claude-haiku-4-5"},
     "scoring": {"batch_size": 2, "max_retries": 1, "backoff_seconds": 0},
     "expertise": {"bonus_topics": ["CAR-T"]},
 }
@@ -187,15 +263,14 @@ def _entry(i):
 
 
 def test_scorer_headless_uses_cli_and_wraps_reply(monkeypatch):
-    monkeypatch.delenv("LLM_BACKEND", raising=False)
     calls = []
 
-    def fake_run(user, *, system, model, cfg, effort=None):
+    def fake_run(user, *, system, model, cfg, effort=None):  # no tools for the scorer
         calls.append((user, system, model))
         return "```json\n" + json.dumps({"scores": [_entry(0)]}) + "\n```"
 
     monkeypatch.setattr(claude_cli, "run_claude", fake_run)
-    scorer = Scorer(CFG, client=object())  # client must never be touched
+    scorer = Scorer(CFG)
     resp = scorer.create_with_retry("USER")
     assert isinstance(resp, HeadlessResponse)
     assert Scorer.extract_scores(resp) == [_entry(0)]
@@ -206,7 +281,6 @@ def test_scorer_headless_uses_cli_and_wraps_reply(monkeypatch):
 
 
 def test_scorer_headless_bad_json_is_scoring_error_not_retried(monkeypatch):
-    monkeypatch.delenv("LLM_BACKEND", raising=False)
     n = {"calls": 0}
 
     def fake_run(user, **kw):
@@ -215,16 +289,15 @@ def test_scorer_headless_bad_json_is_scoring_error_not_retried(monkeypatch):
 
     monkeypatch.setattr(claude_cli, "run_claude", fake_run)
     with pytest.raises(ScoringError, match="not JSON"):
-        Scorer(CFG, client=object()).create_with_retry("USER")
+        Scorer(CFG).create_with_retry("USER")
     assert n["calls"] == 1
 
     monkeypatch.setattr(claude_cli, "run_claude", lambda *a, **k: json.dumps({"foo": 1}))
     with pytest.raises(ScoringError, match="scores"):
-        Scorer(CFG, client=object()).create_with_retry("USER")
+        Scorer(CFG).create_with_retry("USER")
 
 
 def test_scorer_headless_cli_error_is_retried(monkeypatch):
-    monkeypatch.delenv("LLM_BACKEND", raising=False)
     n = {"calls": 0}
 
     def flaky(user, **kw):
@@ -234,12 +307,11 @@ def test_scorer_headless_cli_error_is_retried(monkeypatch):
         return json.dumps({"scores": [_entry(0)]})
 
     monkeypatch.setattr(claude_cli, "run_claude", flaky)
-    resp = Scorer(CFG, client=object()).create_with_retry("USER")
+    resp = Scorer(CFG).create_with_retry("USER")
     assert n["calls"] == 2 and Scorer.extract_scores(resp)[0]["index"] == 0
 
 
 def test_scorer_unavailable_cli_is_not_retried_and_stops_the_run(monkeypatch, db):
-    monkeypatch.delenv("LLM_BACKEND", raising=False)
     n = {"calls": 0}
 
     def missing(user, **kw):
@@ -261,35 +333,32 @@ def test_scorer_unavailable_cli_is_not_retried_and_stops_the_run(monkeypatch, db
     assert n["calls"] == 1
 
 
-def test_scorer_api_backend_never_spawns_cli(monkeypatch):
-    monkeypatch.delenv("LLM_BACKEND", raising=False)
+def test_scorer_ignores_a_leftover_api_backend(monkeypatch):
+    """An old config.yaml or .env may still say `backend: api`; the call is a CLI run anyway."""
+    monkeypatch.setitem(sys.modules, "anthropic", None)  # `import anthropic` now fails
+    monkeypatch.setenv("LLM_BACKEND", "api")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    calls = []
     monkeypatch.setattr(
-        claude_cli, "run_claude", lambda *a, **k: pytest.fail("CLI used on api backend")
+        claude_cli,
+        "run_claude",
+        lambda user, **kw: calls.append(user) or json.dumps({"scores": [_entry(0)]}),
     )
     cfg = {**CFG, "models": {"scorer": "m", "backend": "api"}}
-    created = {}
-
-    class Client:
-        class messages:
-            @staticmethod
-            def create(**kw):
-                created.update(kw)
-                return "api-response"
-
-    assert Scorer(cfg, client=Client()).create_message("USER") == "api-response"
-    assert created["tools"] == [rubric.TOOL]
+    resp = Scorer(cfg).create_message("USER")
+    assert isinstance(resp, HeadlessResponse) and calls == ["USER"]
+    assert Scorer.extract_scores(resp) == [_entry(0)]
 
 
-# ---- drafter on the headless backend --------------------------------------------
+# ---- drafter through the CLI ------------------------------------------------------
 
 
-def test_drafter_call_routes_to_cli_when_configured(monkeypatch):
-    monkeypatch.setenv("LLM_BACKEND", "claude_code")
+def test_drafter_call_runs_the_cli_with_the_root_config(monkeypatch):
     monkeypatch.setattr(drafter, "_root_config", lambda: {"claude_code": {"binary": "cc"}})
     seen = {}
 
-    def fake_run(user, *, system, model, cfg, effort=None):
-        seen.update(user=user, system=system, model=model, cfg=cfg)
+    def fake_run(user, *, system, model, cfg, effort=None):  # no tools for the drafter
+        seen.update(user=user, system=system, model=model, cfg=cfg, effort=effort)
         return '{"ok": true}'
 
     monkeypatch.setattr(claude_cli, "run_claude", fake_run)
@@ -299,19 +368,21 @@ def test_drafter_call_routes_to_cli_when_configured(monkeypatch):
         "system": "SYS",
         "model": "claude-sonnet-5",
         "cfg": {"claude_code": {"binary": "cc"}},
+        "effort": None,  # no drafter_effort: the model's default
     }
 
 
-def test_drafter_call_api_backend_requires_key_and_skips_cli(monkeypatch):
+def test_drafter_call_needs_no_api_key_and_ignores_a_leftover_backend(monkeypatch):
+    monkeypatch.setitem(sys.modules, "anthropic", None)  # `import anthropic` now fails
     monkeypatch.setenv("LLM_BACKEND", "api")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(drafter, "_root_config", lambda: {})
-    monkeypatch.setattr(drafter, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(drafter, "_root_config", lambda: {"models": {"backend": "api"}})
+    calls = []
     monkeypatch.setattr(
-        claude_cli, "run_claude", lambda *a, **k: pytest.fail("CLI used on api backend")
+        claude_cli, "run_claude", lambda user, **kw: calls.append(user) or "from the CLI"
     )
-    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
-        drafter.call_anthropic("SYS", "USER", "m")
+    assert drafter.call_anthropic("SYS", "USER", "m") == "from the CLI"
+    assert calls == ["USER"]
 
 
 def test_run_with_timeout_kills_the_child_and_raises():
@@ -396,7 +467,6 @@ def test_safeguard_verdict_is_a_refusal_not_a_plain_error(monkeypatch):
 
 
 def test_scorer_refusal_is_not_retried_and_splits_the_batch(monkeypatch, db):
-    monkeypatch.delenv("LLM_BACKEND", raising=False)
     from tests.test_scorer import _seed
 
     calls: list[int] = []
@@ -418,7 +488,6 @@ def test_scorer_refusal_is_not_retried_and_splits_the_batch(monkeypatch, db):
 
 
 def test_scorer_and_drafter_pass_effort_to_cli(monkeypatch):
-    monkeypatch.setenv("LLM_BACKEND", "claude_code")
     seen = []
     monkeypatch.setattr(
         claude_cli,
@@ -426,11 +495,7 @@ def test_scorer_and_drafter_pass_effort_to_cli(monkeypatch):
         lambda user, **kw: seen.append(kw.get("effort")) or json.dumps({"scores": []}),
     )
     Scorer({**CFG, "models": {**CFG["models"], "scorer_effort": "low"}}).create_message("U")
-    monkeypatch.setattr(
-        drafter,
-        "_root_config",
-        lambda: {"models": {"backend": "claude_code", "drafter_effort": "low"}},
-    )
+    monkeypatch.setattr(drafter, "_root_config", lambda: {"models": {"drafter_effort": "low"}})
     drafter.call_anthropic("S", "U", "m")
     assert seen == ["low", "low"]
 

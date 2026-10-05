@@ -1,9 +1,15 @@
-"""The image grader: parsing, knob clamping, the render-grade loop, storage and the queue."""
+"""The image grader: parsing, knob clamping, the render-grade loop, storage, the queue and
+the Claude Code CLI call that shows it the picture."""
 
 import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import claude_cli
+import config
 from approval_queue import images, store
 from draft import grader
 from draft.chart import Chart, Style
@@ -236,65 +242,94 @@ def test_re_render_clears_old_grades_and_queue_shows_them(conn, monkeypatch):
     assert "Image grader:" in page and "9/10" in page and "(kept)" in page
 
 
-def test_call_grader_api_path_sends_the_png(monkeypatch, tmp_path):
-    import sys
-    import types
-
-    png = tmp_path / "x.png"
-    png.write_bytes(b"\x89PNG fake")
-    monkeypatch.setattr(
-        grader,
-        "call_grader",
-        grader.call_grader.__wrapped__
-        if hasattr(grader.call_grader, "__wrapped__")
-        else grader.call_grader,
-    )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-    captured = {}
-
-    class Messages:
-        def create(self, **kw):
-            captured.update(kw)
-            return types.SimpleNamespace(content=[types.SimpleNamespace(text='{"score": 8}')])
-
-    class Client:
-        def __init__(self, api_key):
-            captured["key"] = api_key
-            self.messages = Messages()
-
-    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=Client))
-    monkeypatch.setitem(
-        sys.modules, "dotenv", types.SimpleNamespace(load_dotenv=lambda *a, **k: False)
-    )
-    monkeypatch.setattr("claude_cli.llm_backend", lambda cfg: "api")
-    out = REAL_CALL_GRADER(png, "sys", "user", "m")
-    assert out == '{"score": 8}' and captured["model"] == "m" and captured["key"] == "k"
-    blocks = captured["messages"][0]["content"]
-    assert blocks[0]["type"] == "image" and blocks[0]["source"]["media_type"] == "image/png"
-    assert blocks[1] == {"type": "text", "text": "user"}
-    assert "output_config" not in captured
-    REAL_CALL_GRADER(png, "sys", "user", "m", "low")
-    assert captured["output_config"] == {"effort": "low"}
+# --- the CLI call ------------------------------------------------------------------------
 
 
-def test_call_grader_cli_path_uses_read_tool(monkeypatch, tmp_path):
-    import sys
-    import types
+def _no_dotenv(monkeypatch):
+    """call_grader imports load_dotenv inside the function, out of conftest's reach: a no-op
+    here, so the developer's .env never reaches a test."""
+    monkeypatch.setitem(sys.modules, "dotenv", SimpleNamespace(load_dotenv=lambda *a, **k: False))
 
-    png = tmp_path / "x.png"
-    png.write_bytes(b"\x89PNG fake")
-    monkeypatch.setitem(
-        sys.modules, "dotenv", types.SimpleNamespace(load_dotenv=lambda *a, **k: False)
-    )
-    monkeypatch.setattr("claude_cli.llm_backend", lambda cfg: "claude_code")
+
+def test_call_grader_has_the_cli_read_the_png_by_its_absolute_path(monkeypatch, tmp_path):
+    """The CLI sees the picture only by reading the file itself, and it runs from the temp
+    directory, not the caller's: so the prompt names the PNG by its absolute path even when
+    handed a relative one, and Read is the one tool it gets. The rubric goes in as the
+    system prompt, and the root config.yaml (its `claude_code:` settings) rides along."""
+    _no_dotenv(monkeypatch)
+    root = {"claude_code": {"timeout_seconds": 42}}
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: root)
+    (tmp_path / "x.png").write_bytes(b"\x89PNG fake")
+    monkeypatch.chdir(tmp_path)
     seen = {}
 
     def fake_run(prompt, *, system, model, cfg, tools, effort=None):
-        seen.update(prompt=prompt, tools=tools, model=model, effort=effort)
+        seen.update(prompt=prompt, system=system, model=model, cfg=cfg, tools=tools, effort=effort)
         return '{"score": 9}'
 
-    monkeypatch.setattr("claude_cli.run_claude", fake_run)
-    assert REAL_CALL_GRADER(png, "sys", "user", "m") == '{"score": 9}'
-    assert seen["tools"] == ["Read"] and str(png.resolve()) in seen["prompt"]
-    REAL_CALL_GRADER(png, "sys", "user", "m", "low")
+    monkeypatch.setattr(claude_cli, "run_claude", fake_run)
+    assert REAL_CALL_GRADER(Path("x.png"), "RUBRIC", "SPEC AND KNOBS", "m") == '{"score": 9}'
+    assert str((tmp_path / "x.png").resolve()) in seen["prompt"]
+    assert "SPEC AND KNOBS" in seen["prompt"] and seen["system"] == "RUBRIC"
+    assert seen["tools"] == ["Read"] and seen["model"] == "m" and seen["cfg"] is root
+    assert seen["effort"] is None
+    REAL_CALL_GRADER(Path("x.png"), "RUBRIC", "SPEC AND KNOBS", "m", "low")
     assert seen["effort"] == "low"
+
+
+def test_call_grader_has_no_api_path_left(monkeypatch, tmp_path):
+    """The CLI is the only way to Claude: an API key, LLM_BACKEND=api or `models.backend:
+    api` left in an old .env or config.yaml still sends the picture to the CLI, and the
+    anthropic SDK (made unimportable here) is never reached for."""
+    _no_dotenv(monkeypatch)
+    monkeypatch.setitem(sys.modules, "anthropic", None)  # `import anthropic` now fails
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stale")
+    monkeypatch.setenv("LLM_BACKEND", "api")
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"models": {"backend": "api"}})
+    tools = []
+
+    def fake_run(prompt, **kw):
+        tools.append(kw["tools"])
+        return '{"score": 7}'
+
+    monkeypatch.setattr(claude_cli, "run_claude", fake_run)
+    png = tmp_path / "x.png"
+    png.write_bytes(b"\x89PNG fake")
+    assert REAL_CALL_GRADER(png, "sys", "user", "m") == '{"score": 7}'
+    assert tools == [["Read"]]
+
+
+def test_loop_has_the_cli_read_and_grade_the_render_on_disk(conn, monkeypatch):
+    """Through the real grade_image and call_grader with only the CLI replaced: the file the
+    CLI is told to read is the draft's own render, already a PNG on disk when the call is
+    made; the spec, the grader's rubric and its configured model and effort go with it; and
+    the CLI's reply is the grade the queue stores."""
+    monkeypatch.setattr(grader, "call_grader", REAL_CALL_GRADER)  # undo conftest's stub
+    _no_dotenv(monkeypatch)
+    did = _seeded(conn)
+    png = store.image_file(did)
+    calls = []
+
+    def fake_run(prompt, *, system, model, cfg, tools, effort=None):
+        calls.append(
+            {
+                "prompt": prompt,
+                "system": system,
+                "model": model,
+                "tools": tools,
+                "effort": effort,
+                "head": png.read_bytes()[:8] if png.is_file() else b"",  # what Read would see
+            }
+        )
+        return json.dumps({"score": 9, "criteria": {"readability": 9}})
+
+    monkeypatch.setattr(claude_cli, "run_claude", fake_run)
+    path = images.attach_chart(conn, did, CHART, source_url=URL, cfg=_cfg(effort="low"))
+    assert path == png and png.is_absolute()
+    (call,) = calls
+    assert str(png) in call["prompt"] and call["head"] == b"\x89PNG\r\n\x1a\n"
+    assert "Phase 2 outcomes" in call["prompt"] and call["system"] == grader.SYSTEM_PROMPT
+    assert call["tools"] == ["Read"] and call["model"] == "grader-model"
+    assert call["effort"] == "low"
+    (grade,) = store.list_image_grades(conn, did)
+    assert grade.score == 9 and grade.kept and grade.criteria == {"readability": 9}

@@ -1,12 +1,16 @@
 """ops/store.py: own tables and read-only adapters against a temp SQLite file.
 
 Uses conftest's db_file/conn fixtures (step 1 tables via db.Database, step 2 via
-approval_queue.store.connect). Step 3/4 tables are created by hand where needed.
+approval_queue.store.connect). Step 3/4 tables are created by hand where needed. The last
+tests cover run_ops.cli_status, the adapter behind health's "cli" check.
 """
 
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
+import config
+import run_ops
+from claude_cli import cli_settings
 from db import Database
 from draft.schema import Draft
 from ops import store
@@ -290,13 +294,6 @@ def test_db_path_resolution(monkeypatch, tmp_path):
     assert store.db_path().name == "pipeline.db"  # from config.yaml's db_path
 
 
-def test_configured_backend_follows_the_env_override(monkeypatch):
-    monkeypatch.setenv("LLM_BACKEND", "claude_code")
-    assert store.configured_backend() == "claude_code"
-    monkeypatch.setenv("LLM_BACKEND", "nonsense")
-    assert store.configured_backend() == "api"  # a bad value falls back, never raises
-
-
 def test_fetch_feed_yes_undrafted(conn):
     def rate(cid, rating, rater=None):
         conn.execute(
@@ -338,3 +335,39 @@ def test_fetch_candidates_takes_feed_yes_first(conn):
     conn.commit()
     ids = [c.item_id for c in qstore.fetch_candidates(30, 48, conn=conn)]
     assert ids == ["low", "old", "hi"]
+
+
+def test_health_looks_for_the_cli_the_root_config_names(monkeypatch):
+    """Every model call runs through the Claude Code CLI, so health resolves the binary the
+    root config.yaml names (`claude_code.binary`, the one claude_cli.run_claude launches) on
+    PATH. An unreadable config falls back to the CLI's default name, never raises."""
+    looked_up: list[str] = []
+    monkeypatch.setattr(run_ops.shutil, "which", lambda name: looked_up.append(name) or None)
+    binary, path = run_ops.cli_status()
+    assert binary == cli_settings(config.load_config())["binary"]  # the shipped one agrees
+    assert path is None and looked_up == [binary]
+
+    monkeypatch.setattr(config, "load_config", lambda: {"claude_code": {"binary": "claude-beta"}})
+    monkeypatch.setattr(run_ops.shutil, "which", lambda name: f"/opt/bin/{name}")
+    assert run_ops.cli_status() == ("claude-beta", "/opt/bin/claude-beta")
+
+    def unreadable():
+        raise FileNotFoundError("config.yaml")
+
+    monkeypatch.setattr(config, "load_config", unreadable)
+    assert run_ops.cli_status() == ("claude", "/opt/bin/claude")
+
+
+def test_health_report_fails_without_the_cli_and_asks_for_no_api_key(tmp_path, monkeypatch):
+    """build_report backs the dashboard, `run_ops.py health` and every run's health step: a
+    machine with no API key passes the env check, one without the CLI fails the report."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(run_ops, "cli_status", lambda: ("claude", None))
+    monkeypatch.setattr(store, "configured_sources", lambda: [])
+    path = tmp_path / "o.db"
+    conn = store.connect(path)
+    cfg = {"health": {}, "backups": {"dir": str(tmp_path / "backups")}}
+    report = run_ops.build_report(conn, cfg, path, NOW)
+    conn.close()
+    assert report.check("env").status == "ok"
+    assert report.check("cli").status == "fail" and report.overall == "fail"

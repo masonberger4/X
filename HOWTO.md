@@ -2,8 +2,9 @@
 
 Windows commands, run from `C:\Users\you\X` in a Command Prompt. On Mac or
 Linux the only differences are `python3` for `python`, `cp` for `copy`, and
-`cat` for `type`. Every command that talks to Claude uses your Claude Code
-login (`LLM_BACKEND=claude_code` in `.env`); nothing posts to X until part 5.
+`cat` for `type`. Every command that talks to Claude runs the Claude Code CLI
+with your own login (part 1, step 3); there is no API key to set. Nothing posts
+to X until part 5.
 
 ---
 
@@ -25,10 +26,13 @@ login (`LLM_BACKEND=claude_code` in `.env`); nothing posts to X until part 5.
    ```
    Set these lines and save:
    ```
-   LLM_BACKEND=claude_code
    DRAFT_MODEL=
    NCBI_EMAIL=you@example.com
    ```
+   Claude needs nothing in this file: it runs through the Claude Code CLI with
+   your own login (next step). An `ANTHROPIC_API_KEY=` line is ignored (it is
+   kept away from the CLI, so it can never switch it to pay-per-use API
+   billing), and so is an `LLM_BACKEND=` line from an older copy; delete them.
    Optional, free: an NCBI API key on `NCBI_API_KEY=` and your email on
    `CROSSREF_MAILTO=`. Leave the X lines blank until part 5.
 3. Install Claude Code and log in (needs Node.js from nodejs.org first).
@@ -37,7 +41,12 @@ login (`LLM_BACKEND=claude_code` in `.env`); nothing posts to X until part 5.
    claude login
    echo say ok | claude -p --output-format json --model claude-opus-5-5
    ```
-   The last line must print `"result":"ok"` inside the output.
+   The last line must print `"result":"ok"` inside the output. Every model
+   call the pipeline makes (scoring, story linking, the model's yes/no,
+   drafting, grading pictures, checking claims) runs this CLI as you, so it
+   uses your account and anything run on a schedule (part 6) must run as the
+   same Windows user. The health checks (parts 6 and 8) have a `cli` line that
+   fails when the app cannot find `claude`.
 4. Confirm the install.
    ```
    ruff check .
@@ -237,13 +246,14 @@ source only when it is due, and score only scores what is new.
    `draft\config.yaml` sets `enabled`, the `model`, `min_score` and
    `max_iterations`; `IMAGE_GRADER_MODEL` in `.env` overrides the model. Each
    grade is one model call with the image, so a draft costs up to four extra
-   calls. If the grader fails (no key, a bad reply) the picture is kept as
-   drawn and the log says so. Besides the overall score the grader rates a
-   checklist of professional touches (readable at thumbnail size, clear
-   hierarchy, aligned columns, a rounded 3D header, logos and tickers in
-   company cells, consistent numbers, a quiet source line, and whether the
-   card would stand out from the account's other cards), and
-   those per-item scores show next to each render on the draft page.
+   calls. If the grader fails (Claude Code not logged in, a bad reply) the
+   picture is kept as drawn and the log says so. Besides the overall score
+   the grader rates a checklist of professional touches (readable at
+   thumbnail size, clear hierarchy, aligned columns, a rounded 3D header,
+   logos and tickers in company cells, consistent numbers, a quiet source
+   line, and whether the card would stand out from the account's other
+   cards), and those per-item scores show next to each render on the draft
+   page.
 
    A chart comes in three kinds, and the drafter picks the one that fits the
    data. **Grouped** puts two to four arms side by side across up to six
@@ -602,8 +612,8 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    button or `run_ops.py run --only draft_retry`.
    The `verify` step runs after `draft` and is optional: if it fails, the
    claims show as "not checked yet" and the run carries on. The `draft` and
-   `evolve` steps have no time limit: with the swarm on and the Claude Code
-   backend, every cell is one CLI launch and a run can take an hour or more.
+   `evolve` steps have no time limit: with the swarm on, every cell is one
+   Claude Code CLI launch and a run can take an hour or more.
    `parallel_calls` in `swarm\config.yaml` (6 shipped) launches that many
    cells, or judge matches, side by side; set it to 1 if the CLI hits its
    usage limits, which costs time, not draft quality.
@@ -625,7 +635,8 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    ```
    In the Task Scheduler app, open each task and tick "Run whether user is
    logged on or not" and "Wake the computer to run this task". The PC must be
-   on for them to fire.
+   on for them to fire. Keep each task running as your own Windows user, the
+   one that ran `claude login` in part 1: every model call uses that login.
 3. The scheduler runs the `publish` step as a dry run: it lists what it would
    post and posts nothing, and it stays that way. Posting is manual only (part
    5): `run_ops.py run` refuses to start if any step in `ops\config.yaml`
@@ -741,9 +752,11 @@ Open http://localhost:8000. Leave it running in its own window; press Ctrl+C
 to stop it. Four pages:
 
 - **Dashboard** (`/`) — the same health checks `python run_ops.py health`
-  prints, worst first, plus the last outcome of every scheduled step, how
-  many rows are in each table, the database size, free disk and the age of
-  the latest backup. This is the page to open when something looks wrong.
+  prints, worst first (`cli` says whether the app can find the Claude Code
+  CLI every model call runs through), plus the last outcome of every
+  scheduled step, how many rows are in each table, the database size, free
+  disk and the age of the latest backup. This is the page to open when
+  something looks wrong.
   "Back up now" under Storage saves a copy of the database right away, the
   same verified copy `run_ops.py backup` makes, into the same `backups\`
   folder (the oldest beyond `backups: keep` in `ops\config.yaml` are removed).
@@ -1021,7 +1034,7 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 | `clinicaltrials_oncology` says `403 Forbidden` | ClinicalTrials.gov blocks a Python program that calls itself a browser. Its entry in `config.yaml` has its own `user_agent` starting with `python-httpx/` for that reason; if the line was removed, put it back |
 | A score run logs `safeguards flagged this message` | the CLI's usage-policy check tripped on a batch full of biology abstracts. The scorer does not retry the same prompt; it halves the batch and scores each half in a fresh call, down to single stories. A single story still refused is logged and left for the next run. `scorer_effort` / `drafter_effort` in `config.yaml` set how hard the model thinks (`low` is the cheapest) |
 | Want a completely fresh start | delete `pipeline.db`, then `python run_ingest.py --force` |
-| The dashboard says `missing env: ANTHROPIC_API_KEY` but you use the Claude Code backend | it should not since the check follows `LLM_BACKEND`; make sure `.env` is in the folder you start `run_app.py` from |
+| The dashboard's `cli` check says `'claude' not found on PATH` | every model call runs the Claude Code CLI; install it and log in (part 1, step 3). If `claude` works in a Command Prompt but not from the app or a scheduled task, put its full path on `binary:` under `claude_code:` in `config.yaml` (`where claude` lists it; use the line ending in `claude.cmd`) |
 | A step keeps running after you closed the app (a `claude` window keeps reopening) | that was the behaviour before the Stop button; on an old checkout, `taskkill /F /IM pythonw.exe` ends it (or `python.exe` if you started the app from a command prompt) |
 | A draft sits on the approved page marked `claimed` and never posts | the run that claimed it died before it posted (a sleep, a power cut, the Stop button). Press "Release" beside it once the claim is over 30 minutes old, or run `python run_publish.py --release-failed`; check on the publishing page first that no part of it reached X |
 | The control panel says a step is already running, or a run's step is marked `locked` | that step is running in this window, another window or the scheduler (part 6); wait for it and press the button again. Other steps can run meanwhile |
@@ -1031,7 +1044,9 @@ as a task in Task Scheduler (part 6) that runs at log-on.
 
 ## Changing settings
 
-Everything lives in `config.yaml` (sources, keywords, models, caps; a source
+Everything lives in `config.yaml` (sources, keywords, models, caps;
+`claude_code:` is the Claude Code CLI every model call runs through, by name
+or full path, with its time limit per call; a source
 can set its own `min_abstract_chars` when its feed only carries a one-line
 summary, as the Fierce Biotech and BioPharma Dive entries do; `linking:` is the
 story-linking pass that merges a release with the trade-press write-ups of it
