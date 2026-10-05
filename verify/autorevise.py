@@ -125,7 +125,7 @@ def revise_round(conn, draft_id: int, *, lifetime_cap: int) -> RoundResult:
         )
     except drafter.DraftRejected as exc:
         return RoundResult(False, total, reason=f"revision broke a hard rule: {exc}")
-    except Exception as exc:  # API / network errors: keep the draft as it was
+    except Exception as exc:  # CLI or network errors: keep the draft as it was
         return RoundResult(False, total, reason=f"revision failed: {exc}")
     old_claims = {store._norm_claim(c.claim) for c in row.draft.claims_to_verify}
     new_claims = {store._norm_claim(c.claim) for c in result.draft.claims_to_verify}

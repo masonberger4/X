@@ -4,8 +4,8 @@ disagree, and tune faster.
 
 Ratings are stored with rater='auto:<model>' and are never confused with human
 ratings (the feedback report and the rubric-tuning workflow read human rows only).
-The single network call is `call_model`, which routes through `claude_cli.run_claude`
-on the claude_code backend or the Anthropic API otherwise; tests replace it.
+The single network call is `call_model`, one Claude Code CLI run through
+`claude_cli.run_claude`; tests replace it.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from score import editorial
 
 log = logging.getLogger(__name__)
 
-MAX_TOKENS = 400
 SCALE = f"""Decision (how the account's human editor answers it):
 yes = would post about this: moves a thesis, names a public company or catalyst, fits the beat
 no = would not post: off the beat, no business implication, weak or overhyped evidence, or already covered
@@ -83,31 +82,10 @@ def parse_reply(text: str) -> AutoRating:
     return AutoRating(decision=decision, note=note)
 
 
-def call_model(
-    system: str,
-    user: str,
-    model: str,
-    effort: str | None,
-    cfg: dict,
-    max_tokens: int = MAX_TOKENS,
-) -> str:
-    """The single network call (claude_code backend or Anthropic API). Also the call
-    behind `filter/link.py` (story linking), which needs a larger `max_tokens`."""
-    if claude_cli.llm_backend(cfg) == claude_cli.CLAUDE_CODE:
-        return claude_cli.run_claude(user, system=system, model=model, cfg=cfg, effort=effort)
-
-    import anthropic  # local import so tests never touch the SDK
-
-    kwargs: dict[str, Any] = dict(
-        model=model,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    if effort:
-        kwargs["output_config"] = {"effort": effort}
-    resp = anthropic.Anthropic().messages.create(**kwargs)
-    return "".join(getattr(b, "text", "") for b in resp.content)
+def call_model(system: str, user: str, model: str, effort: str | None, cfg: dict) -> str:
+    """The single network call: one Claude Code CLI run. Also the call behind
+    `filter/link.py` (story linking)."""
+    return claude_cli.run_claude(user, system=system, model=model, cfg=cfg, effort=effort)
 
 
 CallFn = Callable[[str, str, str, str | None, dict], str]

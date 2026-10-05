@@ -1,19 +1,17 @@
-"""Optional "headless" LLM backend: run the Claude Code CLI in print mode instead of
-calling the Anthropic API directly.
+"""The app's only way to reach Claude: the Claude Code CLI in print mode.
 
-Backend selection (`llm_backend()`): the `LLM_BACKEND` env var, else `models.backend`
-in config.yaml, else "api". With "claude_code" the two Claude call sites
-(`score/scorer.py:Scorer.create_message` and `draft/drafter.py:call_anthropic`) hand
-their prompt to `run_claude`, which launches `claude -p` as a subprocess. The CLI is
-logged in with your own Anthropic account, so usage counts against that account's
-plan rather than a metered API key.
+Every model call in the pipeline (the scorer, the story linker and rater, the drafter and
+the swarm, the image grader, the claim verifier) hands its prompt to `run_claude`, which
+launches `claude -p` as a subprocess. The CLI is logged in with your own Anthropic
+account, so usage counts against that account's plan; there is no API key and no other
+backend. API credentials are kept out of the child's environment (`cli_env`) so a stale
+key in .env can never switch the CLI to metered billing.
 
-This is a convenience for personal, low-volume use. Trade-offs, documented in README:
-no strict tool schema (the reply is validated in code and retried), the CLI must be
-installed and logged in on the machine that runs cron, and the account's rolling
-usage limits are shared with your own interactive sessions. The API backend stays
-the default. `run_claude` is the only place that spawns the CLI; tests replace it
-or `subprocess.run`.
+Trade-offs, documented in README: no strict tool schema (replies are validated in code
+and retried), the CLI must be installed and logged in on the machine that runs the
+pipeline, and the account's rolling usage limits are shared with your own interactive
+sessions. `run_claude` (one-shot calls) is the only place that spawns the CLI; tests
+replace it or `subprocess.run`.
 """
 
 from __future__ import annotations
@@ -28,10 +26,6 @@ import tempfile
 from typing import Any
 
 log = logging.getLogger(__name__)
-
-API = "api"
-CLAUDE_CODE = "claude_code"
-BACKENDS = (API, CLAUDE_CODE)
 
 DEFAULTS: dict[str, Any] = {
     "binary": "claude",
@@ -62,13 +56,15 @@ class ClaudeCliUnavailable(ClaudeCliError):
     """The CLI is not installed or cannot start at all. Not worth retrying."""
 
 
-def llm_backend(cfg: dict[str, Any] | None = None) -> str:
-    """'api' (default) or 'claude_code'. LLM_BACKEND env wins over config.yaml models.backend."""
-    env = os.environ.get("LLM_BACKEND", "").strip().lower()
-    value = env or str(((cfg or {}).get("models") or {}).get("backend") or API).strip().lower()
-    if value not in BACKENDS:
-        raise ValueError(f"unknown LLM backend {value!r}; expected one of {BACKENDS}")
-    return value
+# Credentials that would make the CLI bill a metered API key instead of the logged-in
+# account. The app talks to Claude only through the CLI and its login, so they never reach
+# the child process, even when an old .env still carries one.
+_API_KEY_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def cli_env() -> dict[str, str]:
+    """The environment a CLI child runs with: ours, minus any API credentials."""
+    return {k: v for k, v in os.environ.items() if k not in _API_KEY_ENV}
 
 
 def cli_settings(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -85,8 +81,7 @@ def resolve_binary(settings: dict[str, Any]) -> str:
     found = shutil.which(binary)
     if found is None:
         raise ClaudeCliUnavailable(
-            f"{binary!r} not found on PATH; install Claude Code and run `claude login`, "
-            "or set models.backend: api"
+            f"{binary!r} not found on PATH; install Claude Code and run `claude login`"
         )
     return found
 
@@ -100,14 +95,13 @@ def build_argv(
     tools: list[str] | None = None,
 ) -> list[str]:
     """Print mode, JSON envelope, no session files. `tools` are made available and
-    pre-approved (empty by default, so no tools unless the caller passes some); the
-    claim verifier is the one caller that does, with WebSearch/WebFetch. The system prompt travels
-    in a file: it is long and full of quotes, and on Windows the argv goes through a
-    .cmd wrapper where that is not safe. No `--bare`: it also skips the stored login
-    ("Not logged in" on every call). The project's CLAUDE.md is kept out of the prompt
-    by running the CLI from the temp directory instead (see run_claude). `tools` (only
-    the claim verifier passes any: WebSearch/WebFetch) are both made available and
-    pre-approved, since print mode cannot answer a permission prompt."""
+    pre-approved, since print mode cannot answer a permission prompt; the default is none.
+    Two callers pass some: the claim verifier (WebSearch/WebFetch) and the image grader
+    (Read, to look at the PNG). The system prompt travels in a file: it is long and full
+    of quotes, and on Windows the argv goes through a .cmd wrapper where that is not safe.
+    No `--bare`: it also skips the stored login ("Not logged in" on every call). The
+    project's CLAUDE.md is kept out of the prompt by running the CLI from the temp
+    directory instead (see run_claude)."""
     tool_list = ",".join(tools or [])
     argv = [
         binary,
@@ -202,7 +196,7 @@ def run_claude(
 ) -> str:
     """The single subprocess call. The user prompt goes in on stdin (no arg-length limit).
     `effort` (low|medium|high|xhigh|max) maps to the CLI's --effort; `tools` is empty for
-    every caller except the claim verifier."""
+    every caller except the claim verifier and the image grader."""
     settings = cli_settings(cfg)
     binary = resolve_binary(settings)
     system_file = None
@@ -260,6 +254,7 @@ def _run_with_timeout(
         text=True,
         encoding="utf-8",
         cwd=tempfile.gettempdir(),  # not the repo: no CLAUDE.md auto-discovery
+        env=cli_env(),
         **no_window_kwargs(),
     )
     try:

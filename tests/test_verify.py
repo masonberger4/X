@@ -1,9 +1,11 @@
-"""Step 2b (claim verification): pure parsing/trust logic, the store, the CLI with a fake
-model call, the queue integration, and the CLI wrapper's tool flags. No network."""
+"""Step 2b (claim verification): pure parsing/trust logic, the store, run_verify.py with a
+fake model call, the queue integration, and the one network call: a Claude Code CLI run with
+WebSearch and WebFetch (the CLI itself is never spawned). No network."""
 
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -119,20 +121,62 @@ def test_verify_claim_marks_trust_and_passes_context(monkeypatch):
     assert c2.verdict == "contradicted" and not c2.trusted
 
 
-def test_call_model_uses_claude_code_with_web_tools(monkeypatch):
-    seen = {}
+# --- the one network call: a Claude Code CLI run with web search ----------------------------
+
+
+def test_call_model_runs_the_cli_with_web_tools_under_the_verify_timeout(monkeypatch):
+    """One claim is one CLI run with WebSearch and WebFetch. verify/config.yaml's
+    `timeout_seconds` replaces the CLI's timeout for that run alone (a web check outlasts a
+    draft): every other `claude_code:` setting rides along, and the root config the caller
+    shares with the rest of the run is left as it was."""
+    seen = []
 
     def fake_run(user, *, system, model, cfg, effort, tools):
-        seen.update(cfg=cfg, tools=tools, effort=effort)
+        seen.append(
+            dict(user=user, system=system, model=model, cfg=cfg, effort=effort, tools=tools)
+        )
         return '{"verdict": "unverified"}'
 
     monkeypatch.setattr(claude_cli, "run_claude", fake_run)
-    out = verifier.call_model(
-        "S", "U", "m", "low", {"timeout_seconds": 99}, {"models": {"backend": "claude_code"}}
-    )
+    cli = {"binary": "cc", "timeout_seconds": 600, "extra_args": ["--max-turns", "6"]}
+    root = {"models": {"drafter": "d"}, "claude_code": cli}
+    out = verifier.call_model("SYS", "USER", "m", "low", {"timeout_seconds": 99}, root)
     assert out == '{"verdict": "unverified"}'
-    assert seen["tools"] == ["WebSearch", "WebFetch"]
-    assert seen["cfg"]["claude_code"]["timeout_seconds"] == 99
+    assert seen == [
+        {
+            "user": "USER",
+            "system": "SYS",
+            "model": "m",
+            "effort": "low",
+            "tools": ["WebSearch", "WebFetch"],
+            "cfg": {"models": {"drafter": "d"}, "claude_code": {**cli, "timeout_seconds": 99}},
+        }
+    ]
+    assert root["claude_code"]["timeout_seconds"] == 600  # the caller's config is untouched
+
+    # no timeout in verify/config.yaml and no claude_code section: the verifier's 240 s
+    verifier.call_model("SYS", "USER", "m", None, {}, {})
+    assert seen[-1]["cfg"] == {"claude_code": {"timeout_seconds": 240}}
+    assert seen[-1]["effort"] is None and seen[-1]["tools"] == ["WebSearch", "WebFetch"]
+
+
+def test_call_model_has_no_api_path_left(monkeypatch):
+    """The CLI is the only way to Claude: an API key, LLM_BACKEND=api or `models.backend:
+    api` left in an old .env or config.yaml still checks the claim through the CLI with web
+    search, and the anthropic SDK (made unimportable here) is never reached for."""
+    monkeypatch.setitem(sys.modules, "anthropic", None)  # `import anthropic` now fails
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stale")
+    monkeypatch.setenv("LLM_BACKEND", "api")
+    tools = []
+
+    def fake_run(user, **kw):
+        tools.append(kw["tools"])
+        return '{"verdict": "supported"}'
+
+    monkeypatch.setattr(claude_cli, "run_claude", fake_run)
+    root = {**ROOT, "models": {"backend": "api"}}
+    assert verifier.call_model("S", "U", "m", "low", CFG, root) == '{"verdict": "supported"}'
+    assert tools == [["WebSearch", "WebFetch"]]
 
 
 def test_build_argv_enables_and_preapproves_named_tools():
@@ -149,6 +193,8 @@ def test_shipped_verify_config_is_sane():
     assert cfg["model"].startswith("claude-")
     assert "clinicaltrials.gov" in cfg["trusted_domains"]
     assert cfg["max_claims_per_draft"] >= 1
+    assert cfg["timeout_seconds"] >= 60  # per claim: one CLI run that searches the web
+    assert "max_searches_per_claim" not in cfg  # the API web_search tool's knob: nothing reads it
 
 
 def _draft_with_claims(conn, item_id="i1", n=2):
@@ -234,6 +280,79 @@ def test_run_verify_respects_limit_and_max_claims(conn, monkeypatch):
     calls.clear()
     run_verify.main(["--limit", "1", "--no-auto-revise"])
     assert len(calls) == 1  # draft b, the only one with unchecked claims left
+
+
+def test_run_verify_checks_each_claim_in_one_cli_run_that_can_search_the_web(
+    conn, monkeypatch, cli_plumbing
+):
+    """run_verify.py with only the process replaced: each unchecked claim is one `claude -p`
+    run with WebSearch and WebFetch enabled and pre-approved (print mode cannot answer a
+    permission prompt), the shipped verifier model and effort, the fact-checker's
+    instructions as its system prompt, the claim and its story on stdin and verify's own
+    timeout; a stale API key never reaches it. Its reply becomes the stored verdict, trusted
+    only on a listed host."""
+    did = _draft_with_claims(conn, n=2)
+    shipped = load_verify_config()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-stale")
+    replies = {
+        "claim 0": {
+            "verdict": "supported",
+            "source_url": "https://clinicaltrials.gov/study/NCT01234567",
+            "quote": "A phase 2 study.",
+            "note": "registry entry",
+        },
+        "claim 1": {
+            "verdict": "contradicted",
+            "source_url": "https://blog.example.com/post",
+            "quote": "q",
+            "note": "n",
+        },
+    }
+    runs = []
+
+    class FakeProc:
+        pid = 1
+        returncode = 0
+
+        def __init__(self, run):
+            self.run = run
+
+        def communicate(self, stdin, timeout=None):
+            claim = next(c for c in replies if c in stdin)
+            self.run.update(stdin=stdin, timeout=timeout, claim=claim)
+            result = {"type": "result", "subtype": "success", "result": json.dumps(replies[claim])}
+            return json.dumps([{"type": "system", "subtype": "init"}, result]), ""
+
+    def fake_popen(argv, **kwargs):
+        with open(argv[argv.index("--system-prompt-file") + 1], encoding="utf-8") as fh:
+            system = fh.read()  # a temp file, deleted once the run is over
+        runs.append({"argv": argv, "env": kwargs["env"], "system": system})
+        return FakeProc(runs[-1])
+
+    monkeypatch.setattr(claude_cli.shutil, "which", lambda b: "/usr/bin/" + b)
+    monkeypatch.setattr(claude_cli.subprocess, "Popen", fake_popen)
+    root = {**ROOT, "claude_code": {"timeout_seconds": 600}}
+    monkeypatch.setattr(run_verify, "_root_config", lambda: root)
+    assert run_verify.main(["--no-auto-revise"]) == 0
+
+    assert [run["claim"] for run in runs] == ["claim 0", "claim 1"]
+    for run in runs:
+        argv = run["argv"]
+        assert argv[:2] == ["/usr/bin/claude", "-p"]
+        assert argv[argv.index("--tools") + 1] == "WebSearch,WebFetch"
+        assert argv[argv.index("--allowedTools") + 1] == "WebSearch,WebFetch"
+        assert argv[argv.index("--model") + 1] == shipped["model"]
+        assert argv[argv.index("--effort") + 1] == shipped["effort"]
+        assert run["system"] == verifier.SYSTEM and URL in run["stdin"]
+        assert run["timeout"] == shipped["timeout_seconds"]  # verify's limit, not the root's 600
+        assert "ANTHROPIC_API_KEY" not in run["env"]
+    checks = vstore.checks_for_draft(conn, did)
+    assert [(c.claim, c.verdict, c.trusted) for c in checks] == [
+        ("claim 0", "supported", True),  # clinicaltrials.gov is a listed host
+        ("claim 1", "contradicted", False),  # a blog is a lead, not proof
+    ]
+    assert checks[0].source_url == "https://clinicaltrials.gov/study/NCT01234567"
+    assert checks[0].quote == "A phase 2 study." and checks[0].model == shipped["model"]
 
 
 @pytest.fixture
@@ -424,14 +543,14 @@ def test_auto_revise_stops_when_the_drafter_changes_no_claim_and_at_the_caps(con
     assert not res.revised and res.problems == 2 and "gave up" in res.reason
     assert revisions == []
 
-    # a drafter failure leaves the draft and its verdicts untouched
+    # a drafter failure (its CLI run timing out) leaves the draft and its verdicts untouched
     def boom(**kw):
-        raise RuntimeError("api down")
+        raise claude_cli.ClaudeCliError("CLI timed out after 600s")
 
     monkeypatch.setattr(drafter, "revise_item", boom)
     before = store.get_draft(conn, did).draft
     res = revise_round(conn, did, lifetime_cap=0)  # 0 = uncapped: still revises
-    assert not res.revised and "api down" in res.reason
+    assert not res.revised and "CLI timed out after 600s" in res.reason
     assert store.get_draft(conn, did).draft == before
     assert len(vstore.checks_for_draft(conn, did)) == 3
 

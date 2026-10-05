@@ -1,6 +1,5 @@
 """Verify one claim against the open web. Pure except for `call_model`, the single network
-call, which either runs the Claude Code CLI with WebSearch/WebFetch enabled (claude_code
-backend) or the Anthropic API with the server-side web_search tool. Tests replace it.
+call, which runs the Claude Code CLI with WebSearch/WebFetch enabled. Tests replace it.
 
 The verifier never edits a draft. Its output is evidence for the human: a verdict, the
 source it found, the sentence it relied on, and a note. A verdict only counts as
@@ -26,9 +25,6 @@ SUPPORTED = "supported"
 CONTRADICTED = "contradicted"
 UNVERIFIED = "unverified"
 VERDICTS = (SUPPORTED, CONTRADICTED, UNVERIFIED)
-
-MAX_TOKENS = 4000
-MAX_API_TURNS = 4  # pause_turn continuations on the API backend
 
 SYSTEM = """You are a fact-checker for an X account written by a PhD-level immuno-oncology analyst. A draft post contains a claim the writer added from memory, not from the source article. Your job is to find a PRIMARY source on the web that supports or contradicts that claim, and to quote it.
 
@@ -136,45 +132,19 @@ def is_trusted(url: str, hosts: set[str]) -> bool:
 def call_model(
     system: str, user: str, model: str, effort: str | None, cfg: dict, root_cfg: dict
 ) -> str:
-    """The single network call: Claude with web search, on either backend."""
-    if claude_cli.llm_backend(root_cfg) == claude_cli.CLAUDE_CODE:
-        merged = dict(root_cfg)
-        merged["claude_code"] = dict(root_cfg.get("claude_code") or {})
-        merged["claude_code"]["timeout_seconds"] = cfg.get("timeout_seconds", 240)
-        return claude_cli.run_claude(
-            user,
-            system=system,
-            model=model,
-            cfg=merged,
-            effort=effort,
-            tools=["WebSearch", "WebFetch"],
-        )
-
-    import anthropic  # local import so tests never touch the SDK
-
-    client = anthropic.Anthropic()
-    kwargs: dict[str, Any] = dict(
-        model=model,
-        max_tokens=MAX_TOKENS,
+    """The single network call: one Claude Code CLI run with WebSearch and WebFetch, under
+    verify/config.yaml's own `timeout_seconds` (a web check takes longer than a draft)."""
+    merged = dict(root_cfg)
+    merged["claude_code"] = dict(root_cfg.get("claude_code") or {})
+    merged["claude_code"]["timeout_seconds"] = cfg.get("timeout_seconds", 240)
+    return claude_cli.run_claude(
+        user,
         system=system,
-        tools=[
-            {
-                "type": "web_search_20260209",
-                "name": "web_search",
-                "max_uses": int(cfg.get("max_searches_per_claim", 5)),
-            }
-        ],
+        model=model,
+        cfg=merged,
+        effort=effort,
+        tools=["WebSearch", "WebFetch"],
     )
-    if effort:
-        kwargs["output_config"] = {"effort": effort}
-    messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
-    for _ in range(MAX_API_TURNS):
-        resp = client.messages.create(messages=messages, **kwargs)
-        if resp.stop_reason == "pause_turn":
-            messages.append({"role": "assistant", "content": resp.content})
-            continue
-        return "".join(getattr(b, "text", "") for b in resp.content if b.type == "text")
-    raise RuntimeError("verifier did not finish within the turn limit")
 
 
 CallFn = Callable[[str, str, str, str | None, dict, dict], str]

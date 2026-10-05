@@ -1,9 +1,9 @@
-"""Calls the Anthropic API to draft one item, then enforces the hard rules in code.
+"""Drafts one item with Claude through the Claude Code CLI, then enforces the hard rules
+in code.
 
-All network I/O goes through call_anthropic(); tests replace it. With
-`models.backend: claude_code` (or LLM_BACKEND=claude_code) call_anthropic runs the
-Claude Code CLI via `claude_cli.run_claude` instead; the JSON parsing, schema check
-and hard rules below are the same on both backends.
+All network I/O goes through call_anthropic(), which runs the CLI via
+`claude_cli.run_claude` (the app's only way to reach Claude); tests replace it. The JSON
+parsing, schema check and hard rules below never trust the model's output.
 """
 
 from __future__ import annotations
@@ -46,7 +46,6 @@ from draft.tags import Handle, company_names, load_handles, relevant_handles, ta
 
 log = logging.getLogger(__name__)
 
-MAX_TOKENS = 2048
 MAX_ATTEMPTS = 4
 BACKOFF_BASE_SECONDS = 2.0
 
@@ -146,30 +145,12 @@ def story_handles(*, source_text: str, url: str, source: str) -> list[Handle]:
 
 
 def call_anthropic(system: str, user: str, model: str) -> str:
-    """The single network call. Returns the raw text of the first content block, or, on the
-    claude_code backend, the CLI's result text."""
+    """The single network call: one Claude Code CLI run (`claude_cli.run_claude`) at the
+    root config.yaml `models.drafter_effort`. Returns the CLI's result text."""
     load_dotenv()
     cfg = _root_config()
     effort = str((cfg.get("models") or {}).get("drafter_effort") or "").strip().lower() or None
-    if claude_cli.llm_backend(cfg) == claude_cli.CLAUDE_CODE:
-        return claude_cli.run_claude(user, system=system, model=model, cfg=cfg, effort=effort)
-
-    import anthropic  # imported here so tests that mock this function never touch the SDK
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is not set (put it in .env)")
-    client = anthropic.Anthropic(api_key=api_key)
-    kwargs: dict = dict(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    if effort:
-        kwargs["output_config"] = {"effort": effort}
-    resp = client.messages.create(**kwargs)
-    return "".join(getattr(block, "text", "") for block in resp.content)
+    return claude_cli.run_claude(user, system=system, model=model, cfg=cfg, effort=effort)
 
 
 def parse_json_response(text: str) -> object:
@@ -399,10 +380,10 @@ def draft_item(
     fmt: Format | None = None,
     handles: list[Handle] | None = None,
 ) -> DraftResult:
-    """Draft one item. Retries on API errors, bad JSON, schema errors and hard-rule failures.
+    """Draft one item. Retries on CLI errors, bad JSON, schema errors and hard-rule failures.
 
-    Raises DraftRejected if every attempt failed a hard rule, or re-raises the last API
-    error if the API never returned usable output.
+    Raises DraftRejected if every attempt failed a hard rule, or re-raises the last CLI
+    error if the model never returned usable output.
 
     examples_block (step 7): recent human edits, inserted into the system prompt before the
     hard rules. check_hard_rules and flag_unverified_numbers run on every output regardless.
@@ -588,9 +569,9 @@ def generate(
         try:
             limit = fmt.max_chars if fmt is not None else MAX_POST_CHARS
             raw = call(system, retry_prompt(user, last_reasons, limit), model)
-        except Exception as exc:  # network / rate limit / SDK errors
+        except Exception as exc:  # CLI failure, timeout or usage limit
             last_exc = exc
-            log.warning("attempt %d: API call failed: %s", attempt, exc)
+            log.warning("attempt %d: model call failed: %s", attempt, exc)
             if attempt < max_attempts:
                 _sleep_backoff(attempt, sleep)
             continue
