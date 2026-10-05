@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 import claude_cli
-from draft.chart import note_problems
+from draft.chart import flat_chart_problems, note_problems
 from draft.hook import HOOK_MAX_CHARS, hook_problems, link_problems
 from draft.prompt import (
     PREPRINT_LABEL,
@@ -272,15 +272,19 @@ def chart_problems(draft: Draft, source_text: str) -> list[str]:
     """Hard-rule style violations for the chart: every number in it that the source does not
     contain, worded for the retry prompt. A chart is a picture of numbers, so one
     unverifiable number makes the whole picture unusable, and every draft must carry a
-    usable visual, so the attempt is retried rather than the chart dropped."""
+    usable visual, so the attempt is retried rather than the chart dropped. A bar chart whose
+    bars are all equal is sent back too (chart.flat_chart_problems): it compares nothing."""
+    charts = ([draft.chart] if draft.chart is not None else []) + list(draft.extra_visuals)
+    problems = [p for c in charts for p in flat_chart_problems(c)]
     missing = verify_chart(draft, source_text)
-    if not missing:
-        return []
-    return [
-        "chart number(s) not in the source: "
-        + ", ".join(missing)
-        + " (use only values written verbatim in the abstract or title, or give a table instead)"
-    ]
+    if missing:
+        problems.append(
+            "chart number(s) not in the source: "
+            + ", ".join(missing)
+            + " (use only values written verbatim in the abstract or title, or give a table"
+            " instead)"
+        )
+    return problems
 
 
 def check_hard_rules(

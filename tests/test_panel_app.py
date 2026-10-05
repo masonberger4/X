@@ -206,6 +206,7 @@ def test_the_approved_page_has_publish_now_and_set_schedule(client, conn, draft_
     assert "PUBLISH_ENABLED</code> is not" not in client.get("/status/approved").text
 
     started = {}
+    monkeypatch.setattr(panel_app, "manual_posting", lambda: False)  # posting: api
     monkeypatch.setattr(
         panel_app.JOBS, "start_publish_now", lambda d: started.setdefault("draft", d)
     )
@@ -220,6 +221,44 @@ def test_the_approved_page_has_publish_now_and_set_schedule(client, conn, draft_
     monkeypatch.setattr(panel_app.JOBS, "start_publish_now", refuse)
     r = client.post("/publishing/now", data={"draft_id": "1"})
     assert "already in progress" in unquote_plus(r.headers["location"])
+
+
+def test_manual_posting_opens_the_copy_paste_page_and_logs_the_post(
+    client, conn, draft_id, monkeypatch
+):
+    from publish import store as publish_store
+
+    _approved(conn, draft_id)
+    monkeypatch.setattr(panel_app, "manual_posting", lambda: True)
+    started = {}
+    monkeypatch.setattr(panel_app.JOBS, "start_publish_now", lambda d: started.setdefault("d", d))
+    r = client.post("/publishing/now", data={"draft_id": str(draft_id)})
+    assert r.headers["location"] == f"/publishing/manual/{draft_id}" and not started
+
+    body = client.get(f"/publishing/manual/{draft_id}").text
+    assert "Copy text" in body and "I posted it" in body
+    assert "Preprint. ORR 88%. one" in body and "two (2/3)" in body  # numbered as posted
+    assert client.get("/publishing/manual/999").status_code == 404
+
+    r = client.post(
+        f"/publishing/manual/{draft_id}/done",
+        data={"url": "https://x.com/acct/status/1234567890123?s=20"},
+    )
+    assert r.headers["location"] == "/status/approved"
+    pconn = publish_store.connect()
+    rows = publish_store.list_posts(pconn, draft_id)
+    assert [r["tweet_id"] for r in rows] == [
+        "1234567890123",
+        f"manual-{draft_id}-2",
+        f"manual-{draft_id}-3",
+    ]
+    assert publish_store.get_schedule(pconn, draft_id)["status"] == "posted"
+    assert publish_store.is_live(pconn, draft_id)
+    pconn.close()
+    # a second press does not log it twice
+    r = client.post(f"/publishing/manual/{draft_id}/done", data={})
+    assert "error=" in r.headers["location"]
+    assert "posted" in client.get(f"/publishing/manual/{draft_id}").text
 
 
 def test_saving_the_order_shows_it_and_feeds_the_publisher(client, conn, draft_id):
