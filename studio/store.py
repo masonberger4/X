@@ -103,6 +103,55 @@ CREATE TABLE IF NOT EXISTS studio_topics (
     piece_id   INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS studio_scans (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL DEFAULT 'running',
+    model       TEXT NOT NULL DEFAULT '',
+    effort      TEXT NOT NULL DEFAULT '',
+    summary     TEXT NOT NULL DEFAULT '',
+    topics      INTEGER NOT NULL DEFAULT 0,
+    catalysts   INTEGER NOT NULL DEFAULT 0,
+    detail      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS studio_radar_topics (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id     INTEGER NOT NULL,
+    created_at  TEXT NOT NULL,
+    rank        INTEGER NOT NULL DEFAULT 0,
+    title       TEXT NOT NULL,
+    why_now     TEXT NOT NULL DEFAULT '',
+    angle       TEXT NOT NULL DEFAULT '',
+    companies   TEXT NOT NULL DEFAULT '[]',
+    sources     TEXT NOT NULL DEFAULT '[]',
+    status      TEXT NOT NULL DEFAULT 'new',
+    topic_id    INTEGER,
+    piece_id    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS studio_catalysts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    key         TEXT NOT NULL UNIQUE,
+    date_start  TEXT NOT NULL,
+    date_end    TEXT NOT NULL,
+    when_text   TEXT NOT NULL,
+    company     TEXT NOT NULL,
+    ticker      TEXT NOT NULL DEFAULT '',
+    drug        TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL DEFAULT 'other',
+    detail      TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT '',
+    origin      TEXT NOT NULL DEFAULT '',
+    first_seen  TEXT NOT NULL,
+    last_seen   TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'open',
+    topic_id    INTEGER,
+    piece_id    INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_studio_catalysts_start ON studio_catalysts(date_start);
+
 CREATE TABLE IF NOT EXISTS studio_playbook_versions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -192,7 +241,10 @@ class Piece:
 
     @property
     def label(self) -> str:
-        return self.title or self.topic or f"piece {self.id}"
+        """What lists show: the title, else the topic's first line (a topic queued from the
+        radar carries its reasons and sources on the lines below)."""
+        first = self.topic.strip().splitlines()[0] if self.topic.strip() else ""
+        return self.title or first or f"piece {self.id}"
 
 
 def _row(r: sqlite3.Row) -> Piece:
@@ -513,12 +565,29 @@ def queued_topics(conn: sqlite3.Connection) -> list[QueuedTopic]:
 
 
 def claim_topic(conn: sqlite3.Connection, topic_id: int, piece_id: int) -> None:
+    """The queued topic is now this piece's; so is the radar topic or the catalyst it was
+    queued from."""
     conn.execute("UPDATE studio_topics SET piece_id = ? WHERE id = ?", (piece_id, topic_id))
+    conn.execute(
+        "UPDATE studio_radar_topics SET piece_id = ?, status = ? WHERE topic_id = ?",
+        (piece_id, RADAR_USED, topic_id),
+    )
+    conn.execute(
+        "UPDATE studio_catalysts SET piece_id = ? WHERE topic_id = ?", (piece_id, topic_id)
+    )
     conn.commit()
 
 
 def drop_topic(conn: sqlite3.Connection, topic_id: int) -> None:
-    conn.execute("DELETE FROM studio_topics WHERE id = ? AND piece_id IS NULL", (topic_id,))
+    """Drop a queued topic that has not started; a radar topic or a catalyst it was queued
+    from goes back on the radar."""
+    cur = conn.execute("DELETE FROM studio_topics WHERE id = ? AND piece_id IS NULL", (topic_id,))
+    if cur.rowcount:
+        conn.execute(
+            "UPDATE studio_radar_topics SET status = ?, topic_id = NULL WHERE topic_id = ?",
+            (RADAR_NEW, topic_id),
+        )
+        conn.execute("UPDATE studio_catalysts SET topic_id = NULL WHERE topic_id = ?", (topic_id,))
     conn.commit()
 
 
@@ -777,3 +846,336 @@ def fetch_studio_edits(conn: sqlite3.Connection, limit: int = 12) -> list[tuple[
         if tail.isdigit():
             out.append((int(tail), _decision_text(before), _decision_text(after)))
     return out
+
+
+# --- the radar: scans, their topics, the catalyst calendar (studio/radar.py) ---------------
+
+SCAN_RUNNING = "running"
+SCAN_DONE = "done"
+SCAN_FAILED = "failed"
+RADAR_NEW = "new"
+RADAR_QUEUED = "queued"  # the editor queued it as a topic; no piece yet
+RADAR_USED = "used"  # a piece was written on it
+RADAR_DISMISSED = "dismissed"
+CATALYST_OPEN = "open"
+CATALYST_DISMISSED = "dismissed"
+
+
+@dataclass
+class ScanRow:
+    id: int
+    started_at: str
+    finished_at: str | None
+    status: str
+    model: str
+    effort: str
+    summary: str
+    topics: int
+    catalysts: int
+    detail: str
+
+
+def start_scan(conn: sqlite3.Connection, *, model: str, effort: str) -> int:
+    cur = conn.execute(
+        "INSERT INTO studio_scans (started_at, status, model, effort) VALUES (?, ?, ?, ?)",
+        (_now(), SCAN_RUNNING, model, effort),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def finish_scan(
+    conn: sqlite3.Connection,
+    scan_id: int,
+    *,
+    status: str,
+    summary: str = "",
+    topics: int = 0,
+    catalysts: int = 0,
+    detail: str = "",
+) -> None:
+    conn.execute(
+        "UPDATE studio_scans SET finished_at = ?, status = ?, summary = ?, topics = ?,"
+        " catalysts = ?, detail = ? WHERE id = ?",
+        (_now(), status, summary, int(topics), int(catalysts), detail[:2000], scan_id),
+    )
+    conn.commit()
+
+
+def _scan(r: sqlite3.Row) -> ScanRow:
+    return ScanRow(
+        id=int(r["id"]),
+        started_at=r["started_at"],
+        finished_at=r["finished_at"],
+        status=r["status"],
+        model=r["model"],
+        effort=r["effort"],
+        summary=r["summary"],
+        topics=int(r["topics"]),
+        catalysts=int(r["catalysts"]),
+        detail=r["detail"],
+    )
+
+
+def last_scan(conn: sqlite3.Connection, status: str | None = None) -> ScanRow | None:
+    """The newest scan (of that status)."""
+    sql, args = "SELECT * FROM studio_scans", ()
+    if status:
+        sql, args = sql + " WHERE status = ?", (status,)
+    r = conn.execute(sql + " ORDER BY id DESC LIMIT 1", args).fetchone()
+    return _scan(r) if r else None
+
+
+def close_running_scans(conn: sqlite3.Connection, detail: str) -> int:
+    """Scans a dead run left `running` (this process holds the scan lock)."""
+    cur = conn.execute(
+        "UPDATE studio_scans SET status = ?, finished_at = ?, detail = ? WHERE status = ?",
+        (SCAN_FAILED, _now(), detail, SCAN_RUNNING),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+@dataclass
+class RadarTopic:
+    id: int
+    scan_id: int
+    created_at: str
+    rank: int
+    title: str
+    why_now: str
+    angle: str
+    companies: list[dict[str, str]]
+    sources: list[str]
+    status: str
+    topic_id: int | None
+    piece_id: int | None
+
+    def to_topic(self) -> Any:
+        from studio import radar
+
+        return radar.Topic(
+            title=self.title,
+            why_now=self.why_now,
+            angle=self.angle,
+            companies=tuple(
+                radar.Company(str(c.get("name") or ""), str(c.get("ticker") or ""))
+                for c in self.companies
+                if c.get("name")
+            ),
+            sources=tuple(self.sources),
+        )
+
+
+def _radar_topic(r: sqlite3.Row) -> RadarTopic:
+    companies = [c for c in _json_list(r["companies"]) if isinstance(c, dict)]
+    return RadarTopic(
+        id=int(r["id"]),
+        scan_id=int(r["scan_id"]),
+        created_at=r["created_at"],
+        rank=int(r["rank"]),
+        title=r["title"],
+        why_now=r["why_now"],
+        angle=r["angle"],
+        companies=[
+            {"name": str(c.get("name") or ""), "ticker": str(c.get("ticker") or "")}
+            for c in companies
+        ],
+        sources=[str(u) for u in _json_list(r["sources"]) if isinstance(u, str)],
+        status=r["status"],
+        topic_id=r["topic_id"],
+        piece_id=r["piece_id"],
+    )
+
+
+def add_radar_topics(conn: sqlite3.Connection, scan_id: int, topics: list[Any]) -> list[int]:
+    """A scan's topics (studio/radar.py:Topic), best first."""
+    now, ids = _now(), []
+    for rank, t in enumerate(topics, 1):
+        cur = conn.execute(
+            "INSERT INTO studio_radar_topics (scan_id, created_at, rank, title, why_now, angle,"
+            " companies, sources) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                scan_id,
+                now,
+                rank,
+                t.title,
+                t.why_now,
+                t.angle,
+                json.dumps([{"name": c.name, "ticker": c.ticker} for c in t.companies]),
+                json.dumps(list(t.sources)),
+            ),
+        )
+        ids.append(int(cur.lastrowid))
+    conn.commit()
+    return ids
+
+
+def get_radar_topic(conn: sqlite3.Connection, radar_id: int) -> RadarTopic | None:
+    r = conn.execute("SELECT * FROM studio_radar_topics WHERE id = ?", (int(radar_id),)).fetchone()
+    return _radar_topic(r) if r else None
+
+
+def radar_topics(
+    conn: sqlite3.Connection, *, since_iso: str, statuses: tuple[str, ...] = (RADAR_NEW,)
+) -> list[RadarTopic]:
+    """Topics from scans since `since_iso`, newest scan first, best first within a scan."""
+    marks = ", ".join("?" for _ in statuses)
+    rows = conn.execute(
+        f"SELECT * FROM studio_radar_topics WHERE created_at >= ? AND status IN ({marks})"
+        " ORDER BY scan_id DESC, rank, id",
+        (since_iso, *statuses),
+    ).fetchall()
+    return [_radar_topic(r) for r in rows]
+
+
+def set_radar_topic(
+    conn: sqlite3.Connection,
+    radar_id: int,
+    *,
+    status: str,
+    topic_id: int | None = None,
+    piece_id: int | None = None,
+) -> None:
+    sets, args = ["status = ?"], [status]
+    if topic_id is not None:
+        sets.append("topic_id = ?")
+        args.append(topic_id)
+    if piece_id is not None:
+        sets.append("piece_id = ?")
+        args.append(piece_id)
+    conn.execute(
+        f"UPDATE studio_radar_topics SET {', '.join(sets)} WHERE id = ?", (*args, int(radar_id))
+    )
+    conn.commit()
+
+
+@dataclass
+class CatalystRow:
+    id: int
+    key: str
+    date_start: str
+    date_end: str
+    when_text: str
+    company: str
+    ticker: str
+    drug: str
+    kind: str
+    detail: str
+    source: str
+    origin: str
+    first_seen: str
+    last_seen: str
+    status: str
+    topic_id: int | None
+    piece_id: int | None
+
+    def to_catalyst(self) -> Any:
+        from datetime import date
+
+        from studio import radar
+
+        return radar.Catalyst(
+            when=radar.When(
+                date.fromisoformat(self.date_start),
+                date.fromisoformat(self.date_end),
+                self.when_text,
+            ),
+            company=self.company,
+            ticker=self.ticker,
+            drug=self.drug,
+            kind=self.kind,
+            detail=self.detail,
+            source=self.source,
+        )
+
+
+def _catalyst(r: sqlite3.Row) -> CatalystRow:
+    return CatalystRow(**{k: r[k] for k in r.keys()})  # noqa: SIM118 (sqlite3.Row)
+
+
+def upsert_catalysts(
+    conn: sqlite3.Connection, catalysts: list[Any], *, origin: str
+) -> tuple[int, int]:
+    """Add each catalyst (studio/radar.py:Catalyst) to the calendar, or, when its key is
+    already there, note that it was seen again and fill in a detail or a source it lacked.
+    A dismissed one stays dismissed. Returns (added, seen again)."""
+    now, added, again = _now(), 0, 0
+    for c in catalysts:
+        cur = conn.execute(
+            "UPDATE studio_catalysts SET last_seen = ?,"
+            " detail = CASE WHEN detail = '' THEN ? ELSE detail END,"
+            " source = CASE WHEN source = '' THEN ? ELSE source END,"
+            " ticker = CASE WHEN ticker = '' THEN ? ELSE ticker END WHERE key = ?",
+            (now, c.detail, c.source, c.ticker, c.key),
+        )
+        if cur.rowcount:
+            again += 1
+            continue
+        conn.execute(
+            "INSERT INTO studio_catalysts (key, date_start, date_end, when_text, company, ticker,"
+            " drug, kind, detail, source, origin, first_seen, last_seen)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                c.key,
+                c.when.start.isoformat(),
+                c.when.end.isoformat(),
+                c.when.text,
+                c.company,
+                c.ticker,
+                c.drug,
+                c.kind,
+                c.detail,
+                c.source,
+                origin,
+                now,
+                now,
+            ),
+        )
+        added += 1
+    conn.commit()
+    return added, again
+
+
+def catalysts_between(
+    conn: sqlite3.Connection,
+    first_day: str,
+    last_day: str,
+    *,
+    statuses: tuple[str, ...] = (CATALYST_OPEN,),
+) -> list[CatalystRow]:
+    """Catalysts that may fall between two ISO dates (a quarter counts while any of it is
+    in the span), soonest first."""
+    marks = ", ".join("?" for _ in statuses)
+    rows = conn.execute(
+        f"SELECT * FROM studio_catalysts WHERE date_end >= ? AND date_start <= ?"
+        f" AND status IN ({marks}) ORDER BY date_start, date_end, company, id",
+        (first_day, last_day, *statuses),
+    ).fetchall()
+    return [_catalyst(r) for r in rows]
+
+
+def get_catalyst(conn: sqlite3.Connection, catalyst_id: int) -> CatalystRow | None:
+    r = conn.execute("SELECT * FROM studio_catalysts WHERE id = ?", (int(catalyst_id),)).fetchone()
+    return _catalyst(r) if r else None
+
+
+def set_catalyst(
+    conn: sqlite3.Connection,
+    catalyst_id: int,
+    *,
+    status: str | None = None,
+    topic_id: int | None = None,
+) -> None:
+    sets, args = [], []
+    if status is not None:
+        sets.append("status = ?")
+        args.append(status)
+    if topic_id is not None:
+        sets.append("topic_id = ?")
+        args.append(topic_id)
+    if sets:
+        conn.execute(
+            f"UPDATE studio_catalysts SET {', '.join(sets)} WHERE id = ?", (*args, int(catalyst_id))
+        )
+        conn.commit()

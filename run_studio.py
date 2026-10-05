@@ -13,6 +13,9 @@ Usage:
   python run_studio.py --no-checkpoint     # write straight through after research
   python run_studio.py --list              # show recent pieces and queued topics
   python run_studio.py --dry-run           # print the first prompt, start nothing
+  python run_studio.py --scan              # the radar's daily news scan, when it is due
+  python run_studio.py --scan-now          # the scan now, whatever the time since the last
+  python run_studio.py --scan --dry-run    # print the scan's prompt, run nothing
   python run_studio.py --learn             # measure the posted pieces against X and
                                            # rewrite the playbook when enough are new
   python run_studio.py --learn-now         # the same, rewriting the playbook now
@@ -28,9 +31,16 @@ session; the finished piece goes into the approval queue as a pending draft with
 cards attached. Nothing here posts. Requests from the studio page (Continue, Revise,
 Resume) are picked up by the next run; `--resume-only` is the studio page's button.
 
-Topics: a topic queued from the studio page (or --topic/--story) comes first; otherwise
-the session gets the top scored stories of the last two days that no piece has used and
-picks one, or finds a better story with its own news scan.
+Topics: a topic queued from the studio or radar page (or --topic/--story) comes first;
+otherwise the session gets the radar: today's scan topics, the catalysts coming up and the
+top scored stories of the last two days that no piece has used, and picks one, or finds a
+better story with its own news scan.
+
+The radar (studio/config.yaml `radar`): `--scan` (the `studio_scan` step, before `studio`
+in every automatic run) runs one call with web search at most every `scan_every_hours`:
+it proposes the next topics and reports dated catalysts (PDUFA dates, readouts,
+conference slots) for the calendar on /studio/radar; `--scan-now` (the radar page's
+button) runs it now. Each piece's research adds the catalysts it found.
 
 Learning from X (studio/config.yaml `learn`): every brief carries what X says about the
 earlier pieces (each one's first post, `horizon_hours` after posting, against the
@@ -72,6 +82,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     ap.add_argument("--list", action="store_true", help="list recent pieces and queued topics")
     ap.add_argument("--dry-run", action="store_true", help="print the first prompt, run nothing")
+    ap.add_argument("--scan", action="store_true", help="the radar's news scan, when it is due")
+    ap.add_argument("--scan-now", action="store_true", help="the radar's news scan now")
     ap.add_argument(
         "--learn",
         action="store_true",
@@ -95,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.list:
         return runner.print_list()
+    if args.scan or args.scan_now:
+        return runner.scan(dry_run=args.dry_run, force=args.scan_now)
     if args.learn or args.learn_now:
         return runner.learn(dry_run=args.dry_run, force=args.learn_now)
     return runner.run(

@@ -20,15 +20,21 @@
   POST /studio/performance/{id}/link             the link of a piece posted by hand without it
   POST /studio/playbook/versions/{id}/revert     put an earlier version back (as a new one)
   POST /studio/playbook/versions/{id}/apply      apply the learning loop's open proposal
+  GET  /studio/radar           where topics come from: the latest scan's topics, the feed's
+                               top stories and the catalyst calendar, each with Write it
+  POST /studio/radar/topics/{id}/write        queue a radar topic and start the studio
+  POST /studio/radar/topics/{id}/dismiss      take it off the radar
+  POST /studio/radar/catalysts/{id}/write     queue a preview (or a reaction) of a catalyst
+  POST /studio/radar/catalysts/{id}/dismiss   take it off the calendar
 
 Every button records what the editor wants in studio_pieces / studio_topics (this module
 writes only the studio's own tables, through studio/store.py and studio/playbook.py) and
-then asks the panel to start the `studio_now`, `studio_resume` or `studio_learn_now` step
-from ops/config.yaml; the run itself, its log and its Stop button are the runs page's,
-like every other step. Without a panel the request waits for the next automatic studio
-run. The one write elsewhere is the performance page's "add the link", which the panel
-does through step 3's own module (panel/publishing.py:add_head_link) when it wires this
-router in.
+then asks the panel to start the `studio_now`, `studio_resume`, `studio_scan_now` or
+`studio_learn_now` step from ops/config.yaml; the run itself, its log and its Stop button
+are the runs page's, like every other step. Without a panel the request waits for the
+next automatic studio run. The one write elsewhere is the performance page's "add the
+link", which the panel does through step 3's own module (panel/publishing.py:add_head_link)
+when it wires this router in.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ import json
 import logging
 import os
 from collections.abc import Callable, Iterator
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import parse_qs
@@ -53,6 +60,7 @@ from studio import ingest
 from studio import learn as L
 from studio import playbook as PB
 from studio import prompt as P
+from studio import radar as R
 from studio import store as S
 from studio.settings import DEFAULT_PLAYBOOK, PLAYBOOK_NAME, load_studio_config, playbook_path
 
@@ -61,6 +69,8 @@ log = logging.getLogger(__name__)
 TEMPLATES_DIR = Path(__file__).with_name("templates")
 STEP_NEW = "studio_now"
 STEP_RESUME = "studio_resume"
+STEP_SCAN = "studio_scan_now"
+SOON_DAYS = 30  # the calendar's "coming up" section; later ones are listed below it
 STEP_LEARN = "studio_learn_now"
 LOG_TAIL_LINES = 400
 LOG_TAIL_BYTES = 4_000_000
@@ -446,6 +456,140 @@ async def studio_add_link(request: Request, piece_id: int, conn: Conn):
     except ValueError as exc:
         return _redirect("/studio/performance", f"not linked: {exc}")
     return _redirect("/studio/performance", message)
+
+
+def _today() -> date:
+    from timeutil import display_tz
+
+    return datetime.now(display_tz()).date()
+
+
+def _angle_from(form: dict[str, list[str]]) -> str:
+    """The angle the editor left selected, if the library still has it."""
+    angle = _first(form, "angle")
+    try:
+        return angle if angle in A.load_angles() else ""
+    except (OSError, ValueError):
+        return ""
+
+
+@router.get("/studio/radar", response_class=HTMLResponse)
+def studio_radar(request: Request, conn: Conn, flash: str = ""):
+    from studio import topics as T
+
+    cfg = load_studio_config()
+    rcfg = cfg["radar"]
+    today = _today()
+    try:
+        library = A.load_angles()
+    except (OSError, ValueError):
+        library = {}
+    since = datetime.now(UTC) - timedelta(days=float(rcfg["topic_days"]))
+    topics = S.radar_topics(
+        conn,
+        since_iso=since.isoformat(timespec="seconds"),
+        statuses=(S.RADAR_NEW, S.RADAR_QUEUED, S.RADAR_USED),
+    )
+    first = today - timedelta(days=int(rcfg["past_days"]))
+    last = today + timedelta(days=int(rcfg["calendar_days"]))
+    rows = S.catalysts_between(conn, first.isoformat(), last.isoformat())
+    soon = (today + timedelta(days=SOON_DAYS)).isoformat()
+    calendar = {
+        "passed": [c for c in rows if c.date_end < today.isoformat()],
+        "soon": [c for c in rows if c.date_end >= today.isoformat() and c.date_start <= soon],
+        "later": [c for c in rows if c.date_start > soon],
+    }
+    suggested = {c.id: R.catalyst_text(c.to_catalyst(), today=today)[1] for c in rows}
+    feed = T.fetch_shortlist(
+        {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=S.used_cluster_ids(conn)
+    )
+    return templates.TemplateResponse(
+        request,
+        "studio_radar.html",
+        {
+            "cfg": cfg,
+            "scan": S.last_scan(conn),
+            "done": S.last_scan(conn, S.SCAN_DONE),
+            "topics": topics,
+            "feed": feed,
+            "calendar": calendar,
+            "suggested": suggested,
+            "angles": library,
+            "kinds": R.KIND_LABELS,
+            "today": today.isoformat(),
+            "flash": flash,
+            "step_scan": STEP_SCAN,
+            "S": S,
+        },
+    )
+
+
+def _radar_topic_or_404(conn: Any, radar_id: int) -> S.RadarTopic:
+    topic = S.get_radar_topic(conn, radar_id)
+    if topic is None:
+        raise HTTPException(404, "no such radar topic")
+    return topic
+
+
+def _catalyst_or_404(conn: Any, catalyst_id: int) -> S.CatalystRow:
+    row = S.get_catalyst(conn, catalyst_id)
+    if row is None:
+        raise HTTPException(404, "no such catalyst")
+    return row
+
+
+@router.post("/studio/radar/topics/{radar_id}/write")
+async def studio_radar_write(request: Request, radar_id: int, conn: Conn):
+    topic = _radar_topic_or_404(conn, radar_id)
+    if topic.status != S.RADAR_NEW:
+        return _redirect("/studio/radar", f"radar topic {radar_id} is {topic.status} already")
+    form = await _form(request)
+    text = R.topic_text(topic.to_topic(), scanned=topic.created_at[:10])
+    topic_id = S.queue_topic(
+        conn,
+        topic=text,
+        cluster_id=None,
+        angle=_angle_from(form),
+        checkpoint=bool(_first(form, "checkpoint")),
+    )
+    S.set_radar_topic(conn, radar_id, status=S.RADAR_QUEUED, topic_id=topic_id)
+    return _redirect("/studio/radar", _start([STEP_NEW]))
+
+
+@router.post("/studio/radar/topics/{radar_id}/dismiss")
+def studio_radar_dismiss(radar_id: int, conn: Conn):
+    topic = _radar_topic_or_404(conn, radar_id)
+    if topic.status != S.RADAR_NEW:
+        return _redirect("/studio/radar", f"radar topic {radar_id} is {topic.status}; it stays")
+    S.set_radar_topic(conn, radar_id, status=S.RADAR_DISMISSED)
+    return _redirect("/studio/radar", "topic dismissed")
+
+
+@router.post("/studio/radar/catalysts/{catalyst_id}/write")
+async def studio_catalyst_write(request: Request, catalyst_id: int, conn: Conn):
+    row = _catalyst_or_404(conn, catalyst_id)
+    if row.topic_id is not None or row.piece_id is not None:
+        return _redirect(
+            "/studio/radar", f"catalyst {catalyst_id} already has a piece queued or written"
+        )
+    form = await _form(request)
+    text, _ = R.catalyst_text(row.to_catalyst(), today=_today())
+    topic_id = S.queue_topic(
+        conn,
+        topic=text,
+        cluster_id=None,
+        angle=_angle_from(form),
+        checkpoint=bool(_first(form, "checkpoint")),
+    )
+    S.set_catalyst(conn, catalyst_id, topic_id=topic_id)
+    return _redirect("/studio/radar", _start([STEP_NEW]))
+
+
+@router.post("/studio/radar/catalysts/{catalyst_id}/dismiss")
+def studio_catalyst_dismiss(catalyst_id: int, conn: Conn):
+    _catalyst_or_404(conn, catalyst_id)
+    S.set_catalyst(conn, catalyst_id, status=S.CATALYST_DISMISSED)
+    return _redirect("/studio/radar", "catalyst taken off the calendar")
 
 
 @router.get("/studio/{piece_id}", response_class=HTMLResponse)

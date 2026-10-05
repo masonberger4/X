@@ -7,7 +7,7 @@ import logging
 import re
 import sqlite3
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ from studio import learn as L
 from studio import playbook as PB
 from studio import prompt as P
 from studio import qa
+from studio import radar as R
 from studio import render as render_mod
 from studio import session as SS
 from studio import store as S
@@ -33,6 +34,9 @@ from studio.settings import (
 log = logging.getLogger(__name__)
 
 LOCK_NAME = ".studio.lock"
+SCAN_LOCK_NAME = ".studio_scan.lock"
+RADAR_IN_BRIEF = 8  # radar topics an open piece is shown
+COMING_UP_IN_BRIEF = 20  # catalysts an open piece is shown
 LEARN_LOCK_NAME = ".studio_learn.lock"
 
 _STAGE_OF = {
@@ -145,9 +149,12 @@ def build_brief(
     )
     story = T.fetch_story(piece.cluster_id) if piece.cluster_id is not None else None
     shortlist: list[P.Story] = []
+    radar: list[tuple[int, R.Topic]] = []
+    coming: list[R.Catalyst] = []
     if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
         # Only the research stage chooses a story; later stages have one.
         shortlist = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+        radar, coming = radar_for_brief(conn, cfg, date.fromisoformat(today))
     said, lean = "", None
     if evidence is not None:
         said = E.block(evidence, cfg)
@@ -174,6 +181,8 @@ def build_brief(
         topic=piece.topic,
         story=story,
         shortlist=shortlist,
+        radar=radar,
+        coming_up=coming,
         offer=offer,
         hooks_to_avoid=hooks,
         recent=recent_pieces,
@@ -187,6 +196,27 @@ def build_brief(
         short_post_max=int(x["short_post_max"]),
         max_cards=int(x["max_cards_total"]),
     )
+
+
+def radar_for_brief(
+    conn: sqlite3.Connection, cfg: dict[str, Any], today: date
+) -> tuple[list[tuple[int, R.Topic]], list[R.Catalyst]]:
+    """What an open piece is offered from the radar: the recent scans' topics nobody has
+    taken, and the catalysts coming up or just passed. Nothing when the radar is off."""
+    from studio import scan as SC
+
+    rcfg = cfg["radar"]
+    if not rcfg.get("enabled"):
+        return [], []
+    since = datetime.now(UTC) - timedelta(days=float(rcfg["topic_days"]))
+    topics = S.radar_topics(conn, since_iso=since.isoformat(timespec="seconds"))
+    coming = R.coming_up(
+        SC.known_catalysts(conn, rcfg, today),
+        today=today,
+        ahead_days=int(rcfg["brief_upcoming_days"]),
+        back_days=int(rcfg["brief_recent_days"]),
+    )
+    return [(t.id, t.to_topic()) for t in topics[:RADAR_IN_BRIEF]], coming[:COMING_UP_IN_BRIEF]
 
 
 def _today() -> tuple[str, str]:
@@ -256,7 +286,18 @@ def make_context(
         # Asked by every revision, a resumed one too, before its session runs: a draft
         # approved or rejected meanwhile would refuse the result after an hour's work.
         revisable=lambda piece: ingest.revise_blocker(conn, piece),
+        harvest=lambda piece, info: _harvest(conn, cfg, piece, info, today),
     )
+
+
+def _harvest(
+    conn: sqlite3.Connection, cfg: dict[str, Any], piece: S.Piece, info: dict[str, Any], today: str
+) -> None:
+    from studio import scan as SC
+
+    note = SC.harvest(conn, cfg, piece, info, today=date.fromisoformat(today))
+    if note:
+        log.info("piece %s: %s", piece.id, note)
 
 
 def measure_quietly(conn: sqlite3.Connection, cfg: dict[str, Any]) -> E.Evidence | None:
@@ -642,3 +683,72 @@ def print_list() -> int:
     finally:
         conn.close()
     return 0
+
+
+# --- the radar's scan (run_studio.py --scan) ----------------------------------------------
+
+
+def feed_lines(cfg: dict[str, Any], conn: sqlite3.Connection) -> list[str]:
+    """The feed's top unused stories, one line each, as leads for the scan."""
+    stories = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+    return [
+        f"{s.title} ({', '.join(x for x in (s.source, s.published) if x)})"
+        + (f" [feed score {s.score}/50]" if s.score is not None else "")
+        for s in stories
+    ]
+
+
+def scan(*, dry_run: bool = False, force: bool = False) -> int:
+    """The radar's scan: when the last one finished `radar.scan_every_hours` ago (or
+    `force`), one call with web search proposes topics and reports catalysts. Starts no
+    piece. `dry_run` prints the prompt and changes nothing."""
+    from studio import scan as SC
+
+    cfg = load_studio_config()
+    rcfg = cfg["radar"]
+    if not rcfg.get("enabled"):
+        log.info("the radar is off (studio/config.yaml radar.enabled)")
+        return 0
+    conn = _db_conn()
+    try:
+        today_text, tzname = _today()
+        today = date.fromisoformat(today_text)
+        angles = {key: a.question for key, a in A.load_angles().items()}
+        if dry_run:
+            system, user = SC.prompt_for(
+                conn, cfg, today=today, tzname=tzname, angles=angles, feed=feed_lines(cfg, conn)
+            )
+            print("--- the scan's system prompt ---\n" + system)
+            print("\n--- and its user prompt ---\n" + user)
+            return 0
+        last = S.last_scan(conn, S.SCAN_DONE)
+        if not force and not SC.scan_due(last, datetime.now(UTC), float(rcfg["scan_every_hours"])):
+            log.info(
+                "no scan: the last one (%s) is under %sh old",
+                last.finished_at if last else "",
+                rcfg["scan_every_hours"],
+            )
+            return 0
+        root = workspace_root(_data_folder(), cfg)
+        root.mkdir(parents=True, exist_ok=True)
+        held = lock.acquire(root / SCAN_LOCK_NAME, trust_os_lock=True)
+        if held is None:
+            log.info("another scan is in progress; nothing to do")
+            return 0
+        try:
+            S.close_running_scans(conn, "the run stopped before the scan finished")
+            out = SC.run_scan(
+                conn,
+                cfg,
+                today=today,
+                tzname=tzname,
+                angles=angles,
+                feed=feed_lines(cfg, conn),
+                root_cfg=_root_config(),
+            )
+        finally:
+            held.release()
+        (log.info if out.ok else log.error)("%s", out.message)
+        return 0 if out.ok else 1
+    finally:
+        conn.close()
