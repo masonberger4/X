@@ -147,3 +147,34 @@ def test_compare_majority_with_randomised_order_and_tie_to_control():
     # over many votes both presentation orders occur
     engine.compare(swarm, control, BRIEF, {**CFG, "judge_votes": 20}, call=judge_for_swarm)
     assert True in orders and False in orders
+
+
+def test_parallel_calls_run_side_by_side_and_keep_the_call_count():
+    import threading
+    import time
+
+    class SlowFake(FakeModel):
+        def __init__(self):
+            super().__init__()
+            self.lock = threading.Lock()
+            self.live = 0
+            self.peak = 0
+
+        def __call__(self, system, user, model):
+            with self.lock:
+                self.live += 1
+                self.peak = max(self.peak, self.live)
+                answer = super().__call__(system, user, model)
+            time.sleep(0.01)
+            with self.lock:
+                self.live -= 1
+            return answer
+
+    serial, parallel = FakeModel(), SlowFake()
+    engine.run_swarm(BRIEF, DEFAULT_GENOME, CFG, call=serial, sleep=lambda s: None)
+    res = engine.run_swarm(
+        BRIEF, DEFAULT_GENOME, {**CFG, "parallel_calls": 6}, call=parallel, sleep=lambda s: None
+    )
+    assert parallel.peak > 1
+    assert len(parallel.calls) == len(serial.calls)
+    assert list(res.cells) == DEFAULT_GENOME.slot_names()
