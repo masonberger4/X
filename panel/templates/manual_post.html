@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Post draft {{ d.draft_id }}{% endblock %}
+{% block content %}
+<style>
+  .mpost { border: 1px solid #ddd; border-radius: 8px; padding: .75rem; margin: .75rem 0; }
+  .mpost pre { white-space: pre-wrap; font: inherit; margin: .3rem 0 .5rem; background: #fafafa; padding: .5rem; border-radius: 6px; }
+  .mpost img { max-width: 360px; display: block; border: 1px solid #eee; margin: .4rem 0; }
+  .copied { color: #1b5e20; font-weight: 600; margin-left: .3rem; }
+</style>
+<p><a href="/status/approved">&larr; back to approved</a></p>
+<h1>Post draft {{ d.draft_id }} on X</h1>
+{% if error %}<p class="flash low">{{ error }}</p>{% endif %}
+
+{% if d.status %}
+<p class="flash">This draft is no longer waiting: step 3 has it as <strong>{{ d.status }}</strong>.</p>
+{% elif d.error %}
+<p class="flash low">Do not post this: the text fails a hard check ({{ d.error }}). Reopen the draft and fix it.</p>
+{% else %}
+<p class="meta">{{ d.title }}</p>
+{% if d.blocked %}<p class="flash">Heads up: the publishing limits say wait ({{ d.blocked }}). You can still post it.</p>{% endif %}
+<ol class="meta">
+  <li>Open <a href="https://x.com/compose/post" target="_blank" rel="noopener noreferrer">x.com/compose/post</a>.</li>
+  <li>For each post below: <em>Copy text</em> and paste it; then <em>Copy picture</em> and paste it into the same post (or drag the picture in).{% if d.posts|length > 1 %} Use the <strong>+</strong> in the composer to add the next post of the thread.{% endif %}</li>
+  <li>Post it, come back here and press <em>I posted it</em>.</li>
+</ol>
+
+{% for p in d.posts %}
+<div class="mpost">
+  <strong>Post {{ p.position }}{% if d.posts|length > 1 %} of {{ d.posts|length }}{% endif %}</strong>
+  <span class="meta">{{ p.text|length }} chars</span>
+  <pre id="t{{ p.position }}">{{ p.text }}</pre>
+  <button type="button" onclick="copyText('t{{ p.position }}', this)">Copy text</button>
+  {% for idx, alt in p.images %}
+  <img id="i{{ idx }}" src="/publishing/manual/{{ d.draft_id }}/image/{{ idx }}" alt="{{ alt }}">
+  <button type="button" onclick="copyImage('i{{ idx }}', this)">Copy picture</button>
+  <a href="/publishing/manual/{{ d.draft_id }}/image/{{ idx }}" download="draft_{{ d.draft_id }}_{{ idx }}.png">download</a>
+  {% if alt %}<div class="meta">Alt text (X: "Add description"): <span id="a{{ idx }}">{{ alt }}</span>
+    <button type="button" class="link" onclick="copyText('a{{ idx }}', this)">copy</button></div>{% endif %}
+  {% endfor %}
+</div>
+{% endfor %}
+
+<form method="post" action="/publishing/manual/{{ d.draft_id }}/done" class="mpost"
+      onsubmit="return confirm('Log draft {{ d.draft_id }} as posted?')">
+  <label>Link to the first post (optional, lets feedback read its metrics later)
+    <input name="url" size="50" placeholder="https://x.com/you/status/123..."></label>
+  <p><button type="submit">I posted it, everything went OK</button></p>
+</form>
+{% endif %}
+
+<script>
+function flash(btn, msg) {
+  const s = document.createElement("span"); s.className = "copied"; s.textContent = msg;
+  btn.after(s); setTimeout(() => s.remove(), 1500);
+}
+async function copyText(id, btn) {
+  const text = document.getElementById(id).innerText;
+  try { await navigator.clipboard.writeText(text); flash(btn, "copied"); }
+  catch (e) {
+    const r = document.createRange(); r.selectNodeContents(document.getElementById(id));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    flash(btn, document.execCommand("copy") ? "copied" : "press Ctrl+C");
+  }
+}
+async function copyImage(id, btn) {
+  try {
+    const blob = await (await fetch(document.getElementById(id).src)).blob();
+    await navigator.clipboard.write([new ClipboardItem({"image/png": blob})]);
+    flash(btn, "copied");
+  } catch (e) { flash(btn, "use download or drag the picture"); }
+}
+</script>
+{% endblock %}

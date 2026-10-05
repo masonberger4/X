@@ -6,6 +6,12 @@ timezone: America/Los_Angeles   # Seattle, WA; matches `timezone:` in the root c
 # hand. Nothing posts on a timer: the panel has no automatic publisher and run_ops.py
 # refuses any configured step that carries --live.
 #
+# How "Publish now" posts. manual (shipped): the panel opens a copy-paste page with each
+# post's text and pictures; you post it on x.com yourself and press "I posted it" there,
+# which logs it as posted. No X API call and no developer account needed. api: the
+# publisher posts through the X API (run_publish.py --live, PUBLISH_ENABLED=1).
+posting: manual
+
 # Daily posting slots, local time (HH:MM), for a hand-run `run_publish.py --live` without
 # --now: a slot is "open" from its start until grace_minutes later, and it is used at most
 # once per day. An EMPTY list (`slots: []`) turns slots off: such a run then posts the top

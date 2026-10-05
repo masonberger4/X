@@ -15,7 +15,12 @@ Routes owned here:
   POST /runs/cancel     stop the run in progress (kills the step and what it launched)
   POST /runs/auto       switch the automatic runs on or off and set their times
                         (auto_run_enabled / auto_run_times in ops/config.yaml)
-  POST /publishing/now    post one approved draft now (run_publish.py --live --now --draft)
+  POST /publishing/now    post one approved draft now: with `posting: manual` (shipped) it
+                          opens the copy-paste page, with `posting: api` it runs
+                          run_publish.py --live --now --draft
+  GET  /publishing/manual/{id}         the copy-paste page: each post's text and pictures
+  GET  /publishing/manual/{id}/image/{k}  one picture of it
+  POST /publishing/manual/{id}/done    "I posted it": log the draft as posted (no X call)
   POST /publishing/order  save the approved page's publishing order (schedule.position)
   POST /publishing/caps   save max_posts_per_day / min_gap_minutes into publish/config.yaml
 
@@ -45,7 +50,7 @@ from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import ChoiceLoader, FileSystemLoader
 from starlette.concurrency import run_in_threadpool
@@ -179,6 +184,14 @@ templates.env.globals["current_runs"] = current_runs
 templates.env.globals["busy_steps"] = busy_steps
 templates.env.globals["publish_live"] = publish_live
 templates.env.globals["publish_running"] = publish_running
+
+
+def manual_posting() -> bool:
+    """`posting: manual` in publish/config.yaml: "Publish now" opens the copy-paste page."""
+    return publish_scheduler.load_publish_config()["posting"] == "manual"
+
+
+templates.env.globals["manual_posting"] = manual_posting
 
 
 def _now() -> datetime:
@@ -508,11 +521,44 @@ async def publish_now(request: Request):
         draft_id = int(_first(form, "draft_id") or "")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="draft_id must be a number") from exc
+    if manual_posting():
+        return RedirectResponse(f"/publishing/manual/{draft_id}", status_code=303)
     try:
         JOBS.start_publish_now(draft_id)
     except JobError as exc:
         return RedirectResponse(f"/runs?{urlencode({'error': str(exc)})}", status_code=303)
     return RedirectResponse(_back(form, "/status/approved"), status_code=303)
+
+
+@app.get("/publishing/manual/{draft_id}", response_class=HTMLResponse)
+def publish_manual(request: Request, draft_id: int, error: str = ""):
+    """The copy-paste page: post it on x.com by hand, then press "I posted it"."""
+    draft = publish_order_store.manual_post(draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="not an approved draft")
+    return templates.TemplateResponse(request, "manual_post.html", {"d": draft, "error": error})
+
+
+@app.get("/publishing/manual/{draft_id}/image/{index}", include_in_schema=False)
+def publish_manual_image(draft_id: int, index: int):
+    draft = publish_order_store.manual_post(draft_id)
+    if draft is None or not 0 <= index < len(draft.image_paths):
+        raise HTTPException(status_code=404)
+    return FileResponse(draft.image_paths[index], media_type="image/png")
+
+
+@app.post("/publishing/manual/{draft_id}/done")
+async def publish_manual_done(draft_id: int, request: Request):
+    """Log the hand-posted draft as posted (step 3's schedule and posts rows), so it
+    leaves the approved list and counts toward the daily cap. No X call."""
+    form = await read_form(request)
+    if not publish_order_store.confirm_manual(draft_id, _first(form, "url") or ""):
+        msg = "this draft is not waiting to post any more (already logged, or a run has it)"
+        return RedirectResponse(
+            f"/publishing/manual/{draft_id}?{urlencode({'error': msg})}", status_code=303
+        )
+    log.info("draft %d logged as posted by hand", draft_id)
+    return RedirectResponse("/status/approved", status_code=303)
 
 
 @app.post("/publishing/order")
@@ -618,6 +664,7 @@ def _adopt_queue_routes() -> None:
     queue_app.templates.env.globals["busy_steps"] = busy_steps
     queue_app.templates.env.globals["publish_live"] = publish_live
     queue_app.templates.env.globals["publish_running"] = publish_running
+    queue_app.templates.env.globals["manual_posting"] = manual_posting
     have = {getattr(r, "path", None) for r in app.router.routes}
     for route in queue_app.app.router.routes:
         path = getattr(route, "path", None)
