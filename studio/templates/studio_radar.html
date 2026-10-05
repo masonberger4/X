@@ -80,7 +80,7 @@ Dates are as precise as the source was; a quarter counts until it ends.</p>
   <tr><th>When</th><th>Company</th><th>What</th><th></th></tr>
   {% for c in rows %}
   <tr>
-    <td>{{ c.when_text }}</td>
+    <td class="when">{{ c.when_text }}</td>
     <td>{{ c.company }}{% if c.ticker %} <span class="meta">({{ c.ticker }})</span>{% endif %}</td>
     <td>{{ kinds.get(c.kind, c.kind) }}{% if c.drug %}: {{ c.drug }}{% endif %}{% if c.detail %}<br><span class="meta">{{ c.detail }}</span>{% endif %}
       <br><span class="meta">{% if c.source %}<a href="{{ c.source }}" rel="noreferrer noopener" target="_blank">source</a> · {% endif %}from {{ c.origin }}{% if c.piece_id %} · <a href="/studio/{{ c.piece_id }}">piece {{ c.piece_id }}</a>{% endif %}</span></td>
