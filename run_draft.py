@@ -1,5 +1,7 @@
 """CLI: draft every scored candidate above threshold that has no draft yet.
 
+A story the editor said yes to on the feed is drafted whatever its score or age, and first.
+
 Usage: python run_draft.py [--min-score 30] [--since-hours 48] [--limit N] [--dry-run]
                            [--no-examples] [--no-swarm] [--retry-failed] [--retag]
 

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,6 +53,24 @@ def _swarm_model(cfg: dict[str, Any]) -> str:
     return model
 
 
+def _call_all(
+    call: CallFn, system: str, users: Sequence[str], model: str, workers: int
+) -> list[str | Exception]:
+    """Run independent calls side by side, results in input order; a failed call comes
+    back as its exception. `workers <= 1` runs them one at a time."""
+
+    def one(user: str) -> str | Exception:
+        try:
+            return call(system, user, model)
+        except Exception as exc:  # reported by the caller, never stops the others
+            return exc
+
+    if workers <= 1 or len(users) <= 1:
+        return [one(u) for u in users]
+    with ThreadPoolExecutor(max_workers=min(workers, len(users))) as pool:
+        return list(pool.map(one, users))
+
+
 def _candidates_for_slot(
     brief: Brief,
     slot: Slot,
@@ -66,6 +85,7 @@ def _candidates_for_slot(
     max_chars: int = MAX_POST_CHARS,
     single: bool = False,
     hook_capped: bool = True,
+    workers: int = 1,
 ) -> list[str]:
     """Layer 1 proposals, then `layers - 1` synthesis rounds that each see every earlier
     round (Mixture-of-Agents). Cells that fail the per-post rules are dropped as they land.
@@ -78,16 +98,17 @@ def _candidates_for_slot(
     survivors: list[str] = []
     for layer in range(1, layers + 1):
         round_out: list[str] = []
-        for k in range(fan_out):
-            if layer == 1:
-                user = prompts.propose_prompt(brief, slot, chosen)
-            else:
-                user = prompts.synthesise_prompt(brief, slot, chosen, all_rounds)
-            try:
-                text = call(system, user, model).strip().strip('"')
-            except Exception as exc:  # one failed cell never stops the slot
-                log.warning("%s layer %d cell %d failed: %s", slot.name, layer, k, exc)
+        if layer == 1:
+            user = prompts.propose_prompt(brief, slot, chosen)
+        else:
+            user = prompts.synthesise_prompt(brief, slot, chosen, all_rounds)
+        # The cells of one layer are independent: they run side by side.
+        answers = _call_all(call, system, [user] * fan_out, model, workers)
+        for k, answer in enumerate(answers):
+            if isinstance(answer, Exception):  # one failed cell never stops the slot
+                log.warning("%s layer %d cell %d failed: %s", slot.name, layer, k, answer)
                 continue
+            text = answer.strip().strip('"')
             counter[0] += 1
             problems = cell_problems(
                 text,
@@ -133,6 +154,7 @@ def run_swarm(
     fan_out = int(genome.fan_out or cfg.get("fan_out", 6))
     layers = int(genome.layers or cfg.get("layers", 2))
     max_sim = float(cfg.get("max_similarity", 0.85))
+    workers = int(cfg.get("parallel_calls", 1) or 1)
     counter = [0]
     log_rows: list[dict] = []
     chosen: dict[str, str] = {}
@@ -160,23 +182,27 @@ def run_swarm(
             max_chars=cell_chars,
             single=single,
             hook_capped=hook_capped,
+            workers=workers,
         )
         cands = dedupe(cands, max_sim)
         if not cands:
             raise SwarmFailed(f"no usable candidate for slot {slot.name!r}")
 
-        def judge(a: str, b: str, _slot: Slot = slot) -> str:
-            user = prompts.judge_prompt(brief, _slot, chosen, a, b)
-            try:
-                answer = call(judge_system, user, model)
-            except Exception as exc:
-                log.warning("judge call failed for %s: %s", _slot.name, exc)
-                return a
-            counter[0] += 1
-            w = prompts.parse_winner(answer)
-            return b if w == "B" else a
+        def judge_round(pairs: list[tuple[str, str]], _slot: Slot = slot) -> list[str]:
+            users = [prompts.judge_prompt(brief, _slot, chosen, a, b) for a, b in pairs]
+            out: list[str] = []
+            for (a, b), answer in zip(
+                pairs, _call_all(call, judge_system, users, model, workers), strict=True
+            ):
+                if isinstance(answer, Exception):
+                    log.warning("judge call failed for %s: %s", _slot.name, answer)
+                    out.append(a)
+                    continue
+                counter[0] += 1
+                out.append(b if prompts.parse_winner(answer) == "B" else a)
+            return out
 
-        winner, matches = tournament(cands, judge)
+        winner, matches = tournament(cands, judge_round=judge_round)
         log_rows.append({"slot": slot.name, "tournament": matches, "candidates": len(cands)})
         chosen[slot.name] = winner
         log.info("slot %s: %d candidates, chose %r", slot.name, len(cands), winner[:60])

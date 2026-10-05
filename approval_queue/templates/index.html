@@ -49,10 +49,10 @@
           {% else %}<span class="pill warn">{{ p.status }}</span>{% endif %}
           {% if HAS_PANEL and (not p or p.status == "pending") %}
           <form method="post" action="/publishing/now" class="order-hide" style="margin-top:.3rem"
-                onsubmit="return confirm('Post draft {{ d.id }} to X now?')">
+                {% if not (manual_posting is defined and manual_posting()) %}onsubmit="return confirm('Post draft {{ d.id }} to X now?')"{% endif %}>
             <input type="hidden" name="draft_id" value="{{ d.id }}">
             <input type="hidden" name="back" value="/status/approved">
-            <button type="submit" {% if publish_running() %}disabled title="a publish is already running"{% endif %}>Publish now</button>
+            <button type="submit" {% if not (manual_posting is defined and manual_posting()) and publish_running() %}disabled title="a publish is already running"{% endif %}>Publish now</button>
           </form>
           {% endif %}
           {% if releasable.get(d.id) %}

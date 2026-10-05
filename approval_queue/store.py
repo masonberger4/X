@@ -43,6 +43,7 @@ from draft.chart import (
     visual_from_json,
 )
 from draft.schema import Claim, Draft
+from score.editorial import YES_THRESHOLD
 
 DEFAULT_DB_PATH = "./pipeline.db"
 
@@ -324,16 +325,22 @@ JOIN scores s ON s.id = (SELECT id FROM scores WHERE cluster_id = c.id ORDER BY 
 JOIN items i ON i.id = (SELECT id FROM items WHERE cluster_id = c.id
                         ORDER BY LENGTH(abstract) DESC, published_at IS NULL, published_at, id
                         LIMIT 1)
-WHERE s.total >= :min_score
-  AND s.scored_at >= :since
-ORDER BY s.total DESC, s.scored_at DESC
+WHERE {approved} (s.total >= :min_score AND s.scored_at >= :since)
+ORDER BY {approved_first} s.total DESC, s.scored_at DESC
 """
+
+# A story the editor said yes to on the feed (latest human rating at or above
+# score/editorial.py's YES_THRESHOLD) is drafted whatever its score or age, and first.
+_APPROVED_SQL = """(SELECT rating FROM ratings
+                    WHERE cluster_id = c.id AND (rater IS NULL OR rater = 'human')
+                    ORDER BY id DESC LIMIT 1) >= {yes}"""
 
 
 def fetch_candidates(
     min_score: float, since_hours: float, conn: sqlite3.Connection | None = None
 ) -> list[Candidate]:
-    """Return items scored at or above min_score within the last since_hours.
+    """Return items scored at or above min_score within the last since_hours, plus every
+    story the editor said yes to on the feed whatever its score or age, those first.
 
     This is the ONLY place step 2 reads the items/scores tables.
     """
@@ -343,9 +350,16 @@ def fetch_candidates(
         if not step1_tables_present(conn):
             return []
         since = (datetime.now(UTC) - timedelta(hours=since_hours)).replace(microsecond=0)
-        rows = conn.execute(
-            _CANDIDATES_SQL, {"min_score": min_score, "since": since.isoformat()}
-        ).fetchall()
+        approved = ""
+        approved_first = ""
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ratings'"
+        ).fetchone():
+            rule = _APPROVED_SQL.format(yes=int(YES_THRESHOLD))
+            approved = f"COALESCE({rule}, 0) OR"
+            approved_first = f"COALESCE({rule}, 0) DESC,"
+        sql = _CANDIDATES_SQL.format(approved=approved, approved_first=approved_first)
+        rows = conn.execute(sql, {"min_score": min_score, "since": since.isoformat()}).fetchall()
     finally:
         if own:
             conn.close()
@@ -601,7 +615,9 @@ class PublishInfo:
 
     @property
     def tweet_url(self) -> str:
-        return f"https://x.com/i/web/status/{self.tweet_id}" if self.tweet_id else ""
+        if not self.tweet_id or not self.tweet_id.isdigit():
+            return ""  # a hand-posted thread without its URL has no X id to link
+        return f"https://x.com/i/web/status/{self.tweet_id}"
 
     @property
     def reopenable(self) -> bool:
