@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 
 from studio.angles import HOOK_STYLES, SHAPES, AngleOffer
+from studio.learn import Lean
 from studio.radar import KINDS, Catalyst, Topic
 
 PIECE_FILE = "piece.json"
@@ -96,6 +97,10 @@ class Brief:
     # topics as (radar id, topic), and the catalysts coming up or just passed.
     radar: list[tuple[int, Topic]] = field(default_factory=list)
     coming_up: list[Catalyst] = field(default_factory=list)
+    # What X says about the account's earlier pieces (studio/evidence.py): the evidence
+    # text and this piece's lean, both empty until enough pieces are measured.
+    evidence: str = ""
+    lean: Lean | None = None
     long_post_max: int = 25000
     thread_post_max: int = 25000
     short_post_max: int = 1000
@@ -188,6 +193,18 @@ def _angles_block(b: Brief) -> str:
     return "\n".join(lines)
 
 
+def _x_says(b: Brief) -> str:
+    """How the account's pieces did on X, as a section of its own; "" before any was
+    measured, so a new account's prompts carry no empty heading."""
+    body = [x for x in (b.evidence.strip(), b.lean.line() if b.lean else "") if x]
+    if not body:
+        return ""
+    return (
+        "WHAT X SAYS (how this account's earlier pieces did with readers; weigh it with "
+        "the story, which comes first)\n" + "\n".join(body) + "\n\n"
+    )
+
+
 def _paths_block(b: Brief) -> str:
     refs = ", ".join(b.references) if b.references else "(none)"
     return (
@@ -246,7 +263,7 @@ ANGLES ON OFFER
 RECENT PIECES (do not repeat a topic unless there is genuinely new news on it)
 {_recent_block(b)}
 
-Do not write the post in this stage. When both files are written, end your turn with a
+{_x_says(b)}Do not write the post in this stage. When both files are written, end your turn with a
 three-line summary: the topic, the angle you lean towards, and anything the editor should
 know before you write."""
 
@@ -338,7 +355,7 @@ WRITE
 ANGLES ON OFFER
 {_angles_block(b)}
 
-VARIETY
+{_x_says(b)}VARIETY
 {_variety_block(b)}
 
 THE PLAYBOOK (what has worked on this account; it wins over the voice guide)

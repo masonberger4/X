@@ -820,37 +820,50 @@ def test_one_pieces_card_route_never_serves_anothers(client, sconn, tmp_path):
 # ---- the playbook --------------------------------------------------------------------
 
 
-def test_the_playbook_is_the_seed_until_the_editor_saves_a_copy(client, tmp_path):
-    seed = DEFAULT_PLAYBOOK.read_bytes()
+def test_the_playbook_is_the_seed_until_the_editor_saves_a_copy(client, sconn, tmp_path):
+    seed_bytes = DEFAULT_PLAYBOOK.read_bytes()
+    seed = DEFAULT_PLAYBOOK.read_text(encoding="utf-8")
     copy = tmp_path / PLAYBOOK_NAME
 
     body = client.get("/studio/playbook").text
     assert "This is the shipped seed; saving creates your own copy" in body
-    assert DEFAULT_PLAYBOOK.read_text(encoding="utf-8").splitlines()[0] in body
+    assert seed.splitlines()[0] in body
     assert 'action="/studio/playbook/reset"' not in body
 
     r = client.post(
-        "/studio/playbook", data={"text": "# Playbook\r\n\r\nLead with the number.\r\n\r\n\r\n"}
+        "/studio/playbook",
+        data={"text": "# Playbook\r\n\r\nLead with the number.\r\n\r\n\r\n", "note": "tighter"},
     )
     assert path_of(r) == "/studio/playbook"
-    assert flash_of(r) == "saved; the next session reads it"
+    # the seed in use before it is recorded first, so the history shows what it replaced
+    assert flash_of(r) == "saved as version 2; the next session reads it"
     assert copy.read_text(encoding="utf-8") == "# Playbook\n\nLead with the number.\n"
-    assert not copy.with_suffix(".tmp").exists()
+    assert not list(tmp_path.glob(".playbook-*"))  # the atomic write leaves nothing behind
     assert playbook_path(tmp_path) == copy  # what the next session is handed
-    assert DEFAULT_PLAYBOOK.read_bytes() == seed  # the shipped seed is never written
+    assert DEFAULT_PLAYBOOK.read_bytes() == seed_bytes  # the shipped seed is never written
+    first, second = sorted(S.playbook_versions(sconn), key=lambda v: v.id)
+    assert (first.source, first.text) == (S.PLAYBOOK_SEED, seed)
+    assert (second.source, second.changelog) == (S.PLAYBOOK_EDITOR, ["tighter"])
+    assert S.current_playbook_version(sconn).id == second.id
 
     body = client.get("/studio/playbook").text
-    assert f"This is your edited copy ({copy})" in body
+    assert f"This is your copy ({copy})" in body and "Version 2 (editor" in body
     assert "Lead with the number." in body
     assert 'action="/studio/playbook/reset"' in body
 
     r = client.post("/studio/playbook/reset")
     assert path_of(r) == "/studio/playbook"
-    assert flash_of(r) == "back to the shipped seed (playbook.md)"
-    assert not copy.exists() and playbook_path(tmp_path) == DEFAULT_PLAYBOOK
-    assert "This is the shipped seed" in client.get("/studio/playbook").text
-    # resetting again is harmless
-    assert flash_of(client.post("/studio/playbook/reset")).startswith("back to the shipped seed")
+    assert flash_of(r) == "back to the shipped seed (playbook.md), as version 3"
+    assert copy.read_text(encoding="utf-8") == seed
+    assert S.current_playbook_version(sconn).source == S.PLAYBOOK_REVERT
+    body = client.get("/studio/playbook").text
+    assert "This is the shipped seed." in body
+    assert 'action="/studio/playbook/reset"' not in body  # nothing to go back to
+
+
+def test_a_save_without_a_note_says_it_was_edited_by_hand(client, sconn, tmp_path):
+    client.post("/studio/playbook", data={"text": "# Playbook\n\nShorter."})
+    assert S.current_playbook_version(sconn).changelog == ["edited by hand"]
 
 
 @pytest.mark.parametrize("data", [{}, {"text": ""}, {"text": "  \r\n \n\t"}])

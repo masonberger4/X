@@ -65,6 +65,7 @@ select = ["E", "F", "I", "B", "UP"]
 "filter/link.py" = ["E501"]  # same: the story linker's prompt text
 "studio/render.py" = ["E501"]  # the layout checker is JavaScript inside a string
 "studio/safety.py" = ["E501"]  # the advice patterns read best one per line
+"studio/learn.py" = ["E501"]  # the playbook rewrite prompt text
 "studio/radar.py" = ["E501"]  # the scan's prompt reads best one paragraph per line
 
 [tool.pytest.ini_options]

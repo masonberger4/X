@@ -65,6 +65,8 @@ carrying `--live`).
   [--checkpoint|--no-checkpoint] [--list] [--dry-run]` (step 10: the studio's automatic run,
   or one piece now; see `studio/config.yaml`), `python run_studio.py --scan|--scan-now
   [--dry-run]` (step 10's radar: the daily news scan, when due or now),
+  `python run_studio.py --learn|--learn-now [--dry-run]` (step 10's learning loop: score
+  the posted pieces against X, rewrite the playbook when due or now),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -90,12 +92,17 @@ carrying `--live`).
   `filter/link.py` story linking), `draft/grader.py:call_grader` (the image
   grader: the CLI with `tools=["Read"]` opens the PNG), `studio/scan.py:call_scanner`
   (the radar's daily scan: the CLI with `tools=["WebSearch","WebFetch"]`, its own time
-  limit), `claude_cli.run_claude` (the only place that spawns the Claude Code CLI and the
+  limit), `studio/playbook.py:call_rewriter` (the studio's learning loop: one playbook
+  rewrite, no tools, its own time limit), `claude_cli.run_claude` (the only place that
+  spawns the Claude Code CLI and the
   app's only way to reach Claude: every Claude call site above, and step 2b's
   `verify/verifier.py:call_model`, routes through it; there is no Anthropic API
   path, no `anthropic` SDK and no API key, and `claude_cli.cli_env` drops
   `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` from the child's environment so the
-  CLI always runs on its own login), and `publish/client.py`
+  CLI always runs on its own login, drops `CLAUDE_AUTO_BACKGROUND_TASKS` and sets
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so nothing a call starts (a studio
+  session's fact-check agent) is moved to the background and killed unfinished when
+  the call ends), and `publish/client.py`
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
   `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
@@ -333,8 +340,8 @@ carrying `--live`).
 - Step 2b (`verify/`) checks `claims_to_verify` against the web. Its only
   network call is `verify/verifier.py:call_model` (the CLI with
   `tools=["WebSearch","WebFetch"]` under `verify/config.yaml`'s own `timeout_seconds`;
-  the image grader's `["Read"]` is the only other `tools` list passed to
-  `claude_cli.run_claude`). It owns
+  the image grader's `["Read"]` and the radar scan's own web tools are the only other
+  `tools` lists passed to `claude_cli.run_claude`). It owns
   `claim_checks`, reads drafts only through `approval_queue.store`, never edits a
   draft's text itself, and a verdict is `trusted` only for hosts in `verify/config.yaml` or
   a company's own site (`verifier.trusted_hosts`: each `companies.feeds` URL host and
@@ -474,7 +481,10 @@ carrying `--live`).
   "Set schedule" on the approved page (`POST /publishing/order`, `panel/publishing.py`)
   writes the human's order to step 3's `schedule.position` (guarded migration in
   `publish/store.py`, `set_order`, unclaimed rows only); `scheduler.rank` puts ordered drafts
-  first, then breaking, then policy; `store.publish_states` reads it back for the pill. The
+  first, then breaking, then policy; `store.publish_states` reads it back for the pill.
+  The studio performance page's "add the post's link" (`panel/publishing.py:add_head_link`,
+  wired into `studio/web.py` as its `add_link` hook) writes post 1's X id through step 3's
+  own `publish/store.py:set_head_tweet`, only over a `manual-` marker. The
   panel never writes `config.yaml`, `draft/voice.md` or a draft's text. The settings it
   edits itself are two keys of `publish/config.yaml` and two of `ops/config.yaml`
   (`auto_run_enabled`, `auto_run_times` through `ops/config.py:save_auto_run`, from
@@ -585,7 +595,8 @@ carrying `--live`).
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`), an
   optional checkpoint (`research_ready`, the editor's Continue), write (`posts/NN.txt`,
   `cards/card_N.html`, a cold fact-check by a fresh sub-agent logged in `factcheck.md`,
-  `piece.json`), polish rounds (`studio/qa.py`: `piece.json` shape, X-weighted length from
+  in the foreground since `cli_env` disables background tasks, `piece.json`; a piece
+  without that log blocks, `qa.NO_FACTCHECK`), polish rounds (`studio/qa.py`: `piece.json` shape, X-weighted length from
   `studio/xcount.py` with `x.headroom`, `studio/safety.py` blocking lines (investment or
   medical advice, links incl. bare domains), an @handle without a verifying page, cards
   drawn by `studio/render.py`; blocking problems keep a piece out of the queue, fixable ones
@@ -624,7 +635,7 @@ carrying `--live`).
   rather than waiting, and also the steps an earlier run still has queued behind it,
   `JobManager.queued_behind`, so a long session never makes a run time skip ingest and
   score) and the manual `studio_now` / `studio_resume` steps, all under the
-  `studio` lock; `run_studio.py` is in `ops/autorun.AUTO_SCRIPTS`. The panel includes
+  `studio` lock (the learning steps below have their own); `run_studio.py` is in `ops/autorun.AUTO_SCRIPTS`. The panel includes
   `studio/web.py`'s router (`/studio`, a piece's page, its cards, `/studio/playbook`); its
   buttons write studio rows and start those steps through `panel/app.py:_start_studio`,
   and the playbook editor writes only `studio_playbook.md` next to the database (the
@@ -653,6 +664,40 @@ carrying `--live`).
   `queue_topic` and starts `studio_now`. `ops/config.yaml` has the automatic
   `studio_scan` step (right before `studio`) and the manual `studio_scan_now`, both under
   the `studio_scan` lock.
+  **The studio learns from X** (`studio/config.yaml` `learn:`). `studio/learn.py` is pure
+  (no DB, network or clock): `pick_snapshot` (a typed-in snapshot as it is, else the
+  first at `horizon_hours`), `score` (relative = (value + smoothing) / (median of the
+  account's heads in the `baseline_days` before + smoothing), unscored under
+  `min_baseline_posts`), `arm_stats` per angle/shape/hook_style/cards bucket, `lean` (one
+  Thompson draw per arm, normal posterior on the log scale, prior at the median; an angle
+  the editor named is left out; None under `lean_min_measured`), `lean_shares` (the
+  dashboard's share of draws), `evidence_block` (WHAT X SAYS, with a small-sample caveat),
+  `rewrite_due` (new = scored pieces the last rewrite was not given, `unseen`), and
+  `rewrite_prompt`/`parse_rewrite` (JSON, `REQUIRED_SECTIONS`, `max_words`).
+  `studio/evidence.py:measure` is the reads: step 3's posted heads and step 4's snapshots
+  through `studio/store.py:fetch_posted_heads` (read-only, empty when missing), the
+  editor's numbers from `studio_manual_metrics`, a piece found by its draft's `studio:`
+  item_id, its cards by `ingest.draft_cards`. `runner.build_brief(evidence=)` puts the
+  block and the lean (drawn only among what the variety rules leave: offered angles,
+  hooks not used lately, not a shape the last three pieces all used; seeded by the piece
+  id) into `Brief.evidence`/`Brief.lean`, which `prompt.py` renders as a WHAT X SAYS
+  section in the research and write prompts (none before anything is scored);
+  `make_context` measures once per run (`measure_quietly`: a failure never holds a brief
+  back) and records each piece's lean in its meta. `runner.learn` (`--learn`, the
+  automatic `studio_learn` step after `feedback`; `--learn-now`, the manual
+  `studio_learn_now`; both under the `studio_learn` lock and `.studio_learn.lock`, never
+  the studio's) rewrites when due through `studio/playbook.py:rewrite` (`learn.playbook`:
+  `propose`, shipped, waits for the editor to apply it, `auto` applies, `off` never; a failed call or a rejected
+  reply changes nothing and exits 1). `studio/playbook.py:save` is the one writer of the
+  playbook file (atomic) and of `studio_playbook_versions` (`seed`/`editor`/`learned`/
+  `proposal`/`revert`, changelog, evidence, `pieces` learned from; `ensure_seeded`
+  records the playbook in use before the first change, `revert`, `apply_proposal`).
+  `/studio/performance` (`studio/dashboard.py`, pure views) shows the posted pieces, the
+  per-arm table, the learning state and the version history, takes typed-in numbers and
+  the link of a post confirmed by hand without one: `studio/web.py` calls the `add_link`
+  hook the panel wires to `panel/publishing.py:add_head_link` ->
+  `publish/store.py:set_head_tweet`, which replaces only post 1's `manual-` marker. The
+  playbook editor and its reset save versions through `playbook.save`.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -727,9 +772,13 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           qa.py + xcount.py + safety.py (the checks), render.py (cards via headless browser),
           ingest.py (into the queue), topics.py (feed stories), store.py (studio_pieces,
           studio_runs, studio_topics, studio_scans, studio_radar_topics,
-          studio_catalysts), radar.py (pure: the scan's prompt and answer, the calendar's
-          dates), scan.py (the daily scan, the research harvest), web.py + templates/
-          (/studio pages, /studio/radar)
+          studio_catalysts, studio_playbook_versions, studio_manual_metrics, the
+          read-only adapters), radar.py (pure: the scan's prompt and answer, the
+          calendar's dates), scan.py (the daily scan, the research harvest), learn.py
+          (pure: scores, arms, the lean, the evidence text, the rewrite's prompt and
+          checks), evidence.py (what X says, from the DB), playbook.py (the file, its
+          versions, the rewrite), dashboard.py (pure views of /studio/performance),
+          web.py + templates/ (/studio pages, /studio/radar)
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
 run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py
 run_logos.py  run_evolve.py  run_unlink.py  run_studio.py   (CLIs)

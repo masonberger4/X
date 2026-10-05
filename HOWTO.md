@@ -595,7 +595,7 @@ Set `posting: api` to go back to posting through the X API (the steps below).
 ## Part 6. Running it on a schedule (Windows Task Scheduler)
 
 You may not need this part. While the control panel or desktop window is open it
-already runs ingest, score, studio_scan, studio, draft, verify, feedback and evolve on
+already runs ingest, score, studio_scan, studio, draft, verify, feedback, evolve and studio_learn on
 its own at 06:00, 12:00 and 18:00 (part 8, "Automatic runs"), and it never publishes. Task
 Scheduler is the other way: it runs even with the app closed and can wake the
 PC, but it needs the tasks below. Pick one for `pipeline-run`. Running both is
@@ -678,7 +678,8 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    ```
    The report proposes changes to the scoring rubric, prefilter keywords,
    posting slots and voice guide. It applies none of them; tell me which you
-   want and I will commit them.
+   want and I will commit them. The studio learns from the same snapshots on its
+   own (part 9, "What X says"); without this tier, type its numbers in there.
 
    Every table in it is ranked by one KPI, `kpi:` in `feedback\config.yaml`.
    The shipped value is `conversation`: not a number X reports, but a weighted
@@ -835,6 +836,11 @@ to stop it. Four pages:
   to write a piece on any topic, the queued topics, and the playbook every
   session reads. A piece's page shows its fact base, post, cards, fact-check log
   and live session log, with Continue (after research), Revise and Resume.
+  **What X says** (`/studio/performance`) shows each posted piece's numbers
+  against the account's median, what each angle, shape, hook style and card
+  count has done and how often the lean suggests it, and the playbook's history,
+  with the forms to type numbers in, add a hand-posted post's link, apply a
+  proposed playbook or put an old one back.
 - **Radar** (`/studio/radar`) — part 9: where topics come from. The day's scan
   topics, the feed's top stories and the catalyst calendar, each with **Write
   it**, and the **Scan now** button.
@@ -871,7 +877,7 @@ to stop it. Four pages:
   claim's verdict is saved the moment it lands, so stopping the run keeps
   every claim already checked and only the one in flight is redone next time.
 - **Automatic runs** (top of `/runs`) — while the panel or the desktop window
-  is open it runs ingest, score, studio_scan, studio, draft, verify, feedback and evolve on its own,
+  is open it runs ingest, score, studio_scan, studio, draft, verify, feedback, evolve and studio_learn on its own,
   at 06:00, 12:00 and 18:00 local time as shipped. Publishing is never one of
   them: posting stays the approved page's "Publish now", and an automatic run
   cannot post even if `.env` allows posting. The box says whether it is on,
@@ -1094,9 +1100,46 @@ and long posts need X Premium.
    rejected.
 8. The playbook. **Studio → The playbook** is the short note every session
    reads before it writes: what works on this account and the mistakes the
-   fact-checks keep catching. Edit and save it; the next session reads your
-   version (it lives in `studio_playbook.md` next to `pipeline.db`).
-9. The radar. **Radar** in the top bar (`/studio/radar`) is where topics come
+   fact-checks keep catching. Edit and save it (the box under it says what you
+   changed, for the history); the next session reads your version (it lives in
+   `studio_playbook.md` next to `pipeline.db`). Every version is kept: yours, the
+   learning loop's (below) and the shipped seed, and any one can be put back from
+   the performance page.
+9. What X says. **Studio → what X says** (`/studio/performance`) is the
+   dashboard for the posted pieces, and what it shows is fed back into the next
+   session. Each piece is measured on its first post 48 hours after it went out
+   (`learn: horizon_hours`), on the same conversation score as part 7 (replies
+   and quotes count 3, bookmarks and reposts 2, likes 1, impressions 0.05), and
+   compared with the median of every post the account made in the 30 days
+   before it. From those scores:
+   - every new session's brief gets a **WHAT X SAYS** section: how many pieces
+     are measured, which angles, shapes, hook styles and card counts did best
+     and worst (with how many pieces each), and the openings of the best and
+     weakest posts, with an honest "too few to be sure" while there are under
+     twenty;
+   - it is offered a **lean**: an angle, shape and hook style to favour if the
+     story supports it. The lean is a weighted draw, so what has done better is
+     suggested more often and what has little evidence still gets tried; it only
+     picks among what the variety rules leave on offer, and the session still
+     chooses (the page shows what each piece was offered and whether it went
+     with it);
+   - after every 3 newly scored pieces (at most once a day) one call on the
+     writer's model proposes a rewrite of **the playbook** from the evidence and
+     your hand edits on the queue page. It waits on the page, with its changelog
+     and what it would change, until you press **Apply this version**
+     (`learn: playbook: propose`, shipped: a handful of posts is mostly the story
+     and the day, and the numbers mean little before 20 to 30 pieces). `auto`
+     applies each rewrite at once, `off` never rewrites. **Put this version
+     back** restores any earlier version, and **Rewrite the playbook now** runs
+     a rewrite whatever the counts. A rewrite that fails or comes back unusable
+     changes nothing.
+   The numbers come from the feedback step's snapshots, which need the paid X
+   API read tier (part 7). Without it, open **type the numbers X shows** under a
+   piece about 48 hours after posting and copy them from the post's analytics on
+   x.com; typed numbers count as they are. A piece you posted by hand without
+   giving its link has **add the post's link**: paste it and the feedback step
+   measures it from then on. Nothing on this page posts anything.
+10. The radar. **Radar** in the top bar (`/studio/radar`) is where topics come
    from, and the same list is offered to every automatic piece:
    - **Topics from the scan.** Once a day, before the first automatic studio run,
      one call on the writer's model (Opus 5.5 at max, with web search) reads the
@@ -1116,7 +1159,7 @@ and long posts need X Premium.
      **Dismiss** takes an event off (for instance an old date after it moved).
    A failed scan changes nothing: the page says why, and the next run tries
    again. The settings are `radar:` in `studio\config.yaml`.
-10. From a command prompt (the same thing the buttons do):
+11. From a command prompt (the same thing the buttons do):
    ```
    python run_studio.py --list
    python run_studio.py --topic "next-gen CTLA-4" --checkpoint
@@ -1128,19 +1171,27 @@ and long posts need X Premium.
    python run_studio.py --scan
    python run_studio.py --scan-now
    python run_studio.py --scan --dry-run
+   python run_studio.py --learn
+   python run_studio.py --learn-now
+   python run_studio.py --learn --dry-run
    ```
    `--list` shows recent pieces and queued topics; `--dry-run` prints the
    research prompt the next piece would get and starts nothing; plain
    `run_studio.py` is the automatic run. `--scan` runs the radar's scan when one
    is due (once a day), `--scan-now` runs it now, and `--scan --dry-run` prints
-   its prompt. In `ops\config.yaml` the buttons are the manual steps `studio_now`
-   (start a piece now), `studio_resume` (act on Continue, Revise and Resume) and
-   `studio_scan_now` (Scan now). The `studio_scan` step runs `--scan` in every
-   automatic run, right before `studio`, under a lock of its own.
-11. Cost. One piece is one long session at max effort, often an hour, and it
+   its prompt. `--learn` measures the posted pieces and rewrites the playbook
+   when it is due, `--learn-now` rewrites it now, and `--learn --dry-run` prints
+   what X says and the rewrite's prompt without changing anything. In
+   `ops\config.yaml` the buttons are the manual steps `studio_now` (start a piece
+   now), `studio_resume` (act on Continue, Revise and Resume), `studio_scan_now`
+   (Scan now) and `studio_learn_now` (rewrite the playbook now). In every
+   automatic run the `studio_scan` step runs `--scan` right before `studio`, and
+   the `studio_learn` step runs `--learn` after the feedback snapshot it reads,
+   each under a lock of its own so neither waits for a session.
+12. Cost. One piece is one long session at max effort, often an hour, and it
     uses a lot of your Claude plan; one automatic piece a day is the shipped
     pace. Each stage has a time limit in `studio\config.yaml` (`timeouts:`).
-12. What the session can do on your PC: search and read the web, read the
+13. What the session can do on your PC: search and read the web, read the
     reference pieces, and read and write files inside its own piece folder.
     It has no shell, cannot touch anything else on the PC, ignores your
     CLAUDE.md, plugins and hooks, and cannot post (the `cli_flags` in
@@ -1185,6 +1236,9 @@ reference pieces in `studio\exemplars\`.
 | A studio piece fails at once with `unknown option '--restricted'` (or `--safe-mode`) | your Claude Code is older than the studio expects: `npm install -g @anthropic-ai/claude-code`, then Resume. As a stopgap remove that flag from `cli_flags` in `studio\config.yaml` |
 | The radar page says the last scan `failed` | the line beside it says why (Claude Code not logged in, the time limit, an answer that was not JSON). Nothing was stored from it; press **Scan now**, or the next automatic run tries again. `radar: timeout_minutes` in `studio\config.yaml` gives a slow scan longer |
 | The calendar shows one event twice with different dates | the date moved and both reports were kept. **Dismiss** the old one |
+| The studio's performance page says `no snapshot yet` under a posted piece | the feedback step fetches numbers only with the X API read tier (part 7). Open **type the numbers X shows** under the piece and copy them from the post on x.com, about 48 hours after posting |
+| The runs page shows `studio_learn` failed with `the rewritten playbook was not used` (or `the playbook rewrite call failed`) | nothing changed: the sessions keep the playbook they had, and the next run tries again. The log line says why (cut short, a section missing, Claude Code not logged in); **Rewrite the playbook now** on the performance page retries at once |
+| A learned playbook made the pieces worse | on the performance page, **put this version back** under the version you want; it becomes the newest version and the next session reads it. `learn: playbook: propose` in `studio\config.yaml` makes every rewrite wait for you instead |
 | A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept). Press Resume on its page; the session keeps everything it already read |
 | A studio piece says `failed: still blocked after polishing` | the page lists what the checker still found (advice wording, a link, a post over the limit). Resume with a note saying how to fix it, or Discard |
 | `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |
@@ -1208,8 +1262,9 @@ attaches or skips the chart; posting itself is manual only), `feedback\config.ya
 layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
 drafter), `studio\config.yaml` (part 9: the studio's model and effort, how many
 automatic pieces a day, whether they stop after research, stage time limits, the
-session's tools, the card browser and `radar:`, the daily scan and the catalyst
-calendar) and `ops\config.yaml` (which steps the
+session's tools, the card browser, `radar:` for the daily scan and the catalyst
+calendar, and `learn:` for what X teaches the next session: the horizon, the
+baseline, when and how the playbook is rewritten) and `ops\config.yaml` (which steps the
 scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
 

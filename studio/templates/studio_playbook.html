@@ -5,12 +5,16 @@
 <h1>Playbook</h1>
 {% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
 <p class="meta">Every studio session reads this before it writes. Where it disagrees with the
-voice guide, the playbook wins. {% if editable_copy %}This is your edited copy ({{ path }}).{% else %}This is the shipped seed; saving creates your own copy in the data folder.{% endif %}</p>
+voice guide, the playbook wins. {% if is_seed %}This is the shipped seed{% if not editable_copy %}; saving creates your own copy in the data folder{% endif %}.{% else %}This is your copy ({{ path }}), edited by you or rewritten from what X says.{% endif %}
+{% if version %}Version {{ version.id }} ({{ version.source }}, {{ version.created_at|localtime }}).{% endif %}
+Every version is kept, with what changed and why, on <a href="/studio/performance#playbook">the performance page</a>, where any one can be put back.</p>
+{% if proposal %}<p class="proposal">The learning loop proposed version {{ proposal.id }} ({{ proposal.created_at|localtime }}): read it and apply it on <a href="/studio/performance#playbook">the performance page</a>.</p>{% endif %}
 <form method="post" action="/studio/playbook">
   <p><textarea name="text" rows="40" style="font: 13px/1.45 ui-monospace, monospace">{{ text }}</textarea></p>
+  <p><label>What changed (kept in the history) <input name="note" size="60" placeholder="edited by hand"></label></p>
   <p><button type="submit">Save</button></p>
 </form>
-{% if editable_copy %}
+{% if not is_seed %}
 <form method="post" action="/studio/playbook/reset" class="inline"><button class="link" type="submit">go back to the shipped seed</button></form>
 {% endif %}
 {% endblock %}

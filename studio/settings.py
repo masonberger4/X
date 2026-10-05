@@ -62,6 +62,24 @@ DEFAULTS: dict[str, Any] = {
         "brief_recent_days": 3,
         "feed_stories": 10,
     },
+    "learn": {
+        "enabled": True,
+        "kpi": "conversation",
+        "horizon_hours": 48,
+        "baseline_days": 30,
+        "min_baseline_posts": 3,
+        "smoothing": 1.0,
+        "lean_min_measured": 3,
+        "prior_sd": 0.5,
+        "post_sd": 0.8,
+        "playbook": "propose",
+        "rewrite_min_new": 3,
+        "rewrite_min_hours": 24,
+        "model": "",
+        "effort": "",
+        "max_words": 900,
+        "timeout_minutes": 30,
+    },
 }
 
 _SECTIONS = (
@@ -74,7 +92,12 @@ _SECTIONS = (
     "x",
     "render",
     "radar",
+    "learn",
 )
+# learn.playbook: what a learned rewrite does. propose (shipped): it waits on the
+# performance page for the editor to apply; auto: the sessions read it at once; off: the
+# playbook is never rewritten (the evidence and the lean still reach the prompts).
+PLAYBOOK_MODES = ("auto", "propose", "off")
 
 
 def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
@@ -98,6 +121,18 @@ def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
     # The scan runs on the writer's model and effort unless told otherwise.
     radar["model"] = str(radar.get("model") or "").strip() or cfg["model"]
     radar["effort"] = str(radar.get("effort") or "").strip() or str(cfg.get("effort") or "")
+    learn = cfg["learn"]
+    from feedback.models import KPIS
+
+    learn["kpi"] = str(learn.get("kpi") or "conversation").strip()
+    if learn["kpi"] not in KPIS:
+        raise ValueError(f"studio/config.yaml learn.kpi must be one of {KPIS}")
+    learn["playbook"] = str(learn.get("playbook") or "off").strip().lower()
+    if learn["playbook"] not in PLAYBOOK_MODES:
+        raise ValueError(f"studio/config.yaml learn.playbook must be one of {PLAYBOOK_MODES}")
+    # The rewrite runs on the writer's model and effort unless told otherwise.
+    learn["model"] = str(learn.get("model") or "").strip() or cfg["model"]
+    learn["effort"] = str(learn.get("effort") or "").strip() or str(cfg.get("effort") or "")
     return cfg
 
 

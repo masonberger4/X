@@ -24,8 +24,10 @@ Routes owned here:
   POST /publishing/order  save the approved page's publishing order (schedule.position)
   POST /publishing/caps   save max_posts_per_day / min_gap_minutes into publish/config.yaml
 
-The studio's pages (studio/web.py: /studio, a piece's page, the playbook) are included
-too; their buttons start the studio_now / studio_resume steps through the same runs.
+The studio's pages (studio/web.py: /studio, a piece's page, the playbook, the performance
+page) are included too; their buttons start the studio_now / studio_resume /
+studio_learn_now steps through the same runs, and the performance page's "add the post's
+link" goes through panel/publishing.py:add_head_link.
 
 The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., /voice),
 so the operator has one URL for the whole workflow. Everything else this app shows is
@@ -692,7 +694,11 @@ def _start_studio(steps: list[str]) -> str:
 
 def _adopt_studio_routes() -> None:
     """The studio's pages (studio/web.py), rendered with the shared layout and run bar."""
-    studio_web.configure(start_steps=_start_studio, queue_templates=QUEUE_TEMPLATES_DIR)
+    studio_web.configure(
+        start_steps=_start_studio,
+        queue_templates=QUEUE_TEMPLATES_DIR,
+        add_link=publish_order_store.add_head_link,
+    )
     env = studio_web.templates.env
     env.globals["HAS_PANEL"] = True
     env.globals["current_run"] = current_run

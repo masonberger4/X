@@ -16,6 +16,10 @@ Usage:
   python run_studio.py --scan              # the radar's daily news scan, when it is due
   python run_studio.py --scan-now          # the scan now, whatever the time since the last
   python run_studio.py --scan --dry-run    # print the scan's prompt, run nothing
+  python run_studio.py --learn             # measure the posted pieces against X and
+                                           # rewrite the playbook when enough are new
+  python run_studio.py --learn-now         # the same, rewriting the playbook now
+  python run_studio.py --learn --dry-run   # print what X says and the rewrite prompt
 
 Each piece is ONE Claude Code session (studio/config.yaml `model`, `effort`: Opus 5.5 at
 max) run from the piece's own folder under `workspace_dir`. It researches the topic and
@@ -37,6 +41,15 @@ in every automatic run) runs one call with web search at most every `scan_every_
 it proposes the next topics and reports dated catalysts (PDUFA dates, readouts,
 conference slots) for the calendar on /studio/radar; `--scan-now` (the radar page's
 button) runs it now. Each piece's research adds the catalysts it found.
+
+Learning from X (studio/config.yaml `learn`): every brief carries what X says about the
+earlier pieces (each one's first post, `horizon_hours` after posting, against the
+account's median) and a lean among the angles, shapes and hooks on offer. `--learn` (the
+`studio_learn` step, after the feedback snapshot) measures the posted pieces and, once
+`rewrite_min_new` scored pieces are new to it, rewrites the playbook from the evidence and
+the editor's hand edits in one call; `--learn-now` (the performance page's button) rewrites
+whatever the counts. Every version is kept on /studio/performance, where any one can be
+put back.
 """
 
 from __future__ import annotations
@@ -71,6 +84,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--dry-run", action="store_true", help="print the first prompt, run nothing")
     ap.add_argument("--scan", action="store_true", help="the radar's news scan, when it is due")
     ap.add_argument("--scan-now", action="store_true", help="the radar's news scan now")
+    ap.add_argument(
+        "--learn",
+        action="store_true",
+        help="measure the posted pieces against X; rewrite the playbook when due",
+    )
+    ap.add_argument(
+        "--learn-now", action="store_true", help="like --learn, rewriting the playbook now"
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
     return ap.parse_args(argv)
 
@@ -88,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         return runner.print_list()
     if args.scan or args.scan_now:
         return runner.scan(dry_run=args.dry_run, force=args.scan_now)
+    if args.learn or args.learn_now:
+        return runner.learn(dry_run=args.dry_run, force=args.learn_now)
     return runner.run(
         now=args.now or bool(args.topic) or args.story is not None,
         resume_only=args.resume_only,
