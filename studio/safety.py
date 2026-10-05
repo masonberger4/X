@@ -92,8 +92,9 @@ _OWN_TARGET = (
     r"(?:up\s+|down\s+)?(?:to|at|toward|towards|near|above|past|by)\s+" + _ABOUT + SHARE_FIGURE,
     # "the target would be raised to $30", "fair value should be $40", "its target will be
     # $52", "Stifel's target would move to the high $40s"
-    r"\b" + _TARGET_WORDS + r"\s+(?:should|would|could|might|will|may)\s+(?:likely\s+|"
-    r"probably\s+)?(?:be\s+|go\s+|rise\s+|climb\s+|fall\s+|move\s+)?(?:(?:raised|lifted|cut|"
+    r"\b" + _TARGET_WORDS + r"(?:\s+(?:on|for)\s+\S+(?:\s+\S+){0,2}?)?\s+(?:should|would|"
+    r"could|might|will|may)\s+(?:likely\s+|probably\s+)?(?:be\s+|go\s+|rise\s+|climb\s+|"
+    r"fall\s+|move\s+)?(?:(?:raised|lifted|cut|"
     r"lowered|moved|taken|pushed)\s+)?(?:(?:to|at|toward|towards|near|above|past|by|"
     r"closer\s+to)\s+)?" + _ABOUT + SHARE_FIGURE,
     # "fair value closer to $30"
@@ -111,8 +112,12 @@ _OWN_TARGET = (
     # quoted "our target is to file the BLA" or "our target of $450 million in revenue"
     r"(?<!\bnot\s)\b(?:my|our)\s+(?:[\w-]+\s+){0,2}?(?:price\s+targets?|target\s+prices?|"
     r"fair\s+values?|price\s+objectives?|PTs?)\b",
-    r"\b(?:my|our)\s+(?:[\w-]+\s+){0,2}?targets?\s+(?:(?:is|of|at|to|stays|remains|"
-    r"sits\s+at)\s+)?" + _ABOUT + SHARE_FIGURE,
+    r"\b(?:my|our)\s+(?:[\w-]+\s+){0,2}?targets?\s*[,:]?\s+(?:(?:is|of|at|to|stays|remains|"
+    r"sits|stands|would\s+be|will\s+be|was)\s+)?(?:(?:at|near|around)\s+)?" + _ABOUT + SHARE_FIGURE,
+    r"\b(?:my|our)\s+(?:[\w-]+\s+){0,2}?targets?\s+(?:(?:is|sits|stays|remains|would\s+be)\s+)?"
+    r"(?:(?:well|far|way|comfortably|still)\s+)?(?:above|below|over|under|north\s+of|"
+    r"south\s+of|ahead\s+of)\s+(?:the\s+)?(?:Street|consensus|analysts?|average|"
+    r"(?-i:[A-Z][\w.&-]*)['\u2019]s?)",
     r"\b(?:my|our)\s+(?:math|numbers|model|work|estimates?)\s+(?:puts?|gets?|gives?|says?|"
     r"points?\s+to)\b[^.!?\n]{0,30}?" + SHARE_FIGURE,
     # a value per share of its own: "the stock is worth $30", "Summit is worth $30 a share",
