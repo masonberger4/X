@@ -5,7 +5,8 @@ the swarm, the image grader, the claim verifier) hands its prompt to `run_claude
 launches `claude -p` as a subprocess. The CLI is logged in with your own Anthropic
 account, so usage counts against that account's plan; there is no API key and no other
 backend. API credentials are kept out of the child's environment (`cli_env`) so a stale
-key in .env can never switch the CLI to metered billing.
+key in .env can never switch the CLI to metered billing, and background tasks are disabled
+there, so nothing a call starts outlives it unfinished.
 
 Trade-offs, documented in README: no strict tool schema (replies are validated in code
 and retried), the CLI must be installed and logged in on the machine that runs the
@@ -65,11 +66,22 @@ class ClaudeCliUnavailable(ClaudeCliError):
 # account. The app talks to Claude only through the CLI and its login, so they never reach
 # the child process, even when an old .env still carries one.
 _API_KEY_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+# Background tasks are off in every child. The app waits for each CLI call to finish and
+# reads its answer, so work the CLI moves to the background (an agent running past two
+# minutes when CLAUDE_AUTO_BACKGROUND_TASKS is set in the parent's environment, or a tool
+# the model starts that way) is cut off when the call ends: a studio session's cold
+# fact-check was backgrounded that way, the stage ended without its report and the checker
+# was killed. With background tasks disabled, the Agent tool always runs in the foreground
+# and the call waits for it.
+_BACKGROUND_ENV = ("CLAUDE_AUTO_BACKGROUND_TASKS",)
+_CHILD_ENV = {"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
 
 
 def cli_env() -> dict[str, str]:
-    """The environment a CLI child runs with: ours, minus any API credentials."""
-    return {k: v for k, v in os.environ.items() if k not in _API_KEY_ENV}
+    """The environment a CLI child runs with: ours, minus any API credentials and the
+    switch that moves long tools to the background, with background tasks disabled."""
+    drop = (*_API_KEY_ENV, *_BACKGROUND_ENV)
+    return {**{k: v for k, v in os.environ.items() if k not in drop}, **_CHILD_ENV}
 
 
 def cli_settings(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
