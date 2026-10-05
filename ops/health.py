@@ -45,7 +45,7 @@ class Thresholds:
     disk_min_free_mb: float = 1024
     backup_max_age_hours: float = 36
     feedback_max_age_hours: float = 192
-    required_env: tuple[str, ...] = ("ANTHROPIC_API_KEY",)
+    required_env: tuple[str, ...] = ()
 
     @classmethod
     def from_config(cls, raw: dict[str, Any] | None) -> Thresholds:
@@ -305,31 +305,31 @@ def check_storage(
     return Check("storage", STATUS_OK, f"db {size} MB, disk free {free} MB", details)
 
 
-# Env vars only one LLM backend needs. The API key is meaningless on the claude_code
-# backend (the CLI holds its own login), so requiring it there is a false alarm.
-BACKEND_ONLY_ENV = {"ANTHROPIC_API_KEY": "api"}
-
-
-def required_env_for(required: tuple[str, ...] | list[str], backend: str) -> list[str]:
-    """`required` minus the vars that belong to a backend other than `backend`."""
-    return [n for n in required if BACKEND_ONLY_ENV.get(n, backend) == backend]
-
-
-def check_env(
-    present: dict[str, bool], required: tuple[str, ...] | list[str], backend: str = "api"
-) -> Check:
+def check_env(present: dict[str, bool], required: tuple[str, ...] | list[str]) -> Check:
     """`present` maps env var name -> whether it is set and non-empty. Values are never seen.
-
-    `backend` is the LLM backend in use; vars only another backend needs are not required.
-    """
-    needed = required_env_for(required, backend)
+    Claude needs none: the app reaches it only through the Claude Code CLI, which holds its
+    own login (see check_cli)."""
+    needed = list(required)
     missing = sorted(n for n in needed if not present.get(n, False))
-    details = {"required": needed, "missing": missing, "backend": backend}
+    details = {"required": needed, "missing": missing}
     if missing:
         return Check("env", STATUS_FAIL, f"missing env: {', '.join(missing)}", details)
-    return Check(
-        "env", STATUS_OK, f"{len(needed)} required env vars set ({backend} backend)", details
-    )
+    return Check("env", STATUS_OK, f"{len(needed)} required env vars set", details)
+
+
+def check_cli(binary: str, found: str | None) -> Check:
+    """The Claude Code CLI every model call runs through: `found` is its resolved path on
+    this machine, or None when it is not on PATH (scoring, linking, drafting, grading and
+    claim checks all fail until it is installed and logged in)."""
+    details = {"binary": binary, "path": found}
+    if not found:
+        return Check(
+            "cli",
+            STATUS_FAIL,
+            f"{binary!r} not found on PATH: install Claude Code and run `claude login`",
+            details,
+        )
+    return Check("cli", STATUS_OK, f"Claude Code CLI at {found}", details)
 
 
 def _round(x: float | None, nd: int = 2) -> float | None:
@@ -354,10 +354,12 @@ def run_all(
     disk_free_mb: float | None,
     env_present: dict[str, bool],
     table_counts: dict[str, int] | None = None,
-    backend: str = "api",
+    cli: tuple[str, str | None] | None = None,
 ) -> Report:
+    """Every check. `cli` is (binary name, resolved path or None); None skips the check."""
     checks = [
-        check_env(env_present, thresholds.required_env, backend),
+        check_env(env_present, thresholds.required_env),
+        *([check_cli(*cli)] if cli is not None else []),
         check_sources(source_runs, now, thresholds),
         check_staleness(activity, now, thresholds),
         check_backlog(activity, now, thresholds),

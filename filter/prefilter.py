@@ -1,4 +1,4 @@
-"""Cheap, deterministic gate applied to clusters before they cost API money.
+"""Cheap, deterministic gate applied to clusters before they cost a model call.
 
 Rules (all from config.prefilter): deny keywords, allow keywords, empty/short
 abstract, and a daily cap on clusters passed to the scorer. Clusters are

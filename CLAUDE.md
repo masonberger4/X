@@ -4,7 +4,9 @@ Project guidance for Claude Code. Read PLAN.md before making changes.
 
 ## What this is
 A human-in-the-loop pipeline that ingests immuno-oncology news, scores it with
-the Anthropic API, and drafts X posts for human approval. The account is the
+Claude, and drafts X posts for human approval. Every model call runs the Claude
+Code CLI (`claude -p`) logged in with the operator's account (`claude login`);
+there is no Anthropic API path and no API key. The account is the
 business and investing side of immuno-oncology biotech (CAR-T and cell therapy,
 T-cell engagers and bispecifics, adjacent IO science): trial results and what
 they mean, upcoming catalysts for public companies, M&A and financing. The AI
@@ -31,7 +33,8 @@ draft, verify, feedback and evolve, and `run_ops.py run` refuses any configured 
 carrying `--live`).
 
 ## Commands
-- Install: `pip install -e ".[dev]"`
+- Install: `pip install -e ".[dev]"`; running the pipeline (not the tests) also needs the
+  Claude Code CLI on PATH, logged in (`claude login`)
 - Lint: `ruff check .` and `ruff format --check .`
 - Test: `pytest`
 - Run: `python run_ingest.py`, `python run_score.py`,
@@ -80,14 +83,17 @@ carrying `--live`).
   the only caller of `httpx.get` is its private `_request`, which retries
   429/5xx/transport errors and never logs headers),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
-  (Anthropic), `draft/drafter.py:call_anthropic`, `score/rater.py:call_model`
+  (Claude), `draft/drafter.py:call_anthropic` (an older name: it runs the CLI),
+  `score/rater.py:call_model`
   (the `digest.py --auto-rate` second-opinion rater, and the call behind
   `filter/link.py` story linking), `draft/grader.py:call_grader` (the image
-  grader: the PNG as an image block, or the CLI with `tools=["Read"]`),
-  `claude_cli.run_claude` (the
-  optional `models.backend: claude_code` path: the only place that spawns the
-  Claude Code CLI; both Claude call sites route through it when selected, and
-  the API stays the default), and `publish/client.py`
+  grader: the CLI with `tools=["Read"]` opens the PNG),
+  `claude_cli.run_claude` (the only place that spawns the Claude Code CLI and the
+  app's only way to reach Claude: every Claude call site above, and step 2b's
+  `verify/verifier.py:call_model`, routes through it; there is no Anthropic API
+  path, no `anthropic` SDK and no API key, and `claude_cli.cli_env` drops
+  `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` from the child's environment so the
+  CLI always runs on its own login), and `publish/client.py`
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
   `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
@@ -109,10 +115,13 @@ carrying `--live`).
   cluster that already has a score, else the oldest, moving items, scores and
   ratings. It never raises: a failed call is logged and scoring proceeds.
 - **Every score row stores** `model`, `prompt_version`
-  (`score/rubric.py:PROMPT_VERSION`), and the raw API response. Bump
+  (`score/rubric.py:PROMPT_VERSION`), and the raw CLI reply (`raw_response`). Bump
   `PROMPT_VERSION` whenever the prompt, few-shot examples, or tool schema
   change; `run_score.py` then re-scores automatically.
-- **Scoring is tool-use with a strict JSON schema** (`score/rubric.py:TOOL`).
+- **Scoring answers a strict JSON schema** (`score/rubric.py:TOOL`). The CLI's print
+  mode has no tool calling, so `Scorer.headless_system_prompt` puts the schema in the
+  system prompt and `Scorer.create_message` checks the reply in code (not a JSON object
+  with a `scores` list: `ScoringError`, the batch is skipped, not retried).
   `total` is computed in code (`compute_total`), never taken from the model.
 - **NCBI etiquette:** `Entrez.email`/`tool` from `config.ncbi` (`NCBI_EMAIL`
   env overrides); rate limiter at 3 req/s, or 10 req/s with `NCBI_API_KEY`.
@@ -320,9 +329,10 @@ carrying `--live`).
   was shown. Step 7 reads `items` only through `fetch_decisions_for_voice` /
   `fetch_draft_stats` (source and url).
 - Step 2b (`verify/`) checks `claims_to_verify` against the web. Its only
-  network call is `verify/verifier.py:call_model` (CLI with
-  `tools=["WebSearch","WebFetch"]`, the one caller that passes `tools` to
-  `claude_cli.run_claude`; or the API `web_search` server tool). It owns
+  network call is `verify/verifier.py:call_model` (the CLI with
+  `tools=["WebSearch","WebFetch"]` under `verify/config.yaml`'s own `timeout_seconds`;
+  the image grader's `["Read"]` is the only other `tools` list passed to
+  `claude_cli.run_claude`). It owns
   `claim_checks`, reads drafts only through `approval_queue.store`, never edits a
   draft's text itself, and a verdict is `trusted` only for hosts in `verify/config.yaml` or
   a company's own site (`verifier.trusted_hosts`: each `companies.feeds` URL host and
@@ -384,7 +394,10 @@ carrying `--live`).
   an `fcntl` lock. It reads other steps' tables only through the read-only
   adapters in `ops/store.py` (each returns empty when a table is missing) and
   owns `pipeline_runs`, `health_checks`, `alerts_sent`. `ops/health.py` is pure
-  (`now` is a parameter). The only network call in `ops/` is
+  (`now` is a parameter; its `cli` check, `check_cli(binary, found)`, is handed the
+  Claude Code CLI's resolved path by `run_ops.cli_status`, a `shutil.which` of the root
+  `claude_code.binary`, and `run_all(cli=None)` skips it; `health.required_env` ships
+  empty, since Claude needs no key). The only network call in `ops/` is
   `alert.py:post_webhook` (plus `send_email` via smtplib); alerts carry check
   names, summaries and counts, never secrets or post text. `ops/autorun.py` is pure (no
   DB, network or clock): `parse_times` (HH:MM, at most `MAX_TIMES`, `MIN_SPACING_MINUTES`
@@ -634,7 +647,8 @@ score/    rubric.py, scorer.py, editorial.py (yes/no decision, reason categories
 db.py     sqlite: items, clusters, scores, ratings, source_runs
 timeutil.py  display timezone: UTC storage -> one human-facing zone (root `timezone:`),
           fmt_datetime/fmt_date, Jinja |localtime / |localdate
-claude_cli.py  optional headless LLM backend (llm_backend, run_claude)
+claude_cli.py  the only way to Claude: the Claude Code CLI in print mode (run_claude,
+          build_argv, parse_envelope, cli_env)
 draft/    schema.py (Draft, Format, validate_output), hook.py (rule 2: the link ban;
           rule 12: the opening post),
           chart.py (chart + table specs, verification, PNG rendering, Style

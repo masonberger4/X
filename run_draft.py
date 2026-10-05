@@ -186,7 +186,7 @@ def draft_with_swarm(
     except swarm_engine.SwarmFailed as exc:
         swarm_problem = str(exc)
         log.warning("%s: swarm failed: %s", c.item_id, exc)
-    except Exception as exc:  # API failure inside the swarm: the control still runs
+    except Exception as exc:  # a CLI failure inside the swarm: the control still runs
         swarm_problem = f"error: {exc}"
         log.exception("%s: swarm error", c.item_id)
 
@@ -392,7 +392,7 @@ def retag_drafts(conn: store.sqlite3.Connection, *, dry_run: bool = False) -> in
         except DraftRejected as exc:
             log.warning("draft %d: retag broke a hard rule, left as it was: %s", row.id, exc)
             continue
-        except Exception as exc:  # API / network errors: keep the draft as it was
+        except Exception as exc:  # CLI or network errors: keep the draft as it was
             log.error("draft %d: retag failed, left as it was: %s", row.id, exc)
             continue
         store.revise(conn, row.id, draft=result.draft, model=result.model, note=RETAG_NOTE)
@@ -430,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--since-hours", type=float, default=48.0)
     ap.add_argument("--limit", type=int, default=10, help="max items to draft this run")
-    ap.add_argument("--dry-run", action="store_true", help="list candidates, do not call the API")
+    ap.add_argument("--dry-run", action="store_true", help="list candidates, do not call the model")
     ap.add_argument(
         "--no-examples",
         action="store_true",
@@ -560,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
                     swarm_store.set_run_draft(conn, run_id, draft_id)
                 continue
             except Exception:
-                log.exception("API failure drafting %s; will retry next run", c.item_id)
+                log.exception("model call failed drafting %s; will retry next run", c.item_id)
                 continue
             if isinstance(result, HumanChoice):
                 store_for_pick(conn, c, result, run_id, edit_ids, rejection_ids)

@@ -5,6 +5,7 @@ from urllib.parse import unquote
 import pytest
 from fastapi.testclient import TestClient
 
+import claude_cli
 from approval_queue import app as queue_app
 from approval_queue import publishing, store
 from approval_queue.app import app
@@ -311,16 +312,21 @@ def test_revise_with_nothing_to_do_or_failed_model_leaves_draft_alone(
     _stub_call(monkeypatch, [json.dumps({"thread": ["no url"]})] * drafter.MAX_ATTEMPTS)
     r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
     assert r.status_code == 303 and "error=" in r.headers["location"]
-    _stub_call(monkeypatch, [RuntimeError("api down")] * drafter.MAX_ATTEMPTS)
+    # The model is reached only through the Claude Code CLI. When it cannot start, the draft
+    # is left as it was and the page the redirect lands on tells the operator why.
+    missing = claude_cli.ClaudeCliUnavailable(
+        "'claude' not found on PATH; install Claude Code and run `claude login`"
+    )
+    _stub_call(monkeypatch, [missing] * drafter.MAX_ATTEMPTS)
     monkeypatch.setattr(drafter, "_sleep_backoff", lambda a, s: None)
     r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
-    assert r.status_code == 303 and "api%20down" in r.headers["location"]
+    assert r.status_code == 303
+    assert "not found on PATH; install Claude Code" in unquote(r.headers["location"])
+    assert "install Claude Code and run" in client.get(r.headers["location"]).text
     row = store.get_draft(conn, draft_id)
     assert row.draft.thread[0] == "Preprint. ORR 88%. one"
     assert store.list_decisions(conn, draft_id) == []
     assert client.post("/drafts/999/revise", data={"instructions": "x"}).status_code == 404
-    body = client.get(f"/drafts/{draft_id}?error=api%20down").text
-    assert "api down" in body
 
 
 def test_pending_page_has_inline_revise_box(client, draft_id):

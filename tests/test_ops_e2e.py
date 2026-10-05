@@ -2,7 +2,8 @@
 
 Step 1 tables come from db.Database, step 2 from approval_queue.store.connect (conftest's
 db_file/conn fixtures), step 3's schedule/posts are created by hand here. Nothing runs a
-real pipeline stage: `run` tests use python -c steps or --dry-run.
+real pipeline stage: `run` tests use python -c steps or --dry-run. Health's lookup of the
+Claude Code CLI is pinned (cli_on_path), so no report depends on this machine's PATH.
 """
 
 import json
@@ -39,6 +40,16 @@ CREATE TABLE IF NOT EXISTS posts (
     posted_at TEXT, slot TEXT, status TEXT NOT NULL, error TEXT);
 """
 
+CLI_DIR = "/opt/claude-code/bin"
+
+
+@pytest.fixture
+def cli_on_path(monkeypatch):
+    """Every model call runs through the Claude Code CLI, and health's "cli" check looks up
+    the binary the root config.yaml names (run_ops.cli_status). Pin that lookup to "found"
+    so a report never depends on whether the machine running the tests has `claude`."""
+    monkeypatch.setattr(run_ops.shutil, "which", lambda name: f"{CLI_DIR}/{name}")
+
 
 @pytest.fixture
 def ops_cfg(tmp_path):
@@ -53,7 +64,7 @@ def ops_cfg(tmp_path):
 
 
 @pytest.fixture
-def seeded(conn, db_file, monkeypatch):
+def seeded(conn, db_file, monkeypatch, cli_on_path):
     now = datetime.now(UTC)
     d = Database(str(db_file))
     d.record_run("pubmed", 12, 3, at=now - timedelta(minutes=20))
@@ -83,13 +94,15 @@ def seeded(conn, db_file, monkeypatch):
     )
     conn.commit()
     monkeypatch.setattr(store, "configured_sources", lambda: SOURCES)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
     return db_file
 
 
 def test_health_json_reports_failing_source_partial_thread_and_feedback_skip(
-    seeded, ops_cfg, capsys
+    seeded, ops_cfg, monkeypatch, capsys
 ):
+    # A key left over in an old .env: Claude is reached only through the CLI, so the shipped
+    # config neither requires it nor reads it into the report.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
     rc = run_ops.main(["--config", str(ops_cfg), "health", "--json"])
     out = capsys.readouterr().out
     report = json.loads(out)
@@ -107,10 +120,14 @@ def test_health_json_reports_failing_source_partial_thread_and_feedback_skip(
     assert "partial" in checks["publish"]["summary"]
     assert checks["feedback"]["status"] == "skip"
     assert checks["env"]["status"] == "ok"
+    # the CLI is what the report looks for instead: the configured binary, found on PATH
+    cli = checks["cli"]
+    assert cli["status"] == "ok"
+    assert cli["details"]["path"] == f"{CLI_DIR}/{cli['details']['binary']}"
     assert checks["staleness"]["status"] == "ok"
     assert checks["backlog"]["details"]["approved_drafts"] == 1
     assert checks["storage"]["details"]["table_counts"]["items"] == 2
-    assert "test-key-not-real" not in out
+    assert "test-key-not-real" not in out and "ANTHROPIC_API_KEY" not in out
 
     # The report was stored in health_checks.
     conn = store.connect(seeded)
@@ -123,6 +140,26 @@ def test_health_text_report(seeded, ops_cfg, capsys):
     out = capsys.readouterr().out
     assert out.startswith("Pipeline health at ")
     assert "[fail] publish" in out and "[skip] feedback" in out
+    assert "[ok  ] cli" in out and f"Claude Code CLI at {CLI_DIR}/" in out
+
+
+def test_health_env_check_names_missing_vars_and_never_prints_a_value(
+    seeded, ops_cfg, monkeypatch, capsys
+):
+    """`health.required_env` holds names only: the report says which are missing, and a set
+    var's value is never read into it (build_report passes booleans to the check)."""
+    cfg = yaml.safe_load(ops_cfg.read_text())
+    cfg["health"]["required_env"] = ["OPS_TEST_SECRET", "OPS_TEST_MISSING"]
+    ops_cfg.write_text(yaml.safe_dump(cfg))
+    monkeypatch.setenv("OPS_TEST_SECRET", "secret-value-not-real")
+    monkeypatch.delenv("OPS_TEST_MISSING", raising=False)
+    run_ops.main(["--config", str(ops_cfg), "health", "--json"])
+    out = capsys.readouterr().out
+    env = {c["name"]: c for c in json.loads(out)["checks"]}["env"]
+    assert env["status"] == "fail" and "OPS_TEST_MISSING" in env["summary"]
+    assert env["details"]["missing"] == ["OPS_TEST_MISSING"]
+    assert env["details"]["required"] == ["OPS_TEST_SECRET", "OPS_TEST_MISSING"]
+    assert "secret-value-not-real" not in out
 
 
 def test_run_dry_run_records_nothing_and_runs_nothing(seeded, ops_cfg, capsys, monkeypatch):
@@ -242,14 +279,16 @@ def test_health_alert_flag_records_alerts(seeded, ops_cfg, monkeypatch):
 
 
 def test_health_on_bare_db_skips_everything_but_env_and_storage(
-    tmp_path, ops_cfg, monkeypatch, capsys
+    tmp_path, ops_cfg, cli_on_path, monkeypatch, capsys
 ):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "bare.db"))
     monkeypatch.setattr(store, "configured_sources", lambda: [])
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):  # Claude needs no API key
+        monkeypatch.delenv(name, raising=False)
     run_ops.main(["--config", str(ops_cfg), "health", "--json"])
     report = json.loads(capsys.readouterr().out)
     statuses = {c["name"]: c["status"] for c in report["checks"]}
+    assert statuses["env"] == "ok" and statuses["cli"] == "ok"
     assert statuses["sources"] == "skip" and statuses["staleness"] == "skip"
     assert statuses["publish"] == "skip" and statuses["feedback"] == "skip"
     assert statuses["backups"] == "warn"  # no backup yet

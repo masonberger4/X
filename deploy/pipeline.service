@@ -11,9 +11,13 @@ Wants=network-online.target
 Type=oneshot
 User=pipeline
 WorkingDirectory=/home/pipeline/x
-# .env holds the API keys; python-dotenv reads it too, but EnvironmentFile makes
-# the values available even if the cwd changes. Never commit .env.
+# .env holds the X keys and alert settings; python-dotenv reads it too, but
+# EnvironmentFile makes the values available even if the cwd changes. Never commit .env.
 EnvironmentFile=/home/pipeline/x/.env
+# Every model call runs the Claude Code CLI, logged in as User (run `claude login` once as
+# that user). If `claude` is not in /usr/local/bin or /usr/bin, add its folder here, or set
+# claude_code.binary in config.yaml to its full path.
+#Environment=PATH=/home/pipeline/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/home/pipeline/x/.venv/bin/python run_ops.py run
 # A held lock exits 2 (an overlapping run); do not treat that as a unit failure.
 SuccessExitStatus=2

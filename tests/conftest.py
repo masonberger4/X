@@ -12,29 +12,33 @@ import config
 import run_app
 import run_desktop
 import run_draft
+import run_evolve
 import run_feedback
 import run_ops
 import run_publish
 import run_queue
+import run_verify
 from approval_queue import store
 from db import Database
 from draft import drafter
 from ingest.base import Item
 
 # Every module that loads .env at runtime. Tests must not see the developer's .env
-# (backend choice, keys, PUBLISH_ENABLED ...), so load_dotenv is a no-op under pytest.
+# (drafting model, DB path, keys, PUBLISH_ENABLED ...), so load_dotenv is a no-op under pytest.
 _DOTENV_USERS = (
     config,
     drafter,
     run_app,
     run_desktop,
     run_draft,
+    run_evolve,
     run_feedback,
     run_ops,
     run_publish,
     run_queue,
+    run_verify,
 )
-_ENV_FROM_DOTENV = ("LLM_BACKEND", "DRAFT_MODEL", "DB_PATH", "PUBLISH_ENABLED")
+_ENV_FROM_DOTENV = ("DRAFT_MODEL", "DB_PATH", "PUBLISH_ENABLED")
 
 
 @pytest.fixture(autouse=True)
@@ -56,18 +60,27 @@ def _no_image_grader_network(monkeypatch):
     monkeypatch.setattr(grader, "call_grader", offline)
 
 
-# Test modules that exercise the CLI launchers themselves (with subprocess faked).
-_CLI_TEST_MODULES = ("test_claude_cli", "test_claude_cli_session")
+# Modules that test the CLI plumbing itself: they fake the process, not the launchers.
+_CLI_TEST_MODULES = {"test_claude_cli", "test_claude_cli_session"}
+
+
+@pytest.fixture
+def cli_plumbing():
+    """Ask for this to run the real claude_cli launchers (run_claude, run_session) with the
+    process faked below them (shutil.which, subprocess.Popen); _never_spawn_the_cli then
+    leaves them alone."""
 
 
 @pytest.fixture(autouse=True)
 def _never_spawn_the_cli(request, monkeypatch):
     """Every model call goes through the Claude Code CLI, which is on PATH on a developer's
-    machine: a test that forgot to fake its call must fail loudly, not spend the
-    subscription. The CLI's own tests fake subprocess instead and are left alone."""
+    machine: a test that forgot to fake its call must fail loudly, not spend the account's
+    usage. The CLI's own tests, and tests that ask for `cli_plumbing`, fake the process
+    instead and are left alone."""
     import claude_cli
 
-    if request.module.__name__.rsplit(".", 1)[-1] in _CLI_TEST_MODULES:
+    module = request.module.__name__.rsplit(".", 1)[-1]
+    if module in _CLI_TEST_MODULES or "cli_plumbing" in request.fixturenames:
         return
 
     def refuse(*a, **k):

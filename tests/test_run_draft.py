@@ -99,7 +99,7 @@ def test_run_draft_without_step1_tables_fails_cleanly(tmp_path, monkeypatch, cap
 
 
 def _run_with_capture(monkeypatch, argv):
-    """Run run_draft.main with a fake API call; return the system prompts it saw."""
+    """Run run_draft.main with a fake model call; return the system prompts it saw."""
     import run_draft
     from draft import drafter
 

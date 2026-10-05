@@ -7,7 +7,7 @@
   python run_ops.py prune --days N                 # ops-owned tables only
 
 Exit codes for `run`: 0 ok, 1 a required step failed (or a step carries --live), 2 the lock
-was held. Nothing here posts to X, calls the Anthropic API, or edits pipeline content:
+was held. Nothing here posts to X, calls Claude, or edits pipeline content:
 posting is manual only, so `run` refuses to start when any selected step in
 ops/config.yaml carries run_publish.py's live flag.
 """
@@ -68,6 +68,22 @@ def _db_path(args: argparse.Namespace) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def cli_status() -> tuple[str, str | None]:
+    """(binary, resolved path or None) for the Claude Code CLI named in the root config.yaml
+    `claude_code.binary`: every model call in the app runs through it."""
+    import claude_cli
+
+    try:
+        from config import load_config
+
+        cfg = load_config()
+    except Exception:  # config missing or unreadable: the CLI's default settings
+        cfg = {}
+    # The same settings run_claude reads, so health and every model call agree on the binary.
+    binary = str(claude_cli.cli_settings(cfg)["binary"])
+    return binary, shutil.which(binary) if binary else None
+
+
 def build_report(conn, cfg: dict[str, Any], db_path: Path, now: datetime) -> health.Report:
     th = health.Thresholds.from_config(cfg.get("health"))
     db_size_mb = db_path.stat().st_size / (1024 * 1024) if db_path.exists() else None
@@ -79,9 +95,8 @@ def build_report(conn, cfg: dict[str, Any], db_path: Path, now: datetime) -> hea
     except OSError:
         disk_free_mb = None
     env_present = {name: bool(os.environ.get(name)) for name in th.required_env}
-    backend = store.configured_backend()
     return health.run_all(
-        backend=backend,
+        cli=cli_status(),
         now=now,
         thresholds=th,
         source_runs=store.fetch_source_runs(conn),

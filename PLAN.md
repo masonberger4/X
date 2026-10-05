@@ -75,8 +75,10 @@ scoring rubric: which sources, formats, topics perform with Premium users.
 
 ## Stack
 Python 3.12, SQLite, feedparser, biopython (Entrez), httpx, FastAPI (queue UI),
-tweepy, cron or a small VPS. Anthropic API for scoring/drafting.
-Budget: ~$30–60/mo API + X Premium.
+tweepy, cron or a small VPS. Claude for every model call (scoring, drafting,
+checking), reached only through the Claude Code CLI logged in with the
+operator's account; no API key.
+Budget: that Claude account's plan + X Premium.
 
 ## Build order
 1. Ingest + score. Read the daily digest for a week before writing any posts.

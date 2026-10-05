@@ -12,14 +12,12 @@ render is what the draft keeps. Every grade is stored in `image_grades`
 The grader only ever changes LAYOUT and COLOUR. It cannot add, remove or edit a number,
 a label or a title: those come from the verified spec, and the knobs it may turn are
 clamped by `Style.apply` (a palette name outside `draft.chart.PALETTES` is ignored).
-`call_grader` is this module's single network call (the Anthropic API with an image block,
-or the Claude Code CLI reading the file with its Read tool when
-`models.backend: claude_code`). Settings: `images.grader` in draft/config.yaml.
+`call_grader` is this module's single network call: the Claude Code CLI reading the PNG
+with its Read tool. Settings: `images.grader` in draft/config.yaml.
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -34,7 +32,6 @@ from draft.settings import load_draft_config
 
 log = logging.getLogger(__name__)
 
-MAX_TOKENS = 1500
 DEFAULT_MIN_SCORE = 8
 DEFAULT_MAX_ITERATIONS = 4
 MAX_TEXT_ITEMS = 8  # flaws / fixes kept per grade
@@ -213,8 +210,8 @@ def build_user_prompt(visual: Chart | Table, style: Style, previous: ImageGrade 
 def call_grader(
     image_path: Path, system: str, user: str, model: str, effort: str | None = None
 ) -> str:
-    """The single network call: the PNG plus the prompts to the model, its reply text back.
-    On the claude_code backend the CLI reads the file itself (tools=["Read"])."""
+    """The single network call: the CLI reads the PNG itself with its Read tool and
+    answers the prompts; its reply text comes back."""
     from dotenv import load_dotenv
 
     load_dotenv()
@@ -224,41 +221,10 @@ def call_grader(
         cfg = root_config.load_config()
     except Exception:
         cfg = {}
-    if claude_cli.llm_backend(cfg) == claude_cli.CLAUDE_CODE:
-        prompt = f"{user}\n\nThe image is the file at: {image_path.resolve()}\nRead it first."
-        return claude_cli.run_claude(
-            prompt, system=system, model=model, cfg=cfg, tools=["Read"], effort=effort
-        )
-
-    import anthropic  # imported here so tests that mock this function never touch the SDK
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is not set (put it in .env)")
-    client = anthropic.Anthropic(api_key=api_key)
-    kwargs: dict[str, Any] = {}
-    if effort:
-        kwargs["output_config"] = {"effort": effort}
-    data = base64.standard_b64encode(image_path.read_bytes()).decode("ascii")
-    resp = client.messages.create(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        system=system,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": "image/png", "data": data},
-                    },
-                    {"type": "text", "text": user},
-                ],
-            }
-        ],
-        **kwargs,
+    prompt = f"{user}\n\nThe image is the file at: {image_path.resolve()}\nRead it first."
+    return claude_cli.run_claude(
+        prompt, system=system, model=model, cfg=cfg, tools=["Read"], effort=effort
     )
-    return "".join(getattr(block, "text", "") for block in resp.content)
 
 
 def _texts(value: Any) -> list[str]:
@@ -318,7 +284,7 @@ def grade_image(
     previous: ImageGrade | None = None,
     effort: str | None = None,
 ) -> ImageGrade:
-    """One grader call for one render. Raises GraderError / whatever the backend raises;
+    """One grader call for one render. Raises GraderError / whatever the CLI call raises;
     the caller (approval_queue.images) treats any failure as 'keep this render'."""
     user = build_user_prompt(visual, style, previous)
     text = call_grader(Path(image_path), SYSTEM_PROMPT, user, model, effort)

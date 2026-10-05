@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from ops import health
+from ops.config import load_ops_config
 from ops.health import Thresholds
 from ops.models import (
     Check,
@@ -195,24 +196,41 @@ def test_storage_thresholds():
 
 
 def test_env_lists_missing_names_and_never_values():
-    present = {"ANTHROPIC_API_KEY": True, "X_API_KEY": False}
-    c = health.check_env(present, ("ANTHROPIC_API_KEY", "X_API_KEY", "OTHER"))
+    present = {"X_BEARER_TOKEN": True, "X_API_KEY": False}
+    c = health.check_env(present, ("X_BEARER_TOKEN", "X_API_KEY", "OTHER"))
     assert c.status == "fail"
     assert c.details["missing"] == ["OTHER", "X_API_KEY"]
     assert "X_API_KEY" in c.summary
-    assert health.check_env(present, ("ANTHROPIC_API_KEY",)).status == "ok"
+    assert health.check_env(present, ("X_BEARER_TOKEN",)).status == "ok"
     # The check only ever sees booleans, so no value can leak into the report.
     assert all(isinstance(v, bool) for v in present.values())
 
 
-def test_env_does_not_require_the_api_key_on_the_claude_code_backend():
-    nothing = {"ANTHROPIC_API_KEY": False, "OTHER": True}
-    assert health.check_env(nothing, ("ANTHROPIC_API_KEY", "OTHER"), "api").status == "fail"
-    c = health.check_env(nothing, ("ANTHROPIC_API_KEY", "OTHER"), "claude_code")
-    assert c.status == "ok" and "claude_code" in c.summary
-    assert c.details["required"] == ["OTHER"]
-    assert health.required_env_for(("ANTHROPIC_API_KEY", "X"), "claude_code") == ["X"]
-    assert health.required_env_for(("ANTHROPIC_API_KEY", "X"), "api") == ["ANTHROPIC_API_KEY", "X"]
+def test_env_never_requires_an_api_key():
+    """Claude is reached only through the Claude Code CLI and its own login (the "cli" check),
+    so neither the defaults nor the shipped ops/config.yaml ask for an API credential: a
+    machine without one passes the env check. claude_cli.cli_env keeps both names out of the
+    CLI's environment, so requiring either would demand a key nothing may use."""
+    assert Thresholds().required_env == ()
+    c = health.check_env({}, Thresholds().required_env)
+    assert c.status == "ok" and c.details == {"required": [], "missing": []}
+    shipped = Thresholds.from_config(load_ops_config()["health"]).required_env
+    assert not {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} & set(shipped)
+
+
+def test_cli_check_is_ok_with_a_path_and_fails_without_one():
+    """Every model call runs through the Claude Code CLI: found on PATH is ok, not found fails
+    and says how to fix it. Only the binary's name and resolved path are reported."""
+    ok = health.check_cli("claude", "/usr/local/bin/claude")
+    assert (ok.name, ok.status) == ("cli", "ok")
+    assert "/usr/local/bin/claude" in ok.summary
+    assert ok.details == {"binary": "claude", "path": "/usr/local/bin/claude"}
+
+    missing = health.check_cli("claude-nightly", None)  # claude_code.binary names it
+    assert (missing.name, missing.status) == ("cli", "fail")
+    assert "'claude-nightly' not found on PATH" in missing.summary
+    assert "claude login" in missing.summary
+    assert missing.details == {"binary": "claude-nightly", "path": None}
 
 
 # ---- report -------------------------------------------------------------------
@@ -232,8 +250,9 @@ def test_bad_status_rejected():
         Check("a", "meh", "")
 
 
-def test_run_all_and_format():
-    report = health.run_all(
+def healthy_report(**kw) -> Report:
+    """health.run_all over a healthy pipeline; keyword arguments replace its inputs."""
+    inputs = dict(
         now=NOW,
         thresholds=TH,
         source_runs=[SourceRun("a", last_run_at=ago(1))],
@@ -243,8 +262,14 @@ def test_run_all_and_format():
         latest_backup=(Path("pipeline-x.sqlite"), ago(1)),
         db_size_mb=1.0,
         disk_free_mb=10_000,
-        env_present={"ANTHROPIC_API_KEY": True},
+        env_present={},
     )
+    inputs.update(kw)
+    return health.run_all(**inputs)
+
+
+def test_run_all_and_format():
+    report = healthy_report()
     assert isinstance(report, Report)
     assert report.overall == "ok"
     names = [c.name for c in report.checks]
@@ -265,6 +290,24 @@ def test_run_all_and_format():
     assert "[skip] publish" in text
     d = report.to_dict()
     assert d["overall"] == "ok" and d["checks"][0]["name"] == "env"
+
+
+def test_run_all_checks_the_cli_only_when_given_one():
+    """run_ops.build_report passes (binary, shutil.which(binary)); without it there is no
+    "cli" row at all, never a guessed one."""
+    assert healthy_report().check("cli") is None
+
+    found = healthy_report(cli=("claude", "/usr/local/bin/claude"))
+    assert [c.name for c in found.checks] == ["env", "cli"] + [
+        c.name for c in healthy_report().checks[1:]
+    ]
+    assert found.check("cli").status == "ok" and found.overall == "ok"
+
+    missing = healthy_report(cli=("claude", None))
+    assert missing.check("cli").status == "fail"
+    assert missing.overall == "fail"  # nothing is scored, drafted or verified without it
+    assert "[fail] cli" in health.format_report(missing)
+    assert missing.to_dict()["checks"][1]["details"] == {"binary": "claude", "path": None}
 
 
 def test_thresholds_from_config_ignores_unknown_keys():

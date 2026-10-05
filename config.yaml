@@ -20,10 +20,11 @@ ncbi:
   tool: cancer-news-pipeline
 
 models:
+  # Every model below runs through the Claude Code CLI (`claude_code:` below), logged
+  # in with your account; there is no API key and no other backend.
   # Scoring is analyst triage over ~150 items/day: it needs reliable drug,
   # mechanism and sponsor knowledge (Haiku misidentified a T-cell engager as a
-  # menin inhibitor). Opus 5.5 on the claude_code backend; use claude-haiku-4-5
-  # to cut cost on the API backend.
+  # menin inhibitor), so it runs on Opus 5.5.
   scorer: claude-opus-5-5
   scorer_effort: low              # low | medium | high | xhigh | max; blank = model default
   # Drafting writes the posts the account is judged on. DRAFT_MODEL in .env
@@ -38,25 +39,17 @@ models:
   # Story linking (run_score.py, see `linking:` below): groups clusters that
   # report the same event. Headline matching, so a small model is enough.
   linker: claude-haiku-4-5-20251001
-  # How the scorer and drafter reach Claude. "api" (default) calls the Anthropic
-  # API with ANTHROPIC_API_KEY. "claude_code" runs the Claude Code CLI in print
-  # mode instead (see README "Headless backend"); LLM_BACKEND env overrides.
-  backend: api
 
-claude_code:                      # only used when models.backend is claude_code
+claude_code:                      # how every model call reaches Claude (claude_cli.py)
   binary: claude                  # CLI on PATH; it must be logged in (`claude login`)
   timeout_seconds: 600            # per call (a swarm cell can run several minutes)
   extra_args: []                  # appended verbatim, e.g. ["--fallback-model", "sonnet"]
 
 scoring:
-  batch_size: 10                  # clusters per API call
-  max_tokens: 4096
+  batch_size: 10                  # clusters per CLI call
   threshold: 30                   # total (0-50) needed to appear in the digest
   max_retries: 5
   backoff_seconds: 2              # base for exponential backoff
-  # Fable/Mythos models reject forced tool_choice; set false to fall back to
-  # "auto" + a prompt instruction for those models.
-  force_tool_choice: true
   abstract_max_chars: 2500        # truncate abstracts sent to the model
 
 prefilter:
@@ -151,7 +144,6 @@ linking:
   window_hours: 48
   max_clusters: 200               # newest first; one call per run
   abstract_chars: 300             # snippet per cluster in the prompt
-  max_tokens: 4000
   # effort: low                   # low | medium | high | xhigh | max; only for
                                   # models that take an effort parameter (not Haiku 4.5)
 
