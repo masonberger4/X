@@ -472,3 +472,21 @@ working folder may be missing or half-written. Check what is there, then finish 
 The stage's instructions, again:
 
 {original}"""
+
+
+def fresh_session_prompt(stage: str, original: str) -> str:
+    """A stage's instructions for a new session taking a piece over from one the CLI no
+    longer has (its stored conversation was cleaned up): what the old session knew is gone,
+    what it made is in the working folder, so the new one reads that first."""
+    return f"""PICKING UP A PIECE
+
+This piece was started in an earlier session that can no longer be resumed, so you are
+taking it over in a new one. Everything that session made is in your working folder:
+{FACTBASE_FILE} and {RESEARCH_FILE} (its research), and once the piece was written
+{POSTS_DIR}/, {CARDS_DIR}/, {PIECE_FILE} and {FACTCHECK_FILE} (the cold fact-check log).
+Read every one of them that exists before you do anything else: they are the piece's own
+work so far, and the fact base is what it stands on. Read the reference pieces' handoff
+docs too if this stage needs them. Then do this stage ({stage}).
+The stage's instructions, again:
+
+{original}"""

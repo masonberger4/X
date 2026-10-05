@@ -613,6 +613,38 @@ def test_a_cli_that_exits_without_a_result_says_so(fake, workspace):
     assert claude_cli.session_started(transcript, SID)
 
 
+def test_a_resume_of_a_session_the_cli_no_longer_has_is_lost(fake, workspace):
+    """Claude Code cleans up old sessions (cleanupPeriodDays); a --resume of one prints
+    this and exits 1. No later --resume can work, which session_lost tells apart from a
+    run that merely stopped."""
+    fake.program(stderr=f"No conversation found with session ID: {SID}\n", exit=1)
+    r = run(workspace, resume=True)
+    assert not r.ok and r.subtype == "no_result" and r.returncode == 1
+    assert claude_cli.session_lost(r)
+    # said in an error result instead, it is the same verdict
+    said = claude_cli.SessionResult(
+        session_id=SID,
+        ok=False,
+        subtype="error_during_execution",
+        text=f"No conversation found with session ID: {SID}",
+    )
+    assert claude_cli.session_lost(said)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        claude_cli.SessionResult(session_id=SID, ok=False, subtype="killed"),
+        claude_cli.SessionResult(
+            session_id=SID, ok=False, subtype="no_result", stderr_tail="Error: Invalid API key"
+        ),
+        claude_cli.SessionResult(session_id=SID, ok=True, subtype="success"),
+    ],
+)
+def test_a_session_that_stopped_for_another_reason_is_not_lost(result):
+    assert not claude_cli.session_lost(result)
+
+
 def test_a_stage_past_its_time_limit_is_killed_and_can_be_resumed(fake, workspace):
     fake.program(lines=[init_event()], sleep=60)
     transcript = workspace / "session.ndjson"

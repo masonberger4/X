@@ -803,10 +803,17 @@ environment.
 `score`, `skip_when_busy` so a long session sits a run out instead of holding the
 others back, along with the steps its own run still has to come behind it,
 `JobManager.queued_behind`) acts on the editor's requests and starts a new piece when
-`auto.max_new_per_day` (in any 24 hours) and `auto.min_hours_between` allow and no
-piece waits at the checkpoint; `studio_now` and `studio_resume` are the studio
-page's manual buttons. One studio run at a time (`studio_pieces/.studio.lock`). A
-killed run leaves the piece `interrupted`; Resume carries on in the same session.
+`auto.max_new_per_day` (per calendar day in the root `timezone:`, the clock the run
+times are set in) and `auto.min_hours_between` allow, no piece waits at the checkpoint
+and a card browser was found (without one the step fails rather than start a piece
+whose cards cannot be drawn); `studio_now` and `studio_resume` are the studio page's
+manual buttons. One studio run at a time (`studio_pieces/.studio.lock`). A killed run
+leaves the piece `interrupted`: as soon as a studio page shows it or the panel sees the
+run end, while no studio run holds the lock (`studio/runner.py:settle_stopped`). Resume
+carries on in the same session; a session Claude Code has cleaned up (after 30 days by
+default) is replaced by a fresh one that reads the piece's files first. Each stage is
+told the date and the playbook as they are when it starts. A piece whose folder is gone
+fails and says so, and the run goes on.
 Tables: `studio_pieces`, `studio_runs`, `studio_topics`, `studio_scans`,
 `studio_radar_topics`, `studio_catalysts`, `studio_playbook_versions`,
 `studio_manual_metrics`.

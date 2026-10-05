@@ -32,6 +32,8 @@ log = logging.getLogger(__name__)
 
 TRANSCRIPT = "session.ndjson"
 LOG_FILE = "session.log"
+# After folder_missing's words, for a piece that stopped (a finished one is revised instead).
+PUT_BACK = "; put it back, then Resume, or discard the piece"
 
 Launcher = Callable[..., claude_cli.SessionResult]
 
@@ -86,7 +88,13 @@ def _run_stage(
 ) -> claude_cli.SessionResult:
     """One CLI invocation. Records a studio_runs row around it. A CLI that cannot run at
     all leaves the piece interrupted (so it can be resumed at once) and the error goes up,
-    so the step shows as failed."""
+    so the step shows as failed. A piece folder that is gone or cannot be written comes
+    back as a failed result instead: that is this piece's problem, and the run goes on to
+    the editor's other requests. A session the CLI no longer has is taken over by a fresh
+    one that reads the piece's files (`fresh_session`)."""
+    # The session as stored now: an earlier run in this call may have moved the piece to a
+    # fresh one, and the caller's copy of the piece predates that.
+    piece = S.get_piece(ctx.conn, piece.id) or piece
     workspace = Path(piece.workspace)
     run_id = S.start_run(ctx.conn, piece.id, stage)
     _write_log(workspace, f"=== {stage} ===")
@@ -131,6 +139,27 @@ def _run_stage(
         S.finish_run(ctx.conn, run_id, outcome="error", detail=str(exc))
         _fail(ctx, piece, stage, f"the CLI could not run: {exc}", interrupted=True)
         raise
+    except OSError as exc:
+        # The transcript could not be opened or written: the folder was deleted, the data
+        # folder moved, the disk is full. Raised, it would leave the piece mid-stage and end
+        # the run before the editor's other requests and the new piece.
+        message = (
+            folder_missing(piece) + PUT_BACK
+            if not workspace.is_dir()
+            else f"could not write the session's files: {exc}"
+        )
+        S.finish_run(ctx.conn, run_id, outcome="error", detail=message)
+        return claude_cli.SessionResult(
+            session_id=piece.session_id, ok=False, subtype="error", terminal_reason=message
+        )
+    if not first and claude_cli.session_lost(result):
+        S.finish_run(
+            ctx.conn,
+            run_id,
+            outcome="session_lost",
+            detail=f"the CLI no longer has session {piece.session_id}",
+        )
+        return fresh_session(ctx, piece, stage, prompt_text)
     say(
         f"stage ended: {result.subtype or ('success' if result.ok else 'error')} after "
         f"{result.num_turns} turns"
@@ -145,6 +174,44 @@ def _run_stage(
         duration_ms=result.duration_ms,
     )
     return result
+
+
+def fresh_session(
+    ctx: Context, piece: S.Piece, stage: str, prompt_text: str
+) -> claude_cli.SessionResult:
+    """Run a stage in a new session because the CLI no longer has the piece's own (its
+    stored conversation was cleaned up, `claude_cli.session_lost`). Every later --resume
+    would fail the same way, so the piece takes a new session id for good; the new session
+    gets the standing instructions again and reads the piece's files before the stage.
+    The piece's log and its runs say so."""
+    old, new = piece.session_id, str(uuid.uuid4())
+    S.update_piece(
+        ctx.conn,
+        piece.id,
+        session_id=new,
+        meta={"lost_sessions": [*_lost_sessions(piece), old]},
+    )
+    note = (
+        f"the CLI no longer has session {old} (Claude Code clears old sessions); "
+        f"a fresh session {new} takes the piece over from its files"
+    )
+    _write_log(Path(piece.workspace), note)
+    ctx.echo(f"[piece {piece.id} {stage}] {note}")
+    log.warning("piece %s: %s", piece.id, note)
+    piece = S.get_piece(ctx.conn, piece.id) or piece
+    return _run_stage(ctx, piece, stage, P.fresh_session_prompt(stage, prompt_text), first=True)
+
+
+def _lost_sessions(piece: S.Piece) -> list[str]:
+    ids = piece.meta.get("lost_sessions")
+    return [str(i) for i in ids] if isinstance(ids, list) else []
+
+
+def folder_missing(piece: S.Piece) -> str:
+    """What the piece's page says when its folder is gone ("" while it is there)."""
+    if Path(piece.workspace).is_dir():
+        return ""
+    return f"the piece's folder {piece.workspace} is missing"
 
 
 def _fail(
@@ -276,7 +343,7 @@ def write(ctx: Context, piece: S.Piece, note: str = "", *, resumed_reason: str =
 def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
     # A queue draft that was approved, rejected or posted since the editor asked cannot be
     # replaced: say so now rather than after an hour of revising.
-    blocked = ctx.revisable(piece) if ctx.revisable else ""
+    blocked = (ctx.revisable(piece) if ctx.revisable else "") or folder_missing(piece)
     if blocked:
         S.update_piece(ctx.conn, piece.id, error=blocked, request="", request_note="")
         _write_log(Path(piece.workspace), f"!!! revise not started: {blocked}")
@@ -459,6 +526,9 @@ def resume_interrupted(ctx: Context, piece: S.Piece, note: str = "") -> Outcome:
     """Pick a failed or interrupted piece up where it stopped."""
     stage = str(piece.meta.get("failed_stage") or "")
     reason = piece.error or "the run stopped"
+    missing = folder_missing(piece)
+    if missing:  # nothing to resume from, and no session can be recorded there
+        return _fail(ctx, piece, stage or "write", missing + PUT_BACK)
     if stage == "research":
         started = claude_cli.session_started(Path(piece.workspace) / TRANSCRIPT, piece.session_id)
         if not started:
@@ -481,4 +551,12 @@ def resume_interrupted(ctx: Context, piece: S.Piece, note: str = "") -> Outcome:
         # The editor changed the queue draft while the piece was stopped: polishing alone
         # would put the session's text back over it, so the session gets the changes first.
         return revise(ctx, piece, "")
+    # Stopped while polishing a revision (or between the queue and `ready`) and the draft
+    # it would replace was approved or posted meanwhile: the queue would refuse the result,
+    # so no polish round is spent on it. The piece stays where it was and says why.
+    blocked = ctx.revisable(piece) if ctx.revisable else ""
+    if blocked:
+        S.update_piece(ctx.conn, piece.id, error=blocked)
+        _write_log(Path(piece.workspace), f"!!! polish not resumed: {blocked}")
+        return Outcome(stage=piece.stage, message=f"not resumed: {blocked}")
     return polish(ctx, piece)

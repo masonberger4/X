@@ -35,6 +35,11 @@ are the runs page's, like every other step. Without a panel the request waits fo
 next automatic studio run. The one write elsewhere is the performance page's "add the
 link", which the panel does through step 3's own module (panel/publishing.py:add_head_link)
 when it wires this router in.
+
+A run that was stopped (the Stop button, a reboot, a crash) leaves its piece in a running
+stage. The pages that show or act on such a piece first ask studio/runner.py's
+settle_stopped: when no studio run holds the studio lock, the piece is `interrupted` at
+once, so Resume and discard are there without waiting for the next studio run.
 """
 
 from __future__ import annotations
@@ -73,6 +78,7 @@ STEP_RESUME = "studio_resume"
 STEP_SCAN = "studio_scan_now"
 SOON_DAYS = 30  # the calendar's "coming up" section; later ones are listed below it
 STEP_LEARN = "studio_learn_now"
+STUDIO_CLI = "run_studio.py"  # the script of every studio step (panel/app.py:_after_run)
 LOG_TAIL_LINES = 400
 LOG_TAIL_BYTES = 4_000_000
 
@@ -161,6 +167,37 @@ def _piece_or_404(conn: Any, piece_id: int) -> S.Piece:
     piece = S.get_piece(conn, piece_id)
     if piece is None:
         raise HTTPException(404, "no such piece")
+    return piece
+
+
+def _settle(conn: Any) -> list[S.Piece]:
+    """runner.settle_stopped: the pieces a stopped run left mid-stage, now interrupted
+    ([] while a studio run is alive). Never raises: a page stays up whatever the lock
+    file or the settings say."""
+    from studio import runner
+
+    try:
+        return runner.settle_stopped(conn, load_studio_config())
+    except Exception:
+        log.warning("could not check for a stopped studio run", exc_info=True)
+        return []
+
+
+def settle_stopped() -> list[S.Piece]:
+    """_settle on its own connection, for the panel to call when a studio run ends."""
+    conn = S.connect(_db_path())
+    try:
+        return _settle(conn)
+    finally:
+        conn.close()
+
+
+def _current_piece(conn: Any, piece_id: int) -> S.Piece:
+    """The piece as the editor should see it: one in a running stage whose run is gone is
+    interrupted first, so the page and the buttons treat it as stopped."""
+    piece = _piece_or_404(conn, piece_id)
+    if piece.stage in S.RUNNING_STAGES and _settle(conn):
+        piece = _piece_or_404(conn, piece_id)
     return piece
 
 
@@ -253,6 +290,8 @@ def studio_index(request: Request, conn: Conn, flash: str = ""):
     except (OSError, ValueError):
         library = {}
     pieces = S.list_pieces(conn, 40)
+    if any(p.stage in S.RUNNING_STAGES for p in pieces) and _settle(conn):
+        pieces = S.list_pieces(conn, 40)
     return templates.TemplateResponse(
         request,
         "studio_index.html",
@@ -614,7 +653,7 @@ def _queue_draft(piece: S.Piece) -> Any:
 
 @router.get("/studio/{piece_id}", response_class=HTMLResponse)
 def studio_piece(request: Request, piece_id: int, conn: Conn, flash: str = ""):
-    piece = _piece_or_404(conn, piece_id)
+    piece = _current_piece(conn, piece_id)
     ws = Path(piece.workspace)
     posts = _posts(ws)
     cards = _cards(ws)
@@ -657,7 +696,7 @@ def studio_card(piece_id: int, n: int, conn: Conn):
 
 @router.post("/studio/{piece_id}/continue")
 async def studio_continue(request: Request, piece_id: int, conn: Conn):
-    piece = _piece_or_404(conn, piece_id)
+    piece = _current_piece(conn, piece_id)
     if piece.stage != S.STAGE_RESEARCH_READY:
         return _redirect(f"/studio/{piece_id}", f"the piece is {piece.stage}, not waiting")
     form = await _form(request)
@@ -667,7 +706,7 @@ async def studio_continue(request: Request, piece_id: int, conn: Conn):
 
 @router.post("/studio/{piece_id}/revise")
 async def studio_revise(request: Request, piece_id: int, conn: Conn):
-    piece = _piece_or_404(conn, piece_id)
+    piece = _current_piece(conn, piece_id)
     form = await _form(request)
     note = _first(form, "note")
     if not note:
@@ -685,7 +724,7 @@ async def studio_revise(request: Request, piece_id: int, conn: Conn):
 
 @router.post("/studio/{piece_id}/resume")
 async def studio_resume(request: Request, piece_id: int, conn: Conn):
-    piece = _piece_or_404(conn, piece_id)
+    piece = _current_piece(conn, piece_id)
     if piece.stage not in (S.STAGE_FAILED, S.STAGE_INTERRUPTED):
         return _redirect(f"/studio/{piece_id}", f"the piece is {piece.stage}; nothing to resume")
     form = await _form(request)
@@ -695,7 +734,7 @@ async def studio_resume(request: Request, piece_id: int, conn: Conn):
 
 @router.post("/studio/{piece_id}/discard")
 def studio_discard(piece_id: int, conn: Conn):
-    piece = _piece_or_404(conn, piece_id)
+    piece = _current_piece(conn, piece_id)
     if piece.stage in S.RUNNING_STAGES:
         return _redirect(f"/studio/{piece_id}", "stop the run on the runs page first")
     S.update_piece(conn, piece_id, stage=S.STAGE_DISCARDED, request="", request_note="")

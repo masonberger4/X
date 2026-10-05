@@ -24,10 +24,11 @@ Routes owned here:
   POST /publishing/order  save the approved page's publishing order (schedule.position)
   POST /publishing/caps   save max_posts_per_day / min_gap_minutes into publish/config.yaml
 
-The studio's pages (studio/web.py: /studio, a piece's page, the playbook, the performance
-page) are included too; their buttons start the studio_now / studio_resume /
-studio_learn_now steps through the same runs, and the performance page's "add the post's
-link" goes through panel/publishing.py:add_head_link.
+The studio's pages (studio/web.py: /studio, a piece's page, the playbook, the radar, the
+performance page) are included too; their buttons start the studio_now / studio_resume /
+studio_scan_now / studio_learn_now steps through the same runs, the performance page's
+"add the post's link" goes through panel/publishing.py:add_head_link, and when a studio
+run ends, stopped or not, a piece it left mid-stage is marked interrupted (`_after_run`).
 
 The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., /voice),
 so the operator has one URL for the whole workflow. Everything else this app shows is
@@ -73,7 +74,7 @@ from panel import feed, views
 from panel import publishing as publish_order_store
 from panel.autorun import LEADER_SUFFIX, AutoRunner
 from panel.frozen import data_dir, step_interpreter
-from panel.jobs import JobError, JobManager
+from panel.jobs import Job, JobError, JobManager
 from publish import scheduler as publish_scheduler
 from score import editorial
 from studio import web as studio_web
@@ -692,8 +693,18 @@ def _start_studio(steps: list[str]) -> str:
     return f"started run {job.id} ({', '.join(job.steps)}); its log is on the runs page"
 
 
+def _after_run(job: Job) -> None:
+    """A run of run_studio.py has ended, however it ended (finished, stopped on the runs
+    page, closed with the desktop window, cut off by its step's time limit): a piece it
+    left mid-stage is interrupted now, so its page offers Resume and discard at once rather
+    than after the next studio run (studio/runner.py:settle_stopped)."""
+    if any(len(s.argv) > 1 and Path(s.argv[1]).name == studio_web.STUDIO_CLI for s in job.plan):
+        studio_web.settle_stopped()
+
+
 def _adopt_studio_routes() -> None:
     """The studio's pages (studio/web.py), rendered with the shared layout and run bar."""
+    JOBS.on_finish = _after_run
     studio_web.configure(
         start_steps=_start_studio,
         queue_templates=QUEUE_TEMPLATES_DIR,

@@ -531,7 +531,8 @@ def studio_hold(conn: sqlite3.Connection, row: DraftRow) -> str:
         return (
             f"the studio is working on piece {piece_id} right now ({r['stage']}); when it "
             "finishes it replaces this draft's text and cards. Wait for it, or stop the run on "
-            "the runs page first (a piece whose run died is let go by the next studio run)"
+            "the runs page first (a piece whose run was stopped is let go as soon as the panel "
+            f"sees the run end, or its page /studio/{piece_id} is opened)"
         )
     if r["request"]:
         return (

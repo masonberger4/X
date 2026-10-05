@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import functools
 import json
+import shutil
 import sqlite3
 import struct
 import uuid
@@ -164,13 +165,18 @@ STAGE_HEADS = (
     ("REVISION", "revise"),
 )
 RESUME_HEAD = "Your previous run of this stage was interrupted"
+FRESH_HEAD = "PICKING UP A PIECE"  # a new session taking over from a lost one
 AGAIN = "The stage's instructions, again:"
 
 
 def stage_of(prompt: str) -> tuple[str, bool]:
-    """The stage a prompt asks for, and whether it is the after-an-interruption wrapper."""
-    resumed = prompt.startswith(RESUME_HEAD)
-    body = prompt.split(AGAIN, 1)[1].lstrip() if resumed else prompt
+    """The stage a prompt asks for, and whether it is the after-an-interruption wrapper
+    (on its own, or inside the wrapper of a fresh session that took a piece over)."""
+    resumed = prompt.startswith(RESUME_HEAD) or (
+        prompt.startswith(FRESH_HEAD) and RESUME_HEAD in prompt
+    )
+    wrapped = prompt.startswith((RESUME_HEAD, FRESH_HEAD))
+    body = prompt.rsplit(AGAIN, 1)[1].lstrip() if wrapped else prompt
     for head, stage in STAGE_HEADS:
         if body.startswith(head):
             return stage, resumed
@@ -1885,3 +1891,189 @@ def test_a_layout_problem_the_browser_finds_goes_back_to_the_session(rig):
     assert "text runs off the card or within 20px of its edge" in polish.prompt
     assert "card card_1.html: " in polish.prompt
     assert rig.get(piece.id).meta["warnings"] == []
+
+
+# ---- a piece whose folder is gone --------------------------------------------------
+
+
+def _gone(piece: S.Piece) -> str:
+    """Remove the piece's folder (deleted by hand, or the data folder moved)."""
+    shutil.rmtree(piece.workspace)
+    return f"the piece's folder {piece.workspace} is missing"
+
+
+def test_a_stage_whose_folder_is_gone_fails_the_piece_and_raises_nothing(rig):
+    """The transcript cannot be opened: the piece fails and says why, its run is closed,
+    and nothing is raised, so the run goes on to the editor's other requests."""
+    piece = rig.new_piece(checkpoint=True)
+    SS.research(rig.ctx, piece)
+    missing = _gone(piece)
+
+    out = SS.write(rig.ctx, rig.get(piece.id), "Lead with the durability.")
+
+    p = rig.get(piece.id)
+    assert out.stage == p.stage == S.STAGE_FAILED
+    assert p.error == out.message == missing + SS.PUT_BACK
+    assert p.meta["failed_stage"] == "write"
+    last = S.list_runs(rig.conn, piece.id)[-1]
+    assert (last.stage, last.outcome, last.detail) == ("write", "error", missing + SS.PUT_BACK)
+    assert last.finished_at is not None
+
+
+def test_a_transcript_that_cannot_be_written_fails_the_piece_with_the_reason(rig):
+    piece = rig.new_piece(checkpoint=True)
+    SS.research(rig.ctx, piece)
+    rig.cli.fail("write", OSError(28, "No space left on device"))
+
+    out = SS.write(rig.ctx, rig.get(piece.id))
+
+    assert out.stage == S.STAGE_FAILED
+    assert out.message == (
+        "could not write the session's files: [Errno 28] No space left on device"
+    )
+
+
+def test_resuming_a_piece_whose_folder_is_gone_runs_no_session(rig):
+    rig.cli.fail("write", stopped("killed"))
+    piece = rig.new_piece()
+    SS.research(rig.ctx, piece)
+    missing = _gone(piece)
+    calls = len(rig.cli.calls)
+
+    out = SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+
+    p = rig.get(piece.id)
+    assert len(rig.cli.calls) == calls
+    assert (out.stage, p.stage, p.error) == (
+        S.STAGE_FAILED,
+        S.STAGE_FAILED,
+        missing + SS.PUT_BACK,
+    )
+    assert p.meta["failed_stage"] == "write"
+
+
+def test_revising_a_piece_whose_folder_is_gone_leaves_it_in_the_queue(rig):
+    piece = rig.ready_piece()
+    missing = _gone(piece)
+    calls = len(rig.cli.calls)
+
+    out = SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
+
+    p = rig.get(piece.id)
+    assert len(rig.cli.calls) == calls
+    assert (out.stage, p.stage, p.error) == (S.STAGE_READY, S.STAGE_READY, missing)
+    assert out.message == f"revision not started: {missing}"
+    assert rig.draft(p).status == queue_store.STATUS_PENDING
+
+
+# ---- Resume on a polish the queue would refuse ---------------------------------------
+
+
+def test_resuming_a_polish_whose_draft_was_approved_meanwhile_spends_no_round(rig):
+    """A revision's polish round was stopped, so the old draft stayed pending; the editor
+    approved it, then pressed Resume. The queue would refuse the polished piece, so no round
+    runs (each one could take an hour) and the piece says why."""
+    rig.ctx.revisable = functools.partial(ingest.revise_blocker, rig.conn)
+    piece = rig.ready_piece()
+    rig.cli.fail("polish", stopped("killed"))
+    rig.cli.work["revise"] = _rewrite_to_one_post
+    SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
+    stuck = rig.get(piece.id)
+    assert (stuck.stage, stuck.meta["failed_stage"]) == (S.STAGE_INTERRUPTED, "polish")
+    queue_store.approve(rig.conn, stuck.draft_id)
+    calls = len(rig.cli.calls)
+
+    out = SS.resume_interrupted(rig.ctx, stuck)
+
+    p = rig.get(piece.id)
+    blocked = f"draft {p.draft_id} is approved, not pending; reopen it in the queue before revising"
+    assert len(rig.cli.calls) == calls
+    assert (out.stage, p.stage, p.error) == (S.STAGE_INTERRUPTED, S.STAGE_INTERRUPTED, blocked)
+    assert out.message == f"not resumed: {blocked}"
+    assert p.meta["failed_stage"] == "polish"
+    # reopened, the same Resume polishes and puts the revision in the queue
+    queue_store.reopen(rig.conn, p.draft_id)
+    assert SS.resume_interrupted(rig.ctx, rig.get(piece.id)).stage == S.STAGE_READY
+    assert rig.cli.stages()[calls:] == ["polish"]
+    assert rig.draft(rig.get(piece.id)).draft.thread == [POST_SINGLE]
+
+
+# ---- a session the CLI no longer has -----------------------------------------------
+
+
+def lost(session_id: str, *, where: str = "stderr") -> claude_cli.SessionResult:
+    """How a --resume of a session the CLI has cleaned up comes back: the CLI says so (on
+    stderr with no result line, or in an error result) and exits 1."""
+    said = f"No conversation found with session ID: {session_id}"
+    return claude_cli.SessionResult(
+        session_id=session_id,
+        ok=False,
+        subtype="no_result" if where == "stderr" else "error_during_execution",
+        text="" if where == "stderr" else said,
+        terminal_reason="CLI exited 1",
+        returncode=1,
+        stderr_tail=f"{said}\n" if where == "stderr" else "",
+    )
+
+
+@pytest.mark.parametrize("where", ["stderr", "result"])
+def test_a_lost_session_is_taken_over_by_a_fresh_one_that_reads_the_files(rig, where):
+    """Write was stopped; weeks later Resume finds the CLI has cleaned the session up. A
+    --resume could never work again, so a new session takes the piece over: the standing
+    instructions again, a prompt that has it read the piece's files first, and a new id
+    the piece keeps. The log and the runs say so."""
+    rig.cli.fail("write", stopped("killed"))
+    piece = rig.new_piece()
+    SS.research(rig.ctx, piece)
+    old = piece.session_id
+    rig.cli.fail("write", lost(old, where=where))
+
+    out = SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+
+    assert out.stage == S.STAGE_READY
+    p = rig.get(piece.id)
+    assert p.session_id != old and uuid.UUID(p.session_id)
+    assert p.meta["lost_sessions"] == [old]
+    refused, fresh = rig.cli.of("write")[-2:]
+    assert (refused.kw["session_id"], refused.kw["resume"]) == (old, True)
+    assert (fresh.kw["session_id"], fresh.kw["resume"], fresh.kw["system"]) == (
+        p.session_id,
+        False,
+        SYSTEM,
+    )
+    assert fresh.prompt.startswith(FRESH_HEAD) and fresh.resumed
+    for name in (P.FACTBASE_FILE, P.PIECE_FILE, P.FACTCHECK_FILE):
+        assert name in fresh.prompt.split(AGAIN)[0]
+    # the later stages resume the new session, not the lost one
+    polish = rig.cli.of("polish")[-1]
+    assert (polish.kw["session_id"], polish.kw["resume"]) == (p.session_id, True)
+    runs = [(r.stage, r.outcome) for r in S.list_runs(rig.conn, piece.id)]
+    assert runs[-3:] == [("write", "session_lost"), ("write", "ok"), ("polish", "ok")]
+    note = f"the CLI no longer has session {old}"
+    assert note in rig.log(p) and any(note in line for line in rig.echoed)
+
+
+def test_a_revision_of_a_lost_session_is_written_by_a_fresh_one(rig):
+    piece = rig.ready_piece()
+    rig.cli.fail("revise", lost(piece.session_id))
+    rig.cli.work["revise"] = _rewrite_to_one_post
+
+    out = SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
+
+    assert out.stage == S.STAGE_READY
+    fresh = rig.cli.of("revise")[-1]
+    assert fresh.prompt.startswith(FRESH_HEAD) and fresh.kw["resume"] is False
+    assert "Shorter." in fresh.prompt
+    assert rig.draft(rig.get(piece.id)).draft.thread == [POST_SINGLE]
+
+
+def test_a_stage_stopped_for_another_reason_resumes_the_same_session(rig):
+    """Only the CLI's own "no conversation found" starts a new session: a stage that was
+    killed, ran out of turns or failed otherwise keeps its session for Resume."""
+    piece = rig.new_piece(checkpoint=True)
+    SS.research(rig.ctx, piece)
+    for result in (stopped("killed"), stopped("no_result"), stopped("")):
+        rig.cli.fail("write", result)
+        SS.write(rig.ctx, rig.get(piece.id))
+        assert rig.get(piece.id).session_id == piece.session_id
+    assert not any(c.prompt.startswith(FRESH_HEAD) for c in rig.cli.calls)

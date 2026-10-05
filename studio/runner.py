@@ -6,8 +6,9 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+import time
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,9 @@ SCAN_LOCK_NAME = ".studio_scan.lock"
 RADAR_IN_BRIEF = 8  # radar topics an open piece is shown
 COMING_UP_IN_BRIEF = 20  # catalysts an open piece is shown
 LEARN_LOCK_NAME = ".studio_learn.lock"
+# How long a run waits for the studio lock before it takes another run to be in progress
+# (a page checking for a stopped run holds it for a moment: settle_stopped).
+LOCK_WAIT_SECONDS = 10.0
 
 _STAGE_OF = {
     S.STAGE_RESEARCHING: "research",
@@ -287,11 +291,14 @@ def make_context(
 
     root_cfg = _root_config()
     library = A.load_angles()
-    playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
-    today, tzname = _today()
     evidence = measure_quietly(conn, cfg)
 
     def brief_for(piece: S.Piece) -> P.Brief:
+        # The date and the playbook as they are when this stage starts, not when the run
+        # did: one run acts on every request before it starts a piece, hours of sessions
+        # that can cross midnight, and the editor may save the playbook meanwhile.
+        today, tzname = _today()
+        playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
         brief = build_brief(
             conn,
             cfg,
@@ -327,7 +334,8 @@ def make_context(
         # Asked by every revision, a resumed one too, before its session runs: a draft
         # approved or rejected meanwhile would refuse the result after an hour's work.
         revisable=lambda piece: ingest.revise_blocker(conn, piece),
-        harvest=lambda piece, info: _harvest(conn, cfg, piece, info, today),
+        # The catalysts and radar topic research found, dated by the day research ended.
+        harvest=lambda piece, info: _harvest(conn, cfg, piece, info, _today()[0]),
         # The editor's hand edits and dropped cards in the queue, which a revision starts
         # from instead of putting the session's old text back.
         queue_edits=lambda piece: ingest.hand_edits(conn, piece),
@@ -357,7 +365,7 @@ def measure_quietly(conn: sqlite3.Connection, cfg: dict[str, Any]) -> E.Evidence
 
 
 def mark_stale(conn: sqlite3.Connection) -> list[S.Piece]:
-    """Pieces left mid-stage by a run that died. This process holds the studio lock, so
+    """Pieces left mid-stage by a run that died. The caller holds the studio lock, so
     no other run can be working on them."""
     stale = S.running_pieces(conn)
     for p in stale:
@@ -373,18 +381,65 @@ def mark_stale(conn: sqlite3.Connection) -> list[S.Piece]:
     return stale
 
 
+def settle_stopped(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[S.Piece]:
+    """Mark the pieces a stopped run left mid-stage `interrupted`, when no studio run is
+    alive. The Stop button, a stage the ops runner timed out, a reboot or a crash kills
+    run_studio.py with no chance to say so, and the piece keeps its running stage: no
+    Resume, no discard. The OS frees the studio lock with its process, so while the lock
+    can be taken no run is working on any piece. The studio's pages call this when they
+    show or act on a piece in a running stage, and the panel when a studio run ends, so the
+    editor can Resume or discard it at once rather than at the next studio run. Returns
+    the pieces marked ([] while a run holds the lock, or none was left running)."""
+    if not S.running_pieces(conn):
+        return []
+    held = lock.acquire(workspace_root(_data_folder(), cfg) / LOCK_NAME, trust_os_lock=True)
+    if held is None:
+        return []  # a run is alive and working on them
+    try:
+        stale = mark_stale(conn)
+    finally:
+        held.release()
+    for p in stale:
+        log.warning("piece %s: its run stopped mid-stage; it can be resumed", p.id)
+    return stale
+
+
+def _take_lock(path: Path) -> lock.Lock | None:
+    """The studio lock, waiting a moment for it: a page checking for a stopped run
+    (settle_stopped) holds it for as long as a few updates take, and a run starting in that
+    moment must not skip its turn as if another run were in progress."""
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        held = lock.acquire(path, trust_os_lock=True)
+        if held is not None or time.monotonic() >= deadline:
+            return held
+        time.sleep(0.2)
+
+
 def allowed_to_start(
-    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime, tz: tzinfo | None = None
 ) -> tuple[bool, str]:
-    """May the automatic run start a new piece? (A button press skips this.)"""
+    """May the automatic run start a new piece? (A button press skips this.)
+
+    The cap counts the automatic pieces started on `now`'s calendar day in `tz` (the
+    display zone, the one the automatic run times are typed in). A rolling 24 hours drifts
+    against fixed run times: the studio step starts a few minutes after its run time, a
+    little sooner or later each day, and whenever today's start came sooner than
+    yesterday's, yesterday's piece was still inside the window and the piece slid to the
+    next run time, from the evening one to the next morning a whole day lost."""
     auto = cfg["auto"]
     if not auto.get("enabled"):
         return False, "automatic pieces are off (studio/config.yaml auto.enabled)"
     cap = int(auto.get("max_new_per_day") or 0)
-    since = (now - timedelta(hours=24)).isoformat(timespec="seconds")
+    if tz is None:
+        from timeutil import display_tz
+
+        tz = display_tz()
+    midnight = now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    since = midnight.astimezone(UTC).isoformat(timespec="seconds")
     made = S.pieces_since(conn, since, origin=S.ORIGIN_AUTO)
     if cap <= 0 or made >= cap:
-        return False, f"{made} automatic piece(s) in the last 24 hours (limit {cap})"
+        return False, f"{made} automatic piece(s) today (limit {cap})"
     gap = float(auto.get("min_hours_between") or 0)
     last = S.last_started(conn)
     if last and gap > 0:
@@ -523,7 +578,7 @@ def run(
     root.mkdir(parents=True, exist_ok=True)
     # One studio run at a time on this data folder, however it was started (the ops step,
     # a button, a terminal): a second run would resume the same sessions.
-    held = lock.acquire(root / LOCK_NAME, trust_os_lock=True)
+    held = _take_lock(root / LOCK_NAME)
     if held is None:
         log.info("another studio run is in progress; nothing to do")
         return 0
@@ -583,6 +638,16 @@ def run(
             if not ok:
                 log.info("no new piece: %s", why)
                 return 0
+            if ctx.renderer is None:
+                # Its research and writing would be spent before polish stopped it for want
+                # of a browser, every day: an automatic piece waits for one. The step
+                # fails, so the runs page shows it; a button press still starts a piece.
+                log.error(
+                    "no new piece: %s; install Edge, Chrome or Chromium, or turn automatic "
+                    "pieces off (studio/config.yaml auto.enabled)",
+                    qa.NO_BROWSER,
+                )
+                return 1
             plan = dict(
                 origin=S.ORIGIN_AUTO,
                 topic="",

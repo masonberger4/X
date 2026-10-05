@@ -1116,6 +1116,19 @@ def test_resume_wraps_the_stage_instructions_unchanged(stage):
     assert text.endswith("The stage's instructions, again:\n\n" + original)
 
 
+def test_a_fresh_session_is_told_to_read_the_pieces_files_before_the_stage():
+    original = P.write_prompt(_brief(), "Lead with the OS data.")
+    text = P.fresh_session_prompt("write", original)
+    head = text.split("The stage's instructions, again:")[0]
+    assert text.startswith("PICKING UP A PIECE")
+    assert "can no longer be resumed" in head and "this stage (write)" in head
+    for name in (P.FACTBASE_FILE, P.RESEARCH_FILE, P.POSTS_DIR, P.CARDS_DIR):
+        assert name in head, name
+    for name in (P.PIECE_FILE, P.FACTCHECK_FILE):
+        assert name in head, name
+    assert text.endswith("The stage's instructions, again:\n\n" + original)
+
+
 # ---- settings -----------------------------------------------------------------------------
 
 

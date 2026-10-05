@@ -7,7 +7,8 @@ explicit topic or story, then a queued topic, then `--now`, then the automatic l
 and hold the studio lock while it does. The Claude Code CLI is faked (`FakeCLI` in place
 of claude_cli.run_session, which tests/conftest.py otherwise refuses): it tells the stage
 from the first line of its prompt and writes that stage's files in the piece's folder. No
-test draws a card (the pieces here have none, and make_renderer is replaced), and the DB
+test draws a card (the pieces here have none, and make_renderer is replaced by one that is
+never asked; `rig.renderer = None` is a machine without a browser), and the DB
 is a temp file (DB_PATH), so the data folder, the workspace root and the lock all live in
 tmp_path.
 """
@@ -17,10 +18,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -246,9 +250,11 @@ class FakeCLI:
     def __call__(self, prompt: str, **kw: Any) -> claude_cli.SessionResult:
         stage = stage_of(prompt)
         self.calls.append((stage, prompt, kw))
+        ws = Path(kw["cwd"])
+        if not ws.is_dir():  # the real launcher opens the transcript there before it starts
+            raise FileNotFoundError(2, "No such file or directory", str(kw["transcript"]))
         if stage in self.results:
             return self.results[stage]
-        ws = Path(kw["cwd"])
         if stage == "research":
             write_research(ws)
         elif stage in ("write", "revise"):
@@ -265,11 +271,18 @@ class FakeCLI:
         )
 
 
+def never_draws(html: Path, png: Path) -> render_mod.RenderResult:
+    """The rig machine's card browser: found, and never asked (no rig piece has cards)."""
+    raise AssertionError(f"a card was drawn: {html}")
+
+
 class Rig:
     def __init__(self, conn, cli: FakeCLI, root: Path) -> None:
         self.conn = conn
         self.cli = cli
         self.root = root  # the workspace root, where the studio lock lives too
+        # What make_renderer finds on this machine; None: no browser to draw cards with.
+        self.renderer: qa.Renderer | None = never_draws
 
     def pieces(self) -> list[S.Piece]:
         return S.list_pieces(self.conn)
@@ -284,10 +297,13 @@ class Rig:
 def rig(sconn, cfg, monkeypatch, tmp_path) -> Rig:
     """runner.run() over the temp DB with the fake CLI and the test's own settings."""
     cli = FakeCLI()
+    rig = Rig(sconn, cli, tmp_path / "studio_pieces")
     monkeypatch.setattr(runner, "load_studio_config", lambda *a, **k: cfg)
     monkeypatch.setattr(claude_cli, "run_session", cli)
-    monkeypatch.setattr(runner, "make_renderer", lambda c: None)
-    return Rig(sconn, cli, tmp_path / "studio_pieces")
+    monkeypatch.setattr(runner, "make_renderer", lambda c: rig.renderer)
+    # a run that finds the studio lock taken waits this long for it (10 s shipped)
+    monkeypatch.setattr(runner, "LOCK_WAIT_SECONDS", 0.3)
+    return rig
 
 
 # ---- allowed_to_start: the automatic run's limits --------------------------------------
@@ -304,31 +320,66 @@ def test_an_empty_studio_may_start_a_piece(sconn, cfg):
     assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
 
 
-def test_the_daily_cap_counts_only_automatic_pieces_of_the_last_24_hours(sconn, cfg, clock):
+def test_the_daily_cap_counts_only_automatic_pieces_of_the_local_calendar_day(sconn, cfg, clock):
+    """`max_new_per_day` counts the automatic pieces started on today's date in the display
+    zone (Los Angeles here), the zone the automatic run times are typed in."""
     cfg["auto"].update(max_new_per_day=2, min_hours_between=0)
-    clock.set(T0 - timedelta(hours=30))
-    make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)  # a day and more ago
-    clock.set(T0 - timedelta(hours=23))
+    clock.set(datetime(2026, 10, 5, 6, 59, tzinfo=UTC))  # 23:59 on 10-04 in Los Angeles
+    make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+    clock.set(datetime(2026, 10, 5, 7, 0, tzinfo=UTC))  # midnight: 10-05 there
     make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
     for _ in range(3):  # the editor's pieces never use up the automatic allowance
         make_piece(sconn, origin=S.ORIGIN_MANUAL, stage=S.STAGE_READY)
-    assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
+    morning = datetime(2026, 10, 5, 13, 5, tzinfo=UTC)  # 06:05 on 10-05
+    assert runner.allowed_to_start(sconn, cfg, morning) == (True, "")
 
-    clock.set(T0 - timedelta(hours=1))
+    clock.set(morning)
     make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
-    blocked = (False, "2 automatic piece(s) in the last 24 hours (limit 2)")
-    assert runner.allowed_to_start(sconn, cfg, T0) == blocked
-    # a piece exactly 24 hours old still counts; a second later it has left the window
-    assert runner.allowed_to_start(sconn, cfg, T0 + timedelta(hours=1)) == blocked
-    later = T0 + timedelta(hours=1, seconds=1)
-    assert runner.allowed_to_start(sconn, cfg, later) == (True, "")
+    blocked = (False, "2 automatic piece(s) today (limit 2)")
+    assert runner.allowed_to_start(sconn, cfg, morning) == blocked
+    # the rest of that day stays blocked; the next day starts with a fresh allowance
+    late = datetime(2026, 10, 6, 6, 59, 59, tzinfo=UTC)  # 23:59:59 on 10-05
+    assert runner.allowed_to_start(sconn, cfg, late) == blocked
+    next_day = datetime(2026, 10, 6, 7, 0, tzinfo=UTC)
+    assert runner.allowed_to_start(sconn, cfg, next_day) == (True, "")
+
+
+def test_one_automatic_piece_a_day_whatever_minute_the_run_reaches_the_studio(sconn, cfg, clock):
+    """The shipped pace at the shipped run times (06:00, 12:00 and 18:00 local, the studio
+    step a few minutes after each, sooner some days than others): a piece every day at the
+    day's first run time. Counted over a rolling 24 hours, 06:03 was refused because
+    yesterday's piece started at 06:06, so the piece slid through the day, and each slide
+    off the evening run lost a whole day."""
+    cfg["auto"].update(max_new_per_day=1, min_hours_between=6)
+    zone = ZoneInfo(ZONE)
+    started = []
+    for day in range(10):
+        delay = 6 if day % 2 == 0 else 3  # minutes after the run time
+        for hour in (6, 12, 18):
+            when = datetime(2026, 10, 5 + day, hour, delay, tzinfo=zone).astimezone(UTC)
+            if runner.allowed_to_start(sconn, cfg, when)[0]:
+                clock.set(when)
+                make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+                started.append(when.astimezone(zone).strftime("%m-%d %H:%M"))
+    assert started == [f"10-{5 + d:02d} 06:0{6 if d % 2 == 0 else 3}" for d in range(10)]
+
+
+def test_the_daily_cap_follows_the_display_zone(sconn, cfg, clock):
+    """The same instant is another day in another zone: 01:00 UTC on 10-06 is still 10-05
+    in Los Angeles, where a piece started at 08:00 UTC on 10-05 used up the day."""
+    clock.set(datetime(2026, 10, 5, 8, 0, tzinfo=UTC))
+    make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+    cfg["auto"].update(max_new_per_day=1, min_hours_between=0)
+    when = datetime(2026, 10, 6, 1, 0, tzinfo=UTC)
+    assert runner.allowed_to_start(sconn, cfg, when)[0] is False
+    assert runner.allowed_to_start(sconn, cfg, when, ZoneInfo("UTC")) == (True, "")
 
 
 def test_a_cap_of_zero_starts_nothing_automatically(sconn, cfg):
     cfg["auto"]["max_new_per_day"] = 0
     assert runner.allowed_to_start(sconn, cfg, T0) == (
         False,
-        "0 automatic piece(s) in the last 24 hours (limit 0)",
+        "0 automatic piece(s) today (limit 0)",
     )
 
 
@@ -990,7 +1041,7 @@ def test_the_context_reads_the_data_folders_playbook_and_wires_the_queue(rig, sc
     cfg["x"].update(long_post_max=30000, thread_post_max=25000)
     ctx = runner.make_context(sconn, cfg)
     assert ctx.launch is None  # claude_cli.run_session, looked up at call time
-    assert ctx.renderer is None and ctx.reference_dir == EXEMPLARS_DIR
+    assert ctx.renderer is rig.renderer and ctx.reference_dir == EXEMPLARS_DIR
     assert ctx.system == runner.system_text() and ctx.system.strip()
     assert ctx.stop_after_research is False
     assert runner.make_context(sconn, cfg, stop_after_research=True).stop_after_research
@@ -1399,6 +1450,141 @@ def test_the_lock_is_released_even_when_the_run_raises(rig, sconn):
     held = lock.acquire(rig.root / runner.LOCK_NAME, trust_os_lock=True)
     assert held is not None
     held.release()
+
+
+def test_a_run_waits_a_moment_for_a_page_that_holds_the_lock(rig, sconn):
+    """A studio page checking for a stopped run (settle_stopped) holds the lock for as long
+    as a few updates take; a run starting then waits for it rather than skipping its turn
+    as if another run were in progress."""
+    held = lock.acquire(rig.root / runner.LOCK_NAME, trust_os_lock=True)
+    assert held is not None
+    timer = threading.Timer(0.1, held.release)
+    timer.start()
+    try:
+        assert runner.run(topic=TOPIC) == 0
+    finally:
+        timer.join()
+    assert rig.cli.stages() == ["research"] and len(rig.pieces()) == 1
+
+
+# ---- settle_stopped: a run that was stopped, seen from the pages ------------------------
+
+
+def test_with_no_run_alive_a_piece_left_mid_stage_is_interrupted_at_once(rig, sconn):
+    """The Stop button killed run_studio.py mid-stage; the lock went with its process. The
+    piece is interrupted, its open run closed, without waiting for the next studio run."""
+    stuck = make_piece(sconn, stage=S.STAGE_WRITING)
+    S.start_run(sconn, stuck.id, "write")
+    done = make_piece(sconn, stage=S.STAGE_READY)
+
+    marked = runner.settle_stopped(sconn, load_studio_config())
+
+    assert [p.id for p in marked] == [stuck.id]
+    after = get(sconn, stuck.id)
+    assert after.stage == S.STAGE_INTERRUPTED and after.meta["failed_stage"] == "write"
+    assert after.error == (
+        "the write stage stopped before it finished (stopped, timed out or crashed)"
+    )
+    assert [r.outcome for r in S.list_runs(sconn, stuck.id)] == ["interrupted"]
+    assert get(sconn, done.id).stage == S.STAGE_READY
+    # the lock is free again for the next run
+    again = lock.acquire(rig.root / runner.LOCK_NAME, trust_os_lock=True)
+    assert again is not None
+    again.release()
+
+
+def test_while_a_run_holds_the_lock_its_pieces_are_left_alone(rig, sconn):
+    stuck = make_piece(sconn, stage=S.STAGE_POLISHING)
+    held = lock.acquire(rig.root / runner.LOCK_NAME, trust_os_lock=True)
+    assert held is not None
+    try:
+        assert runner.settle_stopped(sconn, load_studio_config()) == []
+    finally:
+        held.release()
+    assert get(sconn, stuck.id).stage == S.STAGE_POLISHING
+
+
+def test_with_nothing_mid_stage_the_lock_is_not_even_looked_at(rig, sconn):
+    make_piece(sconn, stage=S.STAGE_READY)
+    assert runner.settle_stopped(sconn, load_studio_config()) == []
+    assert not rig.root.exists()  # no lock file made
+
+
+# ---- a piece whose folder is gone, inside a run -----------------------------------------
+
+
+def test_a_piece_whose_folder_is_gone_fails_and_the_run_goes_on(rig, sconn, tmp_path, caplog):
+    """Two Continue requests; the first piece's folder was deleted. That piece fails and
+    says why, the second is written, and the run ends normally."""
+    pieces = []
+    for name in ("gone", "here"):
+        ws = tmp_path / "studio_pieces" / name
+        write_research(ws)
+        piece = make_piece(sconn, stage=S.STAGE_RESEARCH_READY, workspace=ws.resolve())
+        S.request(sconn, piece.id, S.REQUEST_CONTINUE, NOTE)
+        pieces.append(piece)
+    gone, here = pieces
+    shutil.rmtree(gone.workspace)
+
+    assert runner.run(resume_only=True) == 0
+
+    after = get(sconn, gone.id)
+    assert (after.stage, after.request) == (S.STAGE_FAILED, "")
+    assert after.error == f"the piece's folder {gone.workspace} is missing" + SS.PUT_BACK
+    assert S.list_runs(sconn, gone.id)[-1].finished_at is not None
+    assert get(sconn, here.id).stage == S.STAGE_READY
+    # and the next run finds nothing to mark: the piece is not left mid-stage
+    assert runner.run(resume_only=True) == 0
+    assert get(sconn, gone.id).stage == S.STAGE_FAILED
+
+
+# ---- the date and the playbook, per stage ----------------------------------------------
+
+
+def test_each_stage_is_told_the_date_and_the_playbook_as_they_are_when_it_starts(
+    rig, sconn, cfg, tmp_path, monkeypatch
+):
+    """One run acts on every request before it starts a piece, hours of sessions that can
+    cross midnight; a stage starting after it is told the new date, and a playbook the
+    editor saved meanwhile."""
+    days = iter([("2026-10-05", ZONE), ("2026-10-06", ZONE)])
+    monkeypatch.setattr(runner, "_today", lambda: next(days))
+    ctx = runner.make_context(sconn, cfg)
+    piece = make_piece(sconn, stage=S.STAGE_WRITING, workspace=tmp_path / "studio_pieces" / "p")
+    first = ctx.brief_for(piece)
+    (tmp_path / "studio_playbook.md").write_text("SAVED DURING THE RUN\n", encoding="utf-8")
+    second = ctx.brief_for(piece)
+    assert (first.today, second.today) == ("2026-10-05", "2026-10-06")
+    assert first.playbook != second.playbook == "SAVED DURING THE RUN\n"
+    assert "Today is 2026-10-06 (America/Los_Angeles)." in P.write_prompt(second)
+
+
+# ---- an automatic piece needs a browser to draw its cards with -------------------------
+
+
+def test_without_a_browser_no_automatic_piece_is_started(rig, sconn, caplog):
+    """Its research and writing would be spent before polish stopped it for want of a
+    browser, every day. The run fails instead, so the runs page shows why."""
+    rig.renderer = None
+    with caplog.at_level(logging.ERROR, logger="studio.runner"):
+        assert runner.run() == 1
+    assert rig.pieces() == [] and rig.cli.calls == []
+    assert f"no new piece: {qa.NO_BROWSER}; install Edge, Chrome or Chromium" in caplog.text
+
+
+def test_without_a_browser_the_editors_requests_and_buttons_still_run(rig, sconn, cfg, tmp_path):
+    """Only the automatic piece waits: a Continue is acted on, and --now starts a piece
+    (one without cards needs no browser; one with cards stops before polish, resumable)."""
+    rig.renderer = None
+    cfg["auto"]["min_hours_between"] = 0  # the Continue's piece started just now
+    ws = tmp_path / "studio_pieces" / "waiting"
+    write_research(ws)
+    waiting = make_piece(sconn, stage=S.STAGE_RESEARCH_READY, workspace=ws.resolve())
+    S.request(sconn, waiting.id, S.REQUEST_CONTINUE, NOTE)
+    assert runner.run() == 1
+    assert get(sconn, waiting.id).stage == S.STAGE_READY
+    assert runner.run(now=True) == 0
+    assert len(rig.pieces()) == 2
 
 
 def test_a_dry_run_prints_the_first_prompt_and_starts_nothing(rig, sconn, capsys):

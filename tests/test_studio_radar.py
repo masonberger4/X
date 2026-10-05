@@ -38,6 +38,7 @@ from tests.test_studio_runner import (  # noqa: F401 (fixtures)
     _display_zone,
     _no_dotenv,
     make_piece,
+    never_draws,
     write_research,
 )
 
@@ -531,7 +532,7 @@ def test_an_automatic_piece_is_offered_the_radar_and_hands_back_its_finds(sconn,
     S.upsert_catalysts(sconn, near + far, origin=f"scan:{scan_id}")
     cli = RadarCLI({"radar_topic": rid, "catalysts": [catalyst(company="Summit", ticker="SMMT")]})
     monkeypatch.setattr(claude_cli, "run_session", cli)
-    monkeypatch.setattr(runner, "make_renderer", lambda c: None)
+    monkeypatch.setattr(runner, "make_renderer", lambda c: never_draws)
     monkeypatch.setattr(runner, "_today", lambda: (TODAY.isoformat(), "America/Los_Angeles"))
     assert runner.run() == 0
     prompt = cli.prompt("research")
@@ -548,7 +549,7 @@ def test_an_automatic_piece_is_offered_the_radar_and_hands_back_its_finds(sconn,
 def test_a_piece_on_a_given_topic_is_not_offered_the_radar(sconn, cfg, monkeypatch):
     scan_id = S.start_scan(sconn, model="m", effort="max")
     S.add_radar_topics(sconn, scan_id, R.parse_scan(answer(), **KW).topics)
-    monkeypatch.setattr(runner, "make_renderer", lambda c: None)
+    monkeypatch.setattr(runner, "make_renderer", lambda c: never_draws)
     brief = runner.build_brief(
         sconn,
         cfg,
@@ -566,7 +567,7 @@ def test_a_piece_on_a_given_topic_is_not_offered_the_radar(sconn, cfg, monkeypat
 def test_a_harvest_that_breaks_never_fails_the_piece(sconn, cfg, monkeypatch, caplog):
     run_cfg(cfg)
     monkeypatch.setattr(claude_cli, "run_session", FakeCLI())
-    monkeypatch.setattr(runner, "make_renderer", lambda c: None)
+    monkeypatch.setattr(runner, "make_renderer", lambda c: never_draws)
 
     def boom(*a, **k):
         raise RuntimeError("studio_catalysts is locked")
@@ -588,7 +589,7 @@ def test_a_radar_topic_queued_from_the_page_is_the_pieces_topic(sconn, cfg, monk
     S.set_radar_topic(sconn, rid, status=S.RADAR_QUEUED, topic_id=tid)
     cli = FakeCLI()
     monkeypatch.setattr(claude_cli, "run_session", cli)
-    monkeypatch.setattr(runner, "make_renderer", lambda c: None)
+    monkeypatch.setattr(runner, "make_renderer", lambda c: never_draws)
     assert runner.run() == 0
     [piece] = S.list_pieces(sconn)
     assert piece.topic == text and piece.requested_angle == "deal_decoder"

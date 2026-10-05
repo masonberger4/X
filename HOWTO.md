@@ -1066,22 +1066,28 @@ and long posts need X Premium.
    in part 1, and the cards are drawn by Microsoft Edge, which comes with
    Windows (Chrome or Chromium work too). If a piece says `no Chromium-family
    browser found`, put the browser's full path on `render: browser:` in
-   `studio\config.yaml`, or on `STUDIO_BROWSER=` in `.env`.
+   `studio\config.yaml`, or on `STUDIO_BROWSER=` in `.env`. Until a browser is
+   found no automatic piece starts: the `studio` step fails on the runs page with
+   `no new piece: no browser to draw the cards with`, rather than spend a
+   session's research and writing on a piece whose cards cannot be drawn.
 2. It runs on its own. The `studio` step sits in the automatic runs (part 8)
    right after `score`, so each run first acts on anything you asked for on the
    studio page, then starts a new piece if `studio\config.yaml` allows one: at
-   most `max_new_per_day` (1) in any 24 hours, `min_hours_between` (6) hours after
-   the last piece, and never while a piece waits for you at the research
-   checkpoint. An automatic piece picks its own story from the top scored stories
-   of the last two days that the account has not written about (no studio piece on
-   it and no draft from the drafter), or finds a better one with its own news scan,
-   and writes straight through (`auto: checkpoint: false`). It is also offered the
-   radar (item 10): the day's scan topics and the catalysts coming up or just
-   passed. It is told every piece of the last 10 days (`topics: avoid_days` in
-   `studio\config.yaml`), finished or still waiting for you, so it does not repeat
-   a topic. The piece is tied to a feed story only when it is one the app offered
-   it (so the drafter leaves that story to the studio); a number it made up ties
-   it to nothing. Expect it in the queue 30 to 90 minutes after the run starts. A
+   most `max_new_per_day` (1) a day, `min_hours_between` (6) hours after the last
+   piece, and never while a piece waits for you at the research checkpoint. A day
+   is the calendar date in the `timezone:` of the root `config.yaml`, the clock the
+   run times are set in, so the day's first run that may start a piece does,
+   whatever minute yesterday's started at. An automatic piece picks its own story
+   from the top scored stories of the last two days that the account has not
+   written about (no studio piece on it and no draft from the drafter), or finds a
+   better one with its own news scan, and writes straight through (`auto:
+   checkpoint: false`). It is also offered the radar (item 10): the day's scan
+   topics and the catalysts coming up or just passed. It is told every piece of
+   the last 10 days (`topics: avoid_days` in `studio\config.yaml`), finished or
+   still waiting for you, so it does not repeat a topic. The piece is tied to a
+   feed story only when it is one the app offered it (so the drafter leaves that
+   story to the studio); a number it made up ties it to nothing. Expect it in the
+   queue 30 to 90 minutes after the run starts. A
    session still running at the next run time sits that run out
    (`skip_when_busy`) instead of holding the other steps back, and so do the
    steps still waiting behind it in its own run
@@ -1095,7 +1101,7 @@ and long posts need X Premium.
    so you can read the fact base first. If the feed merges that story with another
    before the studio gets to it, the piece follows it to the merged story. The run
    shows on the runs page like any other; its Stop button ends it, and the piece
-   can be resumed later.
+   shows `interrupted` with Resume and Discard as soon as the run has stopped.
 4. The research checkpoint. When a piece says **read the research**, open it:
    the fact base is there with every source marked opened or seen in search
    results only, the X handles it verified, the corrections it made and the
@@ -1131,17 +1137,26 @@ and long posts need X Premium.
    same session carries on with everything it already read, and anything you type
    in the box goes to it. If you edited its queue draft by hand while it was
    stopped, Resume goes through a revision first, so your edit is not
-   overwritten. **Discard** gives up on a piece: its files stay in the
-   `studio_pieces` folder, and a draft of it still pending in the queue is
+   overwritten; if you approved the draft a stopped revision would replace,
+   Resume says so and runs nothing until you reopen it. A piece whose
+   run was stopped (the Stop button, the desktop window closed, the PC restarted)
+   turns `interrupted` as soon as you open its page or the studio page, or the
+   panel sees the run end; while a studio run is still going, its pieces keep
+   their stage. Claude Code deletes sessions it has not used for 30 days, so a
+   piece resumed or revised after that is picked up by a fresh session that
+   reads the piece's own files (fact base, posts, cards, fact-check log) first;
+   the piece's session log says when that happened. **Discard** gives up on a
+   piece: its files stay in the `studio_pieces` folder, and a draft of it still
+   pending in the queue is
    rejected. A piece discarded before it reached the queue gives its story back to
    the drafter.
 8. The playbook. **Studio → The playbook** is the short note every session
    reads before it writes: what works on this account and the mistakes the
    fact-checks keep catching. Edit and save it (the box under it says what you
-   changed, for the history); the next session reads your version (it lives in
-   `studio_playbook.md` next to `pipeline.db`). Every version is kept: yours, the
-   learning loop's (below) and the shipped seed, and any one can be put back from
-   the performance page.
+   changed, for the history); the next piece written reads your version, even one
+   whose run is already going (it lives in `studio_playbook.md` next to
+   `pipeline.db`). Every version is kept: yours, the learning loop's (below) and the
+   shipped seed, and any one can be put back from the performance page.
 9. What X says. **Studio → what X says** (`/studio/performance`) is the
    dashboard for the posted pieces, and what it shows is fed back into the next
    session. Each piece is measured on its first post 48 hours after it went out
@@ -1185,8 +1200,8 @@ and long posts need X Premium.
      it** queues the topic, with the scan's reasons and sources, and the angle you
      leave selected ("the session chooses" works too), then starts the studio.
      **Dismiss** takes a topic off. **Scan now** runs a scan at once.
-   - **From the feeds.** The top scored stories no piece has used, each with
-     **Write it**.
+   - **From the feeds.** The top scored stories the account has not written
+     about (no piece and no draft), each with **Write it**.
    - **The catalyst calendar.** Dated events: PDUFA dates, readouts, conference
      presentations, advisory committees. Each scan reports the ones it finds, and
      every piece's research adds the ones its session confirmed, with the source.
@@ -1276,7 +1291,10 @@ reference pieces in `studio\exemplars\`.
 | The studio's performance page says `no snapshot yet` under a posted piece | the feedback step fetches numbers only with the X API read tier (part 7). Open **type the numbers X shows** under the piece and copy them from the post on x.com, about 48 hours after posting |
 | The runs page shows `studio_learn` failed with `the rewritten playbook was not used` (or `the playbook rewrite call failed`) | nothing changed: the sessions keep the playbook they had, and the next run tries again. The log line says why (cut short, a section missing, Claude Code not logged in); **Rewrite the playbook now** on the performance page retries at once |
 | A learned playbook made the pieces worse | on the performance page, **put this version back** under the version you want; it becomes the newest version and the next session reads it. `learn: playbook: propose` in `studio\config.yaml` makes every rewrite wait for you instead |
-| A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept). Press Resume on its page; the session keeps everything it already read |
+| A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept or restarted). Press Resume on its page; the session keeps everything it already read |
+| A studio piece still says `writing` (or researching, polishing, revising) after its run was stopped | another studio run holds the studio lock (a `run_studio.py` in a command prompt, or a run in a second window): the piece belongs to it until it ends. Otherwise reload the page: with no studio run going, opening it marks the piece `interrupted` |
+| A studio piece says `the piece's folder ... is missing` | its folder under `studio_pieces` was deleted or moved (moving the data folder moves them all). Put the folder back at that path and press Resume, or discard the piece |
+| A studio piece's log says `the CLI no longer has session ...` | Claude Code cleaned up the piece's session (it keeps 30 days by default). Nothing to do: a fresh session took the piece over from its files and carried on |
 | A studio piece says `failed: still blocked after polishing` | the page lists what the checker still found (advice wording, a link, a post over the limit). Resume with a note saying how to fix it, or Discard |
 | `Pipeline.exe` opens and closes at once, or shows a blank window | read `desktop.log` next to it; a missing `.env` or a step that cannot start is logged there. A blank window means the Edge WebView2 runtime is missing: install it from Microsoft (it comes with Windows 11 and most Windows 10) |
 | Building the exe fails with `No module named PyInstaller` | `pip install -e ".[desktop]"` in the venv first |

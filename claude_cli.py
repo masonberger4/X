@@ -607,3 +607,17 @@ def session_started(transcript: str | os.PathLike[str], session_id: str) -> bool
             if '"init"' in line and needle in line.replace(" ", ""):
                 return True
     return False
+
+
+# What the CLI says, and exits 1 on, when `--resume` names a session it does not have: its
+# stored conversation was cleaned up (Claude Code deletes transcripts older than its
+# `cleanupPeriodDays` setting, 30 days by default) or the CLI runs as another user.
+SESSION_NOT_FOUND = "no conversation found with session id"
+
+
+def session_lost(result: SessionResult) -> bool:
+    """Whether a `--resume` run failed because the CLI no longer has the session, so no
+    later --resume of it can work either."""
+    if result.ok:
+        return False
+    return SESSION_NOT_FOUND in f"{result.stderr_tail}\n{result.text}".lower()

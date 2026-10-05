@@ -38,6 +38,7 @@ import logging
 import sys
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -145,6 +146,9 @@ class JobManager:
         self._mutex = threading.Lock()
         self._live: list[Job] = []  # runs in flight, newest first
         self._history: list[Job] = []
+        # Called with each run once its steps are over (finished, failed or stopped), before
+        # it leaves the live list: panel/app.py's _after_run tidies up after a studio run.
+        self.on_finish: Callable[[Job], None] | None = None
 
     # -- configuration -----------------------------------------------------
 
@@ -335,6 +339,11 @@ class JobManager:
             job.state = STATE_ERROR
             job.error = f"{type(exc).__name__}: {exc}"
         finally:
+            if self.on_finish is not None:
+                try:
+                    self.on_finish(job)
+                except Exception:  # nor may the hook
+                    log.exception("panel run %s: after-run hook failed", job.id)
             job.finished_at = _now()
             if job.stopping and job.state == STATE_RUNNING:
                 job.state = STATE_STOPPED

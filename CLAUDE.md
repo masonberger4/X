@@ -160,11 +160,13 @@ carrying `--live`).
   `feedback/store.py:day_of`'s `captured_on` bucket; relative ages are zone-independent.
   `publish/config.yaml` and `feedback/config.yaml` keep their own `timezone:` because
   those drive behaviour (posting slots, the "hour posted" column), not display; all
-  three are set to the same zone. The one behaviour that follows the root `timezone:` is
+  three are set to the same zone. The behaviour that follows the root `timezone:` is
   `auto_run_times` in `ops/config.yaml` (the panel's automatic runs): the human types and
   reads those times on the same page, so `panel/autorun.py` reads the zone through
   `timeutil.display_tz()` (never config.yaml itself) and `ops/autorun.py` takes it as a
-  parameter; a zone change needs a restart, as `timezone_name` is cached.
+  parameter; a zone change needs a restart, as `timezone_name` is cached. The studio's
+  `auto.max_new_per_day` counts by the date in that zone too (`studio/runner.py:
+  allowed_to_start(tz=)`), since the automatic runs it rides on are timed in it.
 - Read secrets from `.env` via python-dotenv; never commit `.env`.
 - Logging: stdlib `logging`. INFO for per-source counts, DEBUG for items.
 - Ask before adding a dependency not already in `pyproject.toml`.
@@ -599,7 +601,11 @@ carrying `--live`).
   never writes or rewrites the post. Every stage is `claude_cli.run_session` (the second
   place that spawns the CLI, beside `run_claude`: stream-json into
   `<piece>/session.ndjson`, a fixed `--session-id` on the first run and `--resume` after,
-  so the session keeps what it read; `cwd` is the piece folder; `--append-system-prompt-file`
+  so the session keeps what it read; a `--resume` the CLI answers "No conversation found"
+  (`claude_cli.session_lost`: Claude Code cleans old sessions up) goes to
+  `session.fresh_session`, a new id the piece keeps (`lost_sessions` in its meta), the
+  standing instructions again and `prompt.fresh_session_prompt`, which has it read the
+  piece's files first; `cwd` is the piece folder; `--append-system-prompt-file`
   with `studio/brief/session.md` + `voice.md` + `cards.md` once, recorded by the CLI;
   `--add-dir studio/exemplars`; `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
@@ -664,9 +670,19 @@ carrying `--live`).
   (`store.started_within`, an unwritten one with its status). `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
   `interrupted`, acts on `request`s (continue, revise), then starts at most one piece:
   explicit `--topic`/`--story`, else the oldest queued topic, else with `--now` an
-  automatic topic, else only when `auto.max_new_per_day` (any 24 hours, automatic pieces),
-  `auto.min_hours_between` (any piece) and no checkpoint wait allow; one run at a time
-  (`<workspace_dir>/.studio.lock`). `ops/config.yaml` has the automatic `studio` step
+  automatic topic, else only when `auto.max_new_per_day` (automatic pieces per calendar
+  day in the root `timezone:`), `auto.min_hours_between` (any piece) and no checkpoint
+  wait allow, and a card browser was found (`make_renderer`; without one the automatic run
+  exits 1 rather than spend research and writing on a piece polish would stop); one run at
+  a time (`<workspace_dir>/.studio.lock`, which a run waits `LOCK_WAIT_SECONDS` for). A
+  killed run (Stop, a reboot, a crash) cannot mark its piece: `runner.settle_stopped`
+  does, under the studio lock and only while no run holds it, when a studio page shows or
+  acts on a piece in a running stage (`web._current_piece`, the index) and when the panel
+  sees a run of `run_studio.py` end (`JobManager.on_finish` = `panel/app.py:_after_run`).
+  Every brief reads the date and the playbook when its stage starts. A piece folder that
+  is gone fails the piece (`session.folder_missing`; `_run_stage` turns the OSError into a
+  failed result, so the run goes on), and a Resume of a polish whose draft the queue would
+  refuse (`ctx.revisable`) runs no round. `ops/config.yaml` has the automatic `studio` step
   (after `score`, `skip_when_busy`: `panel/autorun.py` leaves a busy one out of a slot
   rather than waiting, and also the steps an earlier run still has queued behind it,
   `JobManager.queued_behind`, so a long session never makes a run time skip ingest and
