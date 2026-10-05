@@ -191,6 +191,11 @@ source only when it is due, and score only scores what is new.
    python run_draft.py --retry-failed            # try again on stories whose draft failed
    python run_draft.py --retag                   # apply @handles and #tags to current drafts
    ```
+   In the panel, the pending page's **Retry failed** button runs the `draft_retry` step
+   from `ops/config.yaml`: `--retry-failed --since-hours 480 --limit 10`, so failed
+   stories from the last 20 days are drafted again. It is a `manual: true` step:
+   `run_ops.py run` skips it unless `--only draft_retry` names it, the automatic runs
+   never start it, and it shares draft's lock so the two never run side by side.
    A draft may come with a picture. Nothing draws it freehand: when the source
    has two or more comparable numbers (arms, endpoints, cohorts) the drafter
    lists them as a small bar-chart spec, every number in it is checked
@@ -576,6 +581,9 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    verify in order and records each step. Each step takes its own lock
    (`<lock_path>.<lock name>`) while it runs, so a step the control panel is
    already running is skipped as `locked` and the rest carry on.
+   The `draft_retry` step is `manual: true`: a plain `run_ops.py run` and the
+   automatic runs skip it, and it runs only from the pending page's "Retry failed"
+   button or `run_ops.py run --only draft_retry`.
    The `verify` step runs after `draft` and is optional: if it fails, the
    claims show as "not checked yet" and the run carries on. The `draft` and
    `evolve` steps have no time limit: with the swarm on and the Claude Code
@@ -720,6 +728,11 @@ to stop it. Four pages:
   "Back up now" under Storage saves a copy of the database right away, the
   same verified copy `run_ops.py backup` makes, into the same `backups\`
   folder (the oldest beyond `backups: keep` in `ops\config.yaml` are removed).
+  Under Drafting, how many stories you said yes to on the feed have no draft
+  yet. A yes sends a story to drafting whatever its score or age: the next
+  draft run takes those first, then the best-scored new stories (score at
+  `scoring: threshold` in `config.yaml` or above, scored in the last 48
+  hours), at most `--limit` (10) a run.
 - **Sources** (`/sources`) — every source from `config.yaml`: when it last
   ran, how many items it fetched, how many were new, and the last error if
   it failed. A source in red has been failing; one in amber has not run for

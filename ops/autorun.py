@@ -130,6 +130,8 @@ def ineligible(step: Any) -> str | None:
     argv = [str(a) for a in getattr(step, "argv", [])]
     if posts_live(argv):
         return "it carries the publisher's live flag"
+    if getattr(step, "manual", False):
+        return "it is a manual step (a button on its page)"
     if len(argv) < 2 or argv[0] != "python" or argv[1] not in AUTO_SCRIPTS:
         return "only ingest, score, draft, verify, feedback and evolve run automatically"
     return None
