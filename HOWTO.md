@@ -255,6 +255,22 @@ source only when it is due, and score only scores what is new.
    cards), and those per-item scores show next to each render on the draft
    page.
 
+   A chart comes in three kinds, and the drafter picks the one that fits the
+   data. **Grouped** puts two to four arms side by side across up to six
+   endpoints that share a unit (drug vs control on ORR and CR rate) for a
+   randomised readout. **Stat** draws one to four headline numbers as big
+   tiles, each with its own unit (a single-arm ORR of 73% next to a median PFS
+   of 11 months). **Bars** is one endpoint across arms, doses, cohorts or
+   competitors. Every number in each kind is checked against the source. A bar
+   chart whose bars are all equal (two arms both "in phase 3") compares nothing,
+   so the draft is sent back to the model.
+
+   Every card also shows the story's company logo in its top right corner: the
+   company whose own site published the story (its `domain:`, or its feed's
+   site), otherwise the first configured company the chart or table title
+   names. A card from a journal or a regulator about no configured company has
+   no header logo.
+
    Company cells in a table, and chart bars labelled with a company, get a
    stock ticker and a logo automatically when
    the company is configured. In a table that means the row-label column and
@@ -598,6 +614,9 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    claims show as "not checked yet" and the run carries on. The `draft` and
    `evolve` steps have no time limit: with the swarm on, every cell is one
    Claude Code CLI launch and a run can take an hour or more.
+   `parallel_calls` in `swarm\config.yaml` (6 shipped) launches that many
+   cells, or judge matches, side by side; set it to 1 if the CLI hits its
+   usage limits, which costs time, not draft quality.
    Until that settles, run the steps by hand from the panel and post from
    the approved page; the scheduler can come back later.
    ```

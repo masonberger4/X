@@ -19,7 +19,7 @@ too few cells are supported, and only then renders it through render_table().
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,16 @@ IMAGES_DIRNAME = "images"  # <db folder>/images/draft_<id>.png; shared by steps 
 
 CHART_MIN_BARS = 2
 CHART_MAX_BARS = 8
+# The kinds of chart (Chart.kind). "bars": one value per label, the original. "grouped":
+# two to four arms (series) side by side across one to six endpoints (labels), the shape of
+# a randomised readout. "stat": one to four headline numbers drawn as big tiles, the shape
+# of a single-arm readout (ORR, CR rate, median DOR), each with its own unit.
+CHART_KINDS = ("bars", "grouped", "stat")
+GROUPED_MIN_SERIES = 2
+GROUPED_MAX_SERIES = 4
+GROUPED_MAX_GROUPS = 6
+STAT_MIN_TILES = 1
+STAT_MAX_TILES = 4
 MAX_ALT_TEXT = 1000  # X's limit for image alt text
 
 # Rendered size: X shows a 16:9 image without cropping in the timeline.
@@ -76,23 +86,52 @@ class ChartError(ValueError):
 
 
 @dataclass
+class Series:
+    """One arm of a grouped chart: its name and one value per endpoint (Chart.labels)."""
+
+    name: str
+    values: list[float]
+
+
+@dataclass
 class Chart:
     title: str
     labels: list[str]
     values: list[float]
     unit: str = ""  # "%", "months", "" ... shown on the axis and after each value
     note: str = ""  # one line under the chart, e.g. "n=97, single arm, investigator-assessed"
+    kind: str = "bars"  # one of CHART_KINDS
+    series: list[Series] = field(default_factory=list)  # "grouped": the arms; values is []
+    units: list[str] = field(default_factory=list)  # "stat": a unit per tile ("" -> unit)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        """The spec as stored in drafts.chart_json. A plain bar chart keeps the original
+        five keys, so rows written before the other kinds read the same."""
+        data = asdict(self)
+        if self.kind == "bars":
+            data.pop("kind")
+        if not self.series:
+            data.pop("series")
+        if not self.units:
+            data.pop("units")
+        return data
+
+    def unit_at(self, i: int) -> str:
+        """The unit of value i: its own in `units` when given, else the chart's."""
+        if i < len(self.units) and self.units[i].strip():
+            return self.units[i].strip()
+        return self.unit
 
     def numbers(self) -> list[str]:
         """Every value as the text a reader sees, with its % sign, for the verbatim check."""
-        return [format_value(v, self.unit) for v in self.values]
+        if self.kind == "grouped":
+            return [format_value(v, self.unit) for s in self.series for v in s.values]
+        return [format_value(v, self.unit_at(i)) for i, v in enumerate(self.values)]
 
     def texts(self) -> list[str]:
-        """The free-text parts (title, labels, note), whose numbers are checked too."""
-        return [self.title, *self.labels, self.note]
+        """The free-text parts (title, labels, arm names, note), whose numbers are checked
+        too."""
+        return [self.title, *self.labels, *(s.name for s in self.series), self.note]
 
 
 @dataclass
@@ -165,22 +204,64 @@ TABLE_JSON_SCHEMA: dict[str, Any] = {
 CHART_JSON_SCHEMA: dict[str, Any] = {
     "type": ["object", "null"],
     "additionalProperties": False,
-    "required": ["title", "labels", "values", "unit"],
+    "required": ["title", "labels", "unit"],
     "properties": {
+        "kind": {
+            "type": "string",
+            "enum": list(CHART_KINDS),
+            "description": (
+                "'bars' (default): one value per label, e.g. one endpoint across arms, "
+                "doses, cohorts or competitors. 'grouped': two to four arms side by side "
+                "across one to six endpoints (labels), e.g. drug vs control on ORR, CR and "
+                "median PFS in a randomised readout; values go in 'series'. 'stat': one to "
+                "four headline numbers drawn large, e.g. a single-arm ORR, CR rate and "
+                "median DOR, each with its own unit in 'units'."
+            ),
+        },
         "title": {"type": "string", "description": "Chart title, one line."},
         "labels": {
             "type": "array",
-            "minItems": CHART_MIN_BARS,
+            "minItems": 1,
             "maxItems": CHART_MAX_BARS,
             "items": {"type": "string"},
-            "description": "One label per bar, e.g. arm or endpoint names.",
+            "description": (
+                "'bars': one label per bar (arm, dose, cohort, company). 'grouped': the "
+                "endpoints, one per group. 'stat': the caption under each number."
+            ),
         },
         "values": {
             "type": "array",
-            "minItems": CHART_MIN_BARS,
             "maxItems": CHART_MAX_BARS,
             "items": {"type": "number"},
-            "description": "One value per label, copied verbatim from the source.",
+            "description": (
+                "One value per label, copied verbatim from the source. Empty for 'grouped'."
+            ),
+        },
+        "series": {
+            "type": "array",
+            "maxItems": GROUPED_MAX_SERIES,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "values"],
+                "properties": {
+                    "name": {"type": "string", "description": "The arm, e.g. 'Drug + chemo'."},
+                    "values": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "One value per label, verbatim from the source.",
+                    },
+                },
+            },
+            "description": "'grouped' only: the arms (experimental first, control last).",
+        },
+        "units": {
+            "type": "array",
+            "maxItems": STAT_MAX_TILES,
+            "items": {"type": "string"},
+            "description": (
+                "'stat' only: the unit of each number ('%', 'months', 'patients'); '' uses 'unit'."
+            ),
         },
         "unit": {"type": "string", "description": "'%', 'months', 'patients', or ''."},
         "note": {
@@ -192,7 +273,7 @@ CHART_JSON_SCHEMA: dict[str, Any] = {
         },
     },
     "description": (
-        "Optional bar chart to attach, or null when the source has no comparable numbers. "
+        "Optional chart to attach, or null when the source has no numbers worth drawing. "
         "Only numbers that appear verbatim in the source; code checks each one and drops the "
         "chart otherwise."
     ),
@@ -227,21 +308,80 @@ def validate_chart(data: Any) -> Chart | None:
         isinstance(v, int | float) and not isinstance(v, bool) for v in values
     ):
         raise ChartError("chart.values must be a list of numbers")
-    if len(labels) != len(values):
-        raise ChartError("chart.labels and chart.values must have the same length")
-    if not CHART_MIN_BARS <= len(labels) <= CHART_MAX_BARS:
-        raise ChartError(f"chart needs {CHART_MIN_BARS}-{CHART_MAX_BARS} bars, got {len(labels)}")
     unit = data.get("unit", "")
     note = data.get("note", "")
     if not isinstance(unit, str) or not isinstance(note, str):
         raise ChartError("chart.unit and chart.note must be strings")
+    kind = data.get("kind") or "bars"
+    if kind not in CHART_KINDS:
+        raise ChartError(f"chart.kind must be one of {', '.join(CHART_KINDS)}")
+    units = data.get("units") or []
+    if not isinstance(units, list) or not all(isinstance(u, str) for u in units):
+        raise ChartError("chart.units must be a list of strings")
+    series: list[Series] = []
+    if kind == "grouped":
+        if values:
+            raise ChartError("a grouped chart carries its values in 'series'; leave values empty")
+        if not 1 <= len(labels) <= GROUPED_MAX_GROUPS:
+            raise ChartError(f"a grouped chart needs 1-{GROUPED_MAX_GROUPS} endpoint labels")
+        series = _validate_series(data.get("series"), len(labels))
+    else:
+        if data.get("series"):
+            raise ChartError("'series' is for a grouped chart only")
+        if len(labels) != len(values):
+            raise ChartError("chart.labels and chart.values must have the same length")
+        lo, hi = (
+            (STAT_MIN_TILES, STAT_MAX_TILES) if kind == "stat" else (CHART_MIN_BARS, CHART_MAX_BARS)
+        )
+        if not lo <= len(labels) <= hi:
+            raise ChartError(f"a {kind} chart needs {lo}-{hi} values, got {len(labels)}")
+    if units and (kind != "stat" or len(units) != len(labels)):
+        raise ChartError("'units' is for a stat chart only, one per label")
     return Chart(
         title=title.strip(),
         labels=[x.strip() for x in labels],
         values=[float(v) for v in values],
         unit=unit.strip(),
         note=note.strip(),
+        kind=kind,
+        series=series,
+        units=[u.strip() for u in units],
     )
+
+
+def _validate_series(data: Any, n_labels: int) -> list[Series]:
+    """The arms of a grouped chart: 2-4, each named, each with one number per label."""
+    if not isinstance(data, list) or not GROUPED_MIN_SERIES <= len(data) <= GROUPED_MAX_SERIES:
+        raise ChartError(
+            f"a grouped chart needs {GROUPED_MIN_SERIES}-{GROUPED_MAX_SERIES} series (arms)"
+        )
+    out: list[Series] = []
+    for i, s in enumerate(data):
+        if not isinstance(s, dict) or set(s) - {"name", "values"}:
+            raise ChartError(f"chart.series[{i}] must be an object with name and values")
+        name, vals = s.get("name"), s.get("values")
+        if not isinstance(name, str) or not name.strip():
+            raise ChartError(f"chart.series[{i}].name must be a non-empty string")
+        if not isinstance(vals, list) or not all(
+            isinstance(v, int | float) and not isinstance(v, bool) for v in vals
+        ):
+            raise ChartError(f"chart.series[{i}].values must be a list of numbers")
+        if len(vals) != n_labels:
+            raise ChartError(f"chart.series[{i}] needs one value per label ({n_labels})")
+        out.append(Series(name=name.strip(), values=[float(v) for v in vals]))
+    return out
+
+
+def flat_chart_problems(chart: Chart) -> list[str]:
+    """A bar chart whose bars are all the same height compares nothing (two arms 'in
+    phase 3' drawn as two bars of 3). Worded for the retry prompt."""
+    if chart.kind == "bars" and len(set(chart.values)) == 1:
+        return [
+            "chart bars are all equal, so the chart compares nothing; chart an efficacy or "
+            "safety number that differs between arms, use a 'stat' chart for one arm's "
+            "headline numbers, or give a table"
+        ]
+    return []
 
 
 def validate_table(data: Any) -> Table | None:
@@ -328,6 +468,22 @@ def alt_text(
             )
             rows.append(f"{row[0]}: {facts}")
         parts = [f"Table: {chart.title}. " + ". ".join(rows) + "."]
+    elif chart.kind == "grouped":
+        unit = f" {chart.unit}" if chart.unit and chart.unit != "%" else ""
+        groups = "; ".join(
+            f"{lab}: "
+            + ", ".join(
+                f"{s.name} {format_value(s.values[i], chart.unit)}{unit}" for s in chart.series
+            )
+            for i, lab in enumerate(chart.labels)
+        )
+        parts = [f"Grouped bar chart: {chart.title}. {groups}."]
+    elif chart.kind == "stat":
+        tiles = []
+        for i, (lab, val) in enumerate(zip(chart.labels, chart.numbers(), strict=True)):
+            u = chart.unit_at(i)
+            tiles.append(f"{lab} {val}" + (f" {u}" if u and u != "%" else ""))
+        parts = [f"Key figures: {chart.title}. " + "; ".join(tiles) + "."]
     else:
         bars = "; ".join(
             f"{lab} {val}" for lab, val in zip(chart.labels, chart.numbers(), strict=True)
@@ -633,11 +789,42 @@ def _wrap(text: str, width: int) -> str:
     return "\n".join(textwrap.wrap(text, width=width)) or text
 
 
+_HEADER_LOGO_H = 0.11  # figure fraction: height of the story's company logo, top right
+_HEADER_LOGO_MAX_W = 0.2
+
+
+def _draw_header_logo(fig, logo: Path) -> bool:
+    """The story's company logo in the top right corner, beside the title. An unreadable
+    file is skipped (False): the card is the same without it."""
+    from matplotlib.image import imread
+
+    try:
+        img = imread(str(logo))
+    except Exception:
+        return False
+    h_px, w_px = img.shape[0], img.shape[1]
+    fig_w, fig_h = fig.get_size_inches()
+    w = min(_HEADER_LOGO_H * fig_h * w_px / max(h_px, 1) / fig_w, _HEADER_LOGO_MAX_W)
+    ax = fig.add_axes((1 - _MARGIN_X - w, _TITLE_Y - _HEADER_LOGO_H / 2, w, _HEADER_LOGO_H))
+    ax.imshow(img, interpolation="antialiased")
+    ax.set_anchor("E")
+    ax.axis("off")
+    return True
+
+
 def _frame(
-    fig, plt, *, title: str, footer: list[str], subtitle: str = "", style: Style | None = None
+    fig,
+    plt,
+    *,
+    title: str,
+    footer: list[str],
+    subtitle: str = "",
+    style: Style | None = None,
+    header_logo: Path | None = None,
 ) -> None:
     """The chrome around the data: accent rule, eyebrow, title, subtitle, footer rule
-    and footer texts (note on the left, source on the right)."""
+    and footer texts (note on the left, source on the right), and the story's company
+    logo top right when there is one (draft/branding.py:story_brand)."""
     from matplotlib.patches import Rectangle
 
     st = style or Style()
@@ -658,10 +845,11 @@ def _frame(
         ha="left",
         va="center",
     )
+    has_logo = header_logo is not None and _draw_header_logo(fig, header_logo)
     fig.text(
         _MARGIN_X,
         _TITLE_Y,
-        _wrap(title, max(20, int(62 / ts))),
+        _wrap(title, max(20, int((50 if has_logo else 62) / ts))),
         fontsize=12.5 * ts,
         fontweight="bold",
         color=pal.ink,
@@ -762,18 +950,19 @@ def render_chart(
     source_url: str = "",
     style: Style | None = None,
     logos: dict[int, Path] | None = None,
+    header_logo: Path | None = None,
 ) -> Path:
     """Draw the chart as a PNG at `path` (parent dirs created). Raises ImportError without
     matplotlib, which the callers turn into 'no image' rather than 'no draft'.
 
-    Horizontal bars (arm and endpoint names are long), the palette's series colour (or one
-    hue per bar with `multi_colour`), a light track showing the full scale behind each bar,
-    the verified value at every bar's tip. `logos` maps a bar index to a PNG drawn in the
-    label gutter (draft/branding.py:brand_chart)."""
+    By kind: "bars" are horizontal bars (arm and endpoint names are long), the palette's
+    series colour (or one hue per bar with `multi_colour`), a light track showing the full
+    scale behind each bar, the verified value at every bar's tip; `logos` maps a bar index
+    to a PNG drawn in the label gutter (draft/branding.py:brand_chart). "grouped" draws the
+    arms as columns side by side per endpoint with a legend; "stat" draws each headline
+    number as a big tile. `header_logo` is the story's company logo, top right."""
     st = style or Style()
     pal = st.colours
-    fs = st.font_scale
-    logos = logos or {}
     plt = _setup(pal)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -783,10 +972,31 @@ def render_chart(
     if src:
         footer.append(src)
     unit_label = ""
-    if chart.unit and chart.unit != "%":
+    if chart.kind == "bars" and chart.unit and chart.unit != "%":
         unit_label = f"Values in {chart.unit}"
-    _frame(fig, plt, title=chart.title, footer=footer, subtitle=unit_label, style=st)
+    _frame(
+        fig,
+        plt,
+        title=chart.title,
+        footer=footer,
+        subtitle=unit_label,
+        style=st,
+        header_logo=header_logo,
+    )
+    if chart.kind == "grouped":
+        _draw_grouped(fig, chart, st)
+    elif chart.kind == "stat":
+        _draw_stat(fig, chart, st)
+    else:
+        _draw_bars(fig, chart, st, logos or {})
+    fig.savefig(path, format="png", dpi=DPI, facecolor=pal.surface)
+    plt.close(fig)
+    return path
 
+
+def _draw_bars(fig, chart: Chart, st: Style, logos: dict[int, Path]) -> None:
+    pal = st.colours
+    fs = st.font_scale
     n = len(chart.values)
     wrap_at = st.label_wrap if n <= 5 else max(st.label_wrap, 44)  # dense charts wrap less
     longest = max(len(line) for lab in chart.labels for line in _wrap(lab, wrap_at).split("\n"))
@@ -842,9 +1052,152 @@ def render_chart(
     for i, logo in logos.items():
         if 0 <= i < n:
             _draw_chart_logo(fig, ax, y[i], logo)
-    fig.savefig(path, format="png", dpi=DPI, facecolor=pal.surface)
-    plt.close(fig)
-    return path
+
+
+def arm_colours(style: Style, k: int) -> list[str]:
+    """The fill of each of `k` arms in a grouped chart: the experimental arm in the accent;
+    with two arms the control in the palette's tint, with more one series hue each."""
+    pal = style.colours
+    if k <= 2:
+        return [pal.accent, pal.tint][:k]
+    others = [c for c in pal.series if c.lower() != pal.accent.lower()]
+    return [pal.accent, *others][:k]
+
+
+def _draw_grouped(fig, chart: Chart, st: Style) -> None:
+    """Arms as columns side by side within each endpoint, value on every column, a legend
+    of the arms above the plot. One shared unit, so the heights compare honestly."""
+    from matplotlib.patches import Rectangle
+
+    pal = st.colours
+    fs = st.font_scale
+    arms, groups = chart.series, chart.labels
+    k, g = len(arms), len(groups)
+    colours = arm_colours(st, k)
+
+    # legend: a swatch and the arm's name, left to right under the title
+    x = _MARGIN_X
+    y = _PLOT_TOP + 0.035
+    for name, colour in zip([a.name for a in arms], colours, strict=True):
+        fig.add_artist(
+            Rectangle((x, y - 0.014), 0.014, 0.028, transform=fig.transFigure, color=colour, lw=0)
+        )
+        fig.text(x + 0.022, y, name, fontsize=6.8 * fs, color=pal.ink, ha="left", va="center")
+        x += 0.05 + 0.0068 * len(name) * fs
+    if chart.unit and chart.unit != "%":
+        fig.text(
+            1 - _MARGIN_X,
+            y,
+            f"Values in {chart.unit}",
+            fontsize=6.4 * fs,
+            color=pal.ink_2,
+            ha="right",
+            va="center",
+        )
+
+    plot_bottom = _PLOT_BOTTOM + 0.07
+    ax = fig.add_axes((_MARGIN_X, plot_bottom, 1 - 2 * _MARGIN_X, _PLOT_TOP - 0.06 - plot_bottom))
+    ax.set_facecolor(pal.surface)
+    width = min(0.8 / k, 0.3)
+    top = max([v for a in arms for v in a.values] + [0.0]) or 1.0
+    value_fs = (8.5 if k * g <= 6 else 7 if k * g <= 12 else 5.8) * fs
+    for j, (arm, colour) in enumerate(zip(arms, colours, strict=True)):
+        xs = [gi + (j - (k - 1) / 2) * width for gi in range(g)]
+        ax.bar(xs, arm.values, width=width * 0.9, color=colour, lw=0)
+        for xi, val in zip(xs, arm.values, strict=True):
+            ax.annotate(
+                format_value(val, chart.unit),
+                (xi, val),
+                xytext=(0, 4),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=value_fs,
+                fontweight="bold",
+                color=pal.ink,
+            )
+    ax.set_xlim(-0.6, g - 0.4)
+    ax.set_ylim(0, top * 1.2)
+    ax.set_xticks(range(g))
+    ax.set_xticklabels(
+        [_wrap(lab, 18 if g > 3 else 28) for lab in groups],
+        fontsize=7.2 * fs if g <= 4 else 6.2 * fs,
+        color=pal.ink,
+        fontweight="bold",
+        linespacing=1.1,
+    )
+    ax.tick_params(axis="x", length=0, pad=8)
+    ax.set_yticks([])
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color(pal.rule)
+    ax.spines["bottom"].set_linewidth(0.8)
+
+
+def _draw_stat(fig, chart: Chart, st: Style) -> None:
+    """Each headline number as a tile: its caption above, the number large in the accent,
+    its unit beneath (a % stays on the number)."""
+    from matplotlib.patches import FancyBboxPatch, Rectangle
+
+    pal = st.colours
+    fs = st.font_scale
+    n = len(chart.values)
+    gap = 0.025
+    left, right = _MARGIN_X, 1 - _MARGIN_X
+    w = (right - left - gap * (n - 1)) / n
+    top, bottom = _PLOT_TOP + 0.02, _PLOT_BOTTOM + 0.02
+    h = top - bottom
+    big = {1: 64, 2: 54, 3: 44, 4: 36}[n] * fs
+    wrap_at = max(14, int(w * 120 / fs))
+    for i, (label, text) in enumerate(zip(chart.labels, chart.numbers(), strict=True)):
+        x = left + i * (w + gap)
+        fig.add_artist(
+            FancyBboxPatch(
+                (x, bottom),
+                w,
+                h,
+                boxstyle="round,pad=0,rounding_size=0.012",
+                transform=fig.transFigure,
+                facecolor=pal.zebra,
+                edgecolor="none",
+            )
+        )
+        fig.add_artist(
+            Rectangle((x, bottom), 0.006, h, transform=fig.transFigure, color=pal.accent, lw=0)
+        )
+        pad = 0.03
+        fig.text(
+            x + pad,
+            top - 0.045,
+            _wrap(label.upper(), wrap_at),
+            fontsize=6.6 * fs,
+            fontweight="bold",
+            color=pal.ink_2,
+            ha="left",
+            va="top",
+            linespacing=1.2,
+        )
+        fig.text(
+            x + pad,
+            bottom + h * 0.42,
+            text,
+            fontsize=big,
+            fontweight="bold",
+            color=pal.accent,
+            ha="left",
+            va="center",
+        )
+        unit = chart.unit_at(i)
+        if unit and unit != "%":
+            fig.text(
+                x + pad,
+                bottom + h * 0.13,
+                unit,
+                fontsize=8.5 * fs,
+                color=pal.ink_2,
+                ha="left",
+                va="center",
+            )
 
 
 def render_table(
@@ -855,6 +1208,7 @@ def render_table(
     blanked: frozenset[tuple[int, int]] = frozenset(),
     style: Style | None = None,
     logos: dict[tuple[int, int], Path] | None = None,
+    header_logo: Path | None = None,
 ) -> Path:
     """Draw the table as a PNG at `path`. Cells in `blanked` (the fact-checker could not
     support them) are drawn as BLANK_CELL and the footer says so. `logos` maps a body cell
@@ -876,7 +1230,7 @@ def render_table(
     src = _source_label(source_url)
     if src:
         footer.append(src)
-    _frame(fig, plt, title=table.title, footer=footer, style=st)
+    _frame(fig, plt, title=table.title, footer=footer, style=st, header_logo=header_logo)
 
     body = [
         [BLANK_CELL if (r, c) in blanked or not cell else cell for c, cell in enumerate(row)]

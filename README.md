@@ -586,7 +586,10 @@ python run_draft.py --no-swarm    # the single strong drafter only, as before st
 ```
 
 Settings live in `swarm/config.yaml` (cheap `model`, `assembler_model`,
-`fan_out`, `layers`, `judge_votes`, `jury`, `max_similarity`, `control.enabled`).
+`fan_out`, `layers`, `parallel_calls`, `judge_votes`, `jury`, `max_similarity`,
+`control.enabled`). `parallel_calls` runs a layer's cells and a tournament round's
+judge matches side by side; slots and layers stay in order, so it only changes the wall
+clock.
 Every call goes through `draft/drafter.py:call_anthropic`, one Claude Code CLI
 run per call. Tables (step 9's
 own): `swarm_genomes` (the heritable slots and topology; phase three writes

@@ -189,7 +189,8 @@ def fallback_adjustments(visual: Chart | Table, style: Style) -> dict[str, Any]:
 
 
 def build_user_prompt(visual: Chart | Table, style: Style, previous: ImageGrade | None) -> str:
-    kind = "table" if isinstance(visual, Table) else "bar chart"
+    names = {"bars": "bar chart", "grouped": "grouped bar chart", "stat": "headline-figures card"}
+    kind = "table" if isinstance(visual, Table) else names.get(visual.kind, "bar chart")
     parts = [
         f"This is a {kind}. Its spec (the text the renderer was given):",
         json.dumps(visual.to_dict(), ensure_ascii=False),
