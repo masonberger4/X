@@ -592,10 +592,24 @@ def studio_catalyst_dismiss(catalyst_id: int, conn: Conn):
     return _redirect("/studio/radar", "catalyst taken off the calendar")
 
 
+def _queue_draft(piece: S.Piece) -> Any:
+    """The piece's draft in the approval queue, or None."""
+    from approval_queue import store as queue_store
+
+    item_id = queue_store.studio_item_id(piece.id)
+    return _queue(lambda qconn: queue_store.find_by_item(qconn, item_id))
+
+
 @router.get("/studio/{piece_id}", response_class=HTMLResponse)
 def studio_piece(request: Request, piece_id: int, conn: Conn, flash: str = ""):
     piece = _piece_or_404(conn, piece_id)
     ws = Path(piece.workspace)
+    posts = _posts(ws)
+    cards = _cards(ws)
+    # What would be posted is the queue draft's text. It differs from the session's files
+    # after a hand edit in the queue, or while a revision has not reached the queue yet.
+    draft = _queue_draft(piece)
+    queue_posts = list(draft.draft.thread) if draft is not None else []
     return templates.TemplateResponse(
         request,
         "studio_piece.html",
@@ -605,8 +619,11 @@ def studio_piece(request: Request, piece_id: int, conn: Conn, flash: str = ""):
             "research": _research(piece.meta.get("research")),
             "factbase": _read(ws / P.FACTBASE_FILE),
             "factcheck": _read(ws / P.FACTCHECK_FILE),
-            "posts": _posts(ws),
-            "cards": _cards(ws),
+            "posts": posts,
+            "cards": cards,
+            "queue_draft": draft.id if draft is not None else None,
+            "queue_posts": queue_posts if queue_posts != posts else [],
+            "queue_pictures": len(draft.images) if draft is not None else None,
             "log": _tail(ws / "session.log"),
             "running": piece.stage in S.RUNNING_STAGES,
             "warnings": piece.meta.get("warnings") or [],

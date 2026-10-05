@@ -110,12 +110,14 @@ def get(conn, piece_id: int) -> S.Piece:
     return piece
 
 
-def studio_draft(conn, piece: S.Piece) -> int:
+def studio_draft(conn, piece: S.Piece, thread: list[str] | None = None) -> int:
     draft_id = queue_store.insert_draft(
         conn,
         item_id=queue_store.studio_item_id(piece.id),
         model="writer-model (studio)",
-        draft=Draft(thread=["A finished long post."], suggested_visual="", why_it_matters="w"),
+        draft=Draft(
+            thread=thread or ["A finished long post."], suggested_visual="", why_it_matters="w"
+        ),
     )
     S.update_piece(conn, piece.id, draft_id=draft_id)
     return draft_id
@@ -575,6 +577,10 @@ def write_workspace(ws: Path) -> None:
     )
 
 
+# The posts write_workspace's piece.json lists, in its order (blank and missing ones out).
+WORKSPACE_POSTS = ("The second post, its own section.", "The first post: 41% ORR.")
+
+
 def test_a_piece_page_shows_its_posts_cards_research_and_logs(client, sconn, tmp_path):
     ws = tmp_path / "studio_pieces" / "piece"
     write_workspace(ws)
@@ -596,7 +602,8 @@ def test_a_piece_page_shows_its_posts_cards_research_and_logs(client, sconn, tmp
             "problems": ["card card_2.html: text clipped"],
         },
     )
-    draft_id = studio_draft(sconn, piece)
+    # the queue holds what the session last put there: its files' text
+    draft_id = studio_draft(sconn, piece, list(WORKSPACE_POSTS))
     run_id = S.start_run(sconn, piece.id, "research")
     S.finish_run(sconn, run_id, outcome="ok", detail="finished", turns=31, duration_ms=1_800_000)
     run_id = S.start_run(sconn, piece.id, "polish")
@@ -609,7 +616,7 @@ def test_a_piece_page_shows_its_posts_cards_research_and_logs(client, sconn, tmp
     assert "<h1>The class is back</h1>" in body
     assert f'<a href="/drafts/{draft_id}">draft {draft_id}</a>' in body
     # the posts in piece.json's order, without the blank or missing ones
-    assert "The post (2 posts)" in body
+    assert "The post (2 posts)" in body and "The post in the queue" not in body
     second = body.index("The second post, its own section.")
     first = body.index("The first post: 41% ORR.")
     assert second < first and "\ufeff" not in body
@@ -634,6 +641,26 @@ def test_a_piece_page_shows_its_posts_cards_research_and_logs(client, sconn, tmp
     assert f'action="/studio/{piece.id}/continue"' not in body
     assert f'action="/studio/{piece.id}/resume"' not in body
     assert 'http-equiv="refresh"' not in body
+
+
+def test_a_hand_edit_in_the_queue_is_what_the_piece_page_shows_as_the_post(client, sconn, tmp_path):
+    ws = tmp_path / "studio_pieces" / "piece"
+    write_workspace(ws)
+    piece = make_piece(sconn, stage=S.STAGE_READY, workspace=ws)
+    draft_id = studio_draft(sconn, piece, list(WORKSPACE_POSTS))
+    fixed = ["The second post, fixed by hand in the queue.", WORKSPACE_POSTS[1]]
+    queue_store.edit(sconn, draft_id, thread=fixed, approve_after=False)
+
+    body = client.get(f"/studio/{piece.id}").text
+
+    # what would be posted comes first, then the session's own files
+    head = body.index("The post in the queue (2 posts)")
+    assert f'<a href="/drafts/{draft_id}">draft {draft_id}</a> would post' in body
+    assert "A Revise starts from the queue's text and keeps the hand edits." in body
+    assert head < body.index(fixed[0]) < body.index("The session's files")
+    assert body.index("The session's files") < body.index(WORKSPACE_POSTS[0])
+    # three cards drawn, none attached to the queue draft any more
+    assert "The queue draft carries 0 of these 3 cards" in body
 
 
 def test_the_page_offers_what_the_stage_allows(client, sconn, tmp_path):

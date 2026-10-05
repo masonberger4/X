@@ -24,7 +24,7 @@ import argparse
 import logging
 import sys
 
-from approval_queue import images
+from approval_queue import images, publishing
 from approval_queue import store as queue_store
 from draft.chart import Table, note_problems
 
@@ -62,18 +62,18 @@ def rerender(conn, row: queue_store.DraftRow) -> None:
 
 def scrub(conn, statuses: list[str], dry_run: bool) -> int:
     """Returns the number of drafts whose caption was cleared (or would be)."""
-    posted = set()
     done = 0
     for status in statuses:
         rows = queue_store.list_drafts(conn, status=status)
         states = queue_store.publish_states(conn, [r.id for r in rows])
-        posted |= {i for i, s in states.items() if getattr(s, "posted", False)}
         for row in rows:
             notes = offending_notes(row)
             if not notes:
                 continue
-            if row.id in posted:
-                log.info("draft %d: already posted, left alone: %s", row.id, notes)
+            # Live on X or claimed by a publish run (the queue's own Reopen test): the
+            # picture that went out, or is going out, stays the one on record.
+            if publishing.block_reason(conn, row.id, states.get(row.id)):
+                log.info("draft %d: posted or being posted, left alone: %s", row.id, notes)
                 continue
             done += 1
             if dry_run:

@@ -140,6 +140,9 @@ class Approved:
     shape: str = "thread"
     max_chars: int = 280
     images: list[tuple[str, str, int]] = field(default_factory=list)
+    # The draft's "why it matters" note for the human posting it (a studio draft's carries
+    # the facts to re-check on posting day); never posted.
+    why_it_matters: str = ""
 
 
 def _db_file(conn: sqlite3.Connection) -> Path | None:
@@ -283,7 +286,7 @@ def fetch_approved(
         params.append(limit)
         rows = conn.execute(
             f"""
-            SELECT d.id, d.item_id, d.cluster_id, d.thread_json, d.updated_at,
+            SELECT d.id, d.item_id, d.cluster_id, d.thread_json, d.updated_at, d.why_it_matters,
                    (SELECT edited_text FROM decisions WHERE draft_id = d.id
                       AND action IN ('edit', 'revise') AND edited_text IS NOT NULL
                       ORDER BY id DESC LIMIT 1) AS edited_text,
@@ -334,6 +337,7 @@ def fetch_approved(
                 shape=shape,
                 max_chars=max_chars,
                 images=images,
+                why_it_matters=r["why_it_matters"] or "",
             )
         )
     return out

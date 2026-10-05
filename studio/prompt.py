@@ -10,6 +10,7 @@ offer, what recent pieces did, the playbook, the files to write and when to stop
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from studio.angles import HOOK_STYLES, SHAPES, AngleOffer
@@ -408,12 +409,44 @@ with one line: what you changed, or "no changes"."""
 # --- revise and resume ------------------------------------------------------------------
 
 
-def revise_prompt(note: str) -> str:
+def _hand_edits_block(edited_posts: Sequence[str], dropped_cards: Sequence[str]) -> str:
+    """What the editor changed in the approval queue after the session finished, which the
+    app wrote into the session's files before this revision."""
+    lines = []
+    if edited_posts:
+        lines.append(
+            "The editor changed the text by hand in the approval queue after you finished "
+            f"it. Before this revision the app wrote the editor's version into your post "
+            f"files ({', '.join(edited_posts)}) and listed them in {PIECE_FILE}: that "
+            "version is what would be posted. Keep every change the editor made, word for "
+            "word, unless the request above asks to change that part; make the requested "
+            "changes on top of it and never put your earlier wording back. If the "
+            "fact-check finds a problem in a line the editor wrote, keep the line and say "
+            f"what the problem is in {FACTCHECK_FILE} and in your summary."
+        )
+    if dropped_cards:
+        lines.append(
+            "The editor dropped these cards from the post in the approval queue: "
+            + "; ".join(dropped_cards)
+            + f". The app took them out of {PIECE_FILE}'s card list (their files are still "
+            "in your folder). Leave them out unless the request above asks for them back."
+        )
+    if not lines:
+        return ""
+    return "\nTHE EDITOR'S OWN CHANGES IN THE QUEUE\n" + "\n".join(lines) + "\n"
+
+
+def revise_prompt(
+    note: str, *, edited_posts: Sequence[str] = (), dropped_cards: Sequence[str] = ()
+) -> str:
+    """The editor's request, and the changes the editor made by hand in the queue (the app
+    has already put those into the session's files; see studio/session.py:write_back)."""
+    asked = note.strip() or "(nothing beyond keeping the changes below)"
     return f"""REVISION
 
 The editor read the finished piece and asks for changes:
-{note.strip()}
-
+{asked}
+{_hand_edits_block(edited_posts, dropped_cards)}
 Make them. Update the posts, the cards and {PIECE_FILE}; update {FACTBASE_FILE} if the
 facts change. Run the cold fact-check again (a fresh sub-agent in the foreground, as
 before) on everything new or changed, and add its findings to {FACTCHECK_FILE}. End

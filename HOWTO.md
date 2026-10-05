@@ -171,7 +171,9 @@ runs and writes shorter threads for the day's other stories.
    only introduced it, "Full results:") from every post and drop a post that was
    nothing but the link. It is pure text: no model call, no network, pictures
    untouched, the draft keeps its status, and each change is logged as an edit
-   holding the before and after. A draft already posted is left alone, and one
+   holding the before and after. A draft already posted (or one a publish run
+   has claimed) is left alone, and so is a studio piece (part 9: its session
+   writes without links, and a ticker like `ROG.SW/RHHBY` is not one); a draft
    whose every post is nothing but a link is named in the log for you to revise
    by hand in the queue. By default it covers pending and approved drafts;
    `--status STATUS` (repeatable) narrows it, `-v` shows per draft detail.
@@ -471,7 +473,10 @@ runs and writes shorter threads for the day's other stories.
    discarded and the next `run_verify.py` (or the scheduler) checks the new
    or changed claims.
 4. After a couple of weeks, see what your edits are asking for and paste the
-   suggestions you agree with into `draft\voice.md`.
+   suggestions you agree with into `draft\voice.md`. Only the drafter's own
+   drafts count here and in the examples the drafter is shown: a studio piece
+   (part 9) is written in the studio's voice, so its edits and rejections stay
+   out of both.
    ```
    python -m draft.voice_report
    python -m draft.voice_report --weeks 8 --out voice.md
@@ -519,6 +524,9 @@ the X API:
 - each post of the thread with a **Copy text** button (numbered exactly as the
   publisher would post it), and under it its picture(s) with **Copy picture**,
   a download link and the alt text for X's "Add description";
+- for a studio piece (part 9), above the posts, the fast-moving facts its
+  session flagged to **re-check before posting** (a date that may have moved, a
+  figure that changes daily): confirm each still holds before you paste;
 - a link to x.com's composer. Paste post 1's text and picture, press **+** for
   each next post, and post it;
 - back on the page, optionally paste the link to the first post (feedback can
@@ -680,6 +688,9 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    posting slots and voice guide. It applies none of them; tell me which you
    want and I will commit them. The studio learns from the same snapshots on its
    own (part 9, "What X says"); without this tier, type its numbers in there.
+   Studio posts show as their own `studio` group in the tables, but the feed and
+   voice-guide proposals compare the drafter's posts only: there is no `studio`
+   feed to slow down or speed up.
 
    Every table in it is ranked by one KPI, `kpi:` in `feedback\config.yaml`.
    The shipped value is `conversation`: not a number X reports, but a weighted
@@ -1060,11 +1071,13 @@ and long posts need X Premium.
    checkpoint. An automatic piece picks its own story from the top scored stories
    of the last two days that no piece has used, or finds a better one with its own
    news scan, and writes straight through (`auto: checkpoint: false`). It is also
-   offered the radar (item 9): the day's scan topics and the catalysts coming up
-   or just passed. Expect it in
-   the queue 30 to 90 minutes after the run starts. A session still running at
-   the next run time sits that run out (`skip_when_busy`) instead of holding the
-   other steps back, and so do the steps still waiting behind it in its own run
+   offered the radar (item 10): the day's scan topics and the catalysts coming up
+   or just passed. The piece is tied to a feed story only when it is one the app
+   offered it (so the drafter leaves that story to the studio); a number it made
+   up ties it to nothing. Expect it in the queue 30 to 90 minutes after the run
+   starts. A session still running at the next run time sits that run out
+   (`skip_when_busy`) instead of holding the other steps back, and so do the
+   steps still waiting behind it in its own run
    (draft, verify, feedback, evolve): that run gets to them when the session
    ends, and the new run says so in its note on the runs page.
 3. Or start one yourself. Open **Studio** in the panel's top bar, type a topic
@@ -1082,20 +1095,34 @@ and long posts need X Premium.
 5. Review. The piece's page shows the post exactly as it will be posted, the
    cards, the fact-check log (every finding, what changed, what stayed
    unverified) and the session's own log. The same draft is on the pending page;
-   approve it there.
+   approve it there. Once you change the text by hand in the queue, the piece's
+   page shows the queue's text as the post, with the session's own files folded
+   away below it.
 6. Changes. Type them on the piece's page and press **Revise**: the session that
    wrote it rewrites it, fact-checks what changed and replaces the queue draft.
    A draft you rejected comes back to pending with the revision; one you already
    approved has to be reopened on the approved page first (the piece says
    `not revised: draft N is approved ...` otherwise, and no session is spent).
    The queue's own Revise button would flatten a studio piece, so it points you
-   here instead. Hand edits on the queue page still work; keep each section
-   apart with a blank line, since a line of only `---` splits a post there.
+   here instead. Hand edits on the queue page still work, and a Revise keeps
+   them: before the session runs, the app writes the queue's text into the
+   piece's post files and tells the session the editor changed it by hand and
+   the changes stay; a card you dropped in the queue is taken out of the piece
+   and stays out unless your note asks for it back. Keep each section apart with
+   a blank line, since a line of only `---` splits a post there. A rejected
+   draft comes back only if none of it reached X (a posted one would never be
+   posted again, so no session is spent on it), and without the publishing
+   order it had before. While the studio works on a piece, or a run you asked
+   for waits to start, its queue draft is **on hold**: Approve, Edit, Reject and
+   Drop picture say so instead of acting, since the revision replaces the draft
+   when it lands.
 7. When something stops. A piece marked `interrupted` (stopped, timed out, the
    PC slept, Claude Code could not start) or `failed` (the checker still found a
    blocking problem after the polish rounds) has **Resume where it stopped**: the
    same session carries on with everything it already read, and anything you type
-   in the box goes to it. **Discard** gives up on a piece: its files stay in the
+   in the box goes to it. If you edited its queue draft by hand while it was
+   stopped, Resume goes through a revision first, so your edit is not
+   overwritten. **Discard** gives up on a piece: its files stay in the
    `studio_pieces` folder, and a draft of it still pending in the queue is
    rejected.
 8. The playbook. **Studio → The playbook** is the short note every session

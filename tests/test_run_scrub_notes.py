@@ -81,3 +81,16 @@ def test_the_cli_runs_over_the_configured_statuses(conn, monkeypatch):
 def test_the_cli_accepts_its_flags(conn, monkeypatch, flag):
     monkeypatch.setattr(store, "connect", lambda *a, **k: _NoClose(conn))
     assert run_scrub_notes.main([flag]) == 0
+
+
+def test_a_draft_already_on_x_keeps_its_caption(conn, caplog):
+    from publish import store as publish_store
+
+    did = _insert(conn, "i1", Chart("t", ["A", "B"], [88.0, 4.1], "%", note=BAD))
+    store.approve(conn, did)
+    publish_store.connect().close()  # step 3's tables
+    assert publish_store.record_manual(conn, did, ["ORR 88%", "b", "c"])
+    with caplog.at_level("INFO"):
+        assert run_scrub_notes.scrub(conn, [store.STATUS_APPROVED], dry_run=False) == 0
+    assert store.get_draft(conn, did).draft.chart.note == BAD
+    assert "posted or being posted, left alone" in caplog.text

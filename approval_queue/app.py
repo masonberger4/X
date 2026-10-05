@@ -23,6 +23,10 @@ Routes:
 Step 7: the edit and reject forms take an optional category (why the draft was edited or
 rejected); the detail page shows a before/after diff for every edit.
 
+A studio draft (step 10) is held while the studio works on its piece or a run of it waits
+(store.studio_hold): approve, edit, reject and the picture drops answer 409 with the reason,
+since the revision replaces the draft's text and cards when it lands.
+
 Form bodies are parsed with urllib so no multipart dependency is needed.
 """
 
@@ -190,6 +194,7 @@ def index(request: Request, conn: Conn, notice: str = ""):
             "drafts": drafts,
             "status": "pending",
             "checks": _check_summaries(conn, drafts),
+            "studio_holds": _studio_holds(conn, drafts),
             "publish": {},
             "hidden_posted": 0,
             "show_posted": False,
@@ -197,6 +202,12 @@ def index(request: Request, conn: Conn, notice: str = ""):
             "choosing": len(store.list_drafts(conn, store.STATUS_CHOOSING)),
         },
     )
+
+
+def _studio_holds(conn, drafts) -> dict[int, str]:
+    """Per studio draft the studio is working on: why it is held (store.studio_hold)."""
+    holds = {d.id: store.studio_hold(conn, d) for d in drafts if d.studio_piece is not None}
+    return {draft_id: why for draft_id, why in holds.items() if why}
 
 
 def _check_summaries(conn, drafts) -> dict[int, dict[str, int]]:
@@ -239,6 +250,7 @@ def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
             "drafts": drafts,
             "status": status,
             "checks": _check_summaries(conn, drafts),
+            "studio_holds": _studio_holds(conn, drafts),
             "publish": publish,
             "releasable": _releasable(conn, drafts, publish),
             "hidden_posted": hidden,
@@ -308,6 +320,7 @@ def _render_detail(
         "detail.html",
         {
             "d": row,
+            "studio_hold": store.studio_hold(conn, row),
             "publish": publish_info,
             "releasable": _releasable(conn, [row], publish_states).get(draft_id, False),
             "table_checks": table_checks,
@@ -354,6 +367,17 @@ def _awaiting_pick(conn, draft_id: int) -> None:
     row = store.get_draft(conn, draft_id)
     if row is not None and row.status == store.STATUS_CHOOSING:
         raise HTTPException(409, "pick A or B first (/choose)")
+
+
+def _studio_held(request: Request, conn, draft_id: int) -> HTMLResponse | None:
+    """The detail page with a 409 when the studio is working on this draft's piece (or a
+    run of it is waiting): what the editor does here meanwhile would be overwritten by the
+    revision, or make it fail after an hour's work. None when the draft is free."""
+    row = store.get_draft(conn, draft_id)
+    hold = store.studio_hold(conn, row) if row is not None else ""
+    if not hold:
+        return None
+    return _render_detail(request, conn, draft_id, error=f"Not done: {hold}.", status_code=409)
 
 
 @app.get("/choose", response_class=HTMLResponse)
@@ -492,6 +516,9 @@ def _redirect_home(*, notice: str = "") -> RedirectResponse:
 async def approve(draft_id: int, request: Request, conn: Conn):
     _awaiting_pick(conn, draft_id)
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     if verify_store.has_contradiction(conn, draft_id) and not form.get("override"):
         return _render_detail(
             request,
@@ -543,6 +570,9 @@ def _edit_problem(thread: list[str], limit: int = MAX_POST_CHARS) -> str | None:
 async def edit(draft_id: int, request: Request, conn: Conn):
     _awaiting_pick(conn, draft_id)
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     thread = _split_thread(form.get("thread", ""))
     current = store.get_draft(conn, draft_id)
     limit = max(MAX_POST_CHARS, current.draft.max_chars) if current is not None else MAX_POST_CHARS
@@ -724,6 +754,9 @@ def image_at(draft_id: int, index: int, conn: Conn):
 async def drop_image(draft_id: int, request: Request, conn: Conn):
     """Post the text without the chart: forgets the spec, deletes the PNG, logs a decision."""
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     try:
         store.drop_image(conn, draft_id, note=_note(form))
     except KeyError as exc:
@@ -738,6 +771,9 @@ async def drop_one_image(draft_id: int, index: int, request: Request, conn: Conn
     down a place; the spec that made it (the chart or table for index 0, the extra chart
     after) goes with it and the text is untouched."""
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     try:
         store.drop_image(conn, draft_id, note=_note(form), index=index)
     except KeyError as exc:
@@ -895,6 +931,9 @@ async def edit_table(draft_id: int, request: Request, conn: Conn):
 @app.post("/drafts/{draft_id}/reject")
 async def reject(draft_id: int, request: Request, conn: Conn):
     form = await read_form(request)
+    held = _studio_held(request, conn, draft_id)
+    if held is not None:
+        return held
     try:
         store.reject(conn, draft_id, note=_note(form), category=_category(form))
     except KeyError as exc:

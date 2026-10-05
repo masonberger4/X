@@ -204,8 +204,9 @@ carrying `--live`).
   reference only. `run_unlink.py` is the one-off operator pass over queued drafts written
   before the rule (`hook.strip_links`, pure: the link and the lead-in that introduced it
   come out, a post that was only a link is dropped; `store.edit` with the status unchanged,
-  no model call), as `run_scrub_notes.py` is for captions. Publish's re-check and
-  human-approved texts are untouched.
+  no model call; studio drafts are skipped), as `run_scrub_notes.py` is for captions. Both
+  leave alone what `approval_queue/publishing.py:block_reason` says step 3 holds (live on X,
+  posted, partial or claimed). Publish's re-check and human-approved texts are untouched.
 - **Posts talk like a human** (`draft/style.py:style_problems`, pure; rule 13 in
   `draft/prompt.py:hard_rules`, enforced per post from `check_hard_rules` and per cell from
   `swarm/cells.py:cell_problems`). No colon (one between digits, 8:30 or 2:1, is fine) and
@@ -336,7 +337,8 @@ carrying `--live`).
   `draft/config.yaml`; `decisions.category` is added by a guarded migration in
   `approval_queue/store.py:connect`; `draft_examples` records what each draft
   was shown. Step 7 reads `items` only through `fetch_decisions_for_voice` /
-  `fetch_draft_stats` (source and url).
+  `fetch_draft_stats` (source and url); both leave studio drafts (`studio:%` item ids)
+  out, so the drafter learns from its own drafts only.
 - Step 2b (`verify/`) checks `claims_to_verify` against the web. Its only
   network call is `verify/verifier.py:call_model` (the CLI with
   `tools=["WebSearch","WebFetch"]` under `verify/config.yaml`'s own `timeout_seconds`;
@@ -396,7 +398,10 @@ carrying `--live`).
   settings live in `feedback/config.yaml`. `feedback/client.py` is the only
   module that calls the X API (httpx, `X_BEARER_TOKEN`, read-only). Reports
   PROPOSE rubric/prefilter/slot changes; a human applies them and bumps
-  `PROMPT_VERSION`. Analysis and suggestions are pure (no DB, no network).
+  `PROMPT_VERSION`. Analysis and suggestions are pure (no DB, no network). Studio posts
+  are the report group `studio` (`fetch_post_context`); the feed (`sources[...]`) and
+  voice-guide proposals compare the drafter's posts only (`suggest.NOT_A_FEED`,
+  `_drafter_rows`).
 - Step 5 (`ops/`) never imports another step's modules: `run_ops.py run`
   executes the other CLIs as subprocesses (order, timeouts, enabled/required in
   `ops/config.yaml`, which must never contain `--live`; a test asserts it) under
@@ -592,7 +597,9 @@ carrying `--live`).
   with `studio/brief/session.md` + `voice.md` + `cards.md` once, recorded by the CLI;
   `--add-dir studio/exemplars`; `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
-  `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`), an
+  `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
+  `story_id`, an int or digit string, sets the piece's cluster only when it is in
+  `offered_stories`, the shortlist ids every research run of the piece was offered), an
   optional checkpoint (`research_ready`, the editor's Continue), write (`posts/NN.txt`,
   `cards/card_N.html`, a cold fact-check by a fresh sub-agent logged in `factcheck.md`,
   in the foreground since `cli_env` disables background tasks, `piece.json`; a piece
@@ -604,8 +611,22 @@ carrying `--live`).
   review round always shows the session its PNGs), then `studio/ingest.py`: a pending draft
   with `item_id` `studio:<piece id>` (`approval_queue/store.py:studio_item_id`,
   `DraftRow.studio_piece`), shape `long` at `x.long_post_max`, no claims (step 2b skips
-  it), every card copied to `image_file(id, k)` and anchored to its post; a revision
-  (`store.revise`, pending drafts only) replaces text and cards. The queue's revise route
+  it), every card copied to `image_file(id, k)` and anchored to its post, each
+  `recheck_before_posting` fact a `store.RECHECK_PREFIX` line of `why_it_matters`
+  (`store.recheck_lines`, listed by the panel's copy-paste page through
+  `Approved.why_it_matters`); a revision (`store.revise`) replaces text and cards of a
+  pending draft, or of a rejected one that `store.reopen` brings back (refused when
+  `approval_queue/publishing.py:is_live` or `block_reason` says step 3 holds it, followed
+  by `publishing.forget`, as the queue's Reopen does). Every ingest records what it put in
+  (`queued` in the piece's meta); `ingest.hand_edits` compares the draft with it (the
+  editor's text, cards dropped), `session.revise` writes those changes into the piece's
+  files once (`write_back`, recorded as `hand_edit`) and names them in `revise_prompt`,
+  a Resume with unsynced changes goes through a revision, and `to_queue` refuses to
+  replace a draft whose changes the session never saw. The studio page shows the queue's
+  text when it differs from the files. The queue holds a studio draft while its piece is
+  in a running stage or has a request waiting (`store.studio_hold`, read-only on
+  `studio_pieces`): approve, edit, reject and the picture drops answer 409, and the list
+  and detail pages say "on hold". The queue's revise route
   refuses a studio draft and points at `/studio/<id>`; its edit route takes a long draft's
   own `max_chars`. `studio/render.py` is the only place that launches a browser (Edge,
   Chrome or Chromium, `render.browser` / `STUDIO_BROWSER`), always headless with the

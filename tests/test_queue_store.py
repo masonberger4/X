@@ -426,6 +426,28 @@ def test_fetch_decisions_for_voice_without_step1_tables(tmp_path):
     conn.close()
 
 
+def test_studio_drafts_never_reach_the_drafters_voice_examples(conn):
+    # The studio's Discard rejects its pending draft with an app-written note, and an edit
+    # of a studio long post is the studio's voice: neither is an example for the drafter.
+    seed_item(conn, "i1", source="biorxiv")
+    mine = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
+    store.reject(conn, mine, note="too much hype")
+    studio = store.insert_draft(
+        conn, item_id=store.studio_item_id(7), model="opus (studio)", draft=make_draft()
+    )
+    store.edit(conn, studio, thread=["a long post, edited"], approve_after=False)
+    store.reject(conn, studio, note="discarded in the studio")
+
+    rows = store.fetch_decisions_for_voice(conn, "2000-01-01")
+    assert [(r["draft_id"], r["note"]) for r in rows] == [(mine, "too much hype")]
+    assert [r["id"] for r in store.fetch_draft_stats(conn, "2000-01-01")] == [mine]
+
+    import run_draft
+
+    _, edits, rejections = run_draft.build_examples(conn, {"examples": {}})
+    assert edits == [] and [r.draft_id for r in rejections] == [mine]
+
+
 def test_fetch_draft_stats(conn):
     seed_item(conn, "a", source="pubmed")
     seed_item(conn, "b", source="fda")

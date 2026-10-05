@@ -86,11 +86,25 @@ def _clear_effects(
     return out
 
 
+# Report groups of the `source` dimension that are no ingest source, so no
+# sources[...] key in config.yaml: the studio's posts (step 10, feedback/store.py names
+# their source 'studio') and posts whose story is gone (feedback/analysis.py's 'unknown').
+STUDIO_SOURCE = "studio"
+NOT_A_FEED = (STUDIO_SOURCE, "unknown")
+
+
+def _drafter_rows(rows: list[PostRow]) -> list[PostRow]:
+    """The drafter's posts: what its settings (feeds, voice guide) are judged by. A studio
+    post is written by another process from another brief, so it stays a report group of
+    its own and never sits in the drafter's comparison."""
+    return [r for r in rows if r.source != STUDIO_SOURCE]
+
+
 def _source_suggestions(a: Analysis, min_posts: int, effect_ratio: float) -> list[Suggestion]:
     out = []
-    groups = [s.group for s in a.groups.get("source", [])]
+    groups = [s.group for s in a.groups.get("source", []) if s.group not in NOT_A_FEED]
     for g, direction, ev in _clear_effects(
-        a.rows, "source", groups, a.kpi, min_posts, effect_ratio
+        _drafter_rows(a.rows), "source", groups, a.kpi, min_posts, effect_ratio
     ):
         if direction == "above":
             rationale = (
@@ -201,7 +215,7 @@ def _format_suggestions(a: Analysis, min_posts: int, effect_ratio: float) -> lis
     # setting is proposed for it.
     out = []
     for g, direction, ev in _clear_effects(
-        a.rows, "edited", ["edited", "unedited"], a.kpi, min_posts, effect_ratio
+        _drafter_rows(a.rows), "edited", ["edited", "unedited"], a.kpi, min_posts, effect_ratio
     ):
         if g == "edited" and direction == "above":
             rationale = (

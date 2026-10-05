@@ -892,6 +892,13 @@ def test_the_context_reads_the_data_folders_playbook_and_wires_the_queue(rig, sc
     assert draft.item_id == queue_store.studio_item_id(piece.id)
     assert (draft.draft.shape, draft.draft.max_chars) == (SHAPE_LONG, 30000)
     assert draft.model == "writer-model (studio)"
+    # the queue's own questions before a revision: may it land, and what did the editor
+    # change there meanwhile (the revision starts from that)
+    piece = S.get_piece(sconn, piece.id)
+    assert ctx.revisable(piece) == "" and ctx.queue_edits(piece) is None
+    queue_store.edit(sconn, draft.id, thread=["Changed by hand."], approve_after=False)
+    edits = ctx.queue_edits(piece)
+    assert edits is not None and edits.posts == ["Changed by hand."]
 
 
 def test_make_renderer_draws_with_the_configured_browser_and_timeout(monkeypatch, cfg):

@@ -725,7 +725,8 @@ everything it read):
    piece used, or from its own news scan) becomes `factbase.md` (every fact with
    its URL, opened or snippet, knowledge marked, verified X handles, corrections,
    open questions) and `research.json` (topic, why now, companies, candidate
-   angles). A piece started by hand stops here (`research_ready`) until the editor
+   angles, and the story it used: kept only when it is one the brief offered,
+   recorded as `offered_stories` in the piece's meta). A piece started by hand stops here (`research_ready`) until the editor
    presses Continue with optional notes; automatic pieces write straight through.
 2. *Write*: the session picks the angle from those on offer, the shape
    (`long_post`, `thread` of long posts, or `short_post`) and the hook, writes
@@ -750,10 +751,23 @@ everything it read):
 4. *Queue*: `studio/ingest.py` inserts a pending draft (`item_id` `studio:<id>`,
    shape `long` at the studio's `x.long_post_max`, no claims to verify so step 2b
    leaves it alone, every card copied to `<db folder>/images/` and anchored to its
-   post). Publish chains a thread of long posts as replies, unnumbered.
+   post, each `recheck_before_posting` fact a `Re-check before posting:` line of
+   `why_it_matters` that the copy-paste posting page lists). Publish chains a thread
+   of long posts as replies, unnumbered. Each ingest records what it put in the
+   queue (`queued` in the piece's meta).
 5. *Revise*: the studio page's Revise resumes the session with the editor's notes,
-   re-checks and replaces the queue draft (pending drafts only). The queue's own
-   Revise refuses a studio draft and links to the studio page.
+   re-checks and replaces the queue draft: a pending one, or a rejected one that
+   comes back to pending (never one live on X; its old publishing order is
+   forgotten, as the queue's Reopen does). The editor's own changes in the queue
+   since the last ingest (`studio/ingest.py:hand_edits`: text edited by hand, cards
+   dropped) are written into the session's files first and named in the revise
+   prompt, and the queue door refuses to replace a draft whose changes the session
+   never saw, so a hand edit is never reverted. While the studio works on a piece,
+   or a run of it waits, the queue holds its draft (`approval_queue/store.py:studio_hold`:
+   approve, edit, reject and the picture drops answer 409). The queue's own Revise
+   refuses a studio draft and links to the studio page. Studio drafts never feed the
+   drafter's voice examples or voice report, and the weekly report's feed and
+   voice-guide proposals leave the `studio` group out.
 
 **Variety**: `studio/angles.yaml` holds 19 angles (deal decoder, class deep dive,
 catalyst map, readout reaction and preview, the race, head to head, post-mortem,

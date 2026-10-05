@@ -30,6 +30,7 @@ import pytest
 import claude_cli
 from approval_queue import store as queue_store
 from draft.schema import SHAPE_LONG
+from publish import store as publish_store
 from studio import ingest, qa
 from studio import prompt as P
 from studio import render as render_mod
@@ -365,6 +366,7 @@ class Rig:
         self.renderer = FakeRenderer()
         self.echoed: list[str] = []
         self.briefed: list[S.Piece] = []
+        self.shortlist = [P.Story(cluster_id=RESEARCH["story_id"], title="A bispecific readout")]
         self.ctx = SS.Context(
             conn=conn,
             cfg=cfg,
@@ -377,10 +379,15 @@ class Rig:
             ingest=self.ingest,
             launch=self.cli,
             echo=self.echoed.append,
+            # as studio/runner.py:make_context wires it
+            queue_edits=functools.partial(ingest.hand_edits, conn),
         )
 
     def brief_for(self, piece: S.Piece) -> P.Brief:
         self.briefed.append(piece)
+        # As studio/runner.py:build_brief: a research stage with neither a topic nor a
+        # story is offered the feed's shortlist, which holds the story research.json names.
+        choosing = not piece.topic and piece.cluster_id is None
         return P.Brief(
             piece_id=piece.id,
             today="2026-10-05",
@@ -389,6 +396,9 @@ class Rig:
             reference_dir=str(self.ctx.reference_dir),
             references=["merck_spr2015"],
             topic=piece.topic,
+            shortlist=list(self.shortlist)
+            if choosing and piece.stage == S.STAGE_RESEARCHING
+            else [],
         )
 
     def ingest(self, piece: S.Piece, report: qa.Report) -> int:
@@ -710,7 +720,7 @@ def test_research_never_overrides_the_editors_topic_or_story(rig):
         ("{not json", {}),
         ("[1, 2]", {}),
         # A story number must be a number, and JSON true (an int to Python) is not one.
-        ('{"topic": "", "story_id": "42"}', {"topic": "", "story_id": "42"}),
+        ('{"topic": "", "story_id": "forty-two"}', {"topic": "", "story_id": "forty-two"}),
         ('{"story_id": true}', {"story_id": True}),
         ('{"story_id": null}', {"story_id": None}),
     ],
@@ -723,6 +733,46 @@ def test_research_json_is_optional_and_only_a_real_story_number_counts(rig, raw,
     p = rig.get(piece.id)
     assert (p.title, p.cluster_id) == ("", None)
     assert p.meta["research"] == kept
+
+
+@pytest.mark.parametrize(("story_id", "kept"), [(42, 42), ("42", 42), (" 42 ", 42), (7, None)])
+def test_a_story_number_counts_only_when_the_brief_offered_it(rig, story_id, kept):
+    # The rig offers story 42 (as build_brief offers the feed's shortlist). A digit string
+    # names it as well; a number not on offer, invented or mistyped, ties the piece to
+    # nothing: the drafter, the studio's shortlist and the weekly report would all treat
+    # that unrelated story as this piece's.
+    rig.cli.work["research"] = lambda ws, call: write_research(
+        ws, {**RESEARCH, "story_id": story_id}
+    )
+    piece = rig.new_piece(checkpoint=True)
+
+    SS.research(rig.ctx, piece)
+
+    p = rig.get(piece.id)
+    assert p.cluster_id == kept
+    assert p.meta["offered_stories"] == [42]
+    if kept is None:
+        assert "research.json names story 7, not one offered; ignored" in rig.log(p)
+
+
+def test_a_piece_on_a_topic_is_offered_no_story_to_name(rig):
+    # A topic piece gets no shortlist, so any story number in research.json is invented.
+    piece = rig.new_piece(topic="next-gen CTLA-4", checkpoint=True)
+    SS.research(rig.ctx, piece)
+    p = rig.get(piece.id)
+    assert (p.cluster_id, p.meta["offered_stories"]) == (None, [])
+
+
+def test_a_resumed_research_keeps_the_stories_offered_the_first_time(rig):
+    piece = rig.new_piece(checkpoint=True)
+    rig.cli.fail("research", stopped("killed"))
+    SS.research(rig.ctx, piece)
+    # the next brief offers a newer shortlist; the session may still name the first one
+    rig.shortlist = [P.Story(cluster_id=99, title="A newer story")]
+    out = SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+    assert out.stage == S.STAGE_RESEARCH_READY
+    p = rig.get(piece.id)
+    assert p.meta["offered_stories"] == [42, 99] and p.cluster_id == 42
 
 
 def test_a_long_research_topic_is_cut_to_a_title(rig):
@@ -1480,6 +1530,252 @@ def test_resume_revise_without_any_note_only_checks_again(rig):
 
     assert out.stage == S.STAGE_READY
     assert rig.cli.stages()[calls:] == ["polish"]
+
+
+# ---- the editor's own changes in the queue ------------------------------------------
+
+POST_1_FIXED = POST_1.replace("41%", "38%")
+
+
+def _keep_files(seen: dict[str, Any]) -> Callable[[Path, Call], None]:
+    """A revision that changes only a card: it records the post files and piece.json as the
+    session found them, and leaves the text alone."""
+
+    def work(ws: Path, call: Call) -> None:
+        seen["piece"] = json.loads((ws / P.PIECE_FILE).read_text(encoding="utf-8"))
+        seen["posts"] = [
+            (ws / rel).read_text(encoding="utf-8").strip() for rel in seen["piece"]["posts"]
+        ]
+        card = ws / P.CARDS_DIR / "card_2.html"
+        card.write_text(card.read_text(encoding="utf-8").replace("#0b1320", "#1d2840"), "utf-8")
+
+    return work
+
+
+def test_a_revision_starts_from_the_editors_hand_edit_and_keeps_it(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    # the editor fixes a number by hand in the queue, then asks the studio for something else
+    queue_store.edit(rig.conn, draft_id, thread=[POST_1_FIXED, POST_2], approve_after=False)
+    seen: dict[str, Any] = {}
+    rig.cli.work["revise"] = _keep_files(seen)
+
+    out = SS.revise(rig.ctx, rig.get(piece.id), "Make the second card lighter.")
+
+    assert out.stage == S.STAGE_READY
+    # the session found the editor's text in its own files, and was told to keep it
+    assert seen["posts"] == [POST_1_FIXED, POST_2]
+    assert seen["piece"]["posts"] == ["posts/01.txt", "posts/02.txt"]
+    prompt = rig.cli.of("revise")[0].prompt
+    assert "Make the second card lighter." in prompt
+    assert "THE EDITOR'S OWN CHANGES IN THE QUEUE" in prompt
+    assert "changed the text by hand in the approval queue" in prompt
+    assert "(posts/01.txt, posts/02.txt)" in prompt and "word for word" in prompt
+    assert "dropped these cards" not in prompt
+    # the queue keeps the fix, and so does what publish would post
+    row = queue_store.get_draft(rig.conn, draft_id)
+    assert row.draft.thread == [POST_1_FIXED, POST_2] and len(row.images) == 2
+    queue_store.approve(rig.conn, draft_id)
+    (approved,) = publish_store.fetch_approved(conn=rig.conn)
+    assert approved.thread[0] == POST_1_FIXED and "41%" not in approved.thread[0]
+    p = rig.get(piece.id)
+    assert p.meta["queued"]["posts"] == [POST_1_FIXED, POST_2]
+    assert p.meta["hand_edit"] is None  # landed: the next comparison starts here
+    assert "the editor's changes in the queue were written into the piece" in rig.log(p)
+
+
+def test_a_hand_edit_that_adds_or_removes_posts_is_written_back_whole(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    three = [POST_1_FIXED, POST_2, "A third post the editor added."]
+    queue_store.edit(rig.conn, draft_id, thread=three, approve_after=False)
+    seen: dict[str, Any] = {}
+    rig.cli.work["revise"] = _keep_files(seen)
+    SS.revise(rig.ctx, rig.get(piece.id), "Tighten the close.")
+    assert seen["piece"]["posts"] == ["posts/01.txt", "posts/02.txt", "posts/03.txt"]
+    assert seen["posts"] == three
+    assert rig.draft(rig.get(piece.id)).draft.thread == three
+
+    queue_store.edit(rig.conn, draft_id, thread=[POST_1_FIXED], approve_after=False)
+    SS.revise(rig.ctx, rig.get(piece.id), "One post now.")
+    assert seen["piece"]["posts"] == ["posts/01.txt"] and seen["posts"] == [POST_1_FIXED]
+
+
+def test_a_card_the_editor_dropped_stays_dropped(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    queue_store.drop_image(rig.conn, draft_id, index=1)  # the second card goes
+    seen: dict[str, Any] = {}
+    rig.cli.work["revise"] = _keep_files(seen)
+
+    SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
+
+    assert [c["file"] for c in seen["piece"]["cards"]] == ["cards/card_1.html"]
+    prompt = rig.cli.of("revise")[0].prompt
+    dropped = f'cards/card_2.html ("{CARD_2.alt}")'
+    assert f"dropped these cards from the post in the approval queue: {dropped}" in prompt
+    assert "Leave them out unless the request above asks for them back." in prompt
+    assert "changed the text by hand" not in prompt  # only a card was dropped
+    row = rig.draft(rig.get(piece.id))
+    assert [(i["index"], i["alt"]) for i in row.images] == [(0, CARD_1.alt)]
+    assert not queue_store.image_file(row.id, 1).exists()
+
+
+def test_a_dropped_card_comes_back_when_the_session_puts_it_back(rig):
+    # "unless the note asks for it": the session decides, and its piece.json is what lands
+    piece = rig.ready_piece()
+    queue_store.drop_image(rig.conn, rig.get(piece.id).draft_id, index=1)
+    rig.cli.work["revise"] = lambda ws, call: write_piece(ws)  # both cards again
+    out = SS.revise(rig.ctx, rig.get(piece.id), "Bring the class card back.")
+    assert out.stage == S.STAGE_READY
+    assert [i["alt"] for i in rig.draft(rig.get(piece.id)).images] == [CARD_1.alt, CARD_2.alt]
+
+
+def test_a_resumed_revision_leaves_the_sessions_work_since_the_hand_edit_alone(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    queue_store.edit(rig.conn, draft_id, thread=[POST_1_FIXED, POST_2], approve_after=False)
+    rig.cli.fail("revise", stopped("killed"))
+    SS.revise(rig.ctx, rig.get(piece.id), "Add the durability number to the close.")
+    ws = Path(piece.workspace)
+    assert (ws / "posts/01.txt").read_text(encoding="utf-8").strip() == POST_1_FIXED
+    # the session had started on the editor's text when it was stopped
+    worked = POST_1_FIXED + "\n\nDurability is the number to watch."
+    (ws / "posts/01.txt").write_text(worked, encoding="utf-8")
+    rig.cli.work["revise"] = lambda ws, call: None
+
+    out = SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+
+    assert out.stage == S.STAGE_READY
+    assert (ws / "posts/01.txt").read_text(encoding="utf-8") == worked  # not written again
+    again = rig.cli.of("revise")[-1].prompt
+    assert "THE EDITOR'S OWN CHANGES IN THE QUEUE" in again  # still told
+    assert rig.draft(rig.get(piece.id)).draft.thread == [worked, POST_2]
+
+
+def test_a_newer_hand_edit_on_a_stopped_revision_is_written_again(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    queue_store.edit(rig.conn, draft_id, thread=[POST_1_FIXED, POST_2], approve_after=False)
+    rig.cli.fail("revise", stopped("killed"))
+    SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
+    newer = [POST_1_FIXED.replace("14 months", "15 months"), POST_2]
+    queue_store.edit(rig.conn, draft_id, thread=newer, approve_after=False)
+    seen: dict[str, Any] = {}
+    rig.cli.work["revise"] = _keep_files(seen)
+
+    SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+
+    assert seen["posts"] == newer  # the editor's latest text wins
+    assert rig.draft(rig.get(piece.id)).draft.thread == newer
+
+
+def test_resuming_a_stopped_piece_after_a_hand_edit_goes_through_a_revision(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    S.update_piece(rig.conn, piece.id, stage=S.STAGE_FAILED, meta={"failed_stage": "polish"})
+    queue_store.edit(rig.conn, draft_id, thread=[POST_1_FIXED, POST_2], approve_after=False)
+    seen: dict[str, Any] = {}
+    rig.cli.work["revise"] = _keep_files(seen)
+    calls = len(rig.cli.calls)
+
+    out = SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+
+    # polishing alone would put the session's text back over the editor's
+    assert out.stage == S.STAGE_READY
+    assert rig.cli.stages()[calls:] == ["revise", "polish"]
+    assert "(nothing beyond keeping the changes below)" in rig.cli.of("revise")[-1].prompt
+    assert rig.draft(rig.get(piece.id)).draft.thread == [POST_1_FIXED, POST_2]
+
+
+def test_the_queue_door_never_reverts_a_hand_edit_the_session_did_not_see(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    queue_store.edit(rig.conn, draft_id, thread=[POST_1_FIXED, POST_2], approve_after=False)
+    report = qa.check_piece(Path(piece.workspace), rig.ctx.cfg["x"], set(), rig.renderer)
+
+    with pytest.raises(ingest.IngestError, match="changed in the queue"):
+        ingest.to_queue(rig.conn, rig.get(piece.id), report, max_chars=MAX_CHARS)
+
+    assert rig.draft(rig.get(piece.id)).draft.thread == [POST_1_FIXED, POST_2]
+
+
+def test_no_hand_edit_means_nothing_is_written_back(rig):
+    piece = rig.ready_piece()
+    queue_store.approve(rig.conn, rig.get(piece.id).draft_id)  # decisions that change nothing
+    queue_store.reopen(rig.conn, rig.get(piece.id).draft_id)
+    assert ingest.hand_edits(rig.conn, rig.get(piece.id)) is None
+    rig.cli.work["revise"] = _rewrite_to_one_post
+    SS.revise(rig.ctx, rig.get(piece.id), "One post.")
+    assert "THE EDITOR'S OWN CHANGES" not in rig.cli.of("revise")[0].prompt
+
+
+def test_a_piece_queued_before_ingests_were_recorded_is_compared_with_its_files(rig):
+    piece = rig.ready_piece()
+    S.update_piece(rig.conn, piece.id, meta={"queued": None})
+    assert ingest.hand_edits(rig.conn, rig.get(piece.id)) is None
+    draft_id = rig.get(piece.id).draft_id
+    queue_store.edit(rig.conn, draft_id, thread=[POST_1_FIXED, POST_2], approve_after=False)
+    edits = ingest.hand_edits(rig.conn, rig.get(piece.id))
+    assert edits is not None and edits.posts == [POST_1_FIXED, POST_2] and edits.dropped == []
+    # the ready piece's files became its record, kept for the comparisons after a revision
+    assert rig.get(piece.id).meta["queued"]["posts"] == [POST_1, POST_2]
+
+
+def test_a_piece_queued_before_ingests_were_recorded_revises_as_before(rig):
+    # No hand edit: the revision rewrites the files, and its result is the session's work,
+    # never mistaken for an edit the session did not see.
+    piece = rig.ready_piece()
+    S.update_piece(rig.conn, piece.id, meta={"queued": None})
+    rig.cli.work["revise"] = _rewrite_to_one_post
+
+    out = SS.revise(rig.ctx, rig.get(piece.id), "One post.")
+
+    assert out.stage == S.STAGE_READY, out.message
+    assert rig.draft(rig.get(piece.id)).draft.thread == [POST_SINGLE]
+    # and a piece without a record that is not ready has nothing to compare with
+    S.update_piece(rig.conn, piece.id, stage=S.STAGE_FAILED, meta={"queued": None})
+    assert ingest.hand_edits(rig.conn, rig.get(piece.id)) is None
+
+
+# ---- the rejected-to-pending path asks step 3 first ----------------------------------
+
+
+def test_a_rejected_draft_revised_back_to_pending_loses_its_old_publishing_order(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    queue_store.approve(rig.conn, draft_id)
+    publish_store.set_order(rig.conn, [draft_id])  # "Set schedule": first in line
+    queue_store.reject(rig.conn, draft_id)
+    rig.cli.work["revise"] = _rewrite_to_one_post
+
+    assert SS.revise(rig.ctx, rig.get(piece.id), "Shorter.").stage == S.STAGE_READY
+
+    queue_store.approve(rig.conn, draft_id)
+    info = queue_store.publish_states(rig.conn, [draft_id]).get(draft_id)
+    assert info is None or info.position is None  # no stale #1 jumps the line
+
+
+def test_a_draft_already_on_x_is_never_revised_back_to_pending(rig):
+    piece = rig.ready_piece()
+    draft_id = rig.get(piece.id).draft_id
+    queue_store.approve(rig.conn, draft_id)
+    publish_store.connect().close()  # step 3's tables, as its first run makes them
+    assert publish_store.record_manual(rig.conn, draft_id, [POST_1, POST_2])
+    queue_store.reject(rig.conn, draft_id)  # Reject shows for every status
+    rig.ctx.revisable = functools.partial(ingest.revise_blocker, rig.conn)
+    calls = len(rig.cli.calls)
+
+    blocked = ingest.revise_blocker(rig.conn, rig.get(piece.id))
+    out = SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
+
+    assert blocked.startswith(f"draft {draft_id} is already live on X")
+    assert len(rig.cli.calls) == calls  # no session spent on a post that is out
+    assert out.message == f"revision not started: {blocked}"
+    report = qa.check_piece(Path(piece.workspace), rig.ctx.cfg["x"], set(), rig.renderer)
+    with pytest.raises(ingest.IngestError, match="already live on X"):
+        ingest.to_queue(rig.conn, rig.get(piece.id), report, max_chars=MAX_CHARS)
+    assert queue_store.get_draft(rig.conn, draft_id).status == queue_store.STATUS_REJECTED
 
 
 # ---- the queue door (studio/ingest.py) ---------------------------------------------

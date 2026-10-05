@@ -2,7 +2,8 @@
 
 Manual posting (`posting: manual` in publish/config.yaml): `manual_post` gathers what the
 copy-paste page shows for one approved draft (each post's final text, numbered and
-re-checked exactly as run_publish.py would post it, and the pictures anchored to it), and
+re-checked exactly as run_publish.py would post it, the pictures anchored to it, and a
+studio piece's facts to re-check on posting day, `approval_queue/store.py:recheck_lines`), and
 `confirm_manual` logs it as posted through step 3's own `publish.store.record_manual` once
 the human says it is on X. Nothing here talks to X.
 
@@ -23,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import run_publish
+from approval_queue import store as queue_store
 from publish import store as publish_store
 from publish.scheduler import load_publish_config
 from publish.thread import ThreadError
@@ -78,6 +80,9 @@ class ManualDraft:
     error: str | None = None  # the text fails a hard check: post nothing
     blocked: str | None = None  # the daily cap or the gap says wait (a warning only)
     status: str | None = None  # step 3's state when the draft is no longer waiting
+    # Fast-moving facts to confirm before posting (a studio piece's recheck_before_posting):
+    # the session wrote them for posting day, and this page is where posting happens.
+    recheck: list[str] = field(default_factory=list)
 
 
 def manual_post(draft_id: int, now: datetime | None = None) -> ManualDraft | None:
@@ -97,10 +102,14 @@ def manual_post(draft_id: int, now: datetime | None = None) -> ManualDraft | Non
         blocked = policy.blocked_reason(now or datetime.now(UTC))
     finally:
         conn.close()
+    piece = queue_store.studio_piece_id(approved.item_id)
+    # A studio draft has no feed item, so no title of its own: the queue names it this way.
+    title = approved.title or (f"Studio piece {piece}" if piece is not None else "")
+    recheck = queue_store.recheck_lines(approved.why_it_matters)
     try:
         _, texts = run_publish.texts_for(approved, cfg["thread_numbering"])
     except ThreadError as exc:
-        return ManualDraft(draft_id, approved.title, approved.shape, [], [], error=str(exc))
+        return ManualDraft(draft_id, title, approved.shape, [], [], error=str(exc), recheck=recheck)
     paths: list[str] = []
     posts = [ManualPost(i, t) for i, t in enumerate(texts, 1)]
     for pos, pics in sorted(run_publish.images_for(approved, cfg).items()):
@@ -108,7 +117,9 @@ def manual_post(draft_id: int, now: datetime | None = None) -> ManualDraft | Non
         for path, alt in pics:
             target.images.append((len(paths), alt))
             paths.append(path)
-    return ManualDraft(draft_id, approved.title, approved.shape, posts, paths, blocked=blocked)
+    return ManualDraft(
+        draft_id, title, approved.shape, posts, paths, blocked=blocked, recheck=recheck
+    )
 
 
 def confirm_manual(draft_id: int, first_url: str = "") -> bool:

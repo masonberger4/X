@@ -11,6 +11,11 @@ at the call site.
 A release differs from a reopen: the draft stays approved and keeps its place in the
 publishing order, only step 3's dead schedule row goes, so the next run considers it again.
 `release_reason` is the one gate, read by both the button and the route.
+
+Others ask the reopen question through here too: the studio, before it brings a rejected
+draft back to pending with a revision (studio/ingest.py, which then calls `forget`), and
+the operator passes run_unlink.py and run_scrub_notes.py, which leave alone any draft
+`block_reason` says step 3 holds.
 """
 
 from __future__ import annotations
@@ -64,6 +69,11 @@ def block_reason(conn: sqlite3.Connection, draft_id: int, info) -> str:
         f"publishing still holds this draft (it is {info.status}); it cannot be reopened "
         "until that is resolved"
     )
+
+
+def is_live(conn: sqlite3.Connection, draft_id: int) -> bool:
+    """Whether any post of this draft reached X (step 3's posts log, the ground truth)."""
+    return publish_store.is_live(conn, draft_id)
 
 
 def forget(conn: sqlite3.Connection, draft_id: int) -> list[int]:

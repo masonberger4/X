@@ -5,8 +5,8 @@ Drafts used to carry the primary source URL in a post (the last post of a thread
 link post of its own after a single or long post). No post carries a link any more: a post
 with an outbound link is shown to fewer readers and posting a URL is billed as an extra
 request through the X API, so the source is named in words instead. This command is the
-one-off pass over the drafts written before that rule. For every draft still in the queue
-(pending, or approved but not yet posted) whose posts contain a link, it strips the link
+one-off pass over the drafts written before that rule. For every drafter draft still in
+the queue (pending, or approved but not yet posted) whose posts contain a link, it strips the link
 (and the lead-in that only introduced it), drops a post that was nothing but the link, and
 logs the change as an `edit` decision holding the before and after. The draft keeps its
 status.
@@ -15,7 +15,10 @@ Nothing is rewritten: the strip is pure text (draft/hook.py:strip_links), there 
 model call and no network. Pictures are untouched unless the post they are anchored to
 disappears, which cannot happen: a link-only post never carries one. A draft whose posts
 would still break the rules is left alone and named in the log, for the reviewer to revise
-by hand in the queue.
+by hand in the queue. So is a studio draft (step 10): its session wrote it after the rule,
+its checker (studio/safety.py) already blocks links, and what the drafter's stricter
+bare-domain test reads as one there is a ticker such as ROG.SW/RHHBY. And so is anything
+step 3 holds: a draft live on X, or one a publish run has claimed.
 
 usage: python run_unlink.py [--status STATUS ...] [--dry-run] [-v]
   --status STATUS  unlink only these draft statuses (repeatable; default pending,
@@ -30,6 +33,7 @@ import argparse
 import logging
 import sys
 
+from approval_queue import publishing
 from approval_queue import store as queue_store
 from draft.hook import HOOK_MAX_CHARS, hook_problems, link_problems, strip_links
 from draft.schema import SHAPE_THREAD
@@ -72,17 +76,18 @@ def new_thread(row: queue_store.DraftRow) -> tuple[list[str] | None, list[str]]:
 
 def unlink(conn, statuses: list[str], dry_run: bool) -> int:
     """Returns the number of drafts stripped (or that would be)."""
-    posted = set()
     done = 0
     for status in statuses:
         rows = queue_store.list_drafts(conn, status=status)
         states = queue_store.publish_states(conn, [r.id for r in rows])
-        posted |= {i for i, s in states.items() if getattr(s, "posted", False)}
         for row in rows:
             if not needs_unlink(row):
                 continue
-            if row.id in posted:
-                log.info("draft %d: already posted, left alone", row.id)
+            if row.studio_piece is not None:
+                log.info("draft %d: a studio piece, left alone", row.id)
+                continue
+            if publishing.block_reason(conn, row.id, states.get(row.id)):
+                log.info("draft %d: posted or being posted, left alone", row.id)
                 continue
             thread, problems = new_thread(row)
             if thread is None:

@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 import claude_cli
+from studio import ingest, qa
 from studio import prompt as P
-from studio import qa
 from studio import store as S
 from studio.settings import stage_max_turns, stage_timeout
 
@@ -59,6 +59,9 @@ class Context:
     # the catalysts it found: studio/scan.py:harvest in the app); None skips it. It never
     # fails the piece.
     harvest: Callable[[S.Piece, dict[str, Any]], None] | None = None
+    # The editor's changes to the piece's queue draft since the last ingest, or None
+    # (studio/ingest.py:hand_edits in the app); None here never looks.
+    queue_edits: Callable[[S.Piece], ingest.HandEdits | None] | None = None
 
 
 @dataclass
@@ -168,6 +171,10 @@ def research(
     S.update_piece(ctx.conn, piece.id, stage=S.STAGE_RESEARCHING, error="")
     piece = S.get_piece(ctx.conn, piece.id) or piece
     brief = ctx.brief_for(piece)
+    # The stories the session may name in research.json: every one offered so far (a
+    # resumed research run may be offered a newer shortlist than the first).
+    offered = sorted({*_offered(piece), *(s.cluster_id for s in brief.shortlist)})
+    S.update_piece(ctx.conn, piece.id, meta={"offered_stories": offered})
     text = P.research_prompt(brief)
     if note.strip():  # the editor's words when pressing Resume
         text += f"\n\nTHE EDITOR ADDS\n{note.strip()}"
@@ -185,10 +192,19 @@ def research(
     updates: dict[str, Any] = {"meta": {"research": info}}
     if info.get("topic") and not piece.topic:
         updates["title"] = str(info["topic"])[:200]
-    story_id = info.get("story_id")
-    # A story number; JSON true is an int to Python and would name story 1.
-    if isinstance(story_id, int) and not isinstance(story_id, bool) and piece.cluster_id is None:
-        updates["cluster_id"] = story_id
+    story_id = _story_number(info.get("story_id"))
+    if story_id is not None and piece.cluster_id is None:
+        # Only a story the brief offered ties the piece to it: the drafter skips a story
+        # that has a draft, the studio's shortlist skips one a piece used, and the weekly
+        # report reads that story's scores for the post. An invented or mistyped number
+        # would do all three to a story the piece is not about.
+        if story_id in offered:
+            updates["cluster_id"] = story_id
+        else:
+            log.warning(
+                "piece %s: research.json names story %s, which was not offered", piece.id, story_id
+            )
+            _write_log(workspace, f"research.json names story {story_id}, not one offered; ignored")
     S.update_piece(ctx.conn, piece.id, **updates)
     piece = S.get_piece(ctx.conn, piece.id) or piece
     if ctx.harvest is not None:
@@ -202,6 +218,23 @@ def research(
         S.update_piece(ctx.conn, piece.id, stage=S.STAGE_RESEARCH_READY)
         return Outcome(S.STAGE_RESEARCH_READY, "research done; waiting for the editor")
     return write(ctx, piece)
+
+
+def _offered(piece: S.Piece) -> list[int]:
+    ids = piece.meta.get("offered_stories")
+    return [i for i in ids if isinstance(i, int)] if isinstance(ids, list) else []
+
+
+def _story_number(value: Any) -> int | None:
+    """research.json's story_id as a story number: an integer, or one written as a string
+    of digits. JSON true is an int to Python and would name story 1."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def read_research(workspace: Path) -> dict[str, Any]:
@@ -245,6 +278,12 @@ def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
         S.update_piece(ctx.conn, piece.id, error=blocked, request="", request_note="")
         _write_log(Path(piece.workspace), f"!!! revise not started: {blocked}")
         return Outcome(stage=piece.stage, message=f"revision not started: {blocked}")
+    # The editor may have changed the draft in the queue since the session wrote it: the
+    # revision starts from the editor's version, or it would put the old text back.
+    edits = ctx.queue_edits(piece) if ctx.queue_edits else None
+    hand: dict[str, Any] = {}
+    if edits:
+        hand = _take_hand_edits(ctx, piece, edits)
     # The note is kept with the piece so a revision that is interrupted can be resumed with
     # the editor's words, not just re-checked.
     S.update_piece(
@@ -256,10 +295,84 @@ def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
         request_note="",
         meta={"revise_note": note},
     )
-    result = _run_stage(ctx, piece, "revise", P.revise_prompt(note), first=False)
+    text = P.revise_prompt(
+        note,
+        edited_posts=hand.get("files") or [],
+        dropped_cards=[_card_line(c) for c in (edits.dropped if edits else [])],
+    )
+    result = _run_stage(ctx, piece, "revise", text, first=False)
     if not result.ok:
         return _fail(ctx, piece, "revise", result.detail, interrupted=_stopped_early(result))
     return polish(ctx, piece)
+
+
+def _take_hand_edits(ctx: Context, piece: S.Piece, edits: ingest.HandEdits) -> dict[str, Any]:
+    """Put the editor's queue changes into the session's files, once: a resumed revision
+    finds them recorded (`hand_edit` in meta) and leaves the session's work since alone,
+    unless the editor changed the draft again meanwhile. Returns that record."""
+    if not ingest.unsynced(piece, edits):
+        return dict(piece.meta["hand_edit"])
+    files = write_back(Path(piece.workspace), edits)
+    mark = {**edits.key(), "files": files}
+    S.update_piece(ctx.conn, piece.id, meta={"hand_edit": mark})
+    _write_log(
+        Path(piece.workspace),
+        "the editor's changes in the queue were written into the piece: "
+        + (f"text in {', '.join(files)}" if edits.posts is not None else "text unchanged")
+        + (f"; {len(edits.dropped)} card(s) dropped" if edits.dropped else ""),
+    )
+    return mark
+
+
+def _card_line(card: dict[str, Any]) -> str:
+    alt = " ".join(str(card.get("alt") or "").split())
+    return str(card.get("file") or "?") + (f' ("{alt[:160]}")' if alt else "")
+
+
+def write_back(workspace: Path, edits: ingest.HandEdits) -> list[str]:
+    """Write the editor's queue changes into the piece's files before a revision: the text
+    into the post files piece.json lists (a new file for a post the editor added, the list
+    cut for one removed) and each dropped card out of piece.json's card list (its files stay
+    on disk, so the session can bring it back if the editor's note asks). Returns the post
+    files that hold the editor's text ([] when the text was not changed)."""
+    path = workspace / P.PIECE_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        data = None  # unreadable: the posts are still written, and the prompt names them
+    files: list[str] = []
+    if edits.posts is not None:
+        listed = data.get("posts") if data is not None else None
+        names = [str(n) for n in listed] if isinstance(listed, list) else []
+        for i, text in enumerate(edits.posts):
+            rel = names[i] if i < len(names) and qa.inside(workspace, names[i]) else ""
+            if not rel:
+                k = i + 1
+                while f"{P.POSTS_DIR}/{k:02d}.txt" in names + files:
+                    k += 1
+                rel = f"{P.POSTS_DIR}/{k:02d}.txt"
+            target = qa.inside(workspace, rel)
+            assert target is not None  # a listed name inside the folder, or one made here
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text.rstrip() + "\n", encoding="utf-8")
+            files.append(rel)
+        if data is not None:
+            data["posts"] = files
+    if data is not None and edits.dropped and isinstance(data.get("cards"), list):
+        gone = {qa.inside(workspace, str(c.get("file") or "")) for c in edits.dropped}
+        gone.discard(None)
+        data["cards"] = [
+            c
+            for c in data["cards"]
+            if not (isinstance(c, dict) and qa.inside(workspace, str(c.get("file") or "")) in gone)
+        ]
+    if data is not None:
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    return files
 
 
 def polish(ctx: Context, piece: S.Piece) -> Outcome:
@@ -361,4 +474,8 @@ def resume_interrupted(ctx: Context, piece: S.Piece, note: str = "") -> Outcome:
         # Words typed with Resume on a piece stopped while polishing are changes asked for:
         # a revision carries them to the session, then polishes as before.
         return revise(ctx, piece, note)
+    if ctx.queue_edits and ingest.unsynced(piece, ctx.queue_edits(piece)):
+        # The editor changed the queue draft while the piece was stopped: polishing alone
+        # would put the session's text back over it, so the session gets the changes first.
+        return revise(ctx, piece, "")
     return polish(ctx, piece)

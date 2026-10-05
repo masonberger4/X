@@ -49,7 +49,7 @@ def png(width: int = 4, height: int = 5) -> bytes:
     )
 
 
-def put_piece(conn, tmp_path, posts, cards=(), *, title="Next-gen CTLA-4"):
+def put_piece(conn, tmp_path, posts, cards=(), *, title="Next-gen CTLA-4", recheck=()):
     """A finished studio piece in the queue: its studio_pieces row, its folder with one PNG
     per card, and the checker's report, through studio/ingest.py. `cards` are (post, alt).
     Returns (piece id, draft id, the card files)."""
@@ -86,9 +86,12 @@ def put_piece(conn, tmp_path, posts, cards=(), *, title="Next-gen CTLA-4"):
                 for f, (post, alt) in zip(files, cards, strict=True)
             ],
             summary="Why the next CTLA-4 wave is a different drug class.",
+            recheck=list(recheck),
         )
     )
     draft_id = ingest.to_queue(conn, piece, report, max_chars=25000)
+    # where session.polish leaves a piece once its draft is in the queue
+    studio_store.update_piece(conn, piece_id, stage=studio_store.STAGE_READY, draft_id=draft_id)
     return piece_id, draft_id, files
 
 
@@ -333,3 +336,93 @@ def test_an_approved_studio_draft_reaches_the_publisher_whole(client, conn, tmp_
     listed = client.get("/status/approved").text
     assert f"<strong>Studio piece {piece_id}</strong>" in row_of(listed, draft_id)
     assert "fact base, fact-check log and Revise" not in listed  # only while it is pending
+
+
+# ---- while the studio works on a piece, the queue leaves its draft alone ---------------
+
+
+def _hold(conn, piece_id, **fields):
+    studio_store.update_piece(conn, piece_id, **fields)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"stage": studio_store.STAGE_REVISING},
+        {"stage": studio_store.STAGE_POLISHING},
+        {"request": studio_store.REQUEST_REVISE, "request_note": "lead with the OS data"},
+    ],
+)
+def test_a_studio_draft_is_held_while_its_revision_runs_or_waits(client, conn, tmp_path, state):
+    piece_id, draft_id, _ = put_piece(conn, tmp_path, POSTS, [(1, "first card"), (2, "second")])
+    _hold(conn, piece_id, **state)
+
+    for path, form in (
+        ("approve", {}),
+        ("edit", {"thread": "changed by hand", "keep_pending": 1}),
+        ("reject", {"note": "not now"}),
+        ("image/drop", {}),
+        ("image/1/drop", {}),
+    ):
+        r = client.post(f"/drafts/{draft_id}/{path}", data=form)
+        assert r.status_code == 409, path
+        assert "Not done: " in r.text and f"piece {piece_id}" in r.text
+    row = store.get_draft(conn, draft_id)
+    assert (row.status, row.draft.thread, len(row.images)) == ("pending", POSTS, 2)
+    assert store.list_decisions(conn, draft_id) == []
+    # the pages say so before anyone presses a button
+    assert "On hold: " in client.get(f"/drafts/{draft_id}").text
+    assert '<span class="pill warn">on hold</span>' in row_of(client.get("/queue").text, draft_id)
+
+
+def test_the_hold_lifts_when_the_piece_is_ready_again(client, conn, tmp_path):
+    piece_id, draft_id, _ = put_piece(conn, tmp_path, POSTS)
+    _hold(conn, piece_id, stage=studio_store.STAGE_REVISING)
+    assert client.post(f"/drafts/{draft_id}/approve").status_code == 409
+    _hold(conn, piece_id, stage=studio_store.STAGE_READY)
+    assert "On hold" not in client.get(f"/drafts/{draft_id}").text
+    assert "on hold" not in row_of(client.get("/queue").text, draft_id)
+    r = client.post(f"/drafts/{draft_id}/approve")
+    assert r.status_code == 303 and store.get_draft(conn, draft_id).status == "approved"
+
+
+def test_a_drafter_draft_is_never_held(client, conn):
+    draft_id = drafter_draft(conn)
+    row = store.get_draft(conn, draft_id)
+    assert store.studio_hold(conn, row) == ""  # no studio table needed either
+    assert client.post(f"/drafts/{draft_id}/approve").status_code == 303
+
+
+# ---- the copy-paste page carries the posting-day re-checks -----------------------------
+
+
+def test_the_copy_paste_page_lists_what_to_re_check_before_posting(conn, tmp_path, db_file):
+    from panel import app as panel_app
+
+    recheck = [
+        "PDUFA date Nov 14 (Saturday): confirm it has not moved",
+        "the share count; it changes; after the offering",
+    ]
+    piece_id, draft_id, _ = put_piece(conn, tmp_path, POSTS[:1], recheck=recheck)
+    row = store.get_draft(conn, draft_id)
+    # one line each in why_it_matters, read back whole
+    assert store.recheck_lines(row.draft.why_it_matters) == recheck
+    store.approve(conn, draft_id)
+
+    body = TestClient(panel_app.app).get(f"/publishing/manual/{draft_id}").text
+
+    assert "Re-check before posting" in body
+    for line in recheck:
+        assert f"<li>{line}</li>" in body
+    assert body.index("Re-check before posting") < body.index("Copy text")
+    assert f'<p class="meta">Studio piece {piece_id}</p>' in body  # a title, not a blank
+
+
+def test_a_drafter_draft_has_nothing_to_re_check(conn, db_file):
+    from panel import app as panel_app
+
+    draft_id = drafter_draft(conn, why_it_matters="Re-check this, says the drafter")
+    store.approve(conn, draft_id)
+    body = TestClient(panel_app.app).get(f"/publishing/manual/{draft_id}").text
+    assert "Copy text" in body and "Re-check before posting" not in body
+    assert store.recheck_lines(None) == [] and store.recheck_lines("") == []

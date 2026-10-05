@@ -287,6 +287,9 @@ def make_context(
         # approved or rejected meanwhile would refuse the result after an hour's work.
         revisable=lambda piece: ingest.revise_blocker(conn, piece),
         harvest=lambda piece, info: _harvest(conn, cfg, piece, info, today),
+        # The editor's hand edits and dropped cards in the queue, which a revision starts
+        # from instead of putting the session's old text back.
+        queue_edits=lambda piece: ingest.hand_edits(conn, piece),
     )
 
 
