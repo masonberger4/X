@@ -10,13 +10,20 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-from draft.targets import field_figure, field_figures, target_figures, target_mentions
+from draft.targets import (
+    field_figure,
+    field_figures,
+    share_figures,
+    target_figures,
+    target_mentions,
+)
 from studio import render as render_mod
 from studio import safety
 from studio.angles import HOOK_STYLES, SHAPES, load_angles
@@ -310,8 +317,9 @@ TARGET_FIELDS = (
     "post_says",
     "source",
 )
-# post_says is the post's own words, so a word or two could be found anywhere.
-MIN_SAYS_WORDS = 3
+# post_says is the post's own words, so a single word could be found anywhere; a table's
+# basis column is short ("melanoma alone").
+MIN_SAYS_WORDS = 2
 _SAME = str.maketrans(
     {
         "\u2018": "'",
@@ -332,7 +340,8 @@ def _cents(figure: str) -> str:
 
 class _CardText(HTMLParser):
     """The words a card shows: no script, style, title or comment, and a "<" that opens no
-    tag (p<0.001) stays text, as a browser shows it."""
+    tag (p<0.001) stays text, as a browser shows it. Its tables are kept too, row by row,
+    cell by cell."""
 
     _HIDDEN = frozenset({"script", "style", "title", "template", "noscript"})
 
@@ -340,35 +349,90 @@ class _CardText(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.hidden = 0
+        self.tables: list[list[list[str]]] = []
+        self._open: list[list[list[str]]] = []  # tables open now, innermost last
+        self._cell: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: Any) -> None:
         if tag in self._HIDDEN:
             self.hidden += 1
+        elif tag == "table":
+            self._open.append([])
+        elif tag == "tr" and self._open:
+            self._open[-1].append([])
+        elif tag in ("td", "th") and self._open and self._open[-1]:
+            self._cell = []
         self.parts.append(" ")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in self._HIDDEN and self.hidden:
             self.hidden -= 1
+        elif tag in ("td", "th") and self._cell is not None and self._open and self._open[-1]:
+            self._open[-1][-1].append(" ".join("".join(self._cell).split()))
+            self._cell = None
+        elif tag == "table" and self._open:
+            self.tables.append(self._open.pop())
         self.parts.append(" ")
 
     def handle_data(self, data: str) -> None:
         if not self.hidden:
             self.parts.append(data)
+            if self._cell is not None:
+                self._cell.append(data)
 
 
-def card_text(path: Path) -> str:
-    """What a card says, from its HTML: the words a reader sees, "" when it cannot be read."""
+def _read_card(path: Path) -> _CardText:
+    parser = _CardText()
     try:
         raw = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
-        return ""
-    parser = _CardText()
+        return parser
     try:
         parser.feed(raw)
         parser.close()
     except Exception:  # markup the parser gives up on: the words read so far
         log.warning("could not read all of %s", path, exc_info=True)
-    return " ".join("".join(parser.parts).split())
+    return parser
+
+
+def card_text(path: Path) -> str:
+    """What a card says, from its HTML: the words a reader sees, "" when it cannot be read."""
+    return " ".join("".join(_read_card(path).parts).split())
+
+
+# A table of analysts' targets on a card: a column headed as a price target ("Price target",
+# "PT", "12-month target"), or plain "Target" beside a firm or rating column, never the
+# "Target" (the company bought) of a deal table; and a "Prior" or "From" column beside it.
+_TARGET_HEAD_RE = re.compile(
+    r"\bprice[-\s]+targets?\b|\btarget\s+prices?\b|\bPTs?\b|\bprice\s+objectives?\b|"
+    r"\bfair[-\s]+values?\b|\b(?:analyst|consensus|street|average|mean|median|12-month|"
+    r"new|current)\s+targets?\b|\b(?:bull|bear|base)[-\s]case\b",
+    re.I,
+)
+_PLAIN_TARGET_HEAD_RE = re.compile(r"^\W*targets?\b", re.I)
+_FIRM_HEAD_RE = re.compile(r"\b(?:firm|broker|bank|analyst|rating|rated|house)s?\b", re.I)
+_PRIOR_HEAD_RE = re.compile(r"\b(?:prior|previous|old|from|before|was)\b", re.I)
+
+
+def card_table_targets(path: Path) -> list[str]:
+    """The figures in a card's table of analysts' targets: its target columns and the prior
+    ones beside them, without the currency."""
+    out: list[str] = []
+    for table in _read_card(path).tables:
+        if len(table) < 2:
+            continue
+        head = table[0]
+        firm_col = any(_FIRM_HEAD_RE.search(h) for h in head)
+        cols = [
+            i
+            for i, h in enumerate(head)
+            if _TARGET_HEAD_RE.search(h) or (firm_col and _PLAIN_TARGET_HEAD_RE.search(h))
+        ]
+        if not cols:
+            continue
+        cols += [i for i, h in enumerate(head) if _PRIOR_HEAD_RE.search(h) and i not in cols]
+        out += [f for row in table[1:] for i in cols if i < len(row) for f in share_figures(row[i])]
+    return list(dict.fromkeys(out))
 
 
 def field_text(entry: dict[str, Any], key: str) -> str:
@@ -424,7 +488,7 @@ def cited_targets(
     took out of the posts is no longer cited."""
     texts = piece_texts(piece) if texts is None else texts
     plain = [_same(text) for _, text in texts]
-    figures = {_cents(f) for _, text in texts for f in target_figures(text)}
+    figures = {_cents(f) for found in _figures_by_text(piece, texts).values() for f in found}
     out = []
     for entry in piece.price_targets:
         figure = field_figure(field_text(entry, "target"))
@@ -436,6 +500,15 @@ def cited_targets(
     return out
 
 
+def _figures_by_text(piece: PieceFiles, texts: list[tuple[str, str]]) -> dict[str, list[str]]:
+    """The figures each post or card gives as targets, a card's target table included."""
+    found = {label: target_figures(text) for label, text in texts}
+    for c in piece.cards:
+        label = f"card {c.html.name}"
+        found[label] = list(dict.fromkeys(found.get(label, []) + card_table_targets(c.html)))
+    return found
+
+
 def check_price_targets(piece: PieceFiles, report: Report) -> None:
     """An analyst's target is cited only with what it rests on. A post or card that cites a
     target needs an entry in piece.json's price_targets: the firm, the target, its date,
@@ -445,8 +518,12 @@ def check_price_targets(piece: PieceFiles, report: Report) -> None:
     target that no entry lists (as its target, the one before or the firm's published
     cases) may be the account's own, and the account sets none."""
     texts = piece_texts(piece)
-    cited = [(label, target_mentions(text)) for label, text in texts]
-    cited = [(label, found) for label, found in cited if found]
+    figures = _figures_by_text(piece, texts)
+    cited = [
+        (label, target_mentions(text) or [f"a table of targets: ${', $'.join(figures[label])}"])
+        for label, text in texts
+        if target_mentions(text) or figures.get(label)
+    ]
     listed = piece.price_targets
     if cited and not listed:
         label, found = cited[0]
@@ -495,7 +572,7 @@ def check_price_targets(piece: PieceFiles, report: Report) -> None:
             if len(q.split()) < MIN_SAYS_WORDS:
                 report.fixable.append(
                     f"{PIECE_FILE}: {name} post_says is {q!r}; quote the whole stretch of the "
-                    "post that says what the target rests on, not a word or two"
+                    "post that says what the target rests on, not a single word"
                 )
             elif not any(q in t for t in plain):
                 report.fixable.append(
@@ -510,14 +587,15 @@ def check_price_targets(piece: PieceFiles, report: Report) -> None:
                 f"{PIECE_FILE}: price_targets lists {firm!r} {n} times; give each firm one "
                 "entry, its latest target, with the one before it in previous"
             )
-    for label, text in texts if listed else ():  # with none listed, the message above says it
-        for figure in target_figures(text):
+    for label, _ in texts if listed else ():  # with none listed, the message above says it
+        for figure in figures.get(label, []):
             if _cents(figure) not in known:
                 report.fixable.append(
                     f"{label} gives {figure} as a target, but {PIECE_FILE}'s price_targets "
-                    f"lists no published target of {figure}; list the analyst's target with "
-                    "what it rests on and its source, or take the figure out (the account sets "
-                    "no targets of its own)"
+                    f"lists no published target of {figure} (as a target, the one before it, "
+                    "or a bull or bear value in cases); list the analyst's target with what it "
+                    "rests on and its source, or take the figure out (the account sets no "
+                    "targets of its own)"
                 )
     shown = cited_targets(piece, texts)
     if shown:

@@ -453,6 +453,13 @@ OWN_TARGETS = [
     "Summit is worth $30 a share if HARMONi-3 hits.",
     "The stock could reach $50 on a win.",
     "Summit should trade at $40 after approval.",
+    # the account's own target in the first person, with or without a figure
+    "Our target: $40.",
+    "Our target sits near $45.",
+    "Our target, $45, assumes approval.",
+    "My target would be $45.",
+    "My target is well above the Street's.",
+    "The target on Iovance would go to $30.",
 ]
 # What an analyst would write about a target without setting one, and facts that use the
 # same words: none is the account's own target.
@@ -490,6 +497,15 @@ NOT_OWN_TARGETS = [
     "AstraZeneca's new shares are worth $2 billion at the $15.48 close.",
     "Each share would be worth $40 in cash under the offer.",
     "Is CLDN18.2 the right target? Shares are at $14.",
+    "The COGS target will be $35 per dose.",
+    "The cost target will be $50,000 per patient.",
+    "The enrollment target would be raised to 900 patients.",
+    "Strong Amtagvi demand would lift the revenue target to $500 million.",
+    "My target list for ESMO is below.",
+    "The CEO said our target is a BLA filing by year end.",
+    '"Our target population is second-line NSCLC," the CMO said.',
+    '"Our target is $1B in peak sales," the CEO said.',
+    "Stifel's target is well above the Street's average.",
 ]
 
 MEDICAL_ADVICE = [

@@ -189,7 +189,8 @@ carrying `--live`).
   yes/no/partly/unknown, `effect` unless yes, the firm's published `cases`, `post_says`,
   `source`), held to it by `studio/qa.py:check_price_targets` (fixable: a cited target
   with nothing listed, an entry missing a field, `post_says` in no post or card, a firm
-  listed twice, a figure given as a target that no entry lists as its target, previous or
+  listed twice, a figure given as a target (a card's table of targets included,
+  `qa.card_table_targets`) that no entry lists as its target, previous or
   case), while `studio/safety.py:advice_problems` blocks a target, fair value, value per
   share or computed change of the account's own (`_OWN_TARGET`, per-share figures only)
   in a post, on a card or in its alt text. Preprints are labelled as

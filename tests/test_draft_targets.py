@@ -7,7 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from draft.targets import field_figure, target_figures, target_mentions, target_problems
+from draft.targets import (
+    field_figure,
+    share_figures,
+    target_figures,
+    target_mentions,
+    target_problems,
+)
 
 IOVANCE = (
     "The stock closed at $14.45, up 31.5%. H.C. Wainwright raised its target to $20 from $9, "
@@ -69,13 +75,25 @@ CITATIONS = [
     ("Targets run from $8 to $30 across the 12 analysts covering it.", ["8", "30"]),
     ("H.C. Wainwright and Wells Fargo raised targets to $20 and $18.", ["20", "18"]),
     ("Targets of $20 (H.C. Wainwright) and $18 (Wells Fargo) both moved.", ["20", "18"]),
+    ("Each of the targets of $20 and $18 leaves NSCLC out.", ["20", "18"]),
+    ("Two firms set targets of $38 each.", ["38"]),
+    ("Both targets sit at $20.", ["20"]),
+    ("Analysts' targets average $20.", ["20"]),
+    # what a target rests on, in the words the editor asks for (never a deal's "of the")
+    ("Most of the target of $20 rests on melanoma sales.", ["20"]),
+    ("The case for the target of $20 is melanoma alone.", ["20"]),
+    ("None of the target of $38 assumes a first-line label.", ["38"]),
+    ("Wainwright's bull case for the target of $30 assumes NSCLC.", ["30"]),
     ("Cantor sees a $20-$25 target range depending on the NSCLC label.", ["20", "25"]),
     # PT and the other abbreviations
     ("Stifel: Buy, PT $38 (from $45). Guggenheim $38 PT.", ["38", "45"]),
     ("Guggenheim PT raised to $40 from $33.", ["40", "33"]),
     ("$IOVA PT cut to $12 at Piper.", ["12"]),
     ("Stifel PT: $52", ["52"]),
-    ("BofA PO $45.", ["45"]),
+    ("PT $38 (vs. $45)", ["38", "45"]),
+    ("Stifel cut its PT to $38 (vs. $45 prior).", ["38", "45"]),
+    ("UBS raised target $4\u2192$7, Neutral.", ["4", "7"]),
+    ("Its target went $14 -> $18.", ["14", "18"]),
     ("Citi TP HK$130.", ["130"]),
     # other words for a target
     ("BofA raised its price objective on Summit to $45.", ["45"]),
@@ -105,6 +123,14 @@ CITATIONS = [
     ("Upgraded to Outperform with a $30 target.", ["30"]),
     ("Consensus ~$28.64.", ["28.64"]),
     ("Consensus sits near $28.64.", ["28.64"]),
+    ("Stifel (Buy, $38) and Guggenheim (Buy, $38) both cut after the July interim.", ["38"]),
+    ("Leerink (Outperform, $30) sees NSCLC as upside.", ["30"]),
+    ("Stifel and Guggenheim both cut to $38 after the July interim.", ["38"]),
+    ("H.C. Wainwright cut to $23 from $30.", ["23", "30"]),
+    # a firm's published case, which piece.json lists under cases
+    ("Stifel's bull case, $52, assumes a HARMONi-3 win.", ["52"]),
+    ("Its bear case ($20) assumes a miss.", ["20"]),
+    ("A bull-case value of $60 needs NSCLC.", ["60"]),
     # cited without a figure
     ("Shares trade 15% above the consensus target.", []),
     ("At $46 a share, the offer is 12% above the average price target.", []),
@@ -179,6 +205,10 @@ NOT_CITATIONS = [
     "Each CVR carries a fair value of $2.10 per right.",
     "Warrants with a fair value of $0.85 each were issued with the shares.",
     "Analysts put the CVR's fair value at $0.80 a share.",
+    "Merck's offer for the target was $46 a share.",
+    "Merck agreed to buy Verona for $107 a share.",
+    "Pfizer raised its bid to $45 a share.",
+    "Merck raised its offer to $46 a share.",
     # financings, share prices and time zones
     "The offering priced at $18.36 per share, a 7% discount.",
     "The stock closed at $14.45 after the readout.",
@@ -186,6 +216,14 @@ NOT_CITATIONS = [
     "The call is at 4:30 p.m. ET / 1:30 p.m. PT; $IOVA closed at $14.45.",
     "Pts on the PT arm.",  # "PT" counts only with a figure
     "Patients took 10 mg PO daily; $IOVA closed at $14.45.",
+    # a public offering, not BofA's price objective (which is written out)
+    "Iovance priced a $200M PO at $18 per share.",
+    "$SMMT upsized PO at $18.50",
+    "Arcellx raised $300M in a PO at $58.",
+    "Shares fell to $9 after the CRL.",
+    "Iovance moved from $10.99 to $14.45 on the raise.",
+    "Akeso's shares rose 5% to HK$95.",
+    "A EUR 45 million milestone, then HK$1.5 billion in a placement.",
     "TP53 mutations were seen in 40% of patients.",
     "Buy-side interest picked up; the stock is at $14.",
     "In a Neutral-rated name at $14, the readout is the catalyst.",
@@ -195,10 +233,28 @@ NOT_CITATIONS = [
     "EPS of $2.58 vs consensus $2.35 on Keytruda strength.",
     "Merck earned $2.58 a share, above the consensus $2.35.",
     "The consensus $2.35 EPS looks stale.",
+    "Q2 net loss was $0.28 a share vs consensus of $0.31.",
+    "Q2 loss per share was $0.28. Consensus was $0.31.",
+    "Revenue of $99.3M beat consensus of $95M.",
     # a drug's price
     "ICER's value-based target price of $150,000 to $300,000 would make it cost-effective.",
     "Iovance's target price for Amtagvi in Europe is about $500K.",
     "Amtagvi's list price of $515,000 and a target price for Europe of EUR 350,000.",
+    "Replimune cut the list price to $450K.",
+    "The COGS target is $35 per dose.",
+    "A $5,000 target cost per patient would change the math.",
+    "Gilead cut prices to $40 a vial.",
+    # the readout nouns the review found
+    "The mean target-to-background ratio was 4.2 on CD8 PET.",
+    "Median target receptor occupancy exceeded 90% at 10 mg/kg.",
+    "The mean target volume was 120 mL.",
+    "Average target density was about 5,000 copies per cell.",
+    "The median target tumor burden fell 40%.",
+    "Claudin 18.2 has become the consensus target in gastric cancer.",
+    # a case that is not a price
+    "The bull case is a 40% ORR in second line.",
+    "Its base case assumes $500M in peak sales.",
+    "The bull case of $3 billion in peak sales needs NSCLC.",
     # a link's path
     "Per stocktwits.com/news-articles/markets/smmt-price-target-harmoni-data/cZZp the date holds.",
     "Source: https://example.com/iovance-price-target-raised-to-20/",
@@ -261,3 +317,9 @@ def test_the_drafter_cites_no_target():
 )
 def test_the_figure_a_piece_json_field_gives(field, figure):
     assert field_figure(field) == figure
+
+
+def test_the_per_share_figures_in_a_table_cell():
+    assert share_figures("$38 (from $45)") == ["38", "45"]
+    assert share_figures("HK$1,050") == ["1050"]
+    assert share_figures("$2.0B, $35 per dose, stocktwits.com/a/$40") == []

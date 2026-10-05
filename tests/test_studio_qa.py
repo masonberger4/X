@@ -655,7 +655,7 @@ def test_post_says_is_found_whatever_the_quotes_case_and_spacing():
         assert report.fixable == [], (says, report.fixable)
 
 
-def test_post_says_must_be_more_than_a_word_or_two():
+def test_post_says_must_be_more_than_one_word():
     text = "Stifel's $38 target values melanoma alone. " + CLOSING
     entry = target("Stifel", "$38", post_says="melanoma")
     [problem] = qa.check_text(piece_of(text, price_targets=[entry]), XCFG, set()).fixable
@@ -836,16 +836,72 @@ def test_a_card_may_name_a_site_without_it_being_a_link(tmp_path):
     assert qa.check_text(piece_of(POST, cards=cards), XCFG, set()).blocking == []
 
 
-def test_a_firms_published_cases_are_its_figures_not_the_accounts():
-    text = (
-        "Stifel's $38 target values melanoma alone, and its bull-case target of $60 assumes "
-        "an NSCLC win. " + CLOSING
-    )
+@pytest.mark.parametrize(
+    "case",
+    ["its bull-case target of $60 assumes an NSCLC win", "its bull case, $60, assumes a win"],
+)
+def test_a_firms_published_cases_are_its_figures_not_the_accounts(case):
+    text = f"Stifel's $38 target values melanoma alone, and {case}. " + CLOSING
     entry = target("Stifel", "$38", cases="bull $60, bear $20 (published 2026-07-24)")
     assert qa.check_text(piece_of(text, price_targets=[entry]), XCFG, set()).fixable == []
     del entry["cases"]
     [problem] = qa.check_text(piece_of(text, price_targets=[entry]), XCFG, set()).fixable
     assert problem.startswith("post 1 gives 60 as a target")
+    assert "or a bull or bear value in cases" in problem
+
+
+TARGET_TABLE = (
+    "<table><tr><th>Firm</th><th>Price target</th><th>Prior</th><th>Rests on</th></tr>"
+    "<tr><td>H.C. Wainwright</td><td>$20</td><td>$9</td><td>melanoma alone</td></tr>"
+    "<tr><td>Stifel</td><td>$52</td><td>$45</td><td>NSCLC at 35%</td></tr></table>"
+)
+
+
+def test_a_table_of_targets_on_a_card_is_held_to_the_list(tmp_path):
+    card = tmp_path / "card_1.html"
+    card.write_text("<p>Last close $14.45</p>" + TARGET_TABLE, encoding="utf-8")
+    cards = [qa.Card(html=card, png=card.with_suffix(".png"), post=1, alt="Where the Street is")]
+    listed = [target("H.C. Wainwright", "$20", previous="$9", post_says="melanoma alone")]
+    report = qa.check_text(piece_of(POST, cards=cards, price_targets=listed), XCFG, set())
+    # Stifel's row is checked, the share price beside the table is not
+    assert [p.split(",")[0] for p in report.fixable] == [
+        "card card_1.html gives 52 as a target",
+        "card card_1.html gives 45 as a target",
+    ]
+    listed.append(target("Stifel", "$52", previous="$45", post_says="NSCLC at 35%"))
+    report = qa.check_text(piece_of(POST, cards=cards, price_targets=listed), XCFG, set())
+    assert report.fixable == []
+    assert [e["firm"] for e in qa.cited_targets(report.piece)] == ["H.C. Wainwright", "Stifel"]
+
+
+def test_a_table_of_targets_with_nothing_listed_goes_back(tmp_path):
+    card = tmp_path / "card_1.html"
+    card.write_text(
+        "<table><tr><td>Firm</td><td>Target</td><td>Rests on</td></tr>"
+        "<tr><td>Stifel</td><td>$38</td><td>melanoma alone</td></tr></table>",
+        encoding="utf-8",
+    )
+    cards = [qa.Card(html=card, png=card.with_suffix(".png"), post=1, alt="Ratings")]
+    [problem] = qa.check_text(piece_of(POST, cards=cards), XCFG, set()).fixable
+    assert problem.startswith("card card_1.html cites a price target ('a table of targets: $38')")
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        # a deal's target is the company bought; a pipeline's is an antigen
+        "<table><tr><th>Target</th><th>Acquirer</th><th>Prior close</th><th>Per share</th></tr>"
+        "<tr><td>Verona</td><td>Merck</td><td>$80.50</td><td>$107</td></tr></table>",
+        "<table><tr><th>Asset</th><th>Target</th><th>Stage</th></tr>"
+        "<tr><td>anito-cel</td><td>BCMA</td><td>Ph3</td></tr></table>",
+    ],
+)
+def test_other_tables_with_a_target_column_are_not_targets(tmp_path, table):
+    card = tmp_path / "card_1.html"
+    card.write_text(table, encoding="utf-8")
+    cards = [qa.Card(html=card, png=card.with_suffix(".png"), post=1, alt="A table")]
+    assert qa.card_table_targets(card) == []
+    assert qa.check_text(piece_of(POST, cards=cards), XCFG, set()).fixable == []
 
 
 def test_biotech_targets_are_not_price_targets():
