@@ -5,9 +5,9 @@
   body { max-width: 1280px; }
   .ab { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; align-items: start; }
   @media (max-width: 760px) { .ab { grid-template-columns: 1fr; } }
-  .side { border: 1px solid #ddd; border-radius: 8px; padding: .6rem .9rem; }
+  .side { border: 1px solid var(--border, #ddd); border-radius: 8px; padding: .6rem .9rem; }
   .side h2 { margin: .2rem 0 .4rem; }
-  .side img { max-width: 100%; border: 1px solid #ddd; border-radius: 6px; margin: .3rem 0; }
+  .side img { max-width: 100%; border: 1px solid var(--border, #ddd); border-radius: 6px; margin: .3rem 0; }
   .side button.pick { font: inherit; font-weight: 600; padding: .4rem 1.2rem; }
   .spec { font-size: .9em; }
 </style>

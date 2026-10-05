@@ -42,7 +42,7 @@
 {% else %}
 <p class="meta">Attached to post {{ first_anchor }} when published. Rendered by code from the numbers below; check every bar against the source.</p>
 {% endif %}
-<p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid #ccc"></p>
+<p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid var(--border, #ccc)"></p>
 <p class="meta">{{ image_alt }}</p>
 {% if extra_images %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/0/drop">
@@ -60,7 +60,7 @@
 {% endif %}
 {% for im in extra_images %}
 <p class="meta">{{ 'Second picture' if extra_images|length == 1 else 'Picture ' ~ (loop.index + 1) }}, attached to post {{ im.anchor }} when published.</p>
-<p><img src="{{ im.url }}" alt="{{ im.alt }}" style="max-width:100%;border:1px solid #ccc"></p>
+<p><img src="{{ im.url }}" alt="{{ im.alt }}" style="max-width:100%;border:1px solid var(--border, #ccc)"></p>
 <p class="meta">{{ im.alt }}</p>
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/{{ im.index }}/drop">
   <input name="note" placeholder="why (optional)">

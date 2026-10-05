@@ -2,10 +2,10 @@
 {% block title %}Post draft {{ d.draft_id }}{% endblock %}
 {% block content %}
 <style>
-  .mpost { border: 1px solid #ddd; border-radius: 8px; padding: .75rem; margin: .75rem 0; }
-  .mpost pre { white-space: pre-wrap; font: inherit; margin: .3rem 0 .5rem; background: #fafafa; padding: .5rem; border-radius: 6px; }
-  .mpost img { max-width: 360px; display: block; border: 1px solid #eee; margin: .4rem 0; }
-  .copied { color: #1b5e20; font-weight: 600; margin-left: .3rem; }
+  .mpost { border: 1px solid var(--border, #ddd); border-radius: 8px; padding: .75rem; margin: .75rem 0; }
+  .mpost pre { white-space: pre-wrap; font: inherit; margin: .3rem 0 .5rem; background: var(--surface-2, #fafafa); padding: .5rem; border-radius: 6px; }
+  .mpost img { max-width: 360px; display: block; border: 1px solid var(--border, #eee); margin: .4rem 0; }
+  .copied { color: var(--ok, #1b5e20); font-weight: 600; margin-left: .3rem; }
 </style>
 <p><a href="/status/approved">&larr; back to approved</a></p>
 <h1>Post draft {{ d.draft_id }} on X</h1>

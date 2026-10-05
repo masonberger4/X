@@ -16,12 +16,12 @@ the X API read tier is set up; it is an optional step in <code>ops/config.yaml</
   <span class="meta">over {{ growth.days }} snapshots, {{ growth.since }} to {{ growth.on }}</span>
 </p>
 {% if spark %}
-<figure style="margin:0 0 1rem">
+<figure style="margin:0 0 1rem;color:var(--chart-line, #1a4f8a)">
   <svg viewBox="0 0 {{ spark.width }} {{ spark.height }}" width="100%" height="{{ spark.height }}"
        role="img" aria-label="Followers over time, {{ spark.min }} to {{ spark.max }}">
-    <polyline points="{{ spark.points }}" fill="none" stroke="#1a4f8a" stroke-width="2"
+    <polyline points="{{ spark.points }}" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linejoin="round" stroke-linecap="round"></polyline>
-    <circle cx="{{ spark.last[0] }}" cy="{{ spark.last[1] }}" r="4" fill="#1a4f8a"></circle>
+    <circle cx="{{ spark.last[0] }}" cy="{{ spark.last[1] }}" r="4" fill="currentColor"></circle>
   </svg>
   <figcaption class="meta">{{ spark.min }} to {{ spark.max }} followers. Exact numbers are in the table below.</figcaption>
 </figure>
