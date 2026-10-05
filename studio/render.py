@@ -122,14 +122,17 @@ _MAC_CANDIDATES = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
 )
+# Edge comes first on Windows by its install path above. On PATH, Chrome and Chromium come
+# before Edge: Edge's Linux package often ships a sandbox helper that is not set up (CI
+# runners, containers), and then aborts without drawing.
 _PATH_NAMES = (
-    "msedge",
-    "microsoft-edge",
     "google-chrome",
     "google-chrome-stable",
     "chromium",
     "chromium-browser",
     "chrome",
+    "msedge",
+    "microsoft-edge",
 )
 
 

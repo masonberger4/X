@@ -232,6 +232,16 @@ def test_path_names_are_tried_in_order(no_browsers):
     assert render.find_browser("") == str(chrome)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="PATH lookup of extensionless names")
+def test_on_path_chrome_comes_before_edge(no_browsers):
+    # Edge's Linux package often ships a sandbox helper that is not set up (CI runners,
+    # containers) and then aborts; Windows finds Edge by its install path first anyway.
+    edge = _exe(no_browsers, "msedge")
+    assert render.find_browser() == str(edge)  # the only one: it is used
+    chrome = _exe(no_browsers, "google-chrome")
+    assert render.find_browser("") == str(chrome)
+
+
 def test_an_install_location_comes_before_path(no_browsers, tmp_path, monkeypatch):
     app = _exe(tmp_path / "Applications", "Google Chrome")
     _exe(no_browsers, "chromium")

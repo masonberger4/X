@@ -1524,14 +1524,17 @@ def test_reingesting_without_a_revision_note_logs_a_plain_revision(rig):
 
 
 def _browser() -> str | None:
-    try:
-        return render_mod.find_browser()
-    except render_mod.RenderError:
-        return None
+    """A browser that can actually draw here (one whose sandbox the machine refuses is as
+    good as none), the same gate the render tests use."""
+    from tests.test_studio_render import working_browser
+
+    return working_browser()
 
 
 BROWSER = _browser()
-needs_browser = pytest.mark.skipif(BROWSER is None, reason="no Chromium-family browser here")
+needs_browser = pytest.mark.skipif(
+    BROWSER is None, reason="no Chromium-family browser that can draw here"
+)
 
 
 def _real_renderer(html: Path, png: Path) -> render_mod.RenderResult:
