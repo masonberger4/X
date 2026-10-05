@@ -714,8 +714,12 @@ everything it read):
    fresh sub-agent (Agent tool) that sees only the post and card text, logs every
    finding in `factcheck.md`, and writes `piece.json`.
 3. *Polish*: the app draws every card (`studio/render.py`: headless Edge, Chrome or
-   Chromium with the network blocked and the house fonts injected; a layout check
-   reports text cut off, overlapping or off the card), counts characters the way X
+   Chromium with the network blocked, a content policy that runs none of the card's own
+   scripts and loads nothing from the web or the disk, and the house fonts injected; a
+   layout check reports text cut off, overlapping or off the card and any empty band
+   taller than a quarter of the card; the window is grown by whatever the browser keeps
+   for itself and the picture cut back to the card, so the footer is never lost), counts
+   characters the way X
    does (`studio/xcount.py`), runs the safety lines (`studio/safety.py`:
    investment or medical advice, links including bare domains) and checks that
    every @handle has a page that verified it (`studio/qa.py`). Problems go back to
@@ -753,7 +757,8 @@ environment.
 
 **Running it**: the `studio` step in `ops/config.yaml` (automatic, right after
 `score`, `skip_when_busy` so a long session sits a run out instead of holding the
-others back) acts on the editor's requests and starts a new piece when
+others back, along with the steps its own run still has to come behind it,
+`JobManager.queued_behind`) acts on the editor's requests and starts a new piece when
 `auto.max_new_per_day` (in any 24 hours) and `auto.min_hours_between` allow and no
 piece waits at the checkpoint; `studio_now` and `studio_resume` are the studio
 page's manual buttons. One studio run at a time (`studio_pieces/.studio.lock`). A

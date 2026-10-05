@@ -89,6 +89,16 @@ def _opening(piece: S.Piece) -> str:
     return text[:280]
 
 
+def _companies(piece: S.Piece) -> list[str]:
+    """The company names in a piece's research.json. The session writes that file, so a
+    null or a string where the list belongs means no names, never a failed brief."""
+    research = piece.meta.get("research")
+    companies = research.get("companies") if isinstance(research, dict) else None
+    if not isinstance(companies, list):
+        return []
+    return [str(c["name"]) for c in companies if isinstance(c, dict) and c.get("name")]
+
+
 def recent(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[S.Piece]:
     return S.recent_pieces(conn, int(cfg["variety"].get("recent_pieces_shown") or 8))
 
@@ -103,20 +113,19 @@ def build_brief(
     today: str,
     tzname: str,
 ) -> P.Brief:
+    from timeutil import fmt_date
+
     pieces = [p for p in recent(conn, cfg) if p.id != piece.id]
     recent_pieces = [
         P.RecentPiece(
-            date=p.created_at[:10],
+            # The display zone's date, as `today` is: a UTC date can read as tomorrow.
+            date=fmt_date(p.created_at),
             title=p.label,
             angle=p.angle,
             shape=p.shape,
             hook_style=p.hook_style,
             opening=_opening(p),
-            companies=[
-                str(c.get("name"))
-                for c in (p.meta.get("research", {}) or {}).get("companies", [])
-                if isinstance(c, dict) and c.get("name")
-            ],
+            companies=_companies(p),
         )
         for p in pieces
     ]
@@ -210,6 +219,9 @@ def make_context(
         ingest=do_ingest,
         echo=print,
         stop_after_research=stop_after_research,
+        # Asked by every revision, a resumed one too, before its session runs: a draft
+        # approved or rejected meanwhile would refuse the result after an hour's work.
+        revisable=lambda piece: ingest.revise_blocker(conn, piece),
     )
 
 
@@ -290,9 +302,27 @@ def new_piece(
     return piece
 
 
+def _draft_not_pending(conn: sqlite3.Connection, piece: S.Piece) -> str:
+    """Why a revision of this finished piece could not reach the queue, or '' when it can:
+    its draft left `pending` (approved, rejected, posted), which studio/ingest.py refuses.
+    Asked when the request is acted on, not only when it was made: a request can wait for
+    the next studio run while the editor decides the draft in the queue."""
+    from approval_queue import store as queue_store
+
+    row = queue_store.find_by_item(conn, queue_store.studio_item_id(piece.id))
+    if row is None or row.status == queue_store.STATUS_PENDING:
+        return ""
+    return f"draft {row.id} is {row.status}, not pending; reopen it in the queue, then revise"
+
+
 def act_on_requests(ctx: SS.Context) -> int:
     done = 0
-    for piece in S.pending_requests(ctx.conn):
+    for listed in S.pending_requests(ctx.conn):
+        # Read again: the request before this one may have run for an hour, and meanwhile the
+        # editor may have discarded this piece (which drops its request) or changed the note.
+        piece = S.get_piece(ctx.conn, listed.id)
+        if piece is None or not piece.request:
+            continue
         what, note = piece.request, piece.request_note
         S.update_piece(ctx.conn, piece.id, request="", request_note="")
         log.info("piece %s: %s requested (stage %s)", piece.id, what, piece.stage)
@@ -301,6 +331,13 @@ def act_on_requests(ctx: SS.Context) -> int:
         elif what == S.REQUEST_CONTINUE and piece.stage in (S.STAGE_FAILED, S.STAGE_INTERRUPTED):
             out = SS.resume_interrupted(ctx, piece, note)
         elif what == S.REQUEST_REVISE and piece.stage == S.STAGE_READY:
+            gone = _draft_not_pending(ctx.conn, piece)
+            if gone:
+                # The editor approved or rejected it after asking: the queue would refuse
+                # the revised text, so no session is spent and the piece stays ready.
+                log.warning("piece %s: revision not run: %s", piece.id, gone)
+                S.update_piece(ctx.conn, piece.id, error=f"not revised: {gone}")
+                continue
             out = SS.revise(ctx, piece, note or "Improve the piece.")
         else:
             log.info("piece %s: nothing to do for %s at stage %s", piece.id, what, piece.stage)
@@ -426,11 +463,14 @@ def _dry_run(
 
 
 def print_list() -> int:
+    from timeutil import fmt_datetime
+
     conn = _db_conn()
     try:
         for p in S.list_pieces(conn, 30):
             print(
-                f"#{p.id:<4} {p.created_at[:16]}  {p.stage:<15} {p.angle or '-':<22} {p.label[:60]}"
+                f"#{p.id:<4} {fmt_datetime(p.created_at):<20}  {p.stage:<15} "
+                f"{p.angle or '-':<22} {p.label[:60]}"
                 + (f"  [draft {p.draft_id}]" if p.draft_id else "")
                 + (f"  !! {p.error[:80]}" if p.error else "")
             )

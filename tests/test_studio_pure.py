@@ -887,8 +887,12 @@ def test_the_piece_json_example_names_every_key_the_checker_reads():
 
 def test_the_piece_json_example_round_trips_through_the_checker(tmp_path):
     example = _piece_example(P.write_prompt(_brief()))
-    example["shape"] = "long_post"  # the two fields that list their alternatives
+    # The placeholders: the two fields that list their alternatives, and the angle, which
+    # the checker holds to a key of the library (the placeholder itself is sent back).
+    assert example["angle"] not in A.load_angles()
+    example["shape"] = "long_post"
     example["hook_style"] = "juxtaposition"
+    example["angle"] = "deal_decoder"
     (tmp_path / "posts").mkdir()
     (tmp_path / example["posts"][0]).write_text("Merck paid $400 million.", encoding="utf-8")
     (tmp_path / "cards").mkdir()
@@ -1039,3 +1043,41 @@ def test_resume_wraps_the_stage_instructions_unchanged(stage):
     assert text.startswith(f"Your previous run of this stage was interrupted ({reason}).")
     assert "may be missing or half-written" in text
     assert text.endswith("The stage's instructions, again:\n\n" + original)
+
+
+# ---- settings -----------------------------------------------------------------------------
+
+
+def test_the_writers_model_is_named_in_the_studio_config_and_nowhere_in_code():
+    from studio import settings
+
+    cfg = settings.load_studio_config()
+    assert cfg["model"].startswith("claude-")
+    assert "model" not in settings.DEFAULTS
+    studio_dir = Path(settings.__file__).parent
+    for module in sorted(studio_dir.glob("*.py")) + [studio_dir.parent / "run_studio.py"]:
+        src = module.read_text(encoding="utf-8")
+        assert not re.search(r"claude-(?:opus|sonnet|haiku|\d)", src), (
+            f"{module.name}: model IDs belong in studio/config.yaml"
+        )
+
+
+@pytest.mark.parametrize("model_line", ["", "model:\n", "model: ''\n", "model: '  '\n"])
+def test_a_config_that_names_no_model_is_refused(tmp_path, model_line):
+    from studio import settings
+
+    path = tmp_path / "config.yaml"
+    path.write_text(f"effort: high\n{model_line}x:\n  headroom: 10\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="must name the writer's model"):
+        settings.load_studio_config(path)
+
+
+def test_a_named_model_and_the_settings_left_out_take_their_defaults(tmp_path):
+    from studio import settings
+
+    path = tmp_path / "config.yaml"
+    path.write_text("model: '  writer-model '\nx:\n  headroom: 10\n", encoding="utf-8")
+    cfg = settings.load_studio_config(path)
+    assert cfg["model"] == "writer-model" and cfg["effort"] == "max"
+    assert cfg["x"] == {**settings.DEFAULTS["x"], "headroom": 10}  # a section is merged
+    assert cfg["tools"] == settings.DEFAULTS["tools"]

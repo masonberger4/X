@@ -9,6 +9,7 @@ studio/render.py (a headless browser, no network).
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,14 +17,17 @@ from typing import Any
 
 from studio import render as render_mod
 from studio import safety
-from studio.angles import HOOK_STYLES, SHAPES
+from studio.angles import HOOK_STYLES, SHAPES, load_angles
 from studio.prompt import FACTBASE_FILE, FACTCHECK_FILE, PIECE_FILE
 from studio.xcount import x_length
+
+log = logging.getLogger(__name__)
 
 PNG_SIZES = {
     render_mod.DEFAULT_SIZE: (2160, 2700),
     render_mod.WIDE_SIZE: (3200, 1800),
 }
+NO_BROWSER = "no browser to draw the cards with (see render.browser in studio/config.yaml)"
 
 
 @dataclass
@@ -122,6 +126,13 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
         problems.append(f"{PIECE_FILE}: shape must be one of {', '.join(SHAPES)}")
     if piece.hook_style and piece.hook_style not in HOOK_STYLES:
         minor.append(f"{PIECE_FILE}: hook_style must be one of {', '.join(HOOK_STYLES)}")
+    keys = _angle_keys()
+    if keys and piece.angle not in keys:
+        # The angle is what the account's results are read by, so it must be a real key.
+        minor.append(
+            f"{PIECE_FILE}: angle must be the key of one of the angles on offer (one of "
+            f"{', '.join(sorted(keys))}), not {piece.angle!r}"
+        )
     posts = data.get("posts")
     if not isinstance(posts, list) or not posts:
         problems.append(f"{PIECE_FILE}: posts must list the post files in order")
@@ -181,6 +192,15 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
     piece.companies = [c for c in _items(data.get("companies")) if isinstance(c, dict)]
     piece.recheck = [_str(x) for x in _items(data.get("recheck_before_posting")) if _str(x)]
     return piece, problems, minor
+
+
+def _angle_keys() -> set[str]:
+    """The angle library's keys; empty (no check) when the library cannot be read."""
+    try:
+        return set(load_angles())
+    except Exception:  # a broken angles.yaml is reported where it is loaded, not here
+        log.warning("could not read the angle library", exc_info=True)
+        return set()
 
 
 def check_text(piece: PieceFiles, xcfg: dict[str, Any], known_handles: set[str]) -> Report:
@@ -260,9 +280,7 @@ def check_cards(piece: PieceFiles, report: Report, renderer: Renderer | None) ->
     if not piece.cards:
         return
     if renderer is None:
-        report.blocking.append(
-            "no browser to draw the cards with (see render.browser in studio/config.yaml)"
-        )
+        report.blocking.append(NO_BROWSER)
         return
     for c in piece.cards:
         try:

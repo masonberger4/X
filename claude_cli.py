@@ -391,7 +391,8 @@ def describe_event(event: dict[str, Any]) -> list[str]:
         tools = ", ".join(str(t) for t in event.get("tools") or [])
         lines.append(f"session started ({event.get('model')}); tools: {tools}")
     elif etype == "assistant":
-        content = (event.get("message") or {}).get("content") or []
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
         for block in content if isinstance(content, list) else []:
             if not isinstance(block, dict):
                 continue
@@ -439,7 +440,8 @@ def run_session(
     session recorded. Every stream-json line is appended to `transcript` as it arrives and
     handed to `on_event`. `timeout` None or <= 0 means no limit; on expiry the CLI and what
     it started are killed and the result says so (the session can still be resumed).
-    Raises ClaudeCliUnavailable when the CLI cannot start; any other failure is returned."""
+    Raises ClaudeCliUnavailable when the CLI cannot start, and OSError when `transcript`
+    cannot be opened (before anything starts); any other failure is returned."""
     settings = cli_settings(cfg)
     binary = resolve_binary(settings)
     system_file = None
@@ -482,6 +484,9 @@ def _stream_session(
     transcript: str | os.PathLike[str] | None,
     on_event: Callable[[dict[str, Any]], None] | None,
 ) -> SessionResult:
+    # Opened before the CLI starts: a transcript that cannot be written (its folder gone)
+    # raises here, before there is a session left running with nobody reading it.
+    out = open(transcript, "a", encoding="utf-8") if transcript else None  # noqa: SIM115
     try:
         proc = subprocess.Popen(
             argv,
@@ -496,6 +501,8 @@ def _stream_session(
             **no_window_kwargs(),
         )
     except OSError as exc:
+        if out is not None:
+            out.close()
         raise ClaudeCliUnavailable(f"could not start {argv[0]!r}: {exc}") from exc
     stderr_lines: list[str] = []
     finished = threading.Event()
@@ -517,7 +524,6 @@ def _stream_session(
     if timeout and timeout > 0:
         threading.Thread(target=watchdog, daemon=True).start()
     result_event: dict[str, Any] | None = None
-    out = open(transcript, "a", encoding="utf-8") if transcript else None  # noqa: SIM115
     try:
         assert proc.stdin is not None and proc.stdout is not None
         try:
@@ -552,12 +558,18 @@ def _stream_session(
             out.close()
         err_thread.join(timeout=5)
     stderr_tail = "".join(stderr_lines)[-2000:]
-    if result_event is None:
+    if result_event is None or timed_out.is_set():
+        # Killed at the time limit even after a result line (the CLI starts another turn
+        # when a background sub-agent ends): the stage stopped early and can be resumed.
+        last = result_event or {}
         return SessionResult(
-            session_id=session_id,
+            session_id=str(last.get("session_id") or session_id),
             ok=False,
             subtype="killed" if timed_out.is_set() else "no_result",
             terminal_reason="timed out" if timed_out.is_set() else f"CLI exited {proc.returncode}",
+            num_turns=int(last.get("num_turns") or 0),
+            cost_usd=float(last.get("total_cost_usd") or 0.0),
+            duration_ms=int(last.get("duration_ms") or 0),
             returncode=proc.returncode,
             stderr_tail=stderr_tail,
         )
@@ -567,12 +579,16 @@ def _stream_session(
     ok = subtype == "success" and not result_event.get("is_error") and proc.returncode == 0
     if not ok and is_refusal(f"{reason} {text}"):
         subtype = "refused"
+    if reason in ("", "completed", "success"):
+        # A result line that reads as a clean finish from a CLI that then exited non-zero:
+        # the exit is the reason, not "success".
+        reason = "" if ok or proc.returncode in (0, None) else f"CLI exited {proc.returncode}"
     return SessionResult(
         session_id=str(result_event.get("session_id") or session_id),
         ok=ok,
         subtype=subtype,
         text=text,
-        terminal_reason="" if reason in ("", "completed", "success") else reason,
+        terminal_reason=reason,
         num_turns=int(result_event.get("num_turns") or 0),
         cost_usd=float(result_event.get("total_cost_usd") or 0.0),
         duration_ms=int(result_event.get("duration_ms") or 0),

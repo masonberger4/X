@@ -59,6 +59,22 @@ def build_draft(piece: S.Piece, report: qa.Report, max_chars: int) -> Draft:
     )
 
 
+def _not_pending(existing: queue_store.DraftRow) -> str:
+    return (
+        f"draft {existing.id} is {existing.status}, not pending; reopen it in the queue "
+        "before revising"
+    )
+
+
+def revise_blocker(conn: sqlite3.Connection, piece: S.Piece) -> str:
+    """Why a revision of this piece could not replace its queue draft, or "" when it can:
+    the rule to_queue applies at the end, asked before an hour-long revision starts."""
+    existing = queue_store.find_by_item(conn, queue_store.studio_item_id(piece.id))
+    if existing is None or existing.status == queue_store.STATUS_PENDING:
+        return ""
+    return _not_pending(existing)
+
+
 def to_queue(
     conn: sqlite3.Connection, piece: S.Piece, report: qa.Report, *, max_chars: int = 25000
 ) -> int:
@@ -74,17 +90,17 @@ def to_queue(
         )
     else:
         if existing.status != queue_store.STATUS_PENDING:
-            raise IngestError(
-                f"draft {existing.id} is {existing.status}, not pending; reopen it in the "
-                "queue before revising"
-            )
+            raise IngestError(_not_pending(existing))
         draft_id = existing.id
+        # The editor's words, as the queue's own revise logs them. session.revise keeps
+        # them in meta: the request's note is cleared when the revision starts.
+        note = str(piece.meta.get("revise_note") or "") or piece.request_note
         queue_store.revise(
             conn,
             draft_id,
             draft=draft,
             model=model,
-            note=piece.request_note or "revised in the studio",
+            note=note or "revised in the studio",
         )
     _attach_cards(conn, draft_id, report)
     return draft_id

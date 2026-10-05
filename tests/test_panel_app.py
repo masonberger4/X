@@ -294,3 +294,118 @@ def test_back_up_now_writes_to_the_backups_folder(client, monkeypatch, tmp_path)
     saved = list((tmp_path / "bk").glob("pipeline-*.sqlite"))
     assert len(saved) == 1
     assert "Backup saved: " + saved[0].name in client.get(r.headers["location"]).text
+
+
+# ---- step 10, the studio: its pages and buttons live in the same app -------------------
+
+STUDIO_LOCKED = {"studio", "studio_now", "studio_resume"}  # one lock for all three steps
+
+
+def _runbar(body: str) -> str:
+    return body.split('class="runbar"')[1].split("</div>")[0]
+
+
+def test_the_studio_is_part_of_the_same_app(client):
+    body = client.get("/studio").text
+    assert "<h1>Studio</h1>" in body
+    # the shared layout: the panel's nav, and a run bar with the studio's two buttons
+    for link in ('href="/"', 'href="/runs"', 'href="/feed"', 'href="/queue"'):
+        assert link in body
+    bar = _runbar(body)
+    assert 'value="studio_now"' in bar and 'value="studio_resume"' in bar
+    assert 'name="back" value="/studio"' in bar and "disabled" not in bar
+    assert "<h1>Playbook</h1>" in client.get("/studio/playbook").text
+    assert client.get("/studio/999").status_code == 404
+    # and the nav on every page, the queue's included, links to it
+    for path in ("/", "/queue", "/studio"):
+        assert 'href="/studio"' in client.get(path).text, path
+
+
+def test_a_studio_session_in_flight_disables_both_studio_buttons(client, monkeypatch):
+    from studio import web as studio_web
+
+    run = {"id": "x", "steps": ["studio_now"], "active_step": "studio_now", "active_for": "12m"}
+    monkeypatch.setitem(studio_web.templates.env.globals, "current_runs", lambda: [run])
+    monkeypatch.setitem(studio_web.templates.env.globals, "busy_steps", lambda: STUDIO_LOCKED)
+    bar = _runbar(client.get("/studio").text)
+    assert bar.count("disabled") == 2 and "watch the log" in bar
+    assert "studio_now is already running" in bar and "studio_resume is already running" in bar
+
+
+def test_each_feed_story_offers_a_studio_piece(client, conn):
+    cluster_id = seed_item(conn, "i1", source="biorxiv", total=42)
+    body = client.get("/feed").text
+    form = body.split('<form method="post" action="/studio/topics"')[1].split("</form>")[0]
+    assert f'name="story" value="{cluster_id}"' in form
+    assert 'name="checkpoint" value="1"' in form  # it stops after research for the editor
+    assert "Write a studio piece" in form
+
+
+def test_a_studio_piece_from_the_feed_is_queued_and_started(client, conn, monkeypatch):
+    from panel.jobs import Job
+    from studio import store as studio_store
+
+    cluster_id = seed_item(conn, "i1", total=42)
+    started = []
+
+    def start(steps):
+        started.append(list(steps))
+        return Job(id="r1", steps=list(steps), started_at=panel_app._now())
+
+    monkeypatch.setattr(panel_app.JOBS, "start", start)
+    r = client.post("/studio/topics", data={"story": str(cluster_id), "checkpoint": "1"})
+    assert r.status_code == 303 and started == [["studio_now"]]
+    flash = unquote_plus(r.headers["location"])
+    assert flash == "/studio?flash=started run r1 (studio_now); its log is on the runs page"
+    (topic,) = studio_store.queued_topics(conn)
+    assert (topic.cluster_id, topic.topic, topic.checkpoint) == (cluster_id, "", True)
+
+    # a studio run already going: the topic waits for the next one, and the page says why
+    def refuse(steps):
+        raise JobError("studio_now is already running; wait for it to finish")
+
+    monkeypatch.setattr(panel_app.JOBS, "start", refuse)
+    r = client.post("/studio/topics", data={"topic": "next-gen CTLA-4"})
+    assert r.status_code == 303
+    assert unquote_plus(r.headers["location"]).endswith(
+        "saved; it starts with the next studio run (studio_now is already running; "
+        "wait for it to finish)"
+    )
+    assert [t.topic for t in studio_store.queued_topics(conn)] == ["", "next-gen CTLA-4"]
+
+
+def test_the_studio_buttons_start_the_configured_studio_steps(monkeypatch):
+    from panel.jobs import Job
+
+    launched = []
+
+    def launch(names, plan, publish=False, **kwargs):
+        launched.append((names, [s.argv for s in plan], {s.lock_name for s in plan}, kwargs))
+        return Job(id="r1", steps=names, started_at=panel_app._now(), plan=plan)
+
+    monkeypatch.setattr(panel_app.JOBS, "_launch", launch)
+    msg = panel_app._start_studio(["studio_now"])
+    assert msg == "started run r1 (studio_now); its log is on the runs page"
+    assert panel_app._start_studio(["studio_resume"]).startswith("started run r1 (studio_resume)")
+    (names, argv, locks, kwargs), (_, resume_argv, _, _) = launched
+    assert names == ["studio_now"] and argv == [["python", "run_studio.py", "--now"]]
+    assert resume_argv == [["python", "run_studio.py", "--resume-only"]]
+    assert locks == {"studio"} and kwargs["auto"] is False  # a human's run, not the timer's
+
+
+def test_a_studio_button_pressed_during_a_session_says_what_is_running(monkeypatch):
+    from panel.jobs import Job
+
+    steps = {s.name: s for s in panel_app.JOBS.steps()}
+    live = Job(
+        id="b", steps=["studio_now"], started_at=panel_app._now(), plan=[steps["studio_now"]]
+    )
+    monkeypatch.setattr(panel_app.JOBS, "_live", [live])
+    # belt and braces: should the refusal ever fail, nothing is actually run
+    monkeypatch.setattr(panel_app.JOBS, "_execute", lambda job: None)
+    with pytest.raises(
+        RuntimeError, match="studio_resume cannot start while studio_now is running"
+    ):
+        panel_app._start_studio(["studio_resume"])
+    with pytest.raises(RuntimeError, match="studio_now is already running"):
+        panel_app._start_studio(["studio_now"])

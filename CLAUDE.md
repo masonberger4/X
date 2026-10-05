@@ -576,7 +576,16 @@ carrying `--live`).
   refuses a studio draft and points at `/studio/<id>`; its edit route takes a long draft's
   own `max_chars`. `studio/render.py` is the only place that launches a browser (Edge,
   Chrome or Chromium, `render.browser` / `STUDIO_BROWSER`), always headless with the
-  network blocked and the fonts in `studio/fonts/` injected; it is not network I/O.
+  network blocked and the fonts in `studio/fonts/` injected; it is not network I/O. Every
+  card opens with a content policy (`CONTENT_POLICY`: inline styles, data: images and the
+  house fonts only; the nonce'd checker is the one script that runs), so a card can never
+  draw a local file into its picture, and a meta refresh is refused before launch. The
+  checker also reports the page's real viewport: new headless Chromium keeps 87 px of its
+  window, so the window is grown by the measured difference (`_WINDOW_EXTRA`, per browser
+  per run) and the screenshot cut back to the card by `crop_png` (standard library only).
+  An empty band taller than `EMPTY_BAND_SHARE` of the card (text, pictures, chart marks
+  and painted leaf boxes projected on the vertical axis; a box holding other elements is
+  not content) is a fixable layout problem.
   `studio/store.py` owns `studio_pieces` (stage, session id, workspace, angle, shape,
   hook, draft id, the editor's pending `request`), `studio_runs` (one per CLI run) and
   `studio_topics` (queued by the editor); its one read of step 1 is `studio/topics.py`

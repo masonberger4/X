@@ -126,8 +126,8 @@ bear", and it is never offered the angles of the last three posts, so the accoun
 does not repeat itself); write the post; and then hand the post, cold, to a fresh
 copy of itself whose only job is to tear it apart against primary sources. It
 fixes what that finds and logs it. It also designs the pictures, dark cards in
-one house style, and the app draws them and tells it if anything is cut off or
-overlapping.
+one house style, and the app draws them and tells it if anything is cut off,
+overlapping or floating in empty space.
 
 The app's job is the boring part: choose what to ask for, keep it in its own
 sandbox (it can search the web and write in its own folder, nothing else on the

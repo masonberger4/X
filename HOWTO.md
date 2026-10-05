@@ -187,7 +187,8 @@ runs and writes shorter threads for the day's other stories.
    posted whose posts break the rule is revised with the one instruction to
    change only the tags (a `revise` decision on the draft page, the rest of
    the text and the visual kept; claim checks carry over as after any
-   revision). `--retag --dry-run` lists what would change without a call.
+   revision). `--retag --dry-run` lists what would change without a call. A
+   studio piece (part 9) is left alone: it is revised from its studio page.
    ```
    python run_draft.py --dry-run                 # show what would be drafted
    python run_draft.py --min-score 38 --limit 5  # only the strongest few
@@ -980,7 +981,8 @@ fact-check through a fresh sub-agent. The app draws the cards, counts characters
 the way X does, checks the few lines that are never crossed (no investment or
 medical advice, no links) and hands any problem back to the same session. The
 finished piece waits in the pending queue as "Studio piece N" with its cards
-attached. Nothing posts from here: approving and "Publish now" work as in part 5,
+attached. Cards are checked too: text cut off, overlapping or off the edge, and big
+empty areas, all handed back to the session to fix. Nothing posts from here: approving and "Publish now" work as in part 5,
 and long posts need X Premium.
 
 1. Nothing new to install. The session runs through the Claude Code you set up
@@ -998,7 +1000,9 @@ and long posts need X Premium.
    news scan, and writes straight through (`auto: checkpoint: false`). Expect it in
    the queue 30 to 90 minutes after the run starts. A session still running at
    the next run time sits that run out (`skip_when_busy`) instead of holding the
-   other steps back.
+   other steps back, and so do the steps still waiting behind it in its own run
+   (draft, verify, feedback, evolve): that run gets to them when the session
+   ends, and the new run says so in its note on the runs page.
 3. Or start one yourself. Open **Studio** in the panel's top bar, type a topic
    ("next-gen CTLA-4", "Merck's KRAS G12D deal", "what ESMO week means for
    $SMMT"), pick an angle or leave it to the session, and press **Write it**. On
@@ -1087,7 +1091,7 @@ reference pieces in `studio\exemplars\`.
 | A draft sits on the approved page marked `claimed` and never posts | the run that claimed it died before it posted (a sleep, a power cut, the Stop button). Press "Release" beside it once the claim is over 30 minutes old, or run `python run_publish.py --release-failed`; check on the publishing page first that no part of it reached X |
 | The control panel says a step is already running, or a run's step is marked `locked` | that step is running in this window, another window or the scheduler (part 6); wait for it and press the button again. Other steps can run meanwhile |
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
-| A studio piece says `no Chromium-family browser found` | the cards are drawn by Edge, Chrome or Chromium; put the browser's full path on `render: browser:` in `studio\config.yaml` (Edge is usually `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`) and press Resume on the piece |
+| A studio piece says `no browser to draw the cards with` (its run's log: `no Chromium-family browser found`) | the cards are drawn by Edge, Chrome or Chromium; put the browser's full path on `render: browser:` in `studio\config.yaml` (Edge is usually `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`) and press Resume on the piece. The piece stops before polishing, its cards as written |
 | A studio piece fails at once with `unknown option '--restricted'` (or `--safe-mode`) | your Claude Code is older than the studio expects: `npm install -g @anthropic-ai/claude-code`, then Resume. As a stopgap remove that flag from `cli_flags` in `studio\config.yaml` |
 | A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept). Press Resume on its page; the session keeps everything it already read |
 | A studio piece says `failed: still blocked after polishing` | the page lists what the checker still found (advice wording, a link, a post over the limit). Resume with a note saying how to fix it, or Discard |

@@ -52,6 +52,9 @@ class Context:
     launch: Launcher | None = None  # None: claude_cli.run_session, looked up at call time
     echo: Callable[[str], None] = print
     stop_after_research: bool = False
+    # Why a revision could not go into the queue ("" when it can), asked before it runs;
+    # None skips the check (studio/ingest.py:revise_blocker in the app).
+    revisable: Callable[[S.Piece], str] | None = None
 
 
 @dataclass
@@ -73,15 +76,28 @@ def _write_log(workspace: Path, line: str) -> None:
 def _run_stage(
     ctx: Context, piece: S.Piece, stage: str, prompt_text: str, *, first: bool
 ) -> claude_cli.SessionResult:
-    """One CLI invocation. Records a studio_runs row around it."""
+    """One CLI invocation. Records a studio_runs row around it. A CLI that cannot run at
+    all leaves the piece interrupted (so it can be resumed at once) and the error goes up,
+    so the step shows as failed."""
     workspace = Path(piece.workspace)
     run_id = S.start_run(ctx.conn, piece.id, stage)
     _write_log(workspace, f"=== {stage} ===")
+    started = False
+
+    def say(line: str) -> None:
+        _write_log(workspace, line)
+        ctx.echo(f"[piece {piece.id} {stage}] {line}")
 
     def on_event(event: dict[str, Any]) -> None:
+        nonlocal started
+        if event.get("type") == "result":
+            return  # one "stage ended" line below, from the run's last result
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            if started:
+                return  # the CLI starts another turn when a background sub-agent ends
+            started = True
         for line in claude_cli.describe_event(event):
-            _write_log(workspace, line)
-            ctx.echo(f"[piece {piece.id} {stage}] {line}")
+            say(line)
 
     launch = ctx.launch or claude_cli.run_session
     try:
@@ -105,7 +121,12 @@ def _run_stage(
         )
     except claude_cli.ClaudeCliError as exc:
         S.finish_run(ctx.conn, run_id, outcome="error", detail=str(exc))
+        _fail(ctx, piece, stage, f"the CLI could not run: {exc}", interrupted=True)
         raise
+    say(
+        f"stage ended: {result.subtype or ('success' if result.ok else 'error')} after "
+        f"{result.num_turns} turns"
+    )
     S.finish_run(
         ctx.conn,
         run_id,
@@ -154,7 +175,8 @@ def research(
     if info.get("topic") and not piece.topic:
         updates["title"] = str(info["topic"])[:200]
     story_id = info.get("story_id")
-    if isinstance(story_id, int) and piece.cluster_id is None:
+    # A story number; JSON true is an int to Python and would name story 1.
+    if isinstance(story_id, int) and not isinstance(story_id, bool) and piece.cluster_id is None:
         updates["cluster_id"] = story_id
     S.update_piece(ctx.conn, piece.id, **updates)
     piece = S.get_piece(ctx.conn, piece.id) or piece
@@ -173,11 +195,24 @@ def read_research(workspace: Path) -> dict[str, Any]:
 
 
 def write(ctx: Context, piece: S.Piece, note: str = "", *, resumed_reason: str = "") -> Outcome:
+    # The editor's note is kept with the piece, as a revision's is, so a write that is
+    # interrupted is resumed with the editor's words.
+    S.update_piece(
+        ctx.conn,
+        piece.id,
+        stage=S.STAGE_WRITING,
+        error="",
+        request="",
+        request_note="",
+        meta={"write_note": note.strip()} if note.strip() else None,
+    )
+    # The brief from the piece as stored now: what research found, and the writing stage
+    # (so no story shortlist is fetched for a prompt that does not use one).
+    piece = S.get_piece(ctx.conn, piece.id) or piece
     brief = ctx.brief_for(piece)
     text = P.write_prompt(brief, note)
     if resumed_reason:
         text = P.resume_prompt("write", resumed_reason, text)
-    S.update_piece(ctx.conn, piece.id, stage=S.STAGE_WRITING, error="", request="", request_note="")
     result = _run_stage(ctx, piece, "write", text, first=False)
     if not result.ok:
         return _fail(ctx, piece, "write", result.detail, interrupted=_stopped_early(result))
@@ -185,6 +220,13 @@ def write(ctx: Context, piece: S.Piece, note: str = "", *, resumed_reason: str =
 
 
 def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
+    # A queue draft that was approved, rejected or posted since the editor asked cannot be
+    # replaced: say so now rather than after an hour of revising.
+    blocked = ctx.revisable(piece) if ctx.revisable else ""
+    if blocked:
+        S.update_piece(ctx.conn, piece.id, error=blocked, request="", request_note="")
+        _write_log(Path(piece.workspace), f"!!! revise not started: {blocked}")
+        return Outcome(stage=piece.stage, message=f"revision not started: {blocked}")
     # The note is kept with the piece so a revision that is interrupted can be resumed with
     # the editor's words, not just re-checked.
     S.update_piece(
@@ -209,6 +251,13 @@ def polish(ctx: Context, piece: S.Piece) -> Outcome:
     max_rounds = max(1, int(ctx.cfg.get("max_polish_rounds") or 1))
     S.update_piece(ctx.conn, piece.id, stage=S.STAGE_POLISHING)
     report = qa.check_piece(workspace, ctx.cfg["x"], ctx.known_handles, ctx.renderer)
+    if ctx.renderer is None and report.piece is not None and report.piece.cards:
+        # This machine's problem, not the piece's: a round would ask the session to fix it,
+        # and the one fix in its reach is to drop its cards. Stop; Resume once a browser is in.
+        S.update_piece(
+            ctx.conn, piece.id, meta={"problems": report.problems, "warnings": report.warnings}
+        )
+        return _fail(ctx, piece, "polish", f"{qa.NO_BROWSER}; install one, then Resume")
     reviewed = not report.pictures  # nothing to look at: no review round needed
     round_no = 0
     while round_no < max_rounds and (not report.clean or not reviewed):
@@ -274,6 +323,7 @@ def resume_interrupted(ctx: Context, piece: S.Piece, note: str = "") -> Outcome:
             return research(ctx, piece, first=True)
         return research(ctx, piece, first=False, resumed_reason=reason)
     if stage in ("write", ""):
+        note = note or str(piece.meta.get("write_note") or "")
         return write(ctx, piece, note, resumed_reason=reason)
     if stage == "revise":
         note = note or str(piece.meta.get("revise_note") or "")

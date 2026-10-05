@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated, Any
@@ -45,6 +46,7 @@ TEMPLATES_DIR = Path(__file__).with_name("templates")
 STEP_NEW = "studio_now"
 STEP_RESUME = "studio_resume"
 LOG_TAIL_LINES = 400
+LOG_TAIL_BYTES = 4_000_000
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -130,8 +132,28 @@ def _read(path: Path, limit: int = 400_000) -> str:
 
 
 def _tail(path: Path, lines: int = LOG_TAIL_LINES) -> str:
-    text = _read(path, limit=4_000_000)
+    """The log's last `lines` lines, read from its last LOG_TAIL_BYTES (the newest end,
+    however long a piece's log has grown)."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - LOG_TAIL_BYTES))
+            data = fh.read()
+    except OSError:
+        return ""
+    text = data.decode("utf-8-sig", errors="replace")
     return "\n".join(text.splitlines()[-lines:])
+
+
+def _within(workspace: Path, rel: str) -> Path | None:
+    """`rel` under the piece's folder, or None when it points outside it: piece.json is the
+    session's writing, so the page reads only the files the checker (studio/qa.py) would."""
+    try:
+        path = (workspace / rel).resolve()
+        path.relative_to(workspace.resolve())
+    except (OSError, ValueError):
+        return None
+    return path
 
 
 def _posts(workspace: Path) -> list[str]:
@@ -140,10 +162,23 @@ def _posts(workspace: Path) -> list[str]:
     except ValueError:
         data = {}
     names = data.get("posts") if isinstance(data, dict) else None
-    files = [workspace / str(n) for n in names] if isinstance(names, list) else []
+    named = [_within(workspace, str(n)) for n in names] if isinstance(names, list) else []
+    files = [f for f in named if f is not None]
     if not files:
         files = sorted((workspace / P.POSTS_DIR).glob("*.txt"))
     return [t for t in (_read(f).strip() for f in files) if t]
+
+
+def _research(value: Any) -> dict[str, Any]:
+    """research.json as the piece page shows it. The session writes that file, so the
+    candidate angles are the entries of a list of objects, whatever else the file holds:
+    a number there would otherwise take the whole page down."""
+    research = dict(value) if isinstance(value, dict) else {}
+    angles = research.get("candidate_angles")
+    research["candidate_angles"] = (
+        [a for a in angles if isinstance(a, dict)] if isinstance(angles, list) else []
+    )
+    return research
 
 
 def _cards(workspace: Path) -> list[dict[str, Any]]:
@@ -186,7 +221,10 @@ async def studio_queue_topic(request: Request, conn: Conn):
     story = _first(form, "story")
     angle = _first(form, "angle")
     checkpoint = bool(_first(form, "checkpoint"))
-    cluster_id = int(story) if story.isdigit() else None
+    # ASCII digits only: "²".isdigit() is true and int() refuses it.
+    if story and not (story.isascii() and story.isdigit()):
+        return _redirect("/studio", f"a story id is the number the feed shows, not {story!r}")
+    cluster_id = int(story) if story else None
     if not topic and cluster_id is None:
         return _redirect("/studio", "type a topic or pick a story first")
     if angle:
@@ -245,14 +283,13 @@ def studio_reset_playbook():
 def studio_piece(request: Request, piece_id: int, conn: Conn, flash: str = ""):
     piece = _piece_or_404(conn, piece_id)
     ws = Path(piece.workspace)
-    research = piece.meta.get("research") or {}
     return templates.TemplateResponse(
         request,
         "studio_piece.html",
         {
             "piece": piece,
             "runs": S.list_runs(conn, piece.id),
-            "research": research if isinstance(research, dict) else {},
+            "research": _research(piece.meta.get("research")),
             "factbase": _read(ws / P.FACTBASE_FILE),
             "factcheck": _read(ws / P.FACTCHECK_FILE),
             "posts": _posts(ws),

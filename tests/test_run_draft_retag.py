@@ -3,7 +3,7 @@
 import run_draft
 from approval_queue import store
 from draft.drafter import DraftResult
-from draft.schema import validate_output
+from draft.schema import SHAPE_LONG, Draft, validate_output
 from draft.tags import Handle
 from tests.conftest import seed_item
 
@@ -67,6 +67,43 @@ def test_retag_revises_only_offending_drafts(conn, monkeypatch):
     assert store.get_draft(conn, good).draft.thread[0] == "@Merck in #NCT04487080"
     assert not store.list_decisions(conn, good)
     assert run_draft.retag_drafts(conn) == 0  # everything complies now
+
+
+def test_retag_leaves_a_studio_piece_alone(conn, monkeypatch):
+    """A studio piece names drugs and companies the studio's way, so it breaks rule 11 as
+    the drafter reads it; the drafter's rewrite would replace its long post and drop its
+    cards. It is revised in the studio (the queue's Revise refuses it the same way)."""
+    studio = store.insert_draft(
+        conn,
+        item_id=store.studio_item_id(7),
+        model="writer-model (studio)",
+        draft=Draft(
+            thread=["Merck in NCT04487080, a long post."],
+            suggested_visual="card 1",
+            why_it_matters="w",
+            shape=SHAPE_LONG,
+            max_chars=25000,
+        ),
+    )
+    drafted = _seed(conn, "Merck in NCT04487080", "two", "three", "four")
+    monkeypatch.setattr(run_draft, "story_handles", lambda **kw: HANDLES)
+    assert run_draft.retag_problems(store.get_draft(conn, studio))  # it does break rule 11
+    calls = []
+
+    def fake_revise(*, current, instructions, **kw):
+        calls.append(current.thread[0])
+        fixed = validate_output(_out("@Merck in #NCT04487080", "two", "three", "four"))
+        return DraftResult(draft=fixed, model="m2", attempts=1, flagged_numbers=[])
+
+    monkeypatch.setattr(run_draft, "revise_item", fake_revise)
+    monkeypatch.setattr(run_draft.images, "attach_chart", lambda *a, **k: None)
+
+    assert run_draft.retag_drafts(conn) == 1
+    assert calls == ["Merck in NCT04487080"]
+    assert store.get_draft(conn, drafted).draft.thread[0] == "@Merck in #NCT04487080"
+    row = store.get_draft(conn, studio)
+    assert row.draft.thread == ["Merck in NCT04487080, a long post."]
+    assert row.model == "writer-model (studio)" and not store.list_decisions(conn, studio)
 
 
 def test_retag_cli_flag(db_file, monkeypatch):

@@ -68,6 +68,57 @@ def test_the_manifest_covers_every_cli_the_docs_test_knows_about():
     assert on_disk == set(frozen.CLIS)
 
 
+def _shipped_in_place(datas, root: Path, path: Path) -> bool:
+    """Whether the manifest puts `path` at the same place in the bundle as it has in the
+    repo (a file entry into its own folder, or a folder entry above it): the studio finds
+    its files from `Path(__file__)`, so anywhere else is as good as missing."""
+    rel = path.relative_to(root)
+    for src, dest in datas:
+        src, dest = Path(src), Path(dest)
+        if src == path and dest == rel.parent:
+            return True
+        if src.is_dir() and path.is_relative_to(src) and dest == src.relative_to(root):
+            return True
+    return False
+
+
+def test_the_studio_ships_with_everything_it_reads_at_run_time():
+    from studio import render, settings, web
+
+    root = frozen.REPO_ROOT
+    datas, hidden = frozen.bundle_manifest(root)
+    assert "run_studio" in frozen.CLIS and "run_studio" in hidden
+    assert (str(root / "run_studio.py"), ".") in datas  # the marker cli_missing looks for
+    files = [settings.CONFIG_PATH, settings.ANGLES_PATH, settings.DEFAULT_PLAYBOOK]
+    files += [settings.BRIEF_DIR / name for name in ("session.md", "voice.md", "cards.md")]
+    files += sorted(p for p in settings.EXEMPLARS_DIR.rglob("*") if p.is_file())
+    files += sorted(p for p in render.FONT_DIR.iterdir() if p.is_file())
+    files += sorted(web.TEMPLATES_DIR.glob("*.html"))
+    assert any(p.suffix == ".woff2" for p in files) and any(p.name == "handoff.md" for p in files)
+    for path in files:
+        assert path.is_file(), f"the studio reads {path}, which is not in the repo"
+        assert _shipped_in_place(datas, root, path), f"{path.relative_to(root)} is not bundled"
+
+
+def test_the_dispatcher_runs_the_studio(monkeypatch):
+    seen = {}
+
+    class Fake:
+        @staticmethod
+        def main():
+            seen["argv"] = list(sys.argv)
+            return 0
+
+    def load(name):
+        seen["module"] = name
+        return Fake
+
+    monkeypatch.setattr(sys, "argv", list(sys.argv))  # the dispatcher rewrites it
+    monkeypatch.setattr(pipeline_cli.importlib, "import_module", load)
+    assert pipeline_cli.main(["run_studio.py", "--resume-only"]) == 0
+    assert seen == {"module": "run_studio", "argv": ["run_studio.py", "--resume-only"]}
+
+
 def test_the_spec_reads_the_manifest():
     spec = (frozen.REPO_ROOT / "deploy" / "desktop.spec").read_text(encoding="utf-8")
     assert "bundle_manifest" in spec

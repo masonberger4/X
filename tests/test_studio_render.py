@@ -12,7 +12,10 @@ from __future__ import annotations
 import concurrent.futures
 import functools
 import http.server
+import io
 import json
+import logging
+import random
 import re
 import shutil
 import subprocess
@@ -28,16 +31,37 @@ import pytest
 from studio import render
 
 LONG = "This sentence is far too long for a small box"
+NOT_RUN = (
+    "the layout check did not run (unclosed markup, a comment say, may hide the end of the "
+    "page); fix the HTML so it loads cleanly"
+)
 
 
-def page(body: str, *, size: tuple[int, int] = render.DEFAULT_SIZE, head: str = "") -> str:
-    """A card the way the card brief asks for one: the page sized to the card."""
+def rail(h: int) -> str:
+    """A thin painted line down the card's right side. The test cards hold one or two
+    things on purpose; the rail keeps the empty-band check quiet about the space around
+    them, so each card reports only the problem it is about."""
+    return (
+        f'<i style="position:absolute;right:30px;top:30px;width:2px;height:{h - 60}px;'
+        'background:#252c37"></i>'
+    )
+
+
+def page(
+    body: str,
+    *,
+    size: tuple[int, int] = render.DEFAULT_SIZE,
+    head: str = "",
+    filled: bool = True,
+) -> str:
+    """A card the way the card brief asks for one: the page sized to the card. `filled`
+    adds the rail (see `rail`); a card about empty space leaves it out."""
     w, h = size
     meta = '<meta name="card-size" content="1600x900">' if size == render.WIDE_SIZE else ""
     return (
         f'<!doctype html><html><head><meta charset="utf-8">{meta}<style>html,body{{margin:0;'
         f"width:{w}px;height:{h}px;background:#0d1117;color:#fff;font-family:Inter}}</style>"
-        f"{head}</head><body>{body}</body></html>"
+        f"{head}</head><body>{body}{rail(h) if filled else ''}</body></html>"
     )
 
 
@@ -46,13 +70,8 @@ def box(x: int, y: int, inner: str, style: str = "") -> str:
 
 
 def png_header(w: int, h: int) -> bytes:
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + (13).to_bytes(4, "big")
-        + b"IHDR"
-        + w.to_bytes(4, "big")
-        + (h.to_bytes(4, "big"))
-    )
+    """The first 24 bytes of a PNG, all that render.png_size reads."""
+    return b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + w.to_bytes(4, "big") + h.to_bytes(4, "big")
 
 
 def write(folder: Path, text: str, name: str = "card_1.html") -> Path:
@@ -76,6 +95,15 @@ def write(folder: Path, text: str, name: str = "card_1.html") -> Path:
         ('<meta name="card-size" content="1600x9000">', (1080, 1350)),
         ('<meta name="card-size" content="wide">', (1080, 1350)),
         ('<meta name="viewport" content="1600x900">', (1080, 1350)),
+        # valid HTML in any attribute order, with other attributes or the self-closing slash
+        ('<meta content="1600x900" name="card-size">', (1600, 900)),
+        ('<meta id="size" name="card-size" data-x="1" content="1600x900" />', (1600, 900)),
+        ('<meta charset="utf-8"><meta name="card-size" content="1600x900">', (1600, 900)),
+        (
+            '<meta name="viewport" content="width=1080"><meta content="1600x900" name="card-size">',
+            (1600, 900),
+        ),
+        ('<meta name="card-size">', (1080, 1350)),
     ],
 )
 def test_only_the_two_house_sizes_are_accepted(head, size):
@@ -221,6 +249,15 @@ def test_the_newest_playwright_chromium_is_the_last_resort(no_browsers, tmp_path
     assert render.find_browser() == str(newest)
 
 
+def test_the_playwright_revision_is_compared_as_a_number(no_browsers, tmp_path, monkeypatch):
+    pw = tmp_path / "pw"
+    _exe(pw / "chromium-939" / "chrome-linux", "chrome")  # sorts after 1194 as text
+    newest = _exe(pw / "chromium-1194" / "chrome-linux", "chrome")
+    _exe(pw / "chromium-beta" / "chrome-linux", "chrome")  # no number: tried last
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(pw))
+    assert render.find_browser() == str(newest)
+
+
 def test_no_browser_anywhere_raises(no_browsers):
     with pytest.raises(render.RenderError, match="no Chromium-family browser found"):
         render.find_browser()
@@ -256,20 +293,41 @@ page = Path(unquote(urlparse(args[-1]).path)).read_text(encoding="utf-8")
 with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as fh:
     fh.write(json.dumps({"args": args, "page": page}) + "\n")
 time.sleep(float(os.environ.get("FAKE_SLEEP") or 0))
+window = [int(n) for a in args if a.startswith("--window-size=") for n in a[14:].split(",")]
 if "--dump-dom" in args:
     report = os.environ.get("FAKE_REPORT", "[]")
+    viewport = ""
+    if os.environ.get("FAKE_CHROME"):  # what the browser keeps of its window: "dw,dh"
+        dw, dh = (int(n) for n in os.environ["FAKE_CHROME"].split(","))
+        seen = os.environ.get("FAKE_VIEWPORT") or f"{window[0] - dw},{window[1] - dh}"
+        viewport = '<pre id="' + VIEWPORT_ID + '">[' + seen + "]</pre>"
     if report != "none":
         text = report.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        print('<html><body><pre id="' + REPORT_ID + '">' + text + "</pre></body></html>")
+        print('<html><body><pre id="' + REPORT_ID + '">' + text + "</pre>" + viewport)
+        print("</body></html>")
 for arg in args:
     if arg.startswith("--screenshot="):
         size = os.environ.get("FAKE_PNG", "2160x2700")
         if size == "none":
             print("starting\nERROR: could not write the screenshot", file=sys.stderr)
             sys.exit(3)
-        w, h = (int(n) for n in size.split("x"))
+        if size == "window":  # what a real browser draws: the whole window, at 2x
+            w, h = 2 * window[0], 2 * window[1]
+        else:
+            w, h = (int(n) for n in size.split("x"))
         head = b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR"
-        Path(arg.split("=", 1)[1]).write_bytes(head + w.to_bytes(4, "big") + h.to_bytes(4, "big"))
+        ihdr = w.to_bytes(4, "big") + h.to_bytes(4, "big") + bytes([8, 2, 0, 0, 0])
+        if os.environ.get("FAKE_PNG_FULL"):  # a whole, valid picture: black, RGB
+            import zlib
+            def chunk(kind, body):
+                crc = zlib.crc32(kind + body).to_bytes(4, "big")
+                return len(body).to_bytes(4, "big") + kind + body + crc
+            rows = (b"\x00" + b"\x00" * 3 * w) * h
+            data = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            data += chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+        else:
+            data = head + w.to_bytes(4, "big") + h.to_bytes(4, "big")
+        Path(arg.split("=", 1)[1]).write_bytes(data)
 """
 
 
@@ -290,12 +348,21 @@ def stand_in(tmp_path, monkeypatch) -> StandIn:
         pytest.skip("the stand-in browser is a script run through its #! line")
     exe = tmp_path / "stand-in-browser"
     exe.write_text(
-        f"#!{sys.executable}\nREPORT_ID = {render.REPORT_ID!r}\n{STAND_IN}", encoding="utf-8"
+        f"#!{sys.executable}\nREPORT_ID = {render.REPORT_ID!r}\n"
+        f"VIEWPORT_ID = {render.VIEWPORT_ID!r}\n{STAND_IN}",
+        encoding="utf-8",
     )
     exe.chmod(0o755)
     log = tmp_path / "calls.ndjson"
     monkeypatch.setenv("FAKE_LOG", str(log))
-    for name in ("FAKE_REPORT", "FAKE_PNG", "FAKE_SLEEP"):
+    for name in (
+        "FAKE_REPORT",
+        "FAKE_PNG",
+        "FAKE_SLEEP",
+        "FAKE_CHROME",
+        "FAKE_VIEWPORT",
+        "FAKE_PNG_FULL",
+    ):
         monkeypatch.delenv(name, raising=False)
     return StandIn(str(exe), log)
 
@@ -322,13 +389,121 @@ def test_a_card_is_checked_then_drawn_by_two_offline_runs_at_its_size(
     assert render.png_size(result.png) == (3200, 1800)
 
 
+def _window(call: dict) -> str:
+    [size] = [a.split("=", 1)[1] for a in call["args"] if a.startswith("--window-size=")]
+    return size
+
+
+def test_a_browser_that_keeps_part_of_its_window_is_given_a_taller_one(
+    stand_in, tmp_path, monkeypatch
+):
+    # New headless Chromium keeps 87 px of hidden toolbar: a 1080x1350 window gives the
+    # page 1080x1263, and the screenshot would lose the card's footer.
+    monkeypatch.setenv("FAKE_CHROME", "0,87")
+    monkeypatch.setenv("FAKE_PNG", "window")
+    monkeypatch.setenv("FAKE_PNG_FULL", "1")
+    html = write(tmp_path, page(box(60, 60, "A headline")))
+    result = render.render_card(html, tmp_path / "card_1.png", browser=stand_in.path)
+    first, second, shot = stand_in.calls()
+    assert [_window(c) for c in (first, second, shot)] == ["1080,1350", "1080,1437", "1080,1437"]
+    assert "--dump-dom" in first["args"] and "--dump-dom" in second["args"]
+    assert render.png_size(result.png) == (2160, 2700)  # cut back to the card
+    assert result.problems == []
+    # The next card in the same run starts from the measured window: one check, one shot.
+    again = render.render_card(html, tmp_path / "card_2.png", browser=stand_in.path)
+    assert [_window(c) for c in stand_in.calls()[3:]] == ["1080,1437", "1080,1437"]
+    assert render.png_size(again.png) == (2160, 2700)
+
+
+def test_a_viewport_that_never_matches_is_checked_twice_then_drawn(
+    stand_in, tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setenv("FAKE_CHROME", "0,0")
+    monkeypatch.setenv("FAKE_VIEWPORT", "1000,1000")  # whatever the window
+    html = write(tmp_path, page(box(60, 60, "A headline")))
+    with caplog.at_level(logging.WARNING, logger="studio.render"):
+        result = render.render_card(html, tmp_path / "card_1.png", browser=stand_in.path)
+    assert [c["args"].count("--dump-dom") for c in stand_in.calls()] == [1, 1, 0]
+    assert render.png_size(result.png) == (2160, 2700)
+    assert "not the card's (1080, 1350)" in caplog.text
+
+
+def test_a_checker_without_a_viewport_leaves_the_window_alone(stand_in, tmp_path):
+    html = write(tmp_path, page(box(60, 60, "A headline")))
+    render.render_card(html, tmp_path / "card_1.png", browser=stand_in.path)
+    assert [_window(c) for c in stand_in.calls()] == ["1080,1350", "1080,1350"]
+    assert stand_in.path not in render._WINDOW_EXTRA
+
+
+@pytest.mark.parametrize(
+    "dom, found",
+    [
+        (f'<pre id="{render.VIEWPORT_ID}">[1080,1263]</pre>', (1080, 1263)),
+        (f'<pre id="{render.VIEWPORT_ID}">[1080]</pre>', None),
+        (f'<pre id="{render.VIEWPORT_ID}">nope</pre>', None),
+        ("<html></html>", None),
+    ],
+)
+def test_parse_viewport(dom, found):
+    assert render.parse_viewport(dom) == found
+
+
+# ---- crop_png -----------------------------------------------------------------------------
+
+
+def _png_bytes(image) -> bytes:
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+@pytest.mark.parametrize("mode", ["RGB", "RGBA", "L", "LA"])
+@pytest.mark.parametrize("size", [(40, 30), (37, 30), (40, 11)])
+def test_crop_png_keeps_exactly_the_top_left_pixels(mode, size):
+    image_mod = pytest.importorskip("PIL.Image")
+    rng = random.Random(f"{mode}{size}")
+    channels = len(mode)
+    noise = bytes(rng.randrange(256) for _ in range(40 * 30 * channels))
+    source = image_mod.frombytes(mode, (40, 30), noise)
+    cropped = render.crop_png(_png_bytes(source), *size)
+    got = image_mod.open(io.BytesIO(cropped))
+    assert got.size == size and got.mode == mode
+    assert got.tobytes() == source.crop((0, 0, *size)).tobytes()
+
+
+def test_crop_png_returns_a_picture_of_the_right_size_untouched_and_refuses_the_rest():
+    image_mod = pytest.importorskip("PIL.Image")
+    data = _png_bytes(image_mod.new("RGB", (20, 10), (13, 17, 23)))
+    assert render.crop_png(data, 20, 10) is data
+    with pytest.raises(render.RenderError, match="smaller than the card"):
+        render.crop_png(data, 21, 10)
+    with pytest.raises(render.RenderError, match="not a PNG"):
+        render.crop_png(b"GIF89a" + data, 10, 10)
+    interlaced = io.BytesIO()
+    image_mod.new("RGB", (20, 10)).save(interlaced, format="PNG", interlace=1)
+    if interlaced.getvalue()[28] == 1:  # Pillow wrote an interlaced file
+        with pytest.raises(render.RenderError, match="cannot crop"):
+            render.crop_png(interlaced.getvalue(), 10, 10)
+
+
+def test_a_screenshot_already_the_cards_size_or_smaller_is_left_alone(tmp_path):
+    exact = tmp_path / "exact.png"
+    exact.write_bytes(png_header(2160, 2700))
+    small = tmp_path / "small.png"
+    small.write_bytes(png_header(100, 100))
+    for path in (exact, small):
+        before = path.read_bytes()
+        render._crop_to(path, 2160, 2700)
+        assert path.read_bytes() == before
+
+
 def _policy(text: str) -> str:
     return re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', text).group(1)
 
 
 def test_the_policy_and_fonts_open_the_page_and_only_the_checker_may_run(stand_in, tmp_path):
     card = (
-        "﻿<!-- made by the session -->\n<?xml version='1.0'?>\n<!DOCTYPE html>\n"
+        "\ufeff<!-- made by the session -->\n<?xml version='1.0'?>\n<!DOCTYPE html>\n"
         "<html><head><title>card</title></head><body><p>Hi</p>"
         "<script>document.title = 'mine'</script></body></html>"
     )
@@ -338,7 +513,7 @@ def test_the_policy_and_fonts_open_the_page_and_only_the_checker_may_run(stand_i
         # Nothing may come before the doctype (quirks mode), and everything the card wrote
         # comes after the policy (a policy covers only what follows it).
         head, rest = text.split("<!DOCTYPE html>", 1)
-        assert head == "﻿<!-- made by the session -->\n<?xml version='1.0'?>\n"
+        assert head == "\ufeff<!-- made by the session -->\n<?xml version='1.0'?>\n"
         assert rest.startswith(
             '<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="'
         )
@@ -356,12 +531,15 @@ def test_the_policy_and_fonts_open_the_page_and_only_the_checker_may_run(stand_i
     assert _policy(stand_in.calls()[-1]["page"]) != _policy(check["page"])  # fresh each time
 
 
-def test_a_page_without_a_doctype_gets_its_policy_first(stand_in, tmp_path):
+def test_a_bare_fragment_gets_its_policy_first_and_its_checker_last(stand_in, tmp_path):
     render.render_card(
         write(tmp_path, "<p>bare</p>"), tmp_path / "card_1.png", browser=stand_in.path
     )
-    for call in stand_in.calls():
+    check, shot = stand_in.calls()
+    for call in (check, shot):
         assert call["page"].startswith('<meta charset="utf-8"><meta http-equiv="Content-Sec')
+    assert shot["page"].endswith("<style>" + render.font_css() + "</style><p>bare</p>")
+    assert check["page"].rstrip().endswith("</script>") and render.REPORT_ID in check["page"]
 
 
 def test_the_checkers_findings_come_back_as_problems(stand_in, tmp_path, monkeypatch):
@@ -380,10 +558,7 @@ def test_a_checker_that_never_reported_is_a_problem_but_the_picture_is_kept(
     result = render.render_card(
         write(tmp_path, page("x")), tmp_path / "card_1.png", browser=stand_in.path
     )
-    assert result.problems == [
-        "the layout check did not run (the page may have a script error); fix the HTML so "
-        "it loads cleanly"
-    ]
+    assert result.problems == [NOT_RUN]
     assert result.png.is_file()
 
 
@@ -493,6 +668,17 @@ def test_inline_data_and_references_inside_the_card_are_fine(stand_in, tmp_path,
     assert result.problems == []
 
 
+@pytest.mark.parametrize("markup", ["<script>layout()</script>", '<SCRIPT type="module"></SCRIPT>'])
+def test_a_card_with_a_script_is_told_it_will_not_run(stand_in, tmp_path, markup):
+    result = render.render_card(
+        write(tmp_path, page(markup)), tmp_path / "card_1.png", browser=stand_in.path
+    )
+    assert result.problems == [
+        "the card has a script, and the renderer never runs a card's scripts; lay it out "
+        "with HTML and CSS alone"
+    ]
+
+
 # ---- the real browser ----------------------------------------------------------------------
 
 
@@ -588,7 +774,9 @@ CARDS = {
     "too_tall": (
         "<!doctype html><html><head><style>html,body{margin:0;width:1080px;background:#0d1117;"
         'color:#fff;font-family:Inter}</style></head><body><div style="height:2000px;'
-        'padding:60px;box-sizing:border-box">A page taller than the card</div></body></html>'
+        'padding:60px;box-sizing:border-box">A page taller than the card</div>'
+        + rail(1350)
+        + "</body></html>"
     ),
     "ellipsis": page(
         box(
@@ -619,6 +807,23 @@ CARDS = {
         + box(60, 300, "WWWWWWWWWW", MONO + "width:320px")
     ),
     "unclosed_comment": page(box(60, 60, "Headline", "font-size:40px") + "<!-- never closed"),
+    # Two rows floating in a tall panel, as the first real studio card was drawn.
+    "sparse": page(
+        box(56, 56, "The OS miss the FDA will weigh", "font-size:52px;font-weight:700")
+        + '<div style="position:absolute;left:56px;top:216px;width:968px;height:1030px;'
+        'background:#151a22;border:1px solid #252c37;border-radius:18px">'
+        + box(40, 420, "HARMONi (global)", "font-size:24px")
+        + box(40, 560, "HARMONi-A (China)", "font-size:24px")
+        + "</div>",
+        filled=False,
+    ),
+    # A footer on the card's last lines, where a short viewport used to cut the picture.
+    "bottom_edge": page(
+        box(56, 56, "A headline", "font-size:52px;font-weight:700")
+        + box(56, 1280, "Not investment advice.", "font-size:16px;color:#8a93a3")
+        + '<i style="position:absolute;left:56px;top:1306px;width:968px;height:20px;'
+        'background:#ff00ff"></i>'
+    ),
 }
 
 
@@ -637,6 +842,32 @@ def test_a_clean_card_has_no_problems_and_a_2x_picture(drawn):
     result = drawn["clean"]
     assert result.problems == [] and result.ok and result.size == (1080, 1350)
     assert render.png_size(result.png) == (2160, 2700)
+
+
+def test_an_empty_band_in_the_middle_or_at_the_bottom_is_reported(drawn):
+    found = problems(drawn, "sparse")
+    assert len(found) == 2, found
+    middle, bottom = found
+    assert re.fullmatch(
+        r'an empty band (\d+)px tall \((\d+)% of the card\) between "The OS miss the FDA will'
+        r' weigh" and "HARMONi \(global\)": fill it .*',
+        middle,
+    ), middle
+    assert int(re.search(r"(\d+)px", middle).group(1)) > 1350 // 4
+    assert bottom.startswith("an empty band ") and bottom.split(" between ")[1].startswith(
+        '"HARMONi-A (China)" and the bottom of the card'
+    )
+
+
+def test_the_whole_card_is_drawn_down_to_its_last_pixels(drawn):
+    image_mod = pytest.importorskip("PIL.Image")
+    result = drawn["bottom_edge"]
+    assert result.problems == []
+    with image_mod.open(result.png) as image:
+        assert image.size == (2160, 2700)
+        # The magenta bar sits at 1306-1326 CSS px: rows 2612-2652 of the 2x picture.
+        assert image.convert("RGB").getpixel((1000, 2632)) == (255, 0, 255)
+        assert image.convert("RGB").getpixel((1000, 2690)) == (13, 17, 23)
 
 
 def test_a_wide_card_is_drawn_at_3200_by_1800(drawn):
@@ -716,10 +947,7 @@ def test_the_house_fonts_are_the_ones_drawn(drawn):
 
 def test_a_page_the_checker_cannot_run_in_still_gets_a_picture(drawn):
     result = drawn["unclosed_comment"]
-    assert result.problems == [
-        "the layout check did not run (the page may have a script error); fix the HTML so "
-        "it loads cleanly"
-    ]
+    assert result.problems == [NOT_RUN]
     assert render.png_size(result.png) == (2160, 2700)
 
 

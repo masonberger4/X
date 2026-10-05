@@ -20,8 +20,9 @@ PLAYBOOK_NAME = "studio_playbook.md"  # the editable copy, in the data dir
 
 STAGES = ("research", "write", "polish", "revise")
 
+# No model here: the writer's model ID lives only in studio/config.yaml (`model:`), as every
+# model ID lives in config, never in code.
 DEFAULTS: dict[str, Any] = {
-    "model": "claude-opus-5-5",
     "effort": "max",
     "auto": {
         "enabled": True,
@@ -63,6 +64,9 @@ def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
             cfg[key] = {**cfg[key], **(value or {})}
         else:
             cfg[key] = value
+    cfg["model"] = str(cfg.get("model") or "").strip()
+    if not cfg["model"]:
+        raise ValueError("studio/config.yaml must name the writer's model (model: ...)")
     cfg["tools"] = [str(t) for t in (cfg.get("tools") or [])]
     cfg["cli_flags"] = [str(f) for f in (cfg.get("cli_flags") or [])]
     return cfg
