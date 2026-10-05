@@ -6,9 +6,9 @@ automatic run of `auto_run_steps`. Which steps may run, and how times are read, 
 `ops/autorun.py`; this module only keeps the clock and the bookkeeping.
 
 Posting stays manual only. The steps go through `JobManager.start(..., auto=True)`, which
-refuses any step that is not one of ingest, score, draft, verify, feedback or evolve (by
-the script it runs, not by its name) and runs the rest with posting switched off in their
-environment. This module never touches "Publish now".
+refuses any step that is not one of ingest, score, draft, verify, feedback, evolve or
+studio (by the script it runs, not by its name), and any manual step, and runs the rest
+with posting switched off in their environment. This module never touches "Publish now".
 
 When a run time fires:
 - Only times that pass while this runner is on and leading count. The watermark `last`
@@ -19,7 +19,12 @@ When a run time fires:
 - A time is run at most `auto_run_grace_minutes` late. One that passed while the PC slept
   runs on wake if it is still within that; several missed at once run once, as the latest.
 - If a step of the run is still going in this window (the previous automatic run, or one a
-  human started), the time waits for it, retried every tick, until the grace runs out.
+  human started), the time waits for it, retried every tick, until the grace runs out. A
+  step marked `skip_when_busy` (the studio, whose session can outlast the gap between run
+  times) is left out of that time instead, noted on the run, and so is a step an earlier
+  run still has to come behind such a step (`JobManager.queued_behind`: draft, waiting in
+  the last automatic run for its studio session to end, runs there when it does); when
+  every step of the time is left out, the time is skipped.
 - With several panel windows open, one runs the timer: it holds `<lock_path>.autorun`
   (the OS lock alone decides, so a crash never leaves it stuck); the others show who leads.
 - Daily backup: when a run starts and the newest backup is older than
@@ -196,9 +201,29 @@ class AutoRunner:
             self.pending = self.wait_reason = None
             return REASON_IDLE
         busy = sorted(set(names) & self.jobs.busy_steps())
+        # A step marked skip_when_busy (the studio) sits this slot out rather than holding
+        # every other step back until it finishes, and so does a step an earlier run has
+        # still to come behind it: that run gets to it when the session ends.
+        skippable = {s.name for s in self.jobs.steps() if s.skip_when_busy}
+        behind = self.jobs.queued_behind(skippable) if skippable else {}
+        left_out: set[str] = set()
+        for name in busy:
+            if name in skippable:
+                dropped[name] = "still running from an earlier run"
+            elif name in behind:
+                dropped[name] = f"still to run in an earlier run, after {behind[name]}"
+            else:
+                continue
+            left_out.add(name)
+        names = [n for n in names if n not in left_out]
+        busy = [b for b in busy if b not in left_out]
         if busy:
             self.wait_reason = f"{', '.join(busy)} still running"
             return f"waiting: {self.wait_reason}"
+        if not names:
+            self._note(self.pending, now, "skipped: every step is still running")
+            self.pending = self.wait_reason = None
+            return REASON_IDLE
         note = "; ".join(f"left out {n}: {why}" for n, why in dropped.items()) or None
         try:
             job = self.jobs.start(names, auto=True, note=note)

@@ -427,6 +427,12 @@ class DraftRow:
         """Whether the reviewer may still change this draft (it awaits a decision)."""
         return self.status in EDITABLE_STATUSES
 
+    @property
+    def studio_piece(self) -> int | None:
+        """The studio piece this draft came from (None: the drafter wrote it). A studio
+        draft is revised in the studio, which resumes the session that wrote it."""
+        return studio_piece_id(self.item_id)
+
 
 def _row_to_draft(r: sqlite3.Row) -> DraftRow:
     keys = r.keys()
@@ -461,6 +467,29 @@ def _row_to_draft(r: sqlite3.Row) -> DraftRow:
         image_alt=(r["image_alt"] or "") if "image_alt" in keys else "",
         images=_images_list(r["images_json"]) if "images_json" in keys else [],
     )
+
+
+STUDIO_ITEM_PREFIX = "studio:"
+
+
+def studio_item_id(piece_id: int) -> str:
+    """The item_id of a draft the studio (studio/) wrote: one long session per post, with
+    its own fact base and cards. Such a draft is revised in the studio, not by the drafter."""
+    return f"{STUDIO_ITEM_PREFIX}{int(piece_id)}"
+
+
+def studio_piece_id(item_id: str | None) -> int | None:
+    """The studio piece behind a draft, or None for a drafter draft."""
+    if not item_id or not item_id.startswith(STUDIO_ITEM_PREFIX):
+        return None
+    tail = item_id[len(STUDIO_ITEM_PREFIX) :]
+    return int(tail) if tail.isdigit() else None
+
+
+def find_by_item(conn: sqlite3.Connection, item_id: str) -> DraftRow | None:
+    """The draft written for this item_id, if there is one (item_id is unique)."""
+    r = conn.execute("SELECT id FROM drafts WHERE item_id = ?", (item_id,)).fetchone()
+    return get_draft(conn, int(r[0])) if r else None
 
 
 def has_draft(

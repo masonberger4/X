@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Studio · piece {{ piece.id }}{% endblock %}
+{% block content %}
+{% if running %}<meta http-equiv="refresh" content="20">{% endif %}
+<p><a href="/studio">&larr; Studio</a></p>
+<h1>{{ piece.label }}</h1>
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+<p class="meta">Piece {{ piece.id }} · {{ piece.origin }} · started {{ piece.created_at|localtime }} ·
+  {{ piece.model }} at {{ piece.effort or "default" }} effort · session <code>{{ piece.session_id }}</code></p>
+<p>
+  {% if piece.stage == "ready" %}<span class="pill ok">ready</span> in the queue as <a href="/drafts/{{ piece.draft_id }}">draft {{ piece.draft_id }}</a>
+  {% elif piece.stage in ("failed", "interrupted") %}<span class="pill fail">{{ piece.stage }}</span>
+  {% elif piece.stage == "research_ready" %}<span class="pill warn">research done</span> read the fact base below, then continue
+  {% else %}<span class="pill warn">{{ piece.stage }}</span>{% if running %} <span class="meta">this page refreshes every 20 seconds; the run's controls are on <a href="/runs">the runs page</a></span>{% endif %}{% endif %}
+  {% if piece.request %}<span class="meta">· {{ piece.request }} requested, waiting for a studio run</span>{% endif %}
+</p>
+{% if piece.error %}<p class="banner fail">{{ piece.error }}</p>{% endif %}
+{% if problems %}<p><strong>Problems the checker still found:</strong></p><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+{% if warnings %}<p><strong>For the editor:</strong></p><ul>{% for w in warnings %}<li class="meta">{{ w }}</li>{% endfor %}</ul>{% endif %}
+
+{% if piece.stage == "research_ready" %}
+<form method="post" action="/studio/{{ piece.id }}/continue">
+  <p><textarea name="note" rows="3" placeholder="optional direction for the writing: the angle you want, what to lead with, what to drop or dig into"></textarea></p>
+  <p><button type="submit">Continue: write the piece</button></p>
+</form>
+{% elif piece.stage == "ready" %}
+<form method="post" action="/studio/{{ piece.id }}/revise">
+  <p><textarea name="note" rows="3" placeholder="what to change (the same session rewrites the piece and fact-checks the changes)"></textarea></p>
+  <p><button type="submit">Revise</button></p>
+</form>
+{% elif piece.stage in ("failed", "interrupted") %}
+<form method="post" action="/studio/{{ piece.id }}/resume">
+  <p><textarea name="note" rows="2" placeholder="optional note for the session"></textarea></p>
+  <p><button type="submit">Resume where it stopped</button></p>
+</form>
+{% endif %}
+{% if piece.stage not in ("discarded",) and not running %}
+<form method="post" action="/studio/{{ piece.id }}/discard" class="inline"><button class="link" type="submit">discard this piece</button></form>
+{% endif %}
+
+{% if research %}
+<h2>Research</h2>
+<p>{{ research.summary }}</p>
+{% if research.why_now %}<p class="meta">Why now: {{ research.why_now }}</p>{% endif %}
+{% if research.candidate_angles %}<p class="meta">Candidate angles:
+  {% for a in research.candidate_angles %}{{ a.angle }}{% if a.why %} ({{ a.why }}){% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+{% endif %}
+
+{% if posts %}
+<h2>The post{% if posts|length > 1 %} ({{ posts|length }} posts){% endif %}</h2>
+{% for p in posts %}<div class="post">{{ p }}</div>{% endfor %}
+{% endif %}
+
+{% if cards %}
+<h2>Cards</h2>
+<div class="cards">
+  {% for c in cards %}<a href="/studio/{{ piece.id }}/card/{{ c.n }}" target="_blank"><img src="/studio/{{ piece.id }}/card/{{ c.n }}" alt="card {{ c.n }}" style="max-width:260px;border:1px solid #ddd;border-radius:6px"></a>{% endfor %}
+</div>
+{% endif %}
+
+{% if factcheck %}
+<details open><summary><strong>Fact-check log</strong></summary><pre class="log" style="max-height:30rem">{{ factcheck }}</pre></details>
+{% endif %}
+{% if factbase %}
+<details {% if piece.stage == "research_ready" %}open{% endif %}><summary><strong>Fact base</strong></summary><pre class="log" style="max-height:40rem">{{ factbase }}</pre></details>
+{% endif %}
+
+<h2>Session log</h2>
+<pre class="log">{{ log or "(nothing yet)" }}</pre>
+
+<h2>Runs</h2>
+<table>
+  <tr><th>Stage</th><th>Started</th><th>Outcome</th><th>Turns</th><th>Minutes</th></tr>
+  {% for r in runs %}
+  <tr><td>{{ r.stage }}</td><td class="meta">{{ r.started_at|localtime }}</td>
+      <td>{{ r.outcome or "running" }}{% if r.detail and r.outcome != "ok" %}<br><span class="meta">{{ r.detail[:300] }}</span>{% endif %}</td>
+      <td>{{ r.turns or "" }}</td><td>{% if r.duration_ms %}{{ (r.duration_ms / 60000)|round(1) }}{% endif %}</td></tr>
+  {% endfor %}
+</table>
+<p class="meta">Files: <code>{{ piece.workspace }}</code></p>
+{% endblock %}

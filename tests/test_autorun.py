@@ -23,10 +23,10 @@ from ops import autorun, store
 from ops.config import load_ops_config, save_auto_run
 from ops.health import Thresholds, check_sources
 from ops.models import SourceRun
-from ops.runner import Step, steps_from_config
+from ops.runner import Step, StepResult, steps_from_config
 from panel import autorun as panel_autorun
 from panel.autorun import AutoRunner
-from panel.jobs import JobError, JobManager
+from panel.jobs import Job, JobError, JobManager
 
 LA = ZoneInfo("America/Los_Angeles")
 REPO = Path(__file__).resolve().parents[1]
@@ -116,15 +116,36 @@ def test_the_pipeline_steps_may_run_automatically():
     assert "run_publish.py" not in autorun.AUTO_SCRIPTS
 
 
+def test_the_studio_runs_automatically_but_its_buttons_never_do():
+    assert "run_studio.py" in autorun.AUTO_SCRIPTS
+    assert autorun.ineligible(Step("studio", ["python", "run_studio.py"])) is None
+    for flag in ("--now", "--resume-only"):
+        button = Step("studio_x", ["python", "run_studio.py", flag], manual=True)
+        assert "manual" in autorun.ineligible(button)
+    refused = autorun.ineligible(Step("x", ["python", "run_ops.py", "run"]))
+    assert refused == (
+        "only ingest, score, draft, verify, feedback, evolve and studio run automatically"
+    )
+
+
+SHIPPED_AUTO_STEPS = ["ingest", "score", "studio", "draft", "verify", "feedback", "evolve"]
+
+
 def test_the_shipped_config_runs_everything_but_publishing():
     cfg = load_ops_config()
     s = autorun.settings_of(cfg)
     steps = steps_from_config(cfg)
     names, dropped = autorun.plan(s["steps"], steps)
     assert s["error"] is None and s["times"] == ["06:00", "12:00", "18:00"]
-    assert names == ["ingest", "score", "draft", "verify", "feedback", "evolve"] and not dropped
+    assert names == SHIPPED_AUTO_STEPS and not dropped
     assert "publish" not in s["steps"]
     assert "--live" not in (REPO / "ops" / "config.yaml").read_text(encoding="utf-8")
+    # the studio is the one step that sits a run time out while a session is still going
+    assert [st.name for st in steps if st.skip_when_busy] == ["studio"]
+    # the studio page's buttons are manual: even listed by mistake they never run on a timer
+    names, dropped = autorun.plan(["studio_now", "studio_resume"], steps)
+    assert names == [] and set(dropped) == {"studio_now", "studio_resume"}
+    assert all("manual" in why for why in dropped.values())
 
 
 def test_the_publisher_no_longer_takes_an_abbreviated_live_flag(capsys):
@@ -292,7 +313,10 @@ class FakeJobs:
     def __init__(self, steps=None):
         self._steps = steps or steps_from_config(load_ops_config())
         self.busy: set[str] = set()
+        # busy steps an earlier run has still to come behind a slow live step: {step: it}
+        self.behind: dict[str, str] = {}
         self.started: list[tuple[list[str], bool]] = []
+        self.notes: list[str | None] = []  # each started run's note (the steps left out)
         self.refuse: str | None = None
 
     def steps(self):
@@ -301,11 +325,15 @@ class FakeJobs:
     def busy_steps(self):
         return set(self.busy)
 
+    def queued_behind(self, slow):
+        return {name: ahead for name, ahead in self.behind.items() if ahead in slow}
+
     def start(self, names, *, auto=False, note=None):
         if self.refuse:
             raise JobError(self.refuse)
         assert auto is True
         self.started.append((list(names), auto))
+        self.notes.append(note)
 
         class J:
             id = f"job{len(self.started)}"
@@ -421,6 +449,186 @@ def test_a_time_waits_for_a_busy_step_then_gives_up_after_the_grace(tmp_path):
     jobs.busy = set()
     r.tick(la(2026, 10, 2, 5, 59))
     assert r.tick(la(2026, 10, 2, 6, 0)).startswith("waiting: draft is already running")
+
+
+# The three studio steps share one lock, so a session in flight makes all three busy.
+STUDIO_BUSY = {"studio", "studio_now", "studio_resume"}
+REST = ["ingest", "score", "draft", "verify", "feedback", "evolve"]
+
+
+def test_a_busy_studio_sits_the_run_time_out_while_the_other_steps_start(tmp_path):
+    jobs = FakeJobs()  # the shipped steps: studio is skip_when_busy
+    jobs.busy = set(STUDIO_BUSY)  # the 06:00 piece is still being written at 12:00
+    r = _runner(tmp_path, jobs, _settings(auto_run_steps=SHIPPED_AUTO_STEPS))
+    r.tick(la(2026, 10, 1, 11, 59))
+    assert r.tick(la(2026, 10, 1, 12, 0)) == "started run job1"
+    assert jobs.started == [(REST, True)]
+    assert jobs.notes == ["left out studio: still running from an earlier run"]
+    assert r.outcomes[0].text == "started " + ", ".join(REST) and r.pending is None
+    # free again by the next run time: it runs in its configured place, nothing left out
+    jobs.busy = set()
+    r.tick(la(2026, 10, 1, 18, 0))
+    assert jobs.started[-1] == (SHIPPED_AUTO_STEPS, True) and jobs.notes[-1] is None
+
+
+def test_a_studio_left_out_is_noted_beside_the_steps_that_never_run(tmp_path):
+    jobs = FakeJobs()
+    jobs.busy = set(STUDIO_BUSY)
+    r = _runner(tmp_path, jobs, _settings(auto_run_steps=["ingest", "studio", "publish"]))
+    r.tick(la(2026, 10, 1, 5, 59))
+    r.tick(la(2026, 10, 1, 6, 0))
+    assert jobs.started == [(["ingest"], True)]
+    (note,) = jobs.notes
+    assert note.startswith("left out publish: only ingest, score")
+    assert note.endswith("; left out studio: still running from an earlier run")
+
+
+def test_a_run_time_whose_every_step_is_still_running_is_skipped(tmp_path):
+    jobs = FakeJobs()
+    jobs.busy = set(STUDIO_BUSY)
+    r = _runner(tmp_path, jobs, _settings(auto_run_steps=["studio"]))
+    r.tick(la(2026, 10, 1, 5, 59))
+    assert r.tick(la(2026, 10, 1, 6, 0)) == panel_autorun.REASON_IDLE
+    assert jobs.started == [] and r.pending is None and r.wait_reason is None
+    assert r.outcomes[0].text == "skipped: every step is still running"
+    assert r.outcomes[0].slot == la(2026, 10, 1, 6)
+    # skipped, not waiting: the session finishing later does not make 06:00 up
+    jobs.busy = set()
+    r.tick(la(2026, 10, 1, 6, 30))
+    assert jobs.started == [] and len(r.outcomes) == 1
+    r.tick(la(2026, 10, 1, 12, 0))
+    assert jobs.started == [(["studio"], True)]
+
+
+def test_a_busy_step_that_cannot_sit_out_still_holds_the_run_time(tmp_path):
+    jobs = FakeJobs()
+    jobs.busy = STUDIO_BUSY | {"draft"}
+    r = _runner(tmp_path, jobs, _settings(auto_run_steps=SHIPPED_AUTO_STEPS))
+    r.tick(la(2026, 10, 1, 5, 59))
+    assert r.tick(la(2026, 10, 1, 6, 0)) == "waiting: draft still running"  # not the studio
+    assert jobs.started == [] and r.pending == la(2026, 10, 1, 6)
+    jobs.busy = set(STUDIO_BUSY)  # the draft run finished; the studio session goes on
+    r.tick(la(2026, 10, 1, 6, 10))
+    assert jobs.started == [(REST, True)]
+    assert jobs.notes == ["left out studio: still running from an earlier run"]
+
+
+def test_only_a_step_marked_skip_when_busy_sits_a_run_time_out(tmp_path):
+    steps = [
+        Step("ingest", ["python", "run_ingest.py"]),
+        Step("studio", ["python", "run_studio.py"]),  # the name alone does not make it skip
+        Step("evolve", ["python", "run_evolve.py"], skip_when_busy=True),
+    ]
+    jobs = FakeJobs(steps)
+    jobs.busy = {"studio", "evolve"}
+    r = _runner(tmp_path, jobs, _settings(auto_run_steps=["ingest", "studio", "evolve"]))
+    r.tick(la(2026, 10, 1, 5, 59))
+    assert r.tick(la(2026, 10, 1, 6, 0)) == "waiting: studio still running"
+    jobs.busy = {"evolve"}
+    r.tick(la(2026, 10, 1, 6, 5))
+    assert jobs.started == [(["ingest", "studio"], True)]
+    assert jobs.notes == ["left out evolve: still running from an earlier run"]
+
+
+def test_steps_waiting_behind_a_busy_studio_in_an_earlier_run_sit_the_time_out_too(tmp_path):
+    jobs = FakeJobs()
+    later = ["draft", "verify", "feedback", "evolve"]  # the 06:00 run's, after its studio
+    jobs.busy = STUDIO_BUSY | set(later)
+    jobs.behind = dict.fromkeys(later, "studio")
+    r = _runner(tmp_path, jobs, _settings(auto_run_steps=SHIPPED_AUTO_STEPS))
+    r.tick(la(2026, 10, 1, 11, 59))
+    assert r.tick(la(2026, 10, 1, 12, 0)) == "started run job1"
+    assert jobs.started == [(["ingest", "score"], True)]
+    (note,) = jobs.notes
+    assert "left out studio: still running from an earlier run" in note
+    for name in later:
+        assert f"left out {name}: still to run in an earlier run, after studio" in note
+
+
+def _live_auto_run(jobs: JobManager, active: str, done: list[str]):
+    """An automatic run of the shipped steps in `jobs`, with `done` finished and `active`
+    live (no process: only the bookkeeping the manager reads)."""
+    by_name = {s.name: s for s in jobs.steps()}
+    job = Job(
+        id="j0600",
+        steps=list(SHIPPED_AUTO_STEPS),
+        started_at=la(2026, 10, 1, 6),
+        plan=[by_name[n] for n in SHIPPED_AUTO_STEPS],
+        auto=True,
+    )
+    for name in done:
+        job.results.append(
+            StepResult(name, [], la(2026, 10, 1, 6), la(2026, 10, 1, 6, 5), exit_code=0)
+        )
+    job.active_step = active
+    jobs._live.append(job)
+    return job
+
+
+def test_a_studio_session_outlasting_the_gap_holds_back_only_itself(tmp_path, monkeypatch):
+    """The shipped run lists the studio before draft. When its session is still going at
+    the next run time, draft, verify, feedback and evolve are not running: they wait in
+    that run behind the studio. The time runs ingest and score instead of waiting the grace
+    out on steps that cannot start, then skipping everything."""
+    cfg = load_ops_config()
+    cfg["lock_path"] = str(tmp_path / "p.lock")
+    jobs = JobManager(cfg, tmp_path, db_path=tmp_path / "t.db")
+    _live_auto_run(jobs, "studio", done=["ingest", "score"])
+    later = {"draft", "verify", "feedback", "evolve"}
+    assert later | STUDIO_BUSY <= jobs.busy_steps()
+    behind = jobs.queued_behind({"studio"})
+    assert later <= set(behind) and set(behind.values()) == {"studio"}
+    assert not STUDIO_BUSY & set(behind)  # the session's own lock is the live step's
+    started = []
+
+    def start(names, *, auto=False, note=None):
+        started.append((list(names), auto, note))
+        return type("J", (), {"id": "j1200"})()
+
+    monkeypatch.setattr(jobs, "start", start)
+    r = AutoRunner(jobs, tmp_path / "p.lock.autorun", settings=lambda: cfg, tz=lambda: LA)
+    r.tick(la(2026, 10, 1, 11, 59))
+    assert r.tick(la(2026, 10, 1, 12, 0)) == "started run j1200"
+    [(names, auto, note)] = started
+    assert names == ["ingest", "score"] and auto is True
+    assert "left out draft: still to run in an earlier run, after studio" in note
+    r.stop()
+
+
+def test_a_step_behind_a_quick_live_step_is_still_waited_for(tmp_path):
+    cfg = load_ops_config()
+    cfg["lock_path"] = str(tmp_path / "p.lock")
+    jobs = JobManager(cfg, tmp_path, db_path=tmp_path / "t.db")
+    job = _live_auto_run(jobs, "draft", done=["ingest", "score", "studio"])
+    # draft is live and not a slow step: verify, feedback and evolve come right after it
+    assert jobs.queued_behind({"studio"}) == {}
+    # between two steps nothing is live, and nothing can be said to wait behind a slow one
+    job.results.append(StepResult("draft", [], la(2026, 10, 1, 7), la(2026, 10, 1, 8), exit_code=0))
+    job.active_step = None
+    assert jobs.queued_behind({"studio"}) == {}
+    assert {"verify", "feedback", "evolve"} <= jobs.busy_steps()
+
+
+def test_a_step_another_run_is_running_is_not_queued_behind_anything(tmp_path):
+    cfg = load_ops_config()
+    cfg["lock_path"] = str(tmp_path / "p.lock")
+    jobs = JobManager(cfg, tmp_path, db_path=tmp_path / "t.db")
+    _live_auto_run(jobs, "studio", done=["ingest", "score"])
+    assert "draft" in jobs.queued_behind({"studio"})
+    # a human's draft_retry run holds the draft lock with its live step: draft is busy for
+    # real, so the time waits for it
+    by_name = {s.name: s for s in jobs.steps()}
+    retry = Job(
+        id="retry",
+        steps=["draft_retry"],
+        started_at=la(2026, 10, 1, 11),
+        plan=[by_name["draft_retry"]],
+    )
+    retry.active_step = "draft_retry"
+    jobs._live.append(retry)
+    behind = jobs.queued_behind({"studio"})
+    assert "draft" not in behind and "draft_retry" not in behind
+    assert {"verify", "feedback", "evolve"} <= set(behind)
 
 
 def test_publish_is_never_started_even_when_listed(tmp_path):
@@ -543,7 +751,7 @@ def test_the_runs_page_shows_and_saves_the_automatic_runs(panel_client):
     assert r.status_code == 303 and r.headers["location"] == "/runs?saved=auto"
     saved = load_ops_config(cfg_copy)
     assert saved["auto_run_enabled"] is False and saved["auto_run_times"] == ["07:00", "19:00"]
-    assert saved["auto_run_steps"] == ["ingest", "score", "draft", "verify", "feedback", "evolve"]
+    assert saved["auto_run_steps"] == SHIPPED_AUTO_STEPS  # the step list is never written
     body = client.get("/runs?saved=auto").text
     assert "Automatic runs saved" in body and "Nothing runs on its own" in body
     r = client.post("/runs/auto", data={"enabled": "1", "times": "07:00, 07:30"})

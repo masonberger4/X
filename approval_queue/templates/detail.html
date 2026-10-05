@@ -2,7 +2,12 @@
 {% block title %}Draft {{ d.id }}{% endblock %}
 {% block content %}
 <p class="meta"><a href="/queue">&larr; back to pending</a></p>
+{% if d.studio_piece %}
+<h1>Studio piece {{ d.studio_piece }}</h1>
+<p class="banner ok">Written in the {% if HAS_PANEL %}<a href="/studio/{{ d.studio_piece }}">studio</a>{% else %}studio (open the control panel, run_app.py, for its page){% endif %} by one {{ d.model }} session: its fact base, fact-check log and session log are on the studio page, and so is Revise, which resumes that session.</p>
+{% else %}
 <h1>{{ d.title or d.item_id }}</h1>
+{% endif %}
 <p class="meta">
   status <strong>{{ d.status }}</strong>
   · source <strong>{{ d.source or "?" }}</strong>
@@ -26,11 +31,13 @@
 {% if d.draft.suggested_visual %}<p><strong>Suggested visual:</strong> {{ d.draft.suggested_visual }}</p>{% endif %}
 
 {% if d.draft.shape != 'thread' or d.draft.wanted_visuals == 0 or d.draft.wanted_visuals == 2 %}
-<p class="meta">Format: <strong>{{ 'single post' if d.draft.shape == 'single' else ('long post (up to ' ~ d.draft.max_chars ~ ' chars)' if d.draft.shape == 'long' else 'thread') }}</strong>{% if d.draft.wanted_visuals is not none %}, {{ d.draft.wanted_visuals }} picture{{ 's' if d.draft.wanted_visuals != 1 else '' }}{% endif %} (a step 9 format genome).</p>
+<p class="meta">Format: <strong>{{ 'single post' if d.draft.shape == 'single' else (('long post' if d.draft.thread|length == 1 else d.draft.thread|length ~ ' long posts, each') ~ ' up to ' ~ d.draft.max_chars ~ ' chars' if d.draft.shape == 'long' else 'thread') }}</strong>{% if d.draft.wanted_visuals is not none %}, {{ d.draft.wanted_visuals }} picture{{ 's' if d.draft.wanted_visuals != 1 else '' }}{% endif %}{% if not d.studio_piece %} (a step 9 format genome){% endif %}.</p>
 {% endif %}
 {% if image_url %}
 <h2>Image</h2>
-{% if d.draft.table %}
+{% if d.studio_piece %}
+<p class="meta">Attached to post {{ first_anchor }} when published. Designed and checked in the studio session; the studio page shows how.</p>
+{% elif d.draft.table %}
 <p class="meta">Attached to post {{ first_anchor }} when published. Drawn by code from the table below after every cell was fact-checked; a blank cell is one the checker could not tie to a primary source.</p>
 {% else %}
 <p class="meta">Attached to post {{ first_anchor }} when published. Rendered by code from the numbers below; check every bar against the source.</p>
@@ -52,7 +59,7 @@
 </details>
 {% endif %}
 {% for im in extra_images %}
-<p class="meta">Second picture, attached to post {{ im.anchor }} when published.</p>
+<p class="meta">{{ 'Second picture' if extra_images|length == 1 else 'Picture ' ~ (loop.index + 1) }}, attached to post {{ im.anchor }} when published.</p>
 <p><img src="{{ im.url }}" alt="{{ im.alt }}" style="max-width:100%;border:1px solid #ccc"></p>
 <p class="meta">{{ im.alt }}</p>
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/{{ im.index }}/drop">
@@ -62,11 +69,13 @@
 {% endfor %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/drop">
   <input name="note" placeholder="why (optional)">
-  <button>Drop {{ 'both images' if extra_images else 'image' }}</button> <span class="meta">the post goes out text-only</span>
+  <button>Drop {{ ('both images' if extra_images|length == 1 else 'all pictures') if extra_images else 'image' }}</button> <span class="meta">the post goes out text-only</span>
 </form>
+{% if d.draft.chart or d.draft.table %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/redraw">
   <button>Redraw</button> <span class="meta">remake the picture from the same {{ 'table and its verdicts' if d.draft.table else 'numbers' }}; nothing else changes</span>
 </form>
+{% endif %}
 {% elif d.draft.chart %}
 <h2>Image</h2>
 <p class="meta">The drafter proposed a chart ({{ d.draft.chart.title }}) but no image was rendered: images are disabled in draft/config.yaml or matplotlib is not installed. Nothing will be attached.</p>
@@ -103,11 +112,12 @@
 {% if d.draft.table.note %}<p class="meta">{{ d.draft.table.note }}</p>{% endif %}
 {% endif %}
 
-<h2>Thread</h2>
+<h2>{{ 'Post' if d.draft.thread|length == 1 else 'Thread' }}</h2>
+{% set limit = [MAX_POST_CHARS, d.draft.max_chars or MAX_POST_CHARS]|max %}
 {% for p in d.draft.thread %}
   {% set n = p|tweet_length %}
-  <div class="post">{{ loop.index }}/{{ d.draft.thread|length }} {{ p }}</div>
-  <div class="meta {% if n > MAX_POST_CHARS %}over{% endif %}">{{ n }}/{{ MAX_POST_CHARS }}</div>
+  <div class="post">{% if d.draft.thread|length > 1 %}{{ loop.index }}/{{ d.draft.thread|length }} {% endif %}{{ p }}</div>
+  <div class="meta {% if n > limit %}over{% endif %}">{{ n }}/{{ limit }}</div>
 {% endfor %}
 
 <h2>Claims to verify</h2>
@@ -169,6 +179,9 @@
 </div>
 
 <h2>Revise</h2>
+{% if d.studio_piece %}
+<p>Revise this piece on {% if HAS_PANEL %}<a href="/studio/{{ d.studio_piece }}">its studio page</a>{% else %}its studio page in the control panel (run_app.py){% endif %}: the session that researched and wrote it rewrites it from your note and fact-checks what changed. The drafter's Revise would flatten its long posts and drop its cards.</p>
+{% else %}
 <form method="post" action="/drafts/{{ d.id }}/revise">
   <label>What should change?<br><textarea name="instructions" rows="3" placeholder="e.g. lead with the durability data, drop the second thread post, less hype in the last line"></textarea></label>
   {% if claim_problems %}
@@ -184,6 +197,7 @@
   </label>
   <p><button>Revise with AI</button> <span class="meta">takes 10–30 seconds; a status bar shows while it runs</span></p>
 </form>
+{% endif %}
 
 <details{% if edit_open %} open{% endif %}>
 <summary>Edit by hand</summary>

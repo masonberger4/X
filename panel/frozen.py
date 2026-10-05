@@ -40,6 +40,7 @@ CLIS = (
     "run_evolve",
     "run_scrub_notes",
     "run_unlink",
+    "run_studio",
 )
 
 
@@ -72,15 +73,21 @@ def bundle_manifest(root: Path = REPO_ROOT) -> tuple[list[tuple[str, str]], list
     """(datas, hiddenimports) for the PyInstaller spec.
 
     datas are (source path, destination folder inside the bundle) pairs: the root
-    config.yaml, every step's own config.yaml, the voice guide, both template folders,
-    and a copy of each CLI script so `ops/runner.py`'s existence check passes.
+    config.yaml, every step's own config.yaml, the voice guide, the template folders,
+    the studio's brief, angles, playbook seed, fonts and reference pieces, and a copy of
+    each CLI script so `ops/runner.py`'s existence check passes.
     """
     datas: list[tuple[str, str]] = [(str(root / "config.yaml"), ".")]
     for cfg in sorted(root.glob("*/config.yaml")):
         datas.append((str(cfg), cfg.parent.name))
     datas.append((str(root / "draft" / "voice.md"), "draft"))
-    for pkg in ("approval_queue", "panel"):
+    for pkg in ("approval_queue", "panel", "studio"):
         datas.append((str(root / pkg / "templates"), f"{pkg}/templates"))
+    # The studio's brief, angle library, playbook seed, card fonts and reference pieces.
+    for name in ("angles.yaml", "playbook.md"):
+        datas.append((str(root / "studio" / name), "studio"))
+    for folder in ("brief", "fonts", "exemplars"):
+        datas.append((str(root / "studio" / folder), f"studio/{folder}"))
     for cli in CLIS:
         datas.append((str(root / f"{cli}.py"), "."))
     hidden = [*CLIS, "panel.app", "claude_cli"]

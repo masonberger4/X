@@ -357,14 +357,17 @@ def retag_drafts(conn: store.sqlite3.Connection, *, dry_run: bool = False) -> in
     hard rule 11 by revising it through the queue's own path, `revise_item` with the
     instruction to change only the tags, `store.revise` (status unchanged, a `revise`
     decision with note RETAG_NOTE) and `carry_over_checks`. Drafts that already comply are
-    skipped; a draft whose revision fails is left as it was. Returns the number revised."""
+    skipped; a draft whose revision fails is left as it was. A studio piece is never
+    touched: it is revised in the studio. Returns the number revised."""
     rows = store.list_drafts(conn, store.STATUS_PENDING) + store.list_drafts(
         conn, store.STATUS_APPROVED
     )
     posted = store.publish_states(conn, [r.id for r in rows])
     todo = []
     for r in rows:
-        if r.id in posted:
+        # The drafter would flatten a studio piece's long posts and drop its cards, as the
+        # queue's own Revise button knows (approval_queue/app.py refuses it there too).
+        if r.id in posted or r.studio_piece is not None:
             continue
         problems = retag_problems(r)
         if problems:

@@ -86,6 +86,45 @@ Budget: that Claude account's plan + X Premium.
 3. Publish.
 4. Feedback loop.
 
+## The studio (step 10, October 2026)
+
+The account's best posts so far (Merck's SPR2015 deal, the Summit catalyst map,
+next-gen CTLA-4) were not made by the pipeline. Each was one long chat with Opus 5.5
+that researched for an hour, kept a sourced fact base, wrote a long post, ran an
+independent fact-check, corrected itself and designed the cards. The drafter cannot
+make that kind of post: it writes from one abstract, under rules that forbid most of
+what made those posts good (numbers from many sources, labelled estimates, section
+headers, long form).
+
+So the drafting overhaul keeps the model's process and changes the app's job:
+
+- **Opus 5.5 at max effort does the work in one Claude Code session per piece**:
+  research, fact base, angle, post, a cold fact-check by a fresh sub-agent, and the
+  cards. The app resumes the same session between stages, so nothing it learned is
+  lost. Every model call in the app goes through the Claude Code CLI; there is no API
+  key.
+- **The app is the dashboard and the guard rails**: it picks the topic (the editor,
+  a feed story, or the session's own scan), offers angles the account has not used
+  lately, checks only what must never reach X (advice, links, length, unverified
+  handles), draws and checks the cards, and queues the piece. Posting stays manual.
+- **The three handoff docs are the reference set** (`studio/exemplars/`), the angle
+  library has 19 angles so the account does not sound the same, and the playbook is
+  the note every session reads.
+
+Roadmap, one PR each:
+1. CLI only: remove every Anthropic API path. (done)
+2. The studio core: sessions, stages, checker, card renderer, queue and panel,
+   automatic runs with a manual button. (done)
+3. The radar: one page of topic cards (scored stories, a catalyst calendar of dated
+   PDUFAs, readouts and conference slots, and a daily Opus news scan).
+4. The feedback loop: tag every posted piece (angle, shape, hook, cards, topic, time),
+   score it from X against the trailing median (the swarm's fitness code), pick the
+   next angle and shape by Thompson sampling, and have Opus propose playbook edits from
+   the best and worst performers for the editor to approve. Until there are 20 to 30
+   pieces the numbers are noise and the playbook stays editorial judgement.
+5. Retire the old drafter, swarm and claim verifier once the studio has shipped
+   enough pieces to compare.
+
 ---
 
 # Step 1 Kickoff Prompt (paste into Claude Code)

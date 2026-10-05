@@ -199,6 +199,27 @@ def test_fetch_post_context_joins_steps_1_and_2(fconn):
     assert store.fetch_post_context([], fconn) == {}
 
 
+def test_fetch_post_context_names_studio_pieces(fconn, db_file):
+    """A studio piece (item_id studio:<id>) has no item row: its source reads 'studio', with
+    or without step 1's tables, and a story it started from still lends its score."""
+    _, cid = seed_draft(fconn, "story")
+    d = Draft(thread=["A long studio post"], suggested_visual="", why_it_matters="")
+    with_story = qstore.insert_draft(
+        fconn, item_id=qstore.studio_item_id(7), cluster_id=cid, model="m", draft=d
+    )
+    alone = qstore.insert_draft(fconn, item_id=qstore.studio_item_id(8), model="m", draft=d)
+    ctx = store.fetch_post_context([with_story, alone], fconn)
+    assert ctx[with_story].source == "studio" and ctx[with_story].scores["total"] == 40
+    assert ctx[alone].source == "studio" and ctx[alone].title == ""
+    bare = db_file.with_name("bare.db")
+    qconn = qstore.connect(bare)
+    did = qstore.insert_draft(qconn, item_id=qstore.studio_item_id(9), model="m", draft=d)
+    qconn.close()
+    c = store.connect(bare)
+    assert store.fetch_post_context([did], c)[did].source == "studio"
+    c.close()
+
+
 # ---- own tables and due_for_snapshot -------------------------------------------------
 
 

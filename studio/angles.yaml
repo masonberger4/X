@@ -1,0 +1,216 @@
+# The angle library: the question a studio piece answers. An angle is not a template.
+# It tells the session what the reader should come away knowing, which shapes tend to
+# fit and which cards usually carry it; the session decides the structure itself.
+#
+# The app never asks for an angle used in the last `variety.avoid_recent_angles` pieces
+# (studio/config.yaml) unless a human picks it. It offers the session a shortlist of
+# fitting angles and the session chooses one, saying why, in piece.json.
+#
+# Fields
+#   name        what the panel shows
+#   question    the one question the piece must answer
+#   signals     what kind of news makes this angle fit (shown to the session)
+#   shapes      formats that usually suit it: long_post | thread | short_post
+#   cards       card types that usually carry it (see studio/brief/cards.md)
+#   reference   an exemplar in studio/exemplars/ written at this angle, if any
+#   notes       craft notes for this angle
+
+deal_decoder:
+  name: Deal decoder
+  question: Why did they pay that, and what does the structure say about how the buyer values the asset and the class?
+  signals: licensing deal, acquisition, option deal, royalty sale, CVR, a big upfront
+  shapes: [long_post, thread]
+  cards: [headline_stat, deal_terms, race_timeline, scenarios]
+  reference: merck_spr2015
+  notes: >
+    Put the price next to something that makes it surprising (an earlier walked-away
+    bid, the licensor's total funding, a comparable deal). Read the structure: upfront
+    share of headline value, options, CVRs, closing speed. End on the signposts that
+    will prove the buyer right or wrong.
+
+class_deep_dive:
+  name: Class deep dive
+  question: Is this class (target, modality) for real now, who is building it, and what would it change?
+  signals: a new readout in a crowded class, a target that failed before and is back, several programs moving at once
+  shapes: [long_post, thread]
+  cards: [headline_stat, pipeline_matrix, money, history_timeline]
+  reference: ctla4_next_gen
+  notes: >
+    Lead with the result that makes the class news today. History and past failures
+    earn their place only when the new designs answer them. Every asset gets a stage,
+    an owner and a ticker. Keep a reality-check section with the setbacks.
+
+catalyst_map:
+  name: Catalyst map
+  question: What are the next 6 to 12 months for this company, and which event actually sets the value?
+  signals: a public company with several dated catalysts (PDUFA, readouts, conference slots, a financing that funds them)
+  shapes: [thread, long_post]
+  cards: [catalyst_timeline, competitive_landscape, market_growth]
+  reference: smmt_catalysts
+  notes: >
+    Rank the catalysts by what they do to the business, not by date. Say which one is
+    the real value event and why the others matter less. Include the cash position
+    and runway when the company is small.
+
+readout_reaction:
+  name: Readout reaction
+  question: What did the data actually show, what did the release leave out, and what does it do to the thesis?
+  signals: topline press release, conference presentation, journal publication, an interim analysis
+  shapes: [long_post, thread, short_post]
+  cards: [headline_stat, results_table, cross_trial_context]
+  notes: >
+    The numbers that decide the story first, then the design limits (n, single arm,
+    surrogate endpoint, control arm, follow-up). Cross-trial comparisons are labelled
+    as such every time. Say what the market will trade on and what the label will be
+    decided on.
+
+readout_preview:
+  name: Readout preview
+  question: What is the bar before the data drop, and what would a win or a miss change?
+  signals: a dated presentation, a guided topline, a PDUFA date, an advisory committee
+  shapes: [long_post, thread]
+  cards: [bar_for_success, scenarios, prior_data]
+  notes: >
+    Set the bar with numbers from the earlier data, the competitors and the standard
+    of care. Spell out the bull case, the bear case and the muddled middle. Give the
+    date and say what to look at first when the data land.
+
+the_race:
+  name: The race
+  question: Who gets to market first in this target or setting, and does being first matter here?
+  signals: three or more programs on one target, a new entrant, a competitor slipping
+  shapes: [long_post, thread]
+  cards: [race_timeline, pipeline_matrix]
+  notes: >
+    A timeline with a today line, reported milestones solid and estimates hollow and
+    labelled as yours. Say where first-mover advantage holds and where a later,
+    better drug wins.
+
+head_to_head:
+  name: Head to head
+  question: Two drugs, same target, different bets. Which design choice is right and how will we know?
+  signals: two programs on one target with diverging data, design, dosing or price
+  shapes: [long_post, short_post]
+  cards: [side_by_side, results_table]
+  notes: >
+    Compare like with like, flag every cross-trial caveat, and end on the trial or
+    data cut that will settle it.
+
+post_mortem:
+  name: Post-mortem
+  question: Why did this fail, and who else is exposed to the same reason?
+  signals: discontinued program, futility stop, clinical hold, CRL, missed endpoint, a write-down
+  shapes: [long_post, thread]
+  cards: [what_happened_timeline, read_through_map]
+  notes: >
+    Separate what is known from what is inferred. The read-through to other programs
+    and companies is the forwardable part. No dunking; explain.
+
+regulatory_decoder:
+  name: Regulatory decoder
+  question: What did the regulator actually say, and what does it do to the label, the market and the comparables?
+  signals: approval, complete response letter, label change, ODAC, accelerated approval confirmatory trial, a new guidance
+  shapes: [long_post, thread, short_post]
+  cards: [label_vs_expectations, regulatory_timeline]
+  notes: >
+    Quote the label or letter precisely. The market is usually set by the population
+    and line of therapy in the label, so size that.
+
+follow_the_money:
+  name: Follow the money
+  question: Where is capital flowing in this corner of immuno-oncology, and what does that say about the next two years?
+  signals: a cluster of financings, a big Series A, a China out-licensing wave, a crossover round, a royalty deal
+  shapes: [long_post, thread]
+  cards: [deal_ledger, money]
+  notes: >
+    Upfront and guaranteed money separated from "up to" money every time. Name the
+    investors when the round says something (the same fund on both sides of a trend).
+
+patent_cliff:
+  name: Patent cliff
+  question: A franchise is losing exclusivity. How big is the hole and who fills it?
+  signals: loss of exclusivity, biosimilar filings, a big pharma revenue gap, a pharma deal spree
+  shapes: [long_post, thread]
+  cards: [revenue_at_risk, replacement_pipeline]
+  notes: >
+    Revenue at risk with dates, then the candidates that could replace it with stage
+    and timing. Say what the gap forces the company to do.
+
+origin_story:
+  name: Origin story
+  question: How did this target or modality get here, and why is now different?
+  signals: an anniversary, a comeback, a first approval in a new class, a Nobel-adjacent target in the news
+  shapes: [long_post]
+  cards: [history_timeline, headline_stat]
+  notes: >
+    History is the hook only when it ends on today. Breakthroughs and setbacks side by
+    side; the setbacks explain the new designs.
+
+mechanism_for_investors:
+  name: Mechanism for investors
+  question: How does this actually work, and why does the mechanism decide the business case?
+  signals: a new modality getting money or data (in vivo CAR-T, masked engagers, Treg depleters, trispecifics)
+  shapes: [long_post, thread]
+  cards: [mechanism_diagram, where_it_plays]
+  notes: >
+    Explain the mechanism once, clearly, then spend the rest on what it does to
+    safety, manufacturing, cost of goods, dosing and addressable population.
+
+contrarian_take:
+  name: Contrarian take
+  question: What is the market or the consensus getting wrong here, and what is the evidence?
+  signals: a sharp stock move that the data do not support, a narrative everyone repeats, an overlooked number
+  shapes: [long_post, short_post]
+  cards: [the_overlooked_number, headline_stat]
+  notes: >
+    Only when the evidence is there. State the consensus fairly first, then the number
+    or design detail it misses. Describe the thesis, never a trade.
+
+bull_vs_bear:
+  name: Bull vs bear
+  question: What is the strongest case on each side, and what will decide between them?
+  signals: a polarising stock or asset, a debated readout, a contested approval
+  shapes: [long_post, thread]
+  cards: [bull_bear_columns, signposts]
+  notes: >
+    Steelman both sides with numbers. End on dated signposts. Never pick a side as a
+    trade; say which evidence would move you.
+
+one_chart:
+  name: One chart
+  question: What single chart explains this story?
+  signals: a story that one picture tells better than words (a survival curve gap, a deal-value ladder, a revenue line)
+  shapes: [short_post]
+  cards: [headline_stat]
+  notes: >
+    A short post (under about 1,000 characters) carried by one strong card. The card's
+    headline states the finding. This is the account's change of pace; keep it short.
+
+conference_playbook:
+  name: Conference playbook
+  question: Which presentations at the coming meeting actually matter, and what is the bar for each?
+  signals: ASCO, ESMO, ASH, AACR, SITC, WCLC within the next two weeks; late-breaker titles out
+  shapes: [thread, long_post]
+  cards: [watchlist_schedule, bar_for_success]
+  notes: >
+    Dates, sessions and the bar for each. Five that matter beat twenty listed.
+
+weekly_watchlist:
+  name: Weekly watchlist
+  question: What are the immuno-oncology catalysts this week or this month, and which one matters most?
+  signals: a week with several dated events (PDUFAs, toplines, conferences, lockups)
+  shapes: [long_post, thread]
+  cards: [catalyst_timeline]
+  notes: >
+    Rank, do not list. One line on why each matters and one pick for the most
+    important, with the reason.
+
+scorecard:
+  name: Scorecard
+  question: An earlier call or guided milestone has resolved. What happened against the bar, and what did we learn?
+  signals: a readout or decision that one of the account's earlier pieces previewed, a company's guidance coming due
+  shapes: [long_post, short_post]
+  cards: [bar_vs_result, headline_stat]
+  notes: >
+    Name the earlier bar plainly (including the account's own earlier piece when there
+    is one) and grade the outcome against it. Credibility is the product here.

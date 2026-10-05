@@ -21,7 +21,10 @@ against the single strong drafter; phase two: X fitness, round-robin seed genome
 pruning via `run_evolve.py`; phase three: breeding of writer genomes by one strong call
 and of designer genomes, the picture's starting `Style`, by a random knob step, and the
 panel's `/swarm` page; phase four: the format itself, thread or single or long post and how
-many pictures on which posts, is a third bred population). The kickoff prompt that built
+many pictures on which posts, is a third bred population), 10 the studio (one long Claude
+Code session per post on Opus 5.5 at max effort: research, fact base, long post, cards,
+its own cold fact-check; the app checks it and queues it; `run_studio.py`, `/studio`). The
+kickoff prompt that built
 each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 `PUBLISH_ENABLED=1` **and** `--live`, and posting is **manual only**: a human presses
 "Publish now" on the approved page or runs `run_publish.py --live` by hand. Nothing posts on
@@ -58,6 +61,9 @@ carrying `--live`).
   picture captions written to the operator in queued drafts and redraws them),
   `python run_unlink.py [--status STATUS] [--dry-run] [-v]` (operator command: strips the
   source URL out of a queued draft's posts, since no post carries a link),
+  `python run_studio.py [--now|--resume-only|--topic T|--story ID] [--angle KEY]
+  [--checkpoint|--no-checkpoint] [--list] [--dry-run]` (step 10: the studio's automatic run,
+  or one piece now; see `studio/config.yaml`),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
   (operator command: each configured company's own site icon into `assets/logos/`)
@@ -398,7 +404,7 @@ carrying `--live`).
   apart round the clock, YAML's base-60 ints read back), `slots_between` / `next_slot`
   (wall-clock times in a zone that is a parameter), `settings_of` and `plan` /
   `ineligible`, the allowlist: a step may run automatically only as
-  `python <AUTO_SCRIPTS>` (ingest, score, draft, verify, feedback, evolve) with nothing
+  `python <AUTO_SCRIPTS>` (ingest, score, studio, draft, verify, feedback, evolve) with nothing
   starting like the live flag (`posts_live`, which `run_ops.py` now uses too, so an
   abbreviated flag is refused; `run_publish.py` parses with `allow_abbrev=False`).
   `ops/config.py:save_auto_run` writes only `auto_run_enabled` / `auto_run_times` (top-level
@@ -565,6 +571,63 @@ carrying `--live`).
   pure code (`mutate.breed_format`: one field stepped to a neighbour, named by
   `format_name`); `evolve.format_population_size` is their population.
   `tests/conftest.py` turns the swarm off for every test that does not opt in.
+- **Step 10 (`studio/`) is one long Claude Code session per post.** The app chooses the
+  topic and the angles on offer, runs the session, checks what comes back and queues it; it
+  never writes or rewrites the post. Every stage is `claude_cli.run_session` (the second
+  place that spawns the CLI, beside `run_claude`: stream-json into
+  `<piece>/session.ndjson`, a fixed `--session-id` on the first run and `--resume` after,
+  so the session keeps what it read; `cwd` is the piece folder; `--append-system-prompt-file`
+  with `studio/brief/session.md` + `voice.md` + `cards.md` once, recorded by the CLI;
+  `--add-dir studio/exemplars`; `tools` and the isolation `cli_flags` (`--safe-mode
+  --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
+  `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`), an
+  optional checkpoint (`research_ready`, the editor's Continue), write (`posts/NN.txt`,
+  `cards/card_N.html`, a cold fact-check by a fresh sub-agent logged in `factcheck.md`,
+  `piece.json`), polish rounds (`studio/qa.py`: `piece.json` shape, X-weighted length from
+  `studio/xcount.py` with `x.headroom`, `studio/safety.py` blocking lines (investment or
+  medical advice, links incl. bare domains), an @handle without a verifying page, cards
+  drawn by `studio/render.py`; blocking problems keep a piece out of the queue, fixable ones
+  go back to the session up to `max_polish_rounds` and then ride along as warnings, and one
+  review round always shows the session its PNGs), then `studio/ingest.py`: a pending draft
+  with `item_id` `studio:<piece id>` (`approval_queue/store.py:studio_item_id`,
+  `DraftRow.studio_piece`), shape `long` at `x.long_post_max`, no claims (step 2b skips
+  it), every card copied to `image_file(id, k)` and anchored to its post; a revision
+  (`store.revise`, pending drafts only) replaces text and cards. The queue's revise route
+  refuses a studio draft and points at `/studio/<id>`; its edit route takes a long draft's
+  own `max_chars`. `studio/render.py` is the only place that launches a browser (Edge,
+  Chrome or Chromium, `render.browser` / `STUDIO_BROWSER`), always headless with the
+  network blocked and the fonts in `studio/fonts/` injected; it is not network I/O. Every
+  card opens with a content policy (`CONTENT_POLICY`: inline styles, data: images and the
+  house fonts only; the nonce'd checker is the one script that runs), so a card can never
+  draw a local file into its picture, and a meta refresh is refused before launch. The
+  checker also reports the page's real viewport: new headless Chromium keeps 87 px of its
+  window, so the window is grown by the measured difference (`_WINDOW_EXTRA`, per browser
+  per run) and the screenshot cut back to the card by `crop_png` (standard library only).
+  An empty band taller than `EMPTY_BAND_SHARE` of the card (text, pictures, chart marks
+  and painted leaf boxes projected on the vertical axis; a box holding other elements is
+  not content) is a fixable layout problem.
+  `studio/store.py` owns `studio_pieces` (stage, session id, workspace, angle, shape,
+  hook, draft id, the editor's pending `request`), `studio_runs` (one per CLI run) and
+  `studio_topics` (queued by the editor); its one read of step 1 is `studio/topics.py`
+  through `db.Database`. Variety is code, judgement is the session's: `studio/angles.py`
+  offers every angle in `studio/angles.yaml` except the last `avoid_recent_angles` used (a
+  human-named angle is the only one offered) and lists recent hooks, shapes and openings to
+  avoid. `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
+  `interrupted`, acts on `request`s (continue, revise), then starts at most one piece:
+  explicit `--topic`/`--story`, else the oldest queued topic, else with `--now` an
+  automatic topic, else only when `auto.max_new_per_day` (any 24 hours, automatic pieces),
+  `auto.min_hours_between` (any piece) and no checkpoint wait allow; one run at a time
+  (`<workspace_dir>/.studio.lock`). `ops/config.yaml` has the automatic `studio` step
+  (after `score`, `skip_when_busy`: `panel/autorun.py` leaves a busy one out of a slot
+  rather than waiting, and also the steps an earlier run still has queued behind it,
+  `JobManager.queued_behind`, so a long session never makes a run time skip ingest and
+  score) and the manual `studio_now` / `studio_resume` steps, all under the
+  `studio` lock; `run_studio.py` is in `ops/autorun.AUTO_SCRIPTS`. The panel includes
+  `studio/web.py`'s router (`/studio`, a piece's page, its cards, `/studio/playbook`); its
+  buttons write studio rows and start those steps through `panel/app.py:_start_studio`,
+  and the playbook editor writes only `studio_playbook.md` next to the database (the
+  shipped seed is `studio/playbook.md`). `tests/conftest.py` never lets a test spawn the
+  real CLI.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -632,7 +695,14 @@ ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
           read-only adapters)
 assets/   logos/<company key>.png (human-supplied company logos for table cells)
 deploy/   crontab.example, pipeline.service, pipeline.timer, desktop.spec, README.md
+studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, variety),
+          brief/ (session.md, voice.md, cards.md: the appended system prompt), playbook.md
+          (seed), exemplars/ (reference pieces), fonts/, prompt.py (pure stage prompts),
+          session.py (stages), runner.py (one run: stale pieces, requests, new piece),
+          qa.py + xcount.py + safety.py (the checks), render.py (cards via headless browser),
+          ingest.py (into the queue), topics.py (feed stories), store.py (studio_pieces,
+          studio_runs, studio_topics), web.py + templates/ (/studio pages)
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
 run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py
-run_logos.py  run_evolve.py  run_unlink.py   (CLIs)
+run_logos.py  run_evolve.py  run_unlink.py  run_studio.py   (CLIs)
 ```

@@ -32,3 +32,8 @@ images/
 # Fetched or hand-placed company logos are trademarks: keep them local (run_logos.py refills)
 assets/logos/*.png
 desktop.log
+
+# Step 10: the studio's pieces (fact bases, posts, cards, session logs) and the editor's
+# own copy of the playbook, both next to pipeline.db
+studio_pieces/
+studio_playbook.md

@@ -1,0 +1,88 @@
+# The studio's own settings (studio/settings.py). Not the root config.yaml.
+#
+# The studio hands each post to ONE long Claude Code session: research, a fact base,
+# the post, its own cold fact-check through a sub-agent and the cards, the way the
+# account's best posts were made by hand. The app picks the topic, asks for variety,
+# checks the result and puts it in the approval queue. Posting stays manual.
+
+# The writer. Opus 5.5 at max effort for every stage: the account is judged on these.
+model: claude-opus-5-5
+effort: max                     # low | medium | high | xhigh | max
+
+# What the automatic run (`python run_studio.py`, the `studio` step in ops/config.yaml)
+# may start on its own. A button press (`--now`) ignores both limits.
+auto:
+  enabled: true
+  max_new_per_day: 1            # new pieces started automatically in any 24 hours
+  min_hours_between: 6          # since the last piece started, automatic or manual
+  # Stop after the research stage so a human reads the fact base and says "continue"
+  # (with notes) before the post is written. Off for automatic pieces: the finished
+  # piece waits in the queue with its fact base and fact-check log, and "Revise" on the
+  # studio page resumes the same session with your notes.
+  checkpoint: false
+
+# The default for a piece started from the panel or with --topic.
+manual:
+  checkpoint: true
+
+# Where each piece's files live: the fact base, the posts, the cards, the session log.
+# Relative to the data folder (the repo, or the folder Pipeline.exe sits in).
+workspace_dir: studio_pieces
+
+# Limits per stage, in minutes (0 = no limit). A session that hits one is killed and can
+# be resumed from the studio page; nothing it wrote is lost.
+timeouts:
+  research: 150
+  write: 180
+  polish: 60
+  revise: 120
+# Turns per stage (0 = no limit). A turn is one model call; research runs dozens.
+max_turns:
+  research: 0
+  write: 0
+  polish: 40
+  revise: 0
+# Rounds of "here is what the checker found, fix it" before the piece is handed over
+# with the remaining problems listed.
+max_polish_rounds: 3
+
+# What the session may use. Read/Write/Edit only reach its own folder and the reference
+# folder; there is no shell. WebSearch/WebFetch are the research; Agent runs the cold
+# fact-check as a fresh sub-agent.
+tools: [Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent]
+# CLI switches that isolate the session from this machine: no CLAUDE.md, plugins, hooks
+# or MCP servers (--safe-mode), file tools confined to the working folders and no
+# command-running tools (--restricted), and anything not pre-approved is denied rather
+# than prompted for (--permission-mode dontAsk). Remove one only if your CLI version
+# rejects it.
+cli_flags: [--safe-mode, --restricted, --permission-mode, dontAsk]
+
+# Topic choice for automatic pieces: the top scored stories of the last `lookback_hours`
+# from step 1 that no piece has used yet are offered as a shortlist; the session picks
+# one or finds a better story itself with a news scan.
+topics:
+  lookback_hours: 48
+  shortlist: 8
+  min_score: 30                 # scoring total (0-50) a story needs to be offered
+  avoid_days: 10                # recent pieces' titles and companies are listed to avoid
+
+# Variety: the session is never offered an angle used in the last N pieces, and is told
+# which hook styles and openers were used recently.
+variety:
+  avoid_recent_angles: 3
+  avoid_recent_hooks: 2
+  recent_pieces_shown: 8
+
+# X limits the checker enforces (characters weighted the way X counts them).
+x:
+  long_post_max: 25000          # X Premium long post
+  thread_post_max: 25000        # each post of a thread of long posts
+  short_post_max: 1000          # the "short post" format's target, not an X limit
+  headroom: 50                  # stay this far under a limit
+  max_cards_total: 4            # pictures per piece (X allows 4 per post)
+
+# The card renderer (studio/render.py). Blank = find Edge, Chrome or Chromium.
+# STUDIO_BROWSER in .env overrides.
+render:
+  browser: ""
+  timeout_seconds: 60

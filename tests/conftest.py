@@ -60,14 +60,15 @@ def _no_image_grader_network(monkeypatch):
     monkeypatch.setattr(grader, "call_grader", offline)
 
 
-# Modules that test the CLI plumbing itself: they fake the process, not run_claude.
-_CLI_TEST_MODULES = {"test_claude_cli"}
+# Modules that test the CLI plumbing itself: they fake the process, not the launchers.
+_CLI_TEST_MODULES = {"test_claude_cli", "test_claude_cli_session"}
 
 
 @pytest.fixture
 def cli_plumbing():
-    """Ask for this to run the real claude_cli.run_claude with the process faked below it
-    (shutil.which, subprocess.Popen); _never_spawn_the_cli then leaves run_claude alone."""
+    """Ask for this to run the real claude_cli launchers (run_claude, run_session) with the
+    process faked below them (shutil.which, subprocess.Popen); _never_spawn_the_cli then
+    leaves them alone."""
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +87,7 @@ def _never_spawn_the_cli(request, monkeypatch):
         raise RuntimeError("a test tried to run the real Claude Code CLI; fake the call")
 
     monkeypatch.setattr(claude_cli, "run_claude", refuse)
+    monkeypatch.setattr(claude_cli, "run_session", refuse)
 
 
 @pytest.fixture(autouse=True)

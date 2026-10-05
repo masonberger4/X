@@ -146,6 +146,44 @@ def test_steps_from_config_and_defaults():
     cfg = {"steps": [{"name": "s", "argv": ["python", "x.py"]}]}
     steps = runner.steps_from_config(cfg)
     assert steps == [Step("s", ["python", "x.py"], True, False, 600)]
+    assert steps[0].skip_when_busy is False and steps[0].manual is False
+    assert steps[0].lock_name == "s"
+
+
+def test_step_from_config_reads_skip_when_busy():
+    raw = {
+        "name": "studio",
+        "argv": ["python", "run_studio.py"],
+        "lock": "studio",
+        "skip_when_busy": True,
+        "timeout_seconds": 0,
+    }
+    step = Step.from_config(raw)
+    assert step.skip_when_busy is True and step.lock_name == "studio"
+    assert step.wait_timeout is None and step.manual is False
+    assert Step.from_config({**raw, "skip_when_busy": False}).skip_when_busy is False
+    assert Step.from_config({k: v for k, v in raw.items() if k != "skip_when_busy"}) == Step(
+        "studio", ["python", "run_studio.py"], timeout_seconds=0, lock="studio"
+    )
+
+
+def test_a_skip_when_busy_step_is_skipped_like_any_other_when_its_lock_is_held(tmp_path):
+    """The flag only changes how the panel's timer plans a run time; a run itself (cron, a
+    second window) meets the held lock and skips the step, and the next steps still run."""
+    from ops import lock
+
+    base = tmp_path / "p.lock"
+    steps = [
+        Step("studio", py("print('s')"), lock="studio", skip_when_busy=True),
+        Step("draft", py("print('d')")),
+    ]
+    held = lock.acquire(lock.step_lock_path(base, "studio"))
+    try:
+        results = run_steps(steps, cwd=tmp_path, lock_path=base)
+    finally:
+        held.release()
+    assert [r.skipped_reason for r in results] == [runner.SKIP_LOCKED, None]
+    assert results[1].ok and not results[0].failed
 
 
 def test_step_result_properties():

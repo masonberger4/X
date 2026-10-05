@@ -113,6 +113,34 @@ A draft that breaks any of these is thrown out and the AI gets another go,
 this time told exactly what it did wrong. If it fails four times the story
 is set aside for me to look at.
 
+## 5b. The big posts: one long research session each
+
+The drafts above are quick takes on the day's stories. The posts the account is
+really built on are bigger: a deal decoded, a whole drug class mapped, a company's
+next twelve months laid out, with designed charts. Those started as long chats
+with Claude where it researched for an hour, wrote, checked its own facts and drew
+the cards, and they were better than anything the drafter made.
+
+So now the app does exactly that, once a day on its own or whenever I type a
+topic. It starts one long Claude session (Opus at maximum effort) and lets it
+work like an analyst: read the company releases, the SEC filings, the trial
+registry, the papers; build a fact base with every source; pick an angle (there
+are nineteen, from "why did they pay that?" to "who wins the race?" to "bull vs
+bear", and it is never offered the angles of the last three posts, so the account
+does not repeat itself); write the post; and then hand the post, cold, to a fresh
+copy of itself whose only job is to tear it apart against primary sources. It
+fixes what that finds and logs it. It also designs the pictures, dark cards in
+one house style, and the app draws them and tells it if anything is cut off,
+overlapping or floating in empty space.
+
+The app's job is the boring part: choose what to ask for, keep it in its own
+sandbox (it can search the web and write in its own folder, nothing else on the
+PC), count characters the way X does, and check the lines that are never crossed:
+no investment or medical advice, no links. Then the finished piece lands in my
+queue with its fact base and fact-check log next to it. If I want changes I say
+so in words and the same session, which still remembers everything it read,
+rewrites it. Nothing posts until I press the button.
+
 ## 6. A second pass checks its homework
 
 Every draft comes with a list of "claims to verify": the things the AI added

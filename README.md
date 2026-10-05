@@ -22,6 +22,8 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | 6 | Conference abstracts, KOL X list, HTTP retry | `ingest/crossref.py`, `ingest/x_list.py`, `ingest/http.py` |
 | 7 | Voice learning loop from human edits | `draft/examples.py`, `draft/voice_report.py`, queue `/voice` |
 | 8 | Control panel: one web app over the whole workflow | `panel/`, `run_app.py` |
+| 9 | Swarm drafting: many cheap cells against the single drafter | `swarm/`, `run_evolve.py` |
+| 10 | The studio: one Opus 5.5 session per post (research, post, cards, fact-check) | `studio/`, `run_studio.py` |
 
 ## Control panel (step 8)
 
@@ -145,6 +147,13 @@ python digest.py --auto-rate    # models.rater (config.yaml) answers the same ye
 python digest.py --auto-rate --rate   # model first, then you, with its decision as a hint
 python run_draft.py             # draft approved candidates
 python run_verify.py            # check each draft's claims against the web (step 2b)
+python run_studio.py            # step 10: act on studio requests, start a piece if the limits allow
+python run_studio.py --topic "next-gen CTLA-4" --checkpoint   # a studio piece now, stop after research
+python run_studio.py --story 123 --angle deal_decoder        # from feed story 123, at this angle
+python run_studio.py --now --no-checkpoint   # a piece now on today's best story, straight through
+python run_studio.py --resume-only   # only Continue / Revise / Resume what the studio page asked for
+python run_studio.py --list      # recent pieces and queued topics
+python run_studio.py --dry-run   # print the research prompt the next piece would get
 python run_queue.py             # approval UI alone on localhost:8000
 python run_queue.py --host 0.0.0.0 --port 8080   # bind elsewhere (--reload for development)
 python run_app.py               # control panel: dashboard + sources + runs + the queue
@@ -694,6 +703,82 @@ carries a link, so there is nothing to put in a second one, and
 rule), and bred without a model by stepping one field (shape, picture count,
 an anchor, the post range) to a neighbour. The panel's `/swarm` page has a
 Formats table.
+
+## The studio (step 10)
+
+The studio makes the account's main posts the way its best ones were first made by
+hand: ONE long Claude Code session per piece on Opus 5.5 at max effort
+(`studio/config.yaml` `model`, `effort`), which researches, writes, designs and
+fact-checks the whole thing itself. The app decides what to ask for, checks what
+comes back and puts it in the approval queue; it never edits the writing.
+
+**Stages** (`studio/session.py`; each one is a CLI run on the same session, the
+first with `--session-id`, every later one with `--resume`, so the session keeps
+everything it read):
+
+1. *Research*: the topic (typed by the editor, a feed story, or chosen by the
+   session from the top scored stories of the last `topics.lookback_hours` that no
+   piece used, or from its own news scan) becomes `factbase.md` (every fact with
+   its URL, opened or snippet, knowledge marked, verified X handles, corrections,
+   open questions) and `research.json` (topic, why now, companies, candidate
+   angles). A piece started by hand stops here (`research_ready`) until the editor
+   presses Continue with optional notes; automatic pieces write straight through.
+2. *Write*: the session picks the angle from those on offer, the shape
+   (`long_post`, `thread` of long posts, or `short_post`) and the hook, writes
+   `posts/NN.txt`, designs `cards/card_N.html`, runs a cold fact-check with a
+   fresh sub-agent (Agent tool) that sees only the post and card text, logs every
+   finding in `factcheck.md`, and writes `piece.json`.
+3. *Polish*: the app draws every card (`studio/render.py`: headless Edge, Chrome or
+   Chromium with the network blocked, a content policy that runs none of the card's own
+   scripts and loads nothing from the web or the disk, and the house fonts injected; a
+   layout check reports text cut off, overlapping or off the card and any empty band
+   taller than a quarter of the card; the window is grown by whatever the browser keeps
+   for itself and the picture cut back to the card, so the footer is never lost), counts
+   characters the way X
+   does (`studio/xcount.py`), runs the safety lines (`studio/safety.py`:
+   investment or medical advice, links including bare domains) and checks that
+   every @handle has a page that verified it (`studio/qa.py`). Problems go back to
+   the same session for up to `max_polish_rounds`; at least one round always shows
+   the session its rendered cards. A piece that still has a blocking problem ends
+   `failed`; one with only fixable leftovers goes to the queue with them listed.
+4. *Queue*: `studio/ingest.py` inserts a pending draft (`item_id` `studio:<id>`,
+   shape `long` at the studio's `x.long_post_max`, no claims to verify so step 2b
+   leaves it alone, every card copied to `<db folder>/images/` and anchored to its
+   post). Publish chains a thread of long posts as replies, unnumbered.
+5. *Revise*: the studio page's Revise resumes the session with the editor's notes,
+   re-checks and replaces the queue draft (pending drafts only). The queue's own
+   Revise refuses a studio draft and links to the studio page.
+
+**Variety**: `studio/angles.yaml` holds 19 angles (deal decoder, class deep dive,
+catalyst map, readout reaction and preview, the race, head to head, post-mortem,
+regulatory decoder, follow the money, patent cliff, origin story, mechanism for
+investors, contrarian take, bull vs bear, one chart, conference playbook, weekly
+watchlist, scorecard). The angles of the last `variety.avoid_recent_angles` pieces
+are not offered, and the session is told the recent hook styles, shapes and
+opening lines to avoid. **Voice and design**: `studio/brief/session.md` (the job),
+`voice.md` and `cards.md` (dark 4:5 cards, Inter and IBM Plex Mono shipped in
+`studio/fonts/`) travel as text appended to Claude Code's system prompt;
+`studio/exemplars/` holds the three hand-made reference pieces (handoff docs and
+posted cards); the playbook (`studio/playbook.md`, or the editor's copy
+`studio_playbook.md` next to the database, edited on `/studio/playbook`) goes into
+every write prompt and wins over the voice guide.
+
+**Isolation**: each session runs from its own folder under `workspace_dir`
+(`studio_pieces/`) with `--safe-mode --restricted --permission-mode dontAsk` and
+only `Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent` (`cli_flags`,
+`tools`): no shell, file tools confined to its folder and the reference folder, no
+CLAUDE.md, plugins, hooks or MCP servers, and API credentials stripped from its
+environment.
+
+**Running it**: the `studio` step in `ops/config.yaml` (automatic, right after
+`score`, `skip_when_busy` so a long session sits a run out instead of holding the
+others back, along with the steps its own run still has to come behind it,
+`JobManager.queued_behind`) acts on the editor's requests and starts a new piece when
+`auto.max_new_per_day` (in any 24 hours) and `auto.min_hours_between` allow and no
+piece waits at the checkpoint; `studio_now` and `studio_resume` are the studio
+page's manual buttons. One studio run at a time (`studio_pieces/.studio.lock`). A
+killed run leaves the piece `interrupted`; Resume carries on in the same session.
+Tables: `studio_pieces`, `studio_runs`, `studio_topics`.
 
 ## Claude Code CLI
 

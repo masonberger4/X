@@ -177,6 +177,31 @@ class JobManager:
             held = {name for j in self._live for name in j.lock_names}
         return {s.name for s in self.steps() if s.lock_name in held}
 
+    def queued_behind(self, slow: set[str]) -> dict[str, str]:
+        """Busy steps that nothing is running: every run holding their lock has them still to
+        come behind its live step, and that live step is one of `slow` (the skip_when_busy
+        steps). {step name: the live step it waits behind}. That run gets to them when the
+        slow step ends, so an automatic run time can leave them out instead of waiting for
+        them (panel/autorun.py). A step whose lock a live step holds is never one of them."""
+        out: dict[str, str] = {}
+        with self._mutex:
+            live = list(self._live)
+            for step in self.steps():
+                ahead: list[str] = []
+                for job in live:
+                    if step.lock_name not in job.lock_names:
+                        continue
+                    active = next((s for s in job.plan if s.name == job.active_step), None)
+                    if active is None or active.name not in slow:
+                        break  # between steps, or behind a step that ends soon: busy
+                    if active.lock_name == step.lock_name:
+                        break  # the live step itself holds the lock
+                    ahead.append(active.name)
+                else:
+                    if ahead:
+                        out[step.name] = ahead[0]
+        return out
+
     def history(self) -> list[Job]:
         with self._mutex:
             return list(self._live) + self._history

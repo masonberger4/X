@@ -43,14 +43,17 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_app", "run_desktop", "pipeline_cli", "run_publish", "run_feedback", "run_ops", "run_verify"]
+py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_app", "run_desktop", "pipeline_cli", "run_publish", "run_feedback", "run_ops", "run_verify", "run_studio"]
 
 [tool.setuptools.packages.find]
-include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "panel*", "publish*", "feedback*", "ops*", "verify*", "swarm*"]
+include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "panel*", "publish*", "feedback*", "ops*", "verify*", "swarm*", "studio*"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# The studio's reference pieces are kept exactly as they were posted and handed off,
+# Python snippets in their Markdown included: never lint or reformat them.
+extend-exclude = ["studio/exemplars"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
@@ -60,6 +63,8 @@ select = ["E", "F", "I", "B", "UP"]
 "score/rater.py" = ["E501"]   # same: the rater's prompt text
 "verify/verifier.py" = ["E501"]  # same: the verifier's prompt text
 "filter/link.py" = ["E501"]  # same: the story linker's prompt text
+"studio/render.py" = ["E501"]  # the layout checker is JavaScript inside a string
+"studio/safety.py" = ["E501"]  # the advice patterns read best one per line
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

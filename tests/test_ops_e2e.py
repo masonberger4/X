@@ -305,6 +305,9 @@ def test_default_ops_config_never_contains_live():
     assert [s["name"] for s in cfg["steps"]] == [
         "ingest",
         "score",
+        "studio",
+        "studio_now",
+        "studio_resume",
         "draft",
         "draft_retry",
         "verify",
@@ -326,14 +329,56 @@ def test_default_ops_config_never_contains_live():
         assert "--live" not in step["argv"]
 
 
+def test_the_studio_steps_share_one_lock_and_only_the_plain_one_runs_on_its_own():
+    steps = {s["name"]: s for s in load_ops_config()["steps"]}
+    studio = ("studio", "studio_now", "studio_resume")
+    for name in studio:
+        # one session at a time, whichever button or timer started it; a session is often
+        # an hour (each stage has its own limit in studio/config.yaml), and it never stops
+        # the steps after it
+        assert steps[name]["lock"] == "studio" and steps[name]["timeout_seconds"] == 0
+        assert steps[name]["enabled"] is True and steps[name]["required"] is False
+        assert steps[name]["argv"][:2] == ["python", "run_studio.py"]
+    assert steps["studio"]["argv"] == ["python", "run_studio.py"]
+    assert not steps["studio"].get("manual")  # in a plain run and the automatic runs
+    # a session still going at the next run time sits that run out instead of holding it
+    assert steps["studio"]["skip_when_busy"] is True
+    # the studio page's buttons: only when named, never on a timer
+    assert steps["studio_now"]["argv"][2:] == ["--now"]
+    assert steps["studio_resume"]["argv"][2:] == ["--resume-only"]
+    for name in ("studio_now", "studio_resume"):
+        assert steps[name]["manual"] is True and not steps[name].get("skip_when_busy")
+    # each step's flags are ones run_studio.py accepts (it refuses abbreviations)
+    import run_studio
+
+    assert run_studio._parse_args(steps["studio_now"]["argv"][2:]).now is True
+    assert run_studio._parse_args(steps["studio_resume"]["argv"][2:]).resume_only is True
+    plain = run_studio._parse_args(steps["studio"]["argv"][2:])
+    assert not plain.now and not plain.resume_only
+
+
 def test_default_config_dry_run_lists_real_clis(capsys):
     """With the default config, --dry-run resolves every enabled step to an existing CLI."""
     rc = run_ops.main(["run", "--dry-run"])
     out = capsys.readouterr().out
     assert rc == 0
+    names = []
     for line in out.splitlines():
         name, reason = line.split()[:2]
+        names.append(name)
         if name in ("ingest", "score", "draft"):
             assert reason == "dry" and sys.executable in line
-        if name in ("feedback", "evolve"):
+        if name in ("feedback", "evolve", "studio"):
             assert reason == "dry" and sys.executable in line  # on, and the CLI exists
+    # a plain run takes the studio step in its place and leaves the manual ones out
+    assert names.index("score") < names.index("studio") < names.index("draft")
+    assert "studio_now" not in names and "studio_resume" not in names
+    assert "draft_retry" not in names
+
+
+def test_a_manual_studio_step_runs_when_named(capsys):
+    assert run_ops.main(["run", "--dry-run", "--only", "studio_now,studio_resume"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert [ln.split()[:2] for ln in lines] == [["studio_now", "dry"], ["studio_resume", "dry"]]
+    assert lines[0].endswith("run_studio.py --now")
+    assert lines[1].endswith("run_studio.py --resume-only")

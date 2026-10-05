@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Studio{% endblock %}
+{% block content %}
+<h1>Studio</h1>
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+<p class="meta">Each piece is one {{ cfg.model }} session at {{ cfg.effort }} effort: it researches
+the topic, writes the fact base, the post and the cards, fact-checks itself through a fresh
+sub-agent, and lands in the <a href="/queue">pending queue</a> with its cards. Nothing posts
+from here. <a href="/studio/playbook">The playbook</a> every session reads.</p>
+
+{% with buttons=[
+     {"label": "Start a piece now", "steps": [step_new], "title": "a queued topic first, else the session picks today's story from the feeds or its own news scan"},
+     {"label": "Act on requests", "steps": [step_resume], "title": "continue, revise or resume the pieces you asked for below"}],
+   back="/studio" %}
+{% include "_run.html" %}
+{% endwith %}
+
+<h2>Write a piece</h2>
+<form method="post" action="/studio/topics">
+  <p><input name="topic" placeholder="a topic, a company, a question (e.g. next-gen CTLA-4, Merck's KRAS G12D deal)" style="width:100%" aria-label="topic"></p>
+  <p>
+    <label>Story id from the <a href="/feed">feed</a> (optional) <input name="story" size="6" inputmode="numeric"></label>
+    <label>Angle
+      <select name="angle">
+        <option value="">the session chooses</option>
+        {% for key, a in angles.items() %}<option value="{{ key }}">{{ a.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label><input type="checkbox" name="checkpoint" value="1" {% if cfg.manual.checkpoint %}checked{% endif %}> stop after research so I can read the fact base</label>
+  </p>
+  <p><button type="submit">Write it</button></p>
+</form>
+
+{% if topics %}
+<h2>Queued topics</h2>
+<table>
+  <tr><th>Queued</th><th>Topic</th><th>Angle</th><th></th></tr>
+  {% for t in topics %}
+  <tr><td class="meta">{{ t.created_at|localtime }}</td>
+      <td>{{ t.topic or ("story " ~ t.cluster_id) }}{% if t.topic and t.cluster_id %} <span class="meta">(story {{ t.cluster_id }})</span>{% endif %}</td>
+      <td>{{ t.angle or "-" }}</td>
+      <td><form method="post" action="/studio/topics/{{ t.id }}/drop" class="inline"><button class="link">drop</button></form></td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Pieces</h2>
+<p class="meta">Automatic pieces: {% if cfg.auto.enabled %}on, at most {{ cfg.auto.max_new_per_day }} in any 24 hours and {{ cfg.auto.min_hours_between }}h apart, {% if cfg.auto.checkpoint %}stopping{% else %}not stopping{% endif %} after research{% else %}off{% endif %} (studio/config.yaml).</p>
+{% if pieces %}
+<table>
+  <tr><th>#</th><th>Started</th><th>Stage</th><th>Piece</th><th>Angle</th><th>Draft</th></tr>
+  {% for p in pieces %}
+  <tr>
+    <td><a href="/studio/{{ p.id }}">{{ p.id }}</a></td>
+    <td class="meta">{{ p.created_at|localtime }}<br>{{ p.origin }}</td>
+    <td>{% if p.stage == "ready" %}<span class="pill ok">ready</span>
+        {% elif p.stage in ("failed", "interrupted") %}<span class="pill fail">{{ p.stage }}</span>
+        {% elif p.stage == "research_ready" %}<span class="pill warn">read the research</span>
+        {% elif p.stage == "discarded" %}<span class="pill skip">discarded</span>
+        {% else %}<span class="pill warn">{{ p.stage }}</span>{% endif %}
+        {% if p.request %}<br><span class="meta">{{ p.request }} requested</span>{% endif %}</td>
+    <td><a href="/studio/{{ p.id }}">{{ p.label }}</a>{% if p.error %}<br><span class="meta over">{{ p.error[:160] }}</span>{% endif %}</td>
+    <td>{{ p.angle or "-" }}{% if p.shape %}<br><span class="meta">{{ p.shape }}</span>{% endif %}</td>
+    <td>{% if p.draft_id %}<a href="/drafts/{{ p.draft_id }}">{{ p.draft_id }}</a>{% else %}-{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>No pieces yet.</p>
+{% endif %}
+{% endblock %}
