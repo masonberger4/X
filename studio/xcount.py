@@ -2,9 +2,10 @@
 
 X weights text, it does not count code points: most Latin, Greek and Cyrillic text and
 common punctuation count 1, everything else 2, an emoji (including a skin-tone or
-ZWJ sequence) counts 2 as a whole, and a URL counts 23 whatever its length. This follows
-twitter-text's v3 configuration closely enough to keep a post under its limit; the
-studio leaves headroom (studio/config.yaml `x.headroom`) for the cases it misses.
+ZWJ sequence, a flag or a keycap) counts 2 as a whole, and a URL counts 23 whatever its
+length. This follows twitter-text's v3 configuration closely enough to keep a post under
+its limit; the studio leaves headroom (studio/config.yaml `x.headroom`) for the cases it
+misses.
 """
 
 from __future__ import annotations
@@ -39,6 +40,18 @@ def _is_modifier(cp: int) -> bool:
     return cp in (_VS16, _KEYCAP) or 0x1F3FB <= cp <= 0x1F3FF or 0xE0020 <= cp <= 0xE007F
 
 
+def _is_regional(cp: int) -> bool:
+    return 0x1F1E6 <= cp <= 0x1F1FF
+
+
+def _starts_emoji(cps: list[int], i: int) -> bool:
+    if _is_emoji_base(cps[i]):
+        return True
+    # A keycap (1️⃣, #️⃣) or a character asking for emoji presentation (©️) is one emoji too.
+    nxt = cps[i + 1] if i + 1 < len(cps) else 0
+    return nxt in (_VS16, _KEYCAP) and not _is_modifier(cps[i]) and cps[i] != _ZWJ
+
+
 def x_length(text: str) -> int:
     """Weighted length of one post as X counts it."""
     text = unicodedata.normalize("NFC", text or "")
@@ -49,16 +62,16 @@ def x_length(text: str) -> int:
     i = 0
     while i < len(cps):
         cp = cps[i]
-        if _is_emoji_base(cp):
+        if _starts_emoji(cps, i):
             # One emoji: the base plus any modifiers and ZWJ-joined parts count 2 in all.
             i += 1
+            if _is_regional(cp) and i < len(cps) and _is_regional(cps[i]):
+                i += 1  # a flag is exactly two regional indicators; the next pair is a new flag
             while i < len(cps):
                 if _is_modifier(cps[i]):
                     i += 1
                 elif cps[i] == _ZWJ and i + 1 < len(cps):
                     i += 2
-                elif 0x1F1E6 <= cp <= 0x1F1FF and 0x1F1E6 <= cps[i] <= 0x1F1FF:
-                    i += 1  # the second half of a flag
                 else:
                     break
             total += 2

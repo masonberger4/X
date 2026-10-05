@@ -255,7 +255,9 @@ def _variety_block(b: Brief) -> str:
     if openings:
         lines.append("Openings of recent pieces (do not echo their wording or rhythm):")
         lines += [f'- "{" ".join(o.split())[:200]}"' for o in openings]
-    return "\n".join(lines) if lines else "(no recent pieces)"
+    if lines:
+        return "\n".join(lines)
+    return "(nothing recent to vary from)" if b.recent else "(no recent pieces)"
 
 
 def write_prompt(b: Brief, note: str = "") -> str:
@@ -283,9 +285,11 @@ WRITE
    text of every post and every card's visible text (not your fact base or your notes)
    and tell it to check every claim, number, date, name, title, stage and handle against
    primary sources on the web, independently, and to report each problem with the source
-   that shows it. Fix every real problem. Write {FACTCHECK_FILE}: a table of every
-   finding (post or card, what it said, the problem, the source, what you changed or why
-   you kept it), then the checks that passed, then anything still unverified.
+   that shows it. Run it in the foreground and wait for its report: the stage is not
+   done while it is still checking. Fix every real problem. Write {FACTCHECK_FILE}: a
+   table of every finding (post or card, what it said, the problem, the source, what you
+   changed or why you kept it), then the checks that passed, then anything still
+   unverified.
 4. {PIECE_FILE}, exactly this shape:
 {_piece_schema(b)}
    "shape" is one of {", ".join(SHAPES)}; "hook_style" one of the listed styles.
@@ -354,9 +358,10 @@ The editor read the finished piece and asks for changes:
 {note.strip()}
 
 Make them. Update the posts, the cards and {PIECE_FILE}; update {FACTBASE_FILE} if the
-facts change. Run the cold fact-check again (a fresh sub-agent, as before) on everything
-new or changed, and add its findings to {FACTCHECK_FILE}. End your turn with a short
-summary of what you changed. The app checks the piece again afterwards."""
+facts change. Run the cold fact-check again (a fresh sub-agent in the foreground, as
+before) on everything new or changed, and add its findings to {FACTCHECK_FILE}. End
+your turn with a short summary of what you changed. The app checks the piece again
+afterwards."""
 
 
 def resume_prompt(stage: str, reason: str, original: str) -> str:

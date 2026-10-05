@@ -13,6 +13,13 @@ card can never fetch anything and rendering is the same offline:
    other text. Those reports go back to the session to fix.
 2. `--screenshot` of the original page at the card's size and 2x scale.
 
+Both copies open with a content policy (`CONTENT_POLICY`) that lets a card use its own
+inline styles and SVG, data: images and the house fonts, and nothing else: no frame,
+object, script, stylesheet or image from the web or the disk. The browser can read any
+file the app can, and the session opens the pictures, so without it a card could draw
+another file (a .env, a key) into its own picture. A card that tries to navigate with a
+meta refresh is refused before the browser starts.
+
 The house fonts (Inter, IBM Plex Mono; SIL Open Font License) ship in studio/fonts and are
 injected as @font-face rules, so a card names them by family and needs nothing external.
 """
@@ -24,6 +31,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -64,6 +72,20 @@ SIZE_META = re.compile(
     r"""<meta\s+name=["']card-size["']\s+content=["'](\d{3,4})\s*x\s*(\d{3,4})["']""", re.I
 )
 REPORT_ID = "__studio_layout_report"
+# What a card may load. The checker script runs by its nonce; a card's own scripts never do.
+CONTENT_POLICY = (
+    "default-src 'none'; style-src 'unsafe-inline'; font-src file: data:; img-src data:; "
+    "script-src 'nonce-{nonce}'"
+)
+# Whatever may come before the doctype without putting the page in quirks mode: the
+# injected head goes after it.
+_PROLOGUE = re.compile(r"\A\ufeff?(?:\s+|<!--.*?-->|<\?[^>]*>)*(?:<!doctype[^>]*>)?", re.I | re.S)
+# A meta refresh navigates the page (to another file, say) without any script.
+_REFRESH = re.compile(r"""http-equiv\s*=\s*["']?\s*refresh""", re.I)
+_EXTERNAL = (
+    re.compile(r"""(?:src|href)\s*=\s*["']?\s*(?:(?:https?|file):)?//""", re.I),
+    re.compile(r"""url\(\s*['"]?\s*(?:(?:https?|file):)?//""", re.I),
+)
 
 # Candidate browsers in the order they are tried. Windows ships Edge, so the desktop
 # build needs nothing extra; Linux and macOS use whatever Chromium-family browser exists.
@@ -161,28 +183,31 @@ def font_css(font_dir: Path = FONT_DIR) -> str:
     return "\n".join(rules)
 
 
-def _checker_script(size: tuple[int, int]) -> str:
+def _checker_script(size: tuple[int, int], nonce: str) -> str:
     """JS that reports overflowing, off-canvas and overlapping text into a <pre>."""
     w, h = size
     return f"""
-<script>
+<script nonce="{nonce}">
 (async () => {{
   try {{ await document.fonts.ready; }} catch (e) {{}}
   const W = {w}, H = {h}, M = {EDGE_MARGIN};
   const out = [];
   const label = (el) => (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 60);
   const leaves = [];
+  const clippers = [];  // boxes that hide part of what they hold; their text is checked below
   for (const el of document.body.querySelectorAll('*')) {{
-    if (['SCRIPT','STYLE','PRE'].includes(el.tagName) || el.id === '{REPORT_ID}') continue;
+    if (['SCRIPT','STYLE'].includes(el.tagName) || el.id === '{REPORT_ID}') continue;
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden') continue;
     const hasText = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
     if (hasText) leaves.push(el);
     const clips = ['hidden','clip','scroll','auto'].includes(cs.overflowX) ||
                   ['hidden','clip','scroll','auto'].includes(cs.overflowY);
-    if (clips && hasText && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)) {{
-      out.push('text is cut off in its box: "' + label(el) + '"');
-    }}
+    const hides = el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+    // An <svg> cuts its drawing at its own box without ever scrolling, so it always counts.
+    const svgBox = el instanceof SVGSVGElement && !el.ownerSVGElement;
+    if (clips && hides && hasText) out.push('text is cut off in its box: "' + label(el) + '"');
+    else if (clips && (hides || svgBox)) clippers.push(el);
     if (cs.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth + 1) {{
       out.push('text is truncated with an ellipsis: "' + label(el) + '"');
     }}
@@ -190,15 +215,32 @@ def _checker_script(size: tuple[int, int]) -> str:
   const rects = [];
   for (const el of leaves) {{
     const range = document.createRange();
+    // A text rect spans the font's whole ascent and descent; under a tight line-height
+    // (a hero headline) that reaches well past the line the glyphs sit in, so it is
+    // trimmed to the line box.
+    const lh = parseFloat(getComputedStyle(el).lineHeight);
     for (const n of el.childNodes) {{
       if (n.nodeType !== 3 || !n.textContent.trim()) continue;
       range.selectNodeContents(n);
-      for (const r of range.getClientRects()) {{
-        if (r.width < 1 || r.height < 1) continue;
+      for (const box of range.getClientRects()) {{
+        if (box.width < 1 || box.height < 1) continue;
+        const trim = lh > 0 && lh < box.height ? (box.height - lh) / 2 : 0;
+        const r = {{left: box.left, right: box.right, top: box.top + trim, bottom: box.bottom - trim}};
         rects.push({{el, r}});
         if (r.left < M - 0.5 || r.top < M - 0.5 || r.right > W - M + 0.5 || r.bottom > H - M + 0.5) {{
           out.push('text runs off the card or within ' + M + 'px of its edge: "' + label(el) + '"');
         }}
+      }}
+    }}
+  }}
+  for (const box of clippers) {{
+    const b = box.getBoundingClientRect();
+    for (const {{el, r}} of rects) {{
+      // Above the capitals a line is empty, so up to a fifth of it may sit past the box.
+      const v = Math.max(2, (r.bottom - r.top) / 5);
+      if (box.contains(el) && (r.left < b.left - 2 || r.right > b.right + 2 ||
+                               r.top < b.top - v || r.bottom > b.bottom + v)) {{
+        out.push('text is cut off in its box: "' + label(el) + '"');
       }}
     }}
   }}
@@ -226,11 +268,19 @@ def _checker_script(size: tuple[int, int]) -> str:
 """
 
 
-def _with_fonts(page: str, css: str) -> str:
-    style = f"<style>{css}</style>"
-    if re.search(r"<head[^>]*>", page, re.I):
-        return re.sub(r"(<head[^>]*>)", lambda m: m.group(1) + style, page, count=1, flags=re.I)
-    return style + page
+def _with_head(page: str, css: str, nonce: str) -> str:
+    """The page with the charset, the content policy and the house fonts first in its head:
+    straight after the doctype, ahead of everything the card wrote, since a policy only
+    covers what comes after it."""
+    policy = CONTENT_POLICY.format(nonce=nonce)
+    head = (
+        '<meta charset="utf-8">'
+        f'<meta http-equiv="Content-Security-Policy" content="{policy}">'
+        f"<style>{css}</style>"
+    )
+    m = _PROLOGUE.match(page)
+    end = m.end() if m else 0
+    return page[:end] + head + page[end:]
 
 
 def _with_checker(page: str, script: str) -> str:
@@ -313,24 +363,32 @@ def render_card(
     html_path = Path(html_path).resolve()
     png_path = Path(png_path).resolve()
     page = html_path.read_text(encoding="utf-8", errors="replace")
+    if _REFRESH.search(html.unescape(page)):
+        raise RenderError(
+            'the card has a <meta http-equiv="refresh">; a card never navigates, so remove it'
+        )
     size = card_size(page)
     css = font_css()
+    nonce = secrets.token_hex(16)
     problems: list[str] = []
-    if re.search(r"""(?:src|href)\s*=\s*["']\s*(?:https?:)?//""", page, re.I) or re.search(
-        r"url\(\s*['\"]?\s*(?:https?:)?//", page, re.I
-    ):
+    if any(rx.search(page) for rx in _EXTERNAL):
         problems.append(
-            "the card loads something from the web (a font, image or script); cards are "
-            "self-contained and the renderer blocks the network, so inline it or drop it"
+            "the card loads something from the web or another file (a font, image or "
+            "script); cards are self-contained and the renderer blocks both, so inline it "
+            "or drop it"
         )
     png_path.parent.mkdir(parents=True, exist_ok=True)
+    # A draw that fails must not leave the last round's picture looking like this one.
+    png_path.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="studio-card-") as tmp:
         tmpdir = Path(tmp)
-        page_with_fonts = _with_fonts(page, css)
+        page_with_head = _with_head(page, css, nonce)
         shot_page = tmpdir / "card.html"
-        shot_page.write_text(page_with_fonts, encoding="utf-8")
+        shot_page.write_text(page_with_head, encoding="utf-8")
         check_page = tmpdir / "check.html"
-        check_page.write_text(_with_checker(page_with_fonts, _checker_script(size)), "utf-8")
+        check_page.write_text(
+            _with_checker(page_with_head, _checker_script(size, nonce)), encoding="utf-8"
+        )
         argv = browser_argv(browser, size, extra_args) + [f"--user-data-dir={tmpdir / 'profile'}"]
         dumped = _run([*argv, "--dump-dom", check_page.as_uri()], timeout, tmp)
         report = parse_report(dumped.stdout or "")

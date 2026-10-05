@@ -109,9 +109,11 @@ def offer(
     avoid: int,
     requested: str = "",
 ) -> AngleOffer:
-    """The angles the session may choose from. `recent_angles` is newest first; the first
-    `avoid` of them are held back. A requested angle is the only one offered. If holding
-    back would leave nothing (a tiny library), everything is offered."""
+    """The angles the session may choose from. `recent_angles` is newest first; the newest
+    `avoid` distinct angles the library knows are held back (a repeat or an unknown key
+    does not use up a place, so at least the last `avoid` pieces' angles are always held
+    back). A requested angle is the only one offered. If holding back would leave nothing
+    (a tiny library), everything is offered."""
     if requested:
         if requested not in library:
             raise ValueError(f"unknown angle {requested!r}")

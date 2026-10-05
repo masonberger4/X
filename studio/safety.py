@@ -13,35 +13,63 @@ from __future__ import annotations
 import re
 
 # A directional call, a promise of returns or an instruction to trade. Describing a
-# thesis, a valuation, a scenario or a published analyst view is fine.
+# thesis, a valuation, a scenario, a deal or a published analyst view is fine, so a trading
+# verb is advice only as an instruction: at the start of a sentence, line or bullet, or
+# after "I would", "should", "time to" and the like. "AstraZeneca agreed to buy shares",
+# "insiders hold shares" and "$MRK to buy $VRNA" are the news, not a call.
+_ADVICE_LEAD = (
+    r"(?:(?:^|[.!?\u2022:;)/\u2013\u2014-])\s*|\b(?:should|must|would|i[\u2019']d|"
+    r"i[\u2019']ll|i\s+will|i[\u2019']m|i\s+am|we[\u2019']d|we[\u2019']re|time\s+to|just|"
+    r"now|still|definitely|gonna)\s+)"
+)
+_TRADE = r"(?:buy|sell|short|accumulate|dump|hold|load\s+up\s+on)"
 _INVESTMENT = (
-    r"\b(?:buy|sell|short|accumulate|dump|hold|load up on)\s+(?:the\s+)?(?:stock|shares|calls|puts)\b",
-    r"\b(?:buy|sell|short|accumulate|dump)\s+\$[A-Za-z]{1,5}\b",
-    r"\b(?:strong|clear|obvious|easy)\s+(?:buy|sell|short)\b",
+    _ADVICE_LEAD + _TRADE + r"\s+(?:the\s+)?(?:stock|shares|calls|puts)\b",
+    _ADVICE_LEAD + r"(?:buy|sell|short|accumulate|dump)\s+\$[A-Za-z]{1,5}\b",
+    r"\b(?:strong|clear|obvious|easy)\s+(?:buy|sell|short)(?![\w-])",
     r"\b(?:you|investors|traders|everyone)\s+should\s+(?:buy|sell|short|hold|avoid|add|trim|own)\b",
     r"\b(?:my|our)\s+price\s+target\b",
-    r"\bwill\s+(?:double|triple|10x|moon)\b",
+    # A price call, not a forecast for a market ("the PD-1 market will double by 2030").
+    r"(?:\b(?:stock|shares|this\s+(?:one|name|stock))|\$[A-Za-z]{1,5}\b)\s+(?:will|could|can|"
+    r"is\s+going\s+to|is\s+set\s+to)\s+(?:double|triple|10x|moon)\b",
     r"\bto\s+the\s+moon\b",
     r"\b(?:easy|free)\s+money\b",
     r"\bguaranteed\s+(?:return|gain|profit|win)s?\b",
-    r"\bcan'?t\s+lose\b",
-    r"\bload\s+up\b",
+    r"\bcan[\u2019']?t\s+lose\b",
+    # "Time to load up", not "viral load up 20%".
+    r"\btime\s+to\s+load\s+up\b|\bload(?:ing)?\s+up\s+(?:on|here|now|the\s+truck)\b",
     r"\bnot\s+too\s+late\s+to\s+(?:buy|get\s+in)\b",
 )
 # Telling a reader what to do about their own care.
-_MEDICAL = (
-    r"\b(?:ask|talk\s+to)\s+your\s+(?:doctor|oncologist|physician)\b",
-    r"\b(?:discuss|consult)(?:\s+(?:this|it))?\s+with\s+your\s+(?:doctor|oncologist|physician)\b",
-    r"\byou\s+should\s+(?:take|try|switch|stop|start|ask\s+for)\b",
-    r"\bwe\s+recommend\b",
-    r"\bif\s+you\s+(?:have|are\s+being\s+treated\s+for)\s+[a-z ]{3,40}(?:,|\s)\s*(?:ask|try|consider|switch)\b",
+_CARE = (
+    r"(?:drug|medicine|medication|treatment|therapy|dose|dosing|trial|test|testing|biopsy|"
+    r"scan|screening|combination|combo|regimen|chemo(?:therapy)?|immunotherapy|"
+    r"[a-z]+(?:mab|cel|nib|lib|parib))s?\b"
 )
-_INVESTMENT_RE = re.compile("|".join(_INVESTMENT), re.I)
+_DISEASE = (
+    r"(?:cancer|lymphoma|leuka?emia|myeloma|melanoma|carcinoma|sarcoma|glioma|glioblastoma|"
+    r"tumou?rs?|nsclc|sclc|disease|[a-z]+oma)\b"
+)
+_MEDICAL = (
+    r"\b(?:ask|talk\s+(?:to|with)|speak\s+(?:to|with)|check\s+with)\s+your\s+(?:doctor|oncologist|physician)s?\b",
+    r"\b(?:discuss|consult)(?:\s+(?:this|it))?(?:\s+with)?\s+your\s+(?:doctor|oncologist|physician)s?\b",
+    # "You should try the trial", not "you should take those forecasts with a grain of salt".
+    r"\byou\s+should\s+(?:take|try|switch\s+to|switch|stop|start|ask\s+for|get|request)\s+"
+    r"(?:[\w-]+\s+){0,3}?" + _CARE,
+    r"\bwe\s+recommend\b",
+    # "If you have melanoma, ask about a trial", not "if you have been following, consider".
+    r"\bif\s+you\s+(?:have|are\s+being\s+treated\s+for)\s+(?:[\w-]+\s+){0,4}?"
+    + _DISEASE
+    + r"[^.!?\n]{0,60}?\b(?:ask|try|consider|switch|talk|enrol)",
+)
+_INVESTMENT_RE = re.compile("|".join(_INVESTMENT), re.I | re.M)
 _MEDICAL_RE = re.compile("|".join(_MEDICAL), re.I)
 _URL_RE = re.compile(r"https?://\S+", re.I)
-# A bare domain is a link to X's parser too (example.com/path, www.example.com).
+# A bare domain is a link to X's parser too (example.com/path, www.example.com, bit.ly/x),
+# also when a sentence ends on it (example.com.). The domain needs a letter, so a Hong Kong
+# code like 9926.HK is not one; an exchange suffix like BAYN.DE is, and X links it.
 _BARE_DOMAIN_RE = re.compile(
-    r"(?<![\w@./$-])(?:www\.[^\s]+|(?=[a-z0-9-]*[a-z])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|gov|edu|co|ai|bio|health|info|us|uk|eu|de|fr|ch|cn|jp|hk)(?:/[^\s]*)?)(?![\w.-])",
+    r"(?<![\w@./$-])(?:www\.[^\s]+|(?=[a-z0-9-]*[a-z])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|gov|edu|co|ai|bio|health|info|us|uk|eu|de|fr|ch|cn|jp|hk|ly|me|tv|news|ca|au|in|it|es|nl|se|dk|fi|be|at|kr|sg|nz|br|app|dev|xyz|link|site|online|tech|page|gl|fm|science|care|cc)(?:/[^\s]*)?)(?![\w-]|\.\w)",
     re.I,
 )
 _PRICE_TARGET_RE = re.compile(r"\bprice\s+targets?\b", re.I)
@@ -56,7 +84,8 @@ def blocking_problems(text: str, label: str) -> list[str]:
     out: list[str] = []
     m = _INVESTMENT_RE.search(text)
     if m:
-        out.append(f"{label} reads as investment advice ({m.group(0)!r}); describe, never advise")
+        words = m.group(0).lstrip(".!?\u2022:;)/\u2013\u2014- \t\n")
+        out.append(f"{label} reads as investment advice ({words!r}); describe, never advise")
     m = _MEDICAL_RE.search(text)
     if m:
         out.append(f"{label} reads as medical advice ({m.group(0)!r}); describe evidence only")

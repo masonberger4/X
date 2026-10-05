@@ -149,8 +149,10 @@ def build_brief(
         hooks_to_avoid=hooks,
         recent=recent_pieces,
         playbook=playbook,
-        long_post_max=int(x["long_post_max"]),
-        thread_post_max=int(x["thread_post_max"]),
+        # The limits the checker enforces (qa.check_text keeps `headroom` under X's own),
+        # so a post written to the number it is given is never sent back as too long.
+        long_post_max=int(x["long_post_max"]) - int(x.get("headroom") or 0),
+        thread_post_max=int(x["thread_post_max"]) - int(x.get("headroom") or 0),
         short_post_max=int(x["short_post_max"]),
         max_cards=int(x["max_cards_total"]),
     )

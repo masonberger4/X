@@ -35,9 +35,10 @@ continues you.
    cards as HTML. Then run a cold fact-check: start a fresh sub-agent (the Agent
    tool) that has not seen your research, give it only the post files and the card
    HTML, and tell it to check every claim, number, date, name and handle against
-   primary sources on the web and report each problem with the source. Fix
-   everything it finds that is real and log every finding in `factcheck.md`, real or
-   not, with what you changed.
+   primary sources on the web and report each problem with the source. Run it in the
+   foreground and wait for its report: the stage is not finished while it is still
+   checking. Fix everything it finds that is real and log every finding in
+   `factcheck.md`, real or not, with what you changed.
 3. Polish. The app renders your cards, counts characters the way X does and runs a
    few safety checks, then hands you the report. Fix every problem it lists.
 

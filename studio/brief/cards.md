@@ -18,9 +18,14 @@ are there for their layouts only.
   other card is drawn at 1080 x 1350.
 - Size the page to the card: `html, body { margin: 0; width: 1080px; height: 1350px; }`
   and lay out inside it. Nothing may make the page larger than the card.
+- Fill the canvas. A card with two rows of numbers floating in a tall empty panel reads
+  as unfinished. When there is less to show, make it bigger (a hero number, larger type,
+  stat tiles) or add what helps the reading (the caveat, a "why it matters" line), and
+  let the panel end where its content ends. The app reports any empty band taller than
+  a quarter of the card.
 - You do not render the cards yourself. When you finish writing, the app draws every
   card (2x PNG) and checks it: text cut off in its box, text overlapping other text,
-  text off the canvas or within 20 px of an edge. It sends you the report and the
+  text off the canvas or within 20 px of an edge, and large empty bands. It sends you the report and the
   PNG paths; open the PNGs with Read and look at them before you call a card done.
 
 ## Type
@@ -88,6 +93,28 @@ bar tips in the text colours.
   decoration.
 - market_growth / revenue_at_risk: two to three measures, latest vs projection, with
   the change and the source on each row.
+- prior_data: the earlier data the readout will be judged against (the phase 2, the
+  competitor, the standard of care) as rows of the one or two numbers that set the bar,
+  each with its trial name and n.
+- read_through_map: the failed or approved program in the centre, the exposed programs
+  around it, each tagged with the shared reason (same target, same design, same
+  population) and how exposed it is.
+- label_vs_expectations: two columns, what the market expected and what the label or the
+  letter says (population, line, boxed warning, post-marketing requirement), with the
+  differences marked.
+- replacement_pipeline: the candidates that could fill the hole as rows with stage, first
+  possible launch year and a peak-sales range where one is published, against the year the
+  exclusivity ends.
+- where_it_plays: the indications or lines of therapy where the mechanism fits, sized by
+  patients or market, with the reason it fits (or does not) on each row.
+- the_overlooked_number: one big number the consensus misses, the number everyone quotes
+  beside it for contrast, and one line on why the first one matters more.
+- signposts: dated events that would move the debate, each marked as bull or bear
+  evidence, on a short timeline or as a dated list.
+- watchlist_schedule: the sessions that matter at the meeting, by day and time, with the
+  presenter, the abstract or session number and the bar for each.
+- bar_vs_result: the bar that was set beforehand (quoting the earlier piece or the
+  guidance) beside what came out, row by row, with met, missed or mixed on each.
 
 ## Accuracy on the card
 Every number on a card is in the fact base with its source. Estimates say so on the

@@ -77,14 +77,21 @@ def _str(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
 
+def _items(value: Any) -> list[Any]:
+    """A field that should be a JSON list: one string is one item, anything else none."""
+    if isinstance(value, list):
+        return value
+    return [value] if isinstance(value, str) and value.strip() else []
+
+
 def _inside(root: Path, rel: str) -> Path | None:
     """`rel` resolved under `root`, or None when it points outside (or is absolute)."""
     if not rel or Path(rel).is_absolute():
         return None
-    path = (root / rel).resolve()
     try:
+        path = (root / rel).resolve()
         path.relative_to(root.resolve())
-    except ValueError:
+    except (OSError, ValueError):  # outside, or not a path at all (a NUL byte)
         return None
     return path
 
@@ -127,7 +134,11 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
         if not f.is_file():
             problems.append(f"post {i} file {rel} does not exist")
             continue
-        text = f.read_text(encoding="utf-8-sig").strip()
+        try:
+            text = f.read_text(encoding="utf-8-sig").strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            problems.append(f"post {i} file {rel} cannot be read as UTF-8 text ({exc})")
+            continue
         if not text:
             problems.append(f"post {i} file {rel} is empty")
             continue
@@ -148,9 +159,11 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
         if not f.is_file():
             minor.append(f"card {i} file {c.get('file')} does not exist")
             continue
+        # Missing means post 1; 0 or a negative is kept, so the range check names it (a
+        # session counting from 0 would otherwise hang every card one post too early).
         try:
-            post = int(c.get("post") or 1)
-        except (TypeError, ValueError):
+            post = 1 if c.get("post") in (None, "") else int(c.get("post"))
+        except (TypeError, ValueError, OverflowError):
             post = 1
         piece.cards.append(
             Card(
@@ -161,12 +174,12 @@ def read_piece(workspace: Path) -> tuple[PieceFiles | None, list[str], list[str]
                 kind=_str(c.get("type")),
             )
         )
-    for h in data.get("handles") or []:
+    for h in _items(data.get("handles")):
         if isinstance(h, dict) and _str(h.get("handle")):
             handle = _str(h.get("handle")).lstrip("@").lower()
             piece.handles[handle] = _str(h.get("verified_at"))
-    piece.companies = [c for c in (data.get("companies") or []) if isinstance(c, dict)]
-    piece.recheck = [_str(x) for x in (data.get("recheck_before_posting") or []) if _str(x)]
+    piece.companies = [c for c in _items(data.get("companies")) if isinstance(c, dict)]
+    piece.recheck = [_str(x) for x in _items(data.get("recheck_before_posting")) if _str(x)]
     return piece, problems, minor
 
 
