@@ -13,6 +13,9 @@ from typing import Any
 
 from ops import lock
 from studio import angles as A
+from studio import evidence as E
+from studio import learn as L
+from studio import playbook as PB
 from studio import prompt as P
 from studio import qa
 from studio import render as render_mod
@@ -30,6 +33,7 @@ from studio.settings import (
 log = logging.getLogger(__name__)
 
 LOCK_NAME = ".studio.lock"
+LEARN_LOCK_NAME = ".studio_learn.lock"
 
 _STAGE_OF = {
     S.STAGE_RESEARCHING: "research",
@@ -112,6 +116,7 @@ def build_brief(
     playbook: str,
     today: str,
     tzname: str,
+    evidence: E.Evidence | None = None,
 ) -> P.Brief:
     from timeutil import fmt_date
 
@@ -143,6 +148,21 @@ def build_brief(
     if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
         # Only the research stage chooses a story; later stages have one.
         shortlist = T.fetch_shortlist(cfg["topics"], exclude=S.used_cluster_ids(conn))
+    said, lean = "", None
+    if evidence is not None:
+        said = E.block(evidence, cfg)
+        # The lean draws only among what the variety rules leave on offer, so the two never
+        # pull against each other.
+        last_shapes = [p.shape for p in pieces[:3] if p.shape]
+        worn = last_shapes[0] if len(last_shapes) >= 2 and len(set(last_shapes)) == 1 else ""
+        lean = E.lean_for(
+            evidence,
+            cfg,
+            angles=[a.key for a in offer.angles],
+            shapes=[s for s in A.SHAPES if s != worn],
+            hooks=[h for h in A.HOOK_STYLES if h not in hooks],
+            seed=piece.id,
+        )
     x = cfg["x"]
     return P.Brief(
         piece_id=piece.id,
@@ -158,6 +178,8 @@ def build_brief(
         hooks_to_avoid=hooks,
         recent=recent_pieces,
         playbook=playbook,
+        evidence=said,
+        lean=lean,
         # The limits the checker enforces (qa.check_text keeps `headroom` under X's own),
         # so a post written to the number it is given is never sent back as too long.
         long_post_max=int(x["long_post_max"]) - int(x.get("headroom") or 0),
@@ -196,11 +218,23 @@ def make_context(
     library = A.load_angles()
     playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
     today, tzname = _today()
+    evidence = measure_quietly(conn, cfg)
 
     def brief_for(piece: S.Piece) -> P.Brief:
-        return build_brief(
-            conn, cfg, piece, library=library, playbook=playbook, today=today, tzname=tzname
+        brief = build_brief(
+            conn,
+            cfg,
+            piece,
+            library=library,
+            playbook=playbook,
+            today=today,
+            tzname=tzname,
+            evidence=evidence,
         )
+        if brief.lean is not None and piece.meta.get("lean") != brief.lean.as_dict():
+            # Kept with the piece, so the performance page can show what it was offered.
+            S.update_piece(conn, piece.id, meta={"lean": brief.lean.as_dict()})
+        return brief
 
     max_chars = max(int(cfg["x"]["long_post_max"]), int(cfg["x"]["thread_post_max"]))
 
@@ -223,6 +257,18 @@ def make_context(
         # approved or rejected meanwhile would refuse the result after an hour's work.
         revisable=lambda piece: ingest.revise_blocker(conn, piece),
     )
+
+
+def measure_quietly(conn: sqlite3.Connection, cfg: dict[str, Any]) -> E.Evidence | None:
+    """What X says, for the briefs; None when learning is off or the numbers cannot be read
+    (a piece is never held back by its evidence)."""
+    if not cfg["learn"].get("enabled"):
+        return None
+    try:
+        return E.measure(conn, cfg)
+    except Exception:  # the briefs go out without it rather than not at all
+        log.warning("could not read what X says; the briefs go without it", exc_info=True)
+        return None
 
 
 def mark_stale(conn: sqlite3.Connection) -> list[S.Piece]:
@@ -481,10 +527,102 @@ def _dry_run(
         error="",
     )
     brief = build_brief(
-        conn, cfg, fake, library=library, playbook=playbook, today=today, tzname=tzname
+        conn,
+        cfg,
+        fake,
+        library=library,
+        playbook=playbook,
+        today=today,
+        tzname=tzname,
+        evidence=measure_quietly(conn, cfg),
     )
     print(P.research_prompt(brief))
     return 0
+
+
+# --- learning from X (run_studio.py --learn) ----------------------------------------------
+
+
+def _learn_summary(ev: E.Evidence) -> str:
+    scored = ev.scored
+    return (
+        f"{len(ev.posted)} posted piece(s): {len(scored)} scored, "
+        f"{len(ev.measured) - len(scored)} measured but not yet comparable, "
+        f"{len(ev.waiting)} waiting for numbers"
+    )
+
+
+def learn(*, dry_run: bool = False, force: bool = False) -> int:
+    """Measure the posted pieces against X and, when enough are new to it, rewrite the
+    playbook from the evidence (studio/config.yaml `learn`). Starts no piece. `force`
+    rewrites now whatever the counts; `dry_run` prints the evidence and the rewrite prompt
+    and changes nothing."""
+    cfg = load_studio_config()
+    lcfg = cfg["learn"]
+    if not lcfg.get("enabled"):
+        log.info("learning from X is off (studio/config.yaml learn.enabled)")
+        return 0
+    data_dir = _data_folder()
+    conn = _db_conn()
+    try:
+        ev = E.measure(conn, cfg)
+        said = E.block(ev, cfg)
+        log.info("%s", _learn_summary(ev))
+        edits = E.edits(conn)
+        if dry_run:
+            print(said or "(no studio piece is scored yet)")
+            if lcfg["playbook"] != "off":
+                system, user = L.rewrite_prompt(
+                    PB.current_text(data_dir),
+                    ev.measured,
+                    edits,
+                    evidence=said,
+                    max_words=int(lcfg["max_words"]),
+                )
+                print("\n--- the playbook rewrite's system prompt ---\n" + system)
+                print("\n--- and its user prompt ---\n" + user)
+            return 0
+        if lcfg["playbook"] == "off":
+            log.info("the playbook is not rewritten (learn.playbook: off)")
+            return 0
+        last = S.last_learned(conn)
+        new = L.unseen(ev.measured, last.pieces if last else ())
+        due = force or L.rewrite_due(
+            ev.measured,
+            learned_from=last.pieces if last else (),
+            last_rewrite_at=E.parse_when(last.created_at) if last else None,
+            now=datetime.now(UTC),
+            min_new=int(lcfg["rewrite_min_new"]),
+            min_hours=float(lcfg["rewrite_min_hours"]),
+        )
+        if not due:
+            log.info(
+                "no playbook rewrite: %d scored piece(s) new since the last one (needs %s, "
+                "at most every %sh)",
+                len(new),
+                lcfg["rewrite_min_new"],
+                lcfg["rewrite_min_hours"],
+            )
+            return 0
+        if not ev.scored:
+            log.info("no playbook rewrite: no piece is scored yet")
+            return 0
+        root = workspace_root(data_dir, cfg)
+        root.mkdir(parents=True, exist_ok=True)
+        held = lock.acquire(root / LEARN_LOCK_NAME, trust_os_lock=True)
+        if held is None:
+            log.info("another learning run is in progress; nothing to do")
+            return 0
+        try:
+            outcome = PB.rewrite(
+                conn, cfg, data_dir, ev.measured, edits, evidence=said, root_cfg=_root_config()
+            )
+        finally:
+            held.release()
+        (log.info if outcome.ok else log.error)("%s", outcome.message)
+        return 0 if outcome.ok else 1
+    finally:
+        conn.close()
 
 
 def print_list() -> int:

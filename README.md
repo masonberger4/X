@@ -154,6 +154,8 @@ python run_studio.py --now --no-checkpoint   # a piece now on today's best story
 python run_studio.py --resume-only   # only Continue / Revise / Resume what the studio page asked for
 python run_studio.py --list      # recent pieces and queued topics
 python run_studio.py --dry-run   # print the research prompt the next piece would get
+python run_studio.py --learn     # score posted pieces against X; rewrite the playbook when due
+python run_studio.py --learn-now # the same, rewriting the playbook now
 python run_queue.py             # approval UI alone on localhost:8000
 python run_queue.py --host 0.0.0.0 --port 8080   # bind elsewhere (--reload for development)
 python run_app.py               # control panel: dashboard + sources + runs + the queue
@@ -780,7 +782,42 @@ others back, along with the steps its own run still has to come behind it,
 piece waits at the checkpoint; `studio_now` and `studio_resume` are the studio
 page's manual buttons. One studio run at a time (`studio_pieces/.studio.lock`). A
 killed run leaves the piece `interrupted`; Resume carries on in the same session.
-Tables: `studio_pieces`, `studio_runs`, `studio_topics`.
+Tables: `studio_pieces`, `studio_runs`, `studio_topics`, `studio_playbook_versions`,
+`studio_manual_metrics`.
+
+**Learning from X** (`studio/learn.py`, pure; `studio/evidence.py`, the reads;
+`studio/config.yaml` `learn:`): each posted piece is scored on its first post at
+`horizon_hours` (48) after posting, on the conversation KPI
+(`feedback/models.py:CONVERSATION_WEIGHTS`), from step 4's snapshot or from numbers the
+editor typed in, as (value + smoothing) / (median of every head the account posted in
+the `baseline_days` before it + smoothing); a piece with fewer than
+`min_baseline_posts` before it is measured but not scored. Per angle, shape, hook style
+and card count the page and the prompts show the scored pieces and their mean
+log-relative as "x the median". Every brief then carries a WHAT X SAYS section (the
+counts, the best and worst values and openings, a small-sample caveat under twenty
+pieces) and a **lean**: one Thompson draw per arm (a normal posterior on the log scale,
+prior at the median, `prior_sd`, `post_sd` until ten pieces measure the spread) among the
+angles, shapes and hooks the variety rules leave on offer, seeded by the piece id and kept
+in its meta, so a better value is suggested more often and an untried one still gets
+tried. The **playbook rewrite** (`studio/playbook.py:rewrite`, the loop's one model call,
+`call_rewriter` through `claude_cli.run_claude` with no tools, on `learn.model`/`effort`,
+blank = the writer's) runs once `rewrite_min_new` scored pieces are new to the last
+rewrite and `rewrite_min_hours` have passed; it gets the current playbook, the evidence,
+every measured piece and the editor's hand edits of studio drafts, and must answer with
+JSON whose playbook keeps the required sections and `max_words`. `learn.playbook:
+propose` (shipped) keeps it for the editor to apply, since the numbers mean little before
+20 to 30 pieces; `auto` applies it, `off` never rewrites; a failed call or a rejected reply
+changes nothing. Every playbook ever in use is a row of
+`studio_playbook_versions` (seed, editor, learned, proposal, revert, with the changelog,
+the evidence and the pieces it learned from) and the file sessions read is replaced
+atomically. `run_studio.py --learn` (the automatic `studio_learn` step after `feedback`,
+its own lock) measures and rewrites when due, `--learn-now` (the manual
+`studio_learn_now` step) rewrites now, `--learn --dry-run` prints the evidence and the
+prompt. `/studio/performance` shows the posted pieces, the per-arm table with how often
+the lean suggests each value, the learning state and the playbook history (diff,
+changelog, apply, put back), with forms for typed-in numbers and for the link of a post
+confirmed by hand without one (`publish/store.py:set_head_tweet`, through
+`panel/publishing.py:add_head_link`, replaces only post 1's `manual-` marker).
 
 ## Claude Code CLI
 

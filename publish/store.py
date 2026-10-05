@@ -629,6 +629,34 @@ def record_manual(
     return True
 
 
+def set_head_tweet(conn: sqlite3.Connection, draft_id: int, url: str) -> str:
+    """A draft posted by hand without its link gets it afterwards: post 1's
+    MANUAL_ID_PREFIX marker becomes the X id in `url`, so step 4 can fetch its numbers. Only
+    a marker is replaced, never a real id; the same link again is a no-op. Returns the id;
+    raises ValueError with the reason it cannot."""
+    tid = tweet_id_from_url(url)
+    if tid is None:
+        raise ValueError("that is not a link to a post on X (x.com/<account>/status/<number>)")
+    row = conn.execute(
+        "SELECT id, tweet_id FROM posts WHERE draft_id = ? AND position = 1 AND status = 'posted'"
+        " ORDER BY id LIMIT 1",
+        (draft_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"draft {draft_id} has no posted first post")
+    current = str(row["tweet_id"] or "")
+    if current == tid:
+        return tid
+    if not current.startswith(MANUAL_ID_PREFIX):
+        raise ValueError(f"draft {draft_id}'s first post already has its X id ({current})")
+    taken = conn.execute("SELECT draft_id FROM posts WHERE tweet_id = ? LIMIT 1", (tid,)).fetchone()
+    if taken is not None:
+        raise ValueError(f"post {tid} is already logged, for draft {taken[0]}")
+    conn.execute("UPDATE posts SET tweet_id = ? WHERE id = ?", (tid, row["id"]))
+    conn.commit()
+    return tid
+
+
 def list_posts(conn: sqlite3.Connection, draft_id: int | None = None) -> list[sqlite3.Row]:
     if draft_id is None:
         return conn.execute("SELECT * FROM posts ORDER BY id").fetchall()
