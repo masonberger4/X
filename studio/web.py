@@ -54,7 +54,9 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 _starter: dict[str, Callable[[list[str]], str] | None] = {"start": None}
 
 
-def configure(*, start_steps: Callable[[list[str]], str] | None, queue_templates: Path | None) -> None:
+def configure(
+    *, start_steps: Callable[[list[str]], str] | None, queue_templates: Path | None
+) -> None:
     """Wire the router into the panel: how to start a run, and the shared layout."""
     _starter["start"] = start_steps
     loaders = [FileSystemLoader(str(TEMPLATES_DIR))]
@@ -292,7 +294,9 @@ async def studio_revise(request: Request, piece_id: int, conn: Conn):
     if not note:
         return _redirect(f"/studio/{piece_id}", "say what to change")
     if piece.stage != S.STAGE_READY:
-        return _redirect(f"/studio/{piece_id}", f"the piece is {piece.stage}; only a finished piece is revised")
+        return _redirect(
+            f"/studio/{piece_id}", f"the piece is {piece.stage}; only a finished piece is revised"
+        )
     if not _draft_revisable(piece.draft_id):
         return _redirect(
             f"/studio/{piece_id}",

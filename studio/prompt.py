@@ -99,9 +99,7 @@ class Brief:
 
 def system_prompt(session: str, voice: str, cards: str) -> str:
     """The standing instructions appended to Claude Code's system prompt."""
-    return "\n\n".join(
-        part.strip() for part in (session, voice, cards) if part and part.strip()
-    )
+    return "\n\n".join(part.strip() for part in (session, voice, cards) if part and part.strip())
 
 
 # --- research ---------------------------------------------------------------------------
@@ -243,7 +241,10 @@ def _piece_schema(b: Brief) -> str:
 def _variety_block(b: Brief) -> str:
     lines = []
     if b.hooks_to_avoid:
-        lines.append("Hook styles used by the last pieces (use a different one): " + ", ".join(b.hooks_to_avoid))
+        lines.append(
+            "Hook styles used by the last pieces (use a different one): "
+            + ", ".join(b.hooks_to_avoid)
+        )
     shapes = [p.shape for p in b.recent[:3] if p.shape]
     if len(shapes) >= 2 and len(set(shapes)) == 1:
         lines.append(
@@ -258,9 +259,7 @@ def _variety_block(b: Brief) -> str:
 
 
 def write_prompt(b: Brief, note: str = "") -> str:
-    editor = (
-        f"THE EDITOR READ YOUR FACT BASE AND SAYS\n{note.strip()}\n\n" if note.strip() else ""
-    )
+    editor = f"THE EDITOR READ YOUR FACT BASE AND SAYS\n{note.strip()}\n\n" if note.strip() else ""
     return f"""STAGE 2 OF 3: WRITE
 
 {_paths_block(b)}

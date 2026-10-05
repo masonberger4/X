@@ -70,7 +70,9 @@ def _write_log(workspace: Path, line: str) -> None:
         pass
 
 
-def _run_stage(ctx: Context, piece: S.Piece, stage: str, prompt_text: str, *, first: bool) -> claude_cli.SessionResult:
+def _run_stage(
+    ctx: Context, piece: S.Piece, stage: str, prompt_text: str, *, first: bool
+) -> claude_cli.SessionResult:
     """One CLI invocation. Records a studio_runs row around it."""
     workspace = Path(piece.workspace)
     run_id = S.start_run(ctx.conn, piece.id, stage)
@@ -115,7 +117,9 @@ def _run_stage(ctx: Context, piece: S.Piece, stage: str, prompt_text: str, *, fi
     return result
 
 
-def _fail(ctx: Context, piece: S.Piece, stage: str, message: str, *, interrupted: bool = False) -> Outcome:
+def _fail(
+    ctx: Context, piece: S.Piece, stage: str, message: str, *, interrupted: bool = False
+) -> Outcome:
     new_stage = S.STAGE_INTERRUPTED if interrupted else S.STAGE_FAILED
     S.update_piece(ctx.conn, piece.id, stage=new_stage, error=message, meta={"failed_stage": stage})
     _write_log(Path(piece.workspace), f"!!! {stage}: {message}")
@@ -127,7 +131,9 @@ def _stopped_early(result: claude_cli.SessionResult) -> bool:
     return result.subtype in ("error_max_turns", "killed", "no_result")
 
 
-def research(ctx: Context, piece: S.Piece, *, first: bool = True, resumed_reason: str = "") -> Outcome:
+def research(
+    ctx: Context, piece: S.Piece, *, first: bool = True, resumed_reason: str = ""
+) -> Outcome:
     brief = ctx.brief_for(piece)
     text = P.research_prompt(brief)
     if resumed_reason:
@@ -138,7 +144,9 @@ def research(ctx: Context, piece: S.Piece, *, first: bool = True, resumed_reason
         return _fail(ctx, piece, "research", result.detail, interrupted=_stopped_early(result))
     workspace = Path(piece.workspace)
     if not (workspace / P.FACTBASE_FILE).is_file():
-        return _fail(ctx, piece, "research", f"the session finished without writing {P.FACTBASE_FILE}")
+        return _fail(
+            ctx, piece, "research", f"the session finished without writing {P.FACTBASE_FILE}"
+        )
     info = read_research(workspace)
     updates: dict[str, Any] = {"meta": {"research": info}}
     if info.get("topic") and not piece.topic:
@@ -175,7 +183,9 @@ def write(ctx: Context, piece: S.Piece, note: str = "", *, resumed_reason: str =
 
 
 def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
-    S.update_piece(ctx.conn, piece.id, stage=S.STAGE_REVISING, error="", request="", request_note="")
+    S.update_piece(
+        ctx.conn, piece.id, stage=S.STAGE_REVISING, error="", request="", request_note=""
+    )
     result = _run_stage(ctx, piece, "revise", P.revise_prompt(note), first=False)
     if not result.ok:
         return _fail(ctx, piece, "revise", result.detail, interrupted=_stopped_early(result))
@@ -213,7 +223,9 @@ def polish(ctx: Context, piece: S.Piece) -> Outcome:
         report = qa.check_piece(workspace, ctx.cfg["x"], ctx.known_handles, ctx.renderer)
     if report.blocking:
         message = "still blocked after polishing: " + "; ".join(report.blocking[:5])
-        S.update_piece(ctx.conn, piece.id, meta={"problems": report.problems, "warnings": report.warnings})
+        S.update_piece(
+            ctx.conn, piece.id, meta={"problems": report.problems, "warnings": report.warnings}
+        )
         return _fail(ctx, piece, "polish", message)
     pf = report.piece
     report.warnings += [f"unresolved: {p}" for p in report.fixable]

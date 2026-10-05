@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from ops import lock
 from studio import angles as A
 from studio import prompt as P
 from studio import qa
@@ -27,6 +28,8 @@ from studio.settings import (
 )
 
 log = logging.getLogger(__name__)
+
+LOCK_NAME = ".studio.lock"
 
 _STAGE_OF = {
     S.STAGE_RESEARCHING: "research",
@@ -172,7 +175,9 @@ def make_renderer(cfg: dict[str, Any]) -> qa.Renderer | None:
     return _render
 
 
-def make_context(conn: sqlite3.Connection, cfg: dict[str, Any], *, stop_after_research: bool = False) -> SS.Context:
+def make_context(
+    conn: sqlite3.Connection, cfg: dict[str, Any], *, stop_after_research: bool = False
+) -> SS.Context:
     from studio import ingest
 
     root_cfg = _root_config()
@@ -222,7 +227,9 @@ def mark_stale(conn: sqlite3.Connection) -> list[S.Piece]:
     return stale
 
 
-def allowed_to_start(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> tuple[bool, str]:
+def allowed_to_start(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> tuple[bool, str]:
     """May the automatic run start a new piece? (A button press skips this.)"""
     auto = cfg["auto"]
     if not auto.get("enabled"):
@@ -311,6 +318,14 @@ def run(
     dry_run: bool = False,
 ) -> int:
     cfg = load_studio_config()
+    root = workspace_root(_data_folder(), cfg)
+    root.mkdir(parents=True, exist_ok=True)
+    # One studio run at a time on this data folder, however it was started (the ops step,
+    # a button, a terminal): a second run would resume the same sessions.
+    held = lock.acquire(root / LOCK_NAME, trust_os_lock=True)
+    if held is None:
+        log.info("another studio run is in progress; nothing to do")
+        return 0
     conn = _db_conn()
     try:
         stale = mark_stale(conn)
@@ -324,22 +339,41 @@ def run(
             return 0
         queued = S.next_queued_topic(conn)
         if topic or story is not None:
-            plan = dict(origin=S.ORIGIN_MANUAL, topic=topic, cluster_id=story, angle=angle,
-                        checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint)
+            plan = dict(
+                origin=S.ORIGIN_MANUAL,
+                topic=topic,
+                cluster_id=story,
+                angle=angle,
+                checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint,
+            )
         elif queued is not None:
-            plan = dict(origin=S.ORIGIN_MANUAL, topic=queued.topic, cluster_id=queued.cluster_id,
-                        angle=queued.angle or angle,
-                        checkpoint=queued.checkpoint if checkpoint is None else checkpoint)
+            plan = dict(
+                origin=S.ORIGIN_MANUAL,
+                topic=queued.topic,
+                cluster_id=queued.cluster_id,
+                angle=queued.angle or angle,
+                checkpoint=queued.checkpoint if checkpoint is None else checkpoint,
+            )
         elif now:
-            plan = dict(origin=S.ORIGIN_MANUAL, topic="", cluster_id=None, angle=angle,
-                        checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint)
+            plan = dict(
+                origin=S.ORIGIN_MANUAL,
+                topic="",
+                cluster_id=None,
+                angle=angle,
+                checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint,
+            )
         else:
             ok, why = allowed_to_start(conn, cfg, datetime.now(UTC))
             if not ok:
                 log.info("no new piece: %s", why)
                 return 0
-            plan = dict(origin=S.ORIGIN_AUTO, topic="", cluster_id=None, angle="",
-                        checkpoint=bool(cfg["auto"]["checkpoint"]))
+            plan = dict(
+                origin=S.ORIGIN_AUTO,
+                topic="",
+                cluster_id=None,
+                angle="",
+                checkpoint=bool(cfg["auto"]["checkpoint"]),
+            )
         piece = new_piece(conn, cfg, **plan)
         if queued is not None and not (topic or story is not None):
             S.claim_topic(conn, queued.id, piece.id)
@@ -349,20 +383,41 @@ def run(
         return 0 if out.stage in (S.STAGE_READY, S.STAGE_RESEARCH_READY) else 1
     finally:
         conn.close()
+        held.release()
 
 
-def _dry_run(conn: sqlite3.Connection, cfg: dict[str, Any], *, topic: str, story: int | None, angle: str) -> int:
+def _dry_run(
+    conn: sqlite3.Connection, cfg: dict[str, Any], *, topic: str, story: int | None, angle: str
+) -> int:
     library = A.load_angles()
     playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
     today, tzname = _today()
     fake = S.Piece(
-        id=0, created_at="", updated_at="", origin="manual", topic=topic, cluster_id=story,
-        requested_angle=angle, angle="", shape="", hook_style="", title="", stage=S.STAGE_RESEARCHING,
-        checkpoint=True, session_id="(new)", workspace=str(workspace_root(_data_folder(), cfg) / "(new)"),
-        model=str(cfg["model"]), effort=str(cfg.get("effort") or ""), draft_id=None, request="",
-        request_note="", error="",
+        id=0,
+        created_at="",
+        updated_at="",
+        origin="manual",
+        topic=topic,
+        cluster_id=story,
+        requested_angle=angle,
+        angle="",
+        shape="",
+        hook_style="",
+        title="",
+        stage=S.STAGE_RESEARCHING,
+        checkpoint=True,
+        session_id="(new)",
+        workspace=str(workspace_root(_data_folder(), cfg) / "(new)"),
+        model=str(cfg["model"]),
+        effort=str(cfg.get("effort") or ""),
+        draft_id=None,
+        request="",
+        request_note="",
+        error="",
     )
-    brief = build_brief(conn, cfg, fake, library=library, playbook=playbook, today=today, tzname=tzname)
+    brief = build_brief(
+        conn, cfg, fake, library=library, playbook=playbook, today=today, tzname=tzname
+    )
     print(P.research_prompt(brief))
     return 0
 
@@ -371,9 +426,11 @@ def print_list() -> int:
     conn = _db_conn()
     try:
         for p in S.list_pieces(conn, 30):
-            print(f"#{p.id:<4} {p.created_at[:16]}  {p.stage:<15} {p.angle or '-':<22} {p.label[:60]}"
-                  + (f"  [draft {p.draft_id}]" if p.draft_id else "")
-                  + (f"  !! {p.error[:80]}" if p.error else ""))
+            print(
+                f"#{p.id:<4} {p.created_at[:16]}  {p.stage:<15} {p.angle or '-':<22} {p.label[:60]}"
+                + (f"  [draft {p.draft_id}]" if p.draft_id else "")
+                + (f"  !! {p.error[:80]}" if p.error else "")
+            )
         for t in S.queued_topics(conn):
             print(f"queued topic {t.id}: {t.topic or f'story {t.cluster_id}'}")
     finally:

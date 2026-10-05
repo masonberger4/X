@@ -57,7 +57,9 @@ class PieceFiles:
 @dataclass
 class Report:
     blocking: list[str] = field(default_factory=list)  # must be fixed before the queue
-    fixable: list[str] = field(default_factory=list)  # sent back to the session; tolerated after the last round
+    fixable: list[str] = field(
+        default_factory=list
+    )  # sent back to the session; tolerated after the last round
     warnings: list[str] = field(default_factory=list)  # shown to the editor only
     pictures: list[str] = field(default_factory=list)  # rendered PNGs, for the session to look at
     piece: PieceFiles | None = None
@@ -176,10 +178,14 @@ def check_text(piece: PieceFiles, xcfg: dict[str, Any], known_handles: set[str])
         report.blocking.append("the piece has no posts")
         return report
     if piece.shape in ("long_post", "short_post") and len(piece.posts) != 1:
-        report.blocking.append(f"a {piece.shape} is exactly one post; you listed {len(piece.posts)}")
+        report.blocking.append(
+            f"a {piece.shape} is exactly one post; you listed {len(piece.posts)}"
+        )
     if piece.shape == "thread" and len(piece.posts) < 2:
         report.blocking.append("a thread needs at least two posts")
-    limit = int(xcfg.get("thread_post_max") if piece.shape == "thread" else xcfg.get("long_post_max"))
+    limit = int(
+        xcfg.get("thread_post_max") if piece.shape == "thread" else xcfg.get("long_post_max")
+    )
     for i, text in enumerate(piece.posts, start=1):
         label = f"post {i}"
         n = x_length(text)
@@ -210,7 +216,9 @@ def check_text(piece: PieceFiles, xcfg: dict[str, Any], known_handles: set[str])
         report.blocking.append(f"{len(piece.cards)} cards; at most {max_cards} per piece")
     for c in piece.cards:
         if not 1 <= c.post <= len(piece.posts):
-            report.fixable.append(f"card {c.html.name} is attached to post {c.post}, which does not exist")
+            report.fixable.append(
+                f"card {c.html.name} is attached to post {c.post}, which does not exist"
+            )
         if not c.alt:
             report.fixable.append(f"card {c.html.name} has no alt text in {PIECE_FILE}")
     per_post: dict[int, int] = {}
@@ -239,7 +247,9 @@ def check_cards(piece: PieceFiles, report: Report, renderer: Renderer | None) ->
     if not piece.cards:
         return
     if renderer is None:
-        report.blocking.append("no browser to draw the cards with (see render.browser in studio/config.yaml)")
+        report.blocking.append(
+            "no browser to draw the cards with (see render.browser in studio/config.yaml)"
+        )
         return
     for c in piece.cards:
         try:
@@ -251,11 +261,11 @@ def check_cards(piece: PieceFiles, report: Report, renderer: Renderer | None) ->
         expected = PNG_SIZES.get(result.size)
         if size is None or (expected and size != expected):
             report.blocking.append(
-                f"card {c.html.name} came out {size} instead of {expected}; size the page to the card"
+                f"card {c.html.name} came out {size} instead of {expected}; "
+                "size the page to the card"
             )
         report.fixable += [f"card {c.html.name}: {p}" for p in result.problems]
-        rel = c.png.name if c.png.parent == c.html.parent else str(c.png)
-        report.pictures.append(f"{c.png} ({rel})")
+        report.pictures.append(str(c.png))
 
 
 def check_piece(

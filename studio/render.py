@@ -39,9 +39,24 @@ SCALE = 2
 EDGE_MARGIN = 20  # nothing may sit closer than this to the canvas edge
 FONT_DIR = Path(__file__).resolve().parent / "fonts"
 FONTS = (
-    ("Inter", "inter-latin-wght-normal.woff2", "100 900", "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD"),
-    ("Inter", "inter-latin-ext-wght-normal.woff2", "100 900", "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF"),
-    ("Inter", "inter-greek-wght-normal.woff2", "100 900", "U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF"),
+    (
+        "Inter",
+        "inter-latin-wght-normal.woff2",
+        "100 900",
+        "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+    ),
+    (
+        "Inter",
+        "inter-latin-ext-wght-normal.woff2",
+        "100 900",
+        "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+    ),
+    (
+        "Inter",
+        "inter-greek-wght-normal.woff2",
+        "100 900",
+        "U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF",
+    ),
     ("IBM Plex Mono", "ibm-plex-mono-latin-400-normal.woff2", "400", ""),
     ("IBM Plex Mono", "ibm-plex-mono-latin-600-normal.woff2", "600", ""),
 )
@@ -316,9 +331,7 @@ def render_card(
         shot_page.write_text(page_with_fonts, encoding="utf-8")
         check_page = tmpdir / "check.html"
         check_page.write_text(_with_checker(page_with_fonts, _checker_script(size)), "utf-8")
-        argv = browser_argv(browser, size, extra_args) + [
-            f"--user-data-dir={tmpdir / 'profile'}"
-        ]
+        argv = browser_argv(browser, size, extra_args) + [f"--user-data-dir={tmpdir / 'profile'}"]
         dumped = _run([*argv, "--dump-dom", check_page.as_uri()], timeout, tmp)
         report = parse_report(dumped.stdout or "")
         if report is None:

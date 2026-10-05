@@ -61,6 +61,8 @@ select = ["E", "F", "I", "B", "UP"]
 "score/rater.py" = ["E501"]   # same: the rater's prompt text
 "verify/verifier.py" = ["E501"]  # same: the verifier's prompt text
 "filter/link.py" = ["E501"]  # same: the story linker's prompt text
+"studio/render.py" = ["E501"]  # the layout checker is JavaScript inside a string
+"studio/safety.py" = ["E501"]  # the advice patterns read best one per line
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

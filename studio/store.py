@@ -290,8 +290,7 @@ def running_pieces(conn: sqlite3.Connection) -> list[Piece]:
 def recent_pieces(conn: sqlite3.Connection, limit: int) -> list[Piece]:
     """The newest pieces that got as far as being written (they define what to vary)."""
     rows = conn.execute(
-        "SELECT * FROM studio_pieces WHERE angle != '' AND stage != ? "
-        "ORDER BY id DESC LIMIT ?",
+        "SELECT * FROM studio_pieces WHERE angle != '' AND stage != ? ORDER BY id DESC LIMIT ?",
         (STAGE_DISCARDED, int(limit)),
     ).fetchall()
     return [_row(r) for r in rows]
@@ -444,9 +443,7 @@ def next_queued_topic(conn: sqlite3.Connection) -> QueuedTopic | None:
 
 
 def queued_topics(conn: sqlite3.Connection) -> list[QueuedTopic]:
-    rows = conn.execute(
-        "SELECT * FROM studio_topics WHERE piece_id IS NULL ORDER BY id"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM studio_topics WHERE piece_id IS NULL ORDER BY id").fetchall()
     return [
         QueuedTopic(
             id=int(r["id"]),

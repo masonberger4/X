@@ -45,7 +45,9 @@ _BARE_DOMAIN_RE = re.compile(
     re.I,
 )
 _PRICE_TARGET_RE = re.compile(r"\bprice\s+targets?\b", re.I)
-_DISCLAIMER_RE = re.compile(r"\bnot\s+(?:investment|financial)(?:\s+or\s+medical)?\s+advice\b", re.I)
+_DISCLAIMER_RE = re.compile(
+    r"\bnot\s+(?:investment|financial)(?:\s+or\s+medical)?\s+advice\b", re.I
+)
 _HANDLE_RE = re.compile(r"(?<![\w@])@([A-Za-z0-9_]{1,15})\b")
 
 

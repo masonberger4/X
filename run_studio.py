@@ -34,9 +34,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-import uuid
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -46,9 +43,7 @@ log = logging.getLogger("run_studio")
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     ap.add_argument("--now", action="store_true", help="start a new piece now, ignoring the limits")
-    ap.add_argument(
-        "--resume-only", action="store_true", help="only act on the editor's requests"
-    )
+    ap.add_argument("--resume-only", action="store_true", help="only act on the editor's requests")
     ap.add_argument("--topic", default="", help="start a piece on this topic now")
     ap.add_argument("--story", type=int, default=None, help="start a piece from this feed story id")
     ap.add_argument("--angle", default="", help="the angle for the new piece (studio/angles.yaml)")
