@@ -428,6 +428,14 @@ def test_learn_with_nothing_scored_makes_no_call_even_when_forced(lconn, rewrite
     assert rewriter.calls == [] and S.playbook_versions(lconn) == []
 
 
+def test_the_shipped_loop_proposes_and_the_editor_applies():
+    """Agreed when the studio was planned: Opus proposes playbook edits and the editor
+    approves them on the dashboard, since a handful of posts is mostly noise."""
+    shipped = load_studio_config()["learn"]
+    assert shipped["playbook"] == "propose" and shipped["enabled"] is True
+    assert L.SMALL_SAMPLE >= 20  # hints, not rules, until there are 20 scored pieces
+
+
 def test_a_proposal_waits_for_the_editor(lconn, rewriter, cfg, tmp_path):
     cfg["learn"]["playbook"] = "propose"
     scored_pieces(lconn)

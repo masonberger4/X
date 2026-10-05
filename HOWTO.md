@@ -1111,7 +1111,7 @@ and long posts need X Premium.
      are measured, which angles, shapes, hook styles and card counts did best
      and worst (with how many pieces each), and the openings of the best and
      weakest posts, with an honest "too few to be sure" while there are under
-     ten;
+     twenty;
    - it is offered a **lean**: an angle, shape and hook style to favour if the
      story supports it. The lean is a weighted draw, so what has done better is
      suggested more often and what has little evidence still gets tried; it only
@@ -1119,13 +1119,15 @@ and long posts need X Premium.
      chooses (the page shows what each piece was offered and whether it went
      with it);
    - after every 3 newly scored pieces (at most once a day) one call on the
-     writer's model rewrites **the playbook** from the evidence and your hand
-     edits on the queue page (`learn: playbook: auto`, shipped, applies it at
-     once; `propose` makes it wait on the page for **Apply this version**;
-     `off` never rewrites it). Each version has its changelog and what it
-     changed; **put this version back** restores any earlier one, and
-     **Rewrite the playbook now** runs a rewrite whatever the counts. A rewrite
-     that fails or comes back unusable changes nothing.
+     writer's model proposes a rewrite of **the playbook** from the evidence and
+     your hand edits on the queue page. It waits on the page, with its changelog
+     and what it would change, until you press **Apply this version**
+     (`learn: playbook: propose`, shipped: a handful of posts is mostly the story
+     and the day, and the numbers mean little before 20 to 30 pieces). `auto`
+     applies each rewrite at once, `off` never rewrites. **Put this version
+     back** restores any earlier version, and **Rewrite the playbook now** runs
+     a rewrite whatever the counts. A rewrite that fails or comes back unusable
+     changes nothing.
    The numbers come from the feedback step's snapshots, which need the paid X
    API read tier (part 7). Without it, open **type the numbers X shows** under a
    piece about 48 hours after posting and copy them from the post's analytics on

@@ -44,7 +44,7 @@ ARM_LABELS = {
 # A relative of 0 has no logarithm; it counts as this (a post with nothing against a
 # baseline with something, and no smoothing).
 LOG_FLOOR = 0.05
-SMALL_SAMPLE = 10  # below this many scored pieces the evidence is called hints
+SMALL_SAMPLE = 20  # below this many scored pieces the evidence is called hints
 SPREAD_FLOOR = 0.2  # the least spread a draw assumes, so a few alike posts never look certain
 
 

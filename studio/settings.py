@@ -57,7 +57,7 @@ DEFAULTS: dict[str, Any] = {
         "lean_min_measured": 3,
         "prior_sd": 0.5,
         "post_sd": 0.8,
-        "playbook": "auto",
+        "playbook": "propose",
         "rewrite_min_new": 3,
         "rewrite_min_hours": 24,
         "model": "",
@@ -78,9 +78,9 @@ _SECTIONS = (
     "render",
     "learn",
 )
-# learn.playbook: what a learned rewrite does. auto: the sessions read it at once; propose:
-# it waits on the performance page for the editor to apply; off: the playbook is never
-# rewritten (the evidence and the lean still reach the prompts).
+# learn.playbook: what a learned rewrite does. propose (shipped): it waits on the
+# performance page for the editor to apply; auto: the sessions read it at once; off: the
+# playbook is never rewritten (the evidence and the lean still reach the prompts).
 PLAYBOOK_MODES = ("auto", "propose", "off")
 
 

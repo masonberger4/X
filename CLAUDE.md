@@ -657,7 +657,7 @@ carrying `--live`).
   automatic `studio_learn` step after `feedback`; `--learn-now`, the manual
   `studio_learn_now`; both under the `studio_learn` lock and `.studio_learn.lock`, never
   the studio's) rewrites when due through `studio/playbook.py:rewrite` (`learn.playbook`:
-  `auto` applies, `propose` waits for the editor, `off` never; a failed call or a rejected
+  `propose`, shipped, waits for the editor to apply it, `auto` applies, `off` never; a failed call or a rejected
   reply changes nothing and exits 1). `studio/playbook.py:save` is the one writer of the
   playbook file (atomic) and of `studio_playbook_versions` (`seed`/`editor`/`learned`/
   `proposal`/`revert`, changelog, evidence, `pieces` learned from; `ensure_seeded`

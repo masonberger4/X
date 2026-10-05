@@ -107,10 +107,12 @@ learn:
   prior_sd: 0.5                 # how far from the median an untried angle may plausibly be (log scale)
   post_sd: 0.8                  # one post's spread (log scale) until 10 pieces measure it
   # The playbook rewrite: one call (no tools) once `rewrite_min_new` scored pieces are new
-  # to it, at most every `rewrite_min_hours`. auto: the next session reads it at once;
-  # propose: it waits on the performance page for you to apply; off: never rewritten.
-  # Every version is kept there with its changelog, and any one can be put back.
-  playbook: auto
+  # to it, at most every `rewrite_min_hours`. propose (shipped): it waits on the
+  # performance page for you to read and apply, since a handful of posts is mostly noise
+  # (the numbers mean little before 20 to 30 pieces); auto: the next session reads it at
+  # once; off: never rewritten. Every version is kept there with its changelog, and any
+  # one can be put back.
+  playbook: propose
   rewrite_min_new: 3
   rewrite_min_hours: 24
   model: ""                     # blank = the writer's model above

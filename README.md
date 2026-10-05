@@ -792,7 +792,7 @@ the `baseline_days` before it + smoothing); a piece with fewer than
 `min_baseline_posts` before it is measured but not scored. Per angle, shape, hook style
 and card count the page and the prompts show the scored pieces and their mean
 log-relative as "x the median". Every brief then carries a WHAT X SAYS section (the
-counts, the best and worst values and openings, a small-sample caveat under ten
+counts, the best and worst values and openings, a small-sample caveat under twenty
 pieces) and a **lean**: one Thompson draw per arm (a normal posterior on the log scale,
 prior at the median, `prior_sd`, `post_sd` until ten pieces measure the spread) among the
 angles, shapes and hooks the variety rules leave on offer, seeded by the piece id and kept
@@ -802,9 +802,10 @@ tried. The **playbook rewrite** (`studio/playbook.py:rewrite`, the loop's one mo
 blank = the writer's) runs once `rewrite_min_new` scored pieces are new to the last
 rewrite and `rewrite_min_hours` have passed; it gets the current playbook, the evidence,
 every measured piece and the editor's hand edits of studio drafts, and must answer with
-JSON whose playbook keeps the required sections and `max_words`. `learn.playbook: auto`
-applies it, `propose` keeps it for the editor, `off` never rewrites; a failed call or a
-rejected reply changes nothing. Every playbook ever in use is a row of
+JSON whose playbook keeps the required sections and `max_words`. `learn.playbook:
+propose` (shipped) keeps it for the editor to apply, since the numbers mean little before
+20 to 30 pieces; `auto` applies it, `off` never rewrites; a failed call or a rejected reply
+changes nothing. Every playbook ever in use is a row of
 `studio_playbook_versions` (seed, editor, learned, proposal, revert, with the changelog,
 the evidence and the pieces it learned from) and the file sessions read is replaced
 atomically. `run_studio.py --learn` (the automatic `studio_learn` step after `feedback`,
