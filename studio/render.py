@@ -464,6 +464,26 @@ def render_card(
     layout problems are returned, not raised, so the session can fix them."""
     html_path = Path(html_path).resolve()
     png_path = Path(png_path).resolve()
+    try:
+        return _draw_card(html_path, png_path, browser, timeout, extra_args)
+    except OSError as exc:
+        # A file the draw reads or writes, not the browser: on Windows a program that has
+        # the last round's PNG open (an image viewer opened from the piece's folder, an
+        # antivirus scan) refuses its removal and its rewrite. The card could not be drawn,
+        # which the checker reports; raised as it is, it would end the whole studio run.
+        raise RenderError(
+            f"a file could not be read or written: {exc} (a program with {png_path.name} "
+            "open, an image viewer say, keeps it from being replaced: close it)"
+        ) from exc
+
+
+def _draw_card(
+    html_path: Path,
+    png_path: Path,
+    browser: str,
+    timeout: float,
+    extra_args: list[str] | None,
+) -> RenderResult:
     page = html_path.read_text(encoding="utf-8", errors="replace")
     if _REFRESH.search(html.unescape(page)):
         raise RenderError(
@@ -487,7 +507,10 @@ def render_card(
     png_path.parent.mkdir(parents=True, exist_ok=True)
     # A draw that fails must not leave the last round's picture looking like this one.
     png_path.unlink(missing_ok=True)
-    with tempfile.TemporaryDirectory(prefix="studio-card-") as tmp:
+    # The browser's profile folder can stay locked a moment after the browser exits (its
+    # crash handler lingers on Windows): a leftover in the temp folder costs nothing, and is
+    # no reason to lose a card that was drawn.
+    with tempfile.TemporaryDirectory(prefix="studio-card-", ignore_cleanup_errors=True) as tmp:
         tmpdir = Path(tmp)
         page_with_head = _with_head(page, css, nonce)
         shot_page = tmpdir / "card.html"

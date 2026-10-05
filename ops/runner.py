@@ -49,7 +49,9 @@ class Step:
     manual: bool = False  # only when named: a button or --only, never a plain run or the timer
     # The automatic runs leave this step out of a time slot while an earlier run of it is
     # still going, instead of making the whole slot wait for it (the studio: one session
-    # can outlast the gap between run times, and the step paces itself anyway).
+    # can outlast the gap between run times, and the step paces itself anyway). A plain
+    # `run_ops.py run` leaves it out altogether: it has a schedule entry of its own
+    # (`--only studio`), which takes no run lock.
     skip_when_busy: bool = False
 
     @property

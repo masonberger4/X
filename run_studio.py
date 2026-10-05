@@ -96,9 +96,24 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
+def safe_console() -> None:
+    """Make print and the log handler show what the console cannot, never raise on it. On
+    Windows a piped stdout (the runs page, run_ops.py, Task Scheduler's log file) is the
+    ANSI code page, cp1252, with errors='strict', and the session's narration, its queries
+    and a piece's title are full of arrows, >= signs and Greek letters (the beta of
+    TGF-beta): one of those ended the line's print, and --list or --dry-run with it. Such a
+    character is written as its escape (\\u2265) instead."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):  # not a text stream of its own, or closed
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     args = _parse_args(argv)
+    safe_console()
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

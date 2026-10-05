@@ -1293,6 +1293,31 @@ def test_a_config_that_names_no_model_is_refused(tmp_path, model_line):
         settings.load_studio_config(path)
 
 
+@pytest.mark.parametrize(
+    "browser",
+    [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    ],
+)
+def test_a_windows_browser_path_pasted_into_the_shipped_quotes_loads(tmp_path, browser):
+    """HOWTO part 9 has the operator put the browser's full path on render: browser:. Pasted
+    between the quotes the shipped file has, it must load as written: between double quotes
+    YAML reads \\M and \\G as escapes, and the studio's settings would not load at all."""
+    from studio import settings
+
+    shipped = settings.CONFIG_PATH.read_text(encoding="utf-8")
+    [line] = [ln for ln in shipped.splitlines() if ln.strip().startswith("browser:")]
+    value = line.split(":", 1)[1].strip()
+    assert len(value) == 2 and value[0] == value[1]  # empty, between a pair of quotes
+    pasted = line.replace(value, value[0] + browser + value[1])
+    path = tmp_path / "config.yaml"
+    path.write_text(shipped.replace(line, pasted), encoding="utf-8")
+
+    assert settings.load_studio_config(path)["render"]["browser"] == browser
+    assert settings.load_studio_config()["render"]["browser"] == ""  # blank: look for one
+
+
 def test_a_named_model_and_the_settings_left_out_take_their_defaults(tmp_path):
     from studio import settings
 

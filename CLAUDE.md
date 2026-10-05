@@ -417,7 +417,14 @@ carrying `--live`).
 - Step 5 (`ops/`) never imports another step's modules: `run_ops.py run`
   executes the other CLIs as subprocesses (order, timeouts, enabled/required in
   `ops/config.yaml`, which must never contain `--live`; a test asserts it) under
-  an `fcntl` lock. It reads other steps' tables only through the read-only
+  an `fcntl` lock. A plain `run` leaves out `manual` steps and `skip_when_busy` ones (the
+  studio: a session would hold the run and its lock for an hour or more, and Task Scheduler
+  and a systemd oneshot never start a run still going), which run with `--only`; the
+  studio's own schedule entry is `run --only studio` (`deploy/pipeline-studio.service`,
+  `TimeoutStartSec=infinity`), and a run of `skip_when_busy` steps alone takes no run
+  lock, only the step's own. `REPO_ROOT` here and in `panel/frozen.py` (and the frozen
+  `data_dir`) is `os.path.abspath`, never `resolve()`: on Windows that would turn a mapped
+  drive into a UNC path, where the npm `claude.cmd` cannot start a studio session. It reads other steps' tables only through the read-only
   adapters in `ops/store.py` (each returns empty when a table is missing) and
   owns `pipeline_runs`, `health_checks`, `alerts_sent`. `ops/health.py` is pure
   (`now` is a parameter; its `cli` check, `check_cli(binary, found)`, is handed the
@@ -492,7 +499,9 @@ carrying `--live`).
   releasing its mutex through the `backup` callable (`panel/app.py:_backup_now`, the same
   `ops/backup.py:backup` as "Back up now"), noting "backup saved/failed" in the outcomes;
   `ops/backup.py` writes `<name>.part` and renames it after `integrity_check`, so a backup cut
-  short never counts as the newest. The runs page shows it and posts `POST /runs/auto` (switch and times only);
+  short never counts as the newest; it also copies each file named in `backups.with_db`
+  (shipped: `studio_playbook.md`) from the database's folder beside the backup as
+  `pipeline-<stamp>.<name>`, and `rotate` removes those with their backup. The runs page shows it and posts `POST /runs/auto` (switch and times only);
   the dashboard shows the state and `ops/store.py:last_auto_run`. `tests/conftest.py`
   disables `AutoRunner.start` for every test; `tests/test_autorun.py` drives `tick`.
   "Set schedule" on the approved page (`POST /publishing/order`, `panel/publishing.py`)
@@ -702,15 +711,19 @@ carrying `--live`).
   does, under the studio lock and only while no run holds it, when a studio page shows or
   acts on a piece in a running stage (`web._current_piece`, the index) and when the panel
   sees a run of `run_studio.py` end (`JobManager.on_finish` = `panel/app.py:_after_run`).
-  Every brief reads the date and the playbook when its stage starts. A piece folder that
+  Every brief reads the date and the playbook when its stage starts. A piece's folder is
+  `runner.absolute` (the data folder as given, never resolved: a mapped drive stays one).
+  `render.render_card` turns a file it cannot write (a PNG an image viewer holds open)
+  into a `RenderError`, and `session._echo` / `run_studio.safe_console` keep a character a
+  cp1252 console cannot show from costing a line. A piece folder that
   is gone fails the piece (`session.folder_missing`; `_run_stage` turns the OSError into a
   failed result, so the run goes on), and a Resume of a polish whose draft the queue would
   refuse (`ctx.revisable`) runs no round. `ops/config.yaml` has the automatic `studio` step
   (after `score`, `skip_when_busy`: `panel/autorun.py` leaves a busy one out of a slot
   rather than waiting, and also the steps an earlier run still has queued behind it,
   `JobManager.queued_behind`, so a long session never makes a run time skip ingest and
-  score) and the manual `studio_now` / `studio_resume` steps, all under the
-  `studio` lock (the learning steps below have their own); `run_studio.py` is in `ops/autorun.AUTO_SCRIPTS`. The panel includes
+  score; a plain `run_ops.py run` leaves it out, see step 5) and the manual `studio_now` / `studio_resume` steps, all under the
+  `studio` lock (the radar's and the learning steps have their own); `run_studio.py` is in `ops/autorun.AUTO_SCRIPTS`. The panel includes
   `studio/web.py`'s router (`/studio`, a piece's page, its cards, `/studio/playbook`); its
   buttons write studio rows and start those steps through `panel/app.py:_start_studio`,
   and the playbook editor writes only `studio_playbook.md` next to the database (the
@@ -839,7 +852,8 @@ ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
           backup.py, store.py (pipeline_runs, health_checks, alerts_sent +
           read-only adapters)
 assets/   logos/<company key>.png (human-supplied company logos for table cells)
-deploy/   crontab.example, pipeline.service, pipeline.timer, desktop.spec, README.md
+deploy/   crontab.example, pipeline.service, pipeline.timer, pipeline-studio.service,
+          pipeline-studio.timer, desktop.spec, README.md
 studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, variety),
           brief/ (session.md, voice.md, cards.md: the appended system prompt), playbook.md
           (seed), exemplars/ (reference pieces), fonts/, prompt.py (pure stage prompts),

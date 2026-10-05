@@ -118,7 +118,11 @@ def _backup_now(now: datetime | None = None) -> Path:
     """One verified backup into `backups.dir`, rotated to `backups.keep`: the dashboard's
     "Back up now" and the automatic runs' daily backup."""
     return ops_backup.backup(
-        ops_store.db_path(), CONFIG["backups"]["dir"], int(CONFIG["backups"]["keep"]), now=now
+        ops_store.db_path(),
+        CONFIG["backups"]["dir"],
+        int(CONFIG["backups"]["keep"]),
+        now=now,
+        with_db=CONFIG["backups"].get("with_db") or [],
     )
 
 

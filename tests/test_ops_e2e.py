@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 import yaml
@@ -223,6 +224,71 @@ def test_run_exits_2_when_lock_held(seeded, ops_cfg):
     conn.close()
 
 
+def _long_step_config(ops_cfg, tmp_path) -> tuple[dict, Path, Path]:
+    """A pipeline step and a skip_when_busy one (the studio's place), each leaving a marker."""
+    pipeline, session = tmp_path / "pipeline-ran", tmp_path / "session-ran"
+    cfg = yaml.safe_load(ops_cfg.read_text())
+    cfg["steps"] = [
+        {"name": "ingest", "argv": ["python", "-c", f"open({str(pipeline)!r}, 'w')"]},
+        {
+            "name": "studio",
+            "lock": "studio",
+            "skip_when_busy": True,
+            "timeout_seconds": 0,
+            "argv": ["python", "-c", f"open({str(session)!r}, 'w')"],
+        },
+    ]
+    ops_cfg.write_text(yaml.safe_dump(cfg))
+    return cfg, pipeline, session
+
+
+def test_a_plain_run_leaves_a_long_step_to_its_own_entry(seeded, ops_cfg, tmp_path):
+    """Under cron, Task Scheduler or systemd a studio session inside the plain run would
+    hold the run and its lock for an hour or more: ingest, score and draft would stop for
+    as long. The plain run leaves it out; `--only studio` is its own schedule entry."""
+    _, pipeline, session = _long_step_config(ops_cfg, tmp_path)
+
+    assert run_ops.main(["--config", str(ops_cfg), "run"]) == 0
+    assert pipeline.exists() and not session.exists()
+    conn = store.connect(seeded)
+    assert set(store.last_run_per_step(conn)) == {"ingest"}
+    conn.close()
+
+    assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "studio"]) == 0
+    assert session.exists()
+
+
+def test_the_long_steps_own_entry_never_takes_the_run_lock(seeded, ops_cfg, tmp_path):
+    """The studio's entry runs while a pipeline run holds the run lock, and holds only the
+    studio's own lock while it runs, so the pipeline's fires in the meantime go ahead."""
+    cfg, pipeline, session = _long_step_config(ops_cfg, tmp_path)
+    cfg["steps"][1]["argv"] = [
+        "python",
+        "-c",
+        "import sys; sys.path.insert(0, sys.argv[1]); from ops import lock; "
+        f"open({str(session)!r}, 'w').write(str(lock.acquire(sys.argv[2]) is not None))",
+        str(run_ops.REPO_ROOT),
+        cfg["lock_path"],
+    ]
+    ops_cfg.write_text(yaml.safe_dump(cfg))
+
+    with lock.acquire(cfg["lock_path"]):  # a pipeline run is going
+        assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "studio"]) == 0
+    assert session.read_text() == "False"  # still that run's lock, never taken from it
+
+    assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "studio"]) == 0
+    assert session.read_text() == "True"  # the step ran without the run lock held
+    with lock.acquire(lock.step_lock_path(cfg["lock_path"], "studio")):  # a session is going
+        assert run_ops.main(["--config", str(ops_cfg), "run"]) == 0
+        assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "studio"]) == 0
+    conn = store.connect(seeded)
+    assert store.last_run_per_step(conn)["studio"]["skipped_reason"] == "locked"
+    conn.close()
+    # with a pipeline step named beside it, the run lock is taken as before
+    with lock.acquire(cfg["lock_path"]):
+        assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "ingest,studio"]) == 2
+
+
 def test_run_unknown_only_step(seeded, ops_cfg):
     assert run_ops.main(["--config", str(ops_cfg), "run", "--only", "nope"]) == 1
 
@@ -415,15 +481,21 @@ def test_default_config_dry_run_lists_real_clis(capsys):
         names.append(name)
         if name in ("ingest", "score", "draft"):
             assert reason == "dry" and sys.executable in line
-        if name in ("feedback", "evolve", "studio"):
+        if name in ("feedback", "evolve"):
             assert reason == "dry" and sys.executable in line  # on, and the CLI exists
-    # a plain run takes the studio step in its place and leaves the manual ones out
-    assert names.index("score") < names.index("studio") < names.index("draft")
+    # A plain run leaves out the manual steps and the studio, which has a schedule entry of
+    # its own (a session would hold the whole run, and the run lock, for an hour or more).
+    assert names.index("score") < names.index("draft")
+    assert "studio" not in names
     assert "studio_now" not in names and "studio_resume" not in names
     assert "draft_retry" not in names
-    assert names.index("studio_scan") < names.index("studio") and "studio_scan_now" not in names
+    # the radar's scan and the learning step stay in it (each at most daily, its own lock)
+    assert names.index("score") < names.index("studio_scan") < names.index("draft")
     assert names.index("feedback") < names.index("studio_learn")
-    assert "studio_learn_now" not in names
+    assert "studio_scan_now" not in names and "studio_learn_now" not in names
+    assert run_ops.main(["run", "--dry-run", "--only", "studio"]) == 0
+    [line] = capsys.readouterr().out.splitlines()
+    assert line.split()[:2] == ["studio", "dry"] and line.endswith("run_studio.py")
 
 
 def test_a_manual_studio_step_runs_when_named(capsys):
@@ -432,3 +504,25 @@ def test_a_manual_studio_step_runs_when_named(capsys):
     assert [ln.split()[:2] for ln in lines] == [["studio_now", "dry"], ["studio_resume", "dry"]]
     assert lines[0].endswith("run_studio.py --now")
     assert lines[1].endswith("run_studio.py --resume-only")
+
+
+def test_every_scheduler_gives_the_studio_its_own_entry_with_no_time_limit():
+    """A plain run leaves the studio out, so each shipped schedule has a line of its own
+    for it; the systemd unit has no start limit (a session runs an hour or more, each stage
+    under its own limit in studio/config.yaml), which the plain run's unit keeps."""
+    deploy = DEFAULT_OPS_CONFIG_PATH.parent.parent / "deploy"
+    own = "run_ops.py run --only studio"
+
+    def settings(unit: str) -> dict[str, str]:
+        lines = (deploy / unit).read_text(encoding="utf-8").splitlines()
+        return dict(ln.split("=", 1) for ln in lines if "=" in ln and not ln.startswith("#"))
+
+    studio = settings("pipeline-studio.service")
+    assert studio["ExecStart"].endswith(own) and studio["TimeoutStartSec"] == "infinity"
+    assert settings("pipeline-studio.timer")["Unit"] == "pipeline-studio.service"
+    assert settings("pipeline.service")["ExecStart"].endswith("run_ops.py run")
+    cron = (deploy / "crontab.example").read_text(encoding="utf-8")
+    assert [ln for ln in cron.splitlines() if own in ln and not ln.startswith("#")]
+    for doc in (deploy / "README.md", DEFAULT_OPS_CONFIG_PATH.parent.parent / "HOWTO.md"):
+        text = doc.read_text(encoding="utf-8")
+        assert 'schtasks /Create /TN "pipeline-studio"' in text and own in text, doc.name

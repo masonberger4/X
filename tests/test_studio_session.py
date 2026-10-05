@@ -772,6 +772,37 @@ def test_the_session_log_and_the_echo_follow_the_session(rig):
     assert sum(e.get("subtype") == "init" for e in events) == 3
 
 
+def test_a_line_the_console_cannot_show_never_costs_the_log_the_lines_after_it(rig):
+    """On Windows a piped stdout is cp1252 and strict, so print raises on an arrow, a >=
+    sign or a Greek letter. The session.log must still get that line and every later line
+    of the same event (here the tool call after the text), and the stage carries on."""
+
+    def cp1252_console(line: str) -> None:
+        line.encode("cp1252")  # what print does on a Windows pipe
+        rig.echoed.append(line)
+
+    narration = "ORR ≥ 40% → durable; TGF-β trap next"
+    launch = rig.cli
+
+    def narrating(prompt: str, **kw: Any) -> claude_cli.SessionResult:
+        text = {"type": "text", "text": narration}
+        write = {"type": "tool_use", "name": "Write", "input": {"file_path": "factbase.md"}}
+        kw["on_event"]({"type": "assistant", "message": {"content": [text, write]}})
+        return launch(prompt, **kw)
+
+    rig.ctx.echo = cp1252_console
+    rig.ctx.launch = narrating
+    piece = rig.new_piece()
+
+    out = SS.research(rig.ctx, piece)
+
+    assert out.stage == S.STAGE_READY
+    lines = rig.log(rig.get(piece.id)).splitlines()
+    assert lines.count(narration) == 3  # research, write, polish
+    assert lines.count("[Write] factbase.md") == 3
+    assert f"[piece {piece.id} research] [Write] factbase.md" in rig.echoed
+
+
 def test_each_stage_logs_its_start_and_end_once_when_a_sub_agent_adds_a_turn(rig):
     rig.cli.second_turn = True
     piece = rig.new_piece()

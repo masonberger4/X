@@ -610,7 +610,8 @@ You may not need this part. While the control panel or desktop window is open it
 already runs ingest, score, studio_scan, studio, draft, verify, feedback, evolve and studio_learn on
 its own at 06:00, 12:00 and 18:00 (part 8, "Automatic runs"), and it never publishes. Task
 Scheduler is the other way: it runs even with the app closed and can wake the
-PC, but it needs the tasks below. Pick one for `pipeline-run`. Running both is
+PC, but it needs the tasks below. Pick one for `pipeline-run` and
+`pipeline-studio`. Running both is
 safe (a step that is already running is skipped, never run twice) but wasteful.
 The automatic runs also back the database up once a day (the first run each
 day), and each one records a health check and alerts when one fails, but they
@@ -621,7 +622,13 @@ task from step 2 if you want that. `pipeline-backup` is not needed with them. Th
 and `source_stale_min_hours` to 0 for earlier warnings.
 
 1. Try the orchestrator by hand first. It runs ingest, score, draft and
-   verify in order and records each step. Each step takes its own lock
+   verify in order and records each step. It leaves the `studio` step out:
+   one studio session runs for an hour or more, and the whole run (and every
+   `pipeline-run` after it, which Task Scheduler does not start while one is
+   still going) would wait for it. The studio has a task of its own,
+   `pipeline-studio` in step 2, which runs `run_ops.py run --only studio` and
+   holds only the studio's own lock, so the pipeline runs on beside it.
+   Each step takes its own lock
    (`<lock_path>.<lock name>`) while it runs, so a step the control panel is
    already running is skipped as `locked` and the rest carry on.
    The `draft_retry` step is `manual: true`: a plain `run_ops.py run` and the
@@ -640,6 +647,7 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    mkdir logs
    python run_ops.py run --dry-run
    python run_ops.py run
+   python run_ops.py run --only studio --dry-run
    python run_ops.py status
    python run_ops.py health
    python run_ops.py backup
@@ -649,8 +657,13 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    schtasks /Create /TN "pipeline-run" /SC MINUTE /MO 30 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py run >> logs\ops.log 2>&1"
    schtasks /Create /TN "pipeline-health" /SC HOURLY /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py health --alert >> logs\ops.log 2>&1"
    schtasks /Create /TN "pipeline-backup" /SC DAILY /ST 03:00 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py backup >> logs\ops.log 2>&1"
+   schtasks /Create /TN "pipeline-studio" /SC DAILY /ST 06:10 /RI 360 /DU 12:30 /TR "cmd /c cd /d C:\Users\you\X && python run_ops.py run --only studio >> logs\ops.log 2>&1"
    ```
-   In the Task Scheduler app, open each task and tick "Run whether user is
+   `pipeline-studio` runs at 06:10, 12:10 and 18:10; it starts at most one
+   piece a day (part 9) and otherwise only acts on what you asked for on the
+   studio page. Each backup also keeps a copy of your studio playbook
+   (`backups\pipeline-<stamp>.studio_playbook.md`, `with_db` under `backups:`
+   in `ops\config.yaml`). In the Task Scheduler app, open each task and tick "Run whether user is
    logged on or not" and "Wake the computer to run this task". The PC must be
    on for them to fire. Keep each task running as your own Windows user, the
    one that ran `claude login` in part 1: every model call uses that login.
@@ -780,7 +793,8 @@ to stop it. Four pages:
   something looks wrong.
   "Back up now" under Storage saves a copy of the database right away, the
   same verified copy `run_ops.py backup` makes, into the same `backups\`
-  folder (the oldest beyond `backups: keep` in `ops\config.yaml` are removed).
+  folder, with your studio playbook beside it (the oldest beyond
+  `backups: keep` in `ops\config.yaml` are removed, playbook copies too).
   Under Drafting, how many stories you said yes to on the feed have no draft
   yet. A yes sends a story to drafting whatever its score or age: the next
   draft run takes those first, then the best-scored new stories (score at
@@ -1000,8 +1014,12 @@ the whole folder wherever you like; inside it:
   so make lasting changes in the repo and rebuild.
 
 **Where the data lives.** The exe keeps its data next to itself, NOT in the
-repo: `.env`, `pipeline.db`, `backups\`, `images\` and `desktop.log` all sit in
-the folder that holds `Pipeline.exe`. Copy your `.env` in before the first
+repo: `.env`, `pipeline.db`, `backups\`, `images\`, `studio_pieces\` (every
+studio piece: its fact base, posts, cards, fact-check log and session),
+`studio_playbook.md` (your studio playbook, once you have saved it) and
+`desktop.log` all sit in the folder that holds `Pipeline.exe`. Each backup keeps
+a copy of the playbook beside the database's; `studio_pieces\` is in no backup,
+so copy it yourself when you move the app. Copy your `.env` in before the first
 start (and `pipeline.db` too if you want the stories and drafts you already
 have from running the scripts in the repo folder; otherwise the app starts
 with an empty database). `desktop.log` is where messages go, since there is
@@ -1012,16 +1030,20 @@ settings change in the repo, rebuild; the exe does not update itself. Close
 `Pipeline.exe` first. PyInstaller asks
 `The output directory "...\dist\Pipeline" and ALL ITS CONTENTS will be
 REMOVED! Continue?` and means it: if you have been running the app from
-`dist\Pipeline`, its `.env`, `pipeline.db`, `backups\` and `images\` go with
-it. Two ways to keep them:
+`dist\Pipeline`, its `.env`, `pipeline.db`, `backups\`, `images\`,
+`studio_pieces\` and `studio_playbook.md` go with it. A studio piece whose
+folder is gone can no longer be resumed or revised (its page says the folder
+is missing), and the studio falls back to the shipped playbook. Two ways to
+keep them:
 - keep the app outside `dist\` (say `C:\Users\you\Pipeline`): answer `y`,
   then copy `Pipeline.exe`, `pipeline-cli.exe` and `_internal\` from
   `dist\Pipeline` over the top of that folder. Its data files are never in
   the way. This is the simplest habit.
 - or run it from `dist\Pipeline`: answer `N`, copy `.env`, `pipeline.db`,
-  `backups\` and `images\` somewhere safe, rebuild with `y`, and copy them
-  back. If the copy says `The system cannot find the file specified`, that
-  file was never there and there is nothing to keep.
+  `backups\`, `images\`, `studio_pieces\` and `studio_playbook.md` somewhere
+  safe, rebuild with `y`, and copy them back. If the copy says `The system
+  cannot find the file specified`, that file was never there and there is
+  nothing to keep.
 Everything else is the same as in the browser, including the rule
 that publishing stays off unless you turn it on in `ops\config.yaml`.
 
@@ -1071,12 +1093,16 @@ and long posts need X Premium.
    in part 1, and the cards are drawn by Microsoft Edge, which comes with
    Windows (Chrome or Chromium work too). If a piece says `no Chromium-family
    browser found`, put the browser's full path on `render: browser:` in
-   `studio\config.yaml`, or on `STUDIO_BROWSER=` in `.env`. Until a browser is
+   `studio\config.yaml`, between the single quotes that are there:
+   `browser: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`
+   (never double quotes: they turn each `\` into an escape and the studio stops
+   loading its settings), or on `STUDIO_BROWSER=` in `.env`. Until a browser is
    found no automatic piece starts: the `studio` step fails on the runs page with
    `no new piece: no browser to draw the cards with`, rather than spend a
    session's research and writing on a piece whose cards cannot be drawn.
 2. It runs on its own. The `studio` step sits in the automatic runs (part 8)
-   right after `score`, so each run first acts on anything you asked for on the
+   right after `score` (with Task Scheduler instead, it is the `pipeline-studio`
+   task of part 6), so each run first acts on anything you asked for on the
    studio page, then starts a new piece if `studio\config.yaml` allows one: at
    most `max_new_per_day` (1) a day, `min_hours_between` (6) hours after the last
    piece, and never while a piece waits for you at the research checkpoint. A day
@@ -1161,12 +1187,15 @@ and long posts need X Premium.
    the mistakes the fact-checks keep catching. Edit and save it (the box under it
    says what you changed, for the history); the next piece written reads your
    version, even one whose run is already going (it lives in `studio_playbook.md`
-   next to `pipeline.db`). Every version is kept: yours, the learning loop's
-   (below) and the shipped seed, and any one can be put back from the performance
-   page. The session is also given the X handles in `config.yaml` as already
-   verified, and a copy of the account's recent pieces as they stand in the queue
-   (`earlier_pieces.md` in the piece's folder, each marked posted or not), so a
-   follow-up or a scorecard quotes what the account actually wrote.
+   next to `pipeline.db`, and every backup keeps a copy:
+   `backups\pipeline-<stamp>.studio_playbook.md`; to restore one, copy it back
+   as `studio_playbook.md`, or put a version back on the performance page). Every
+   version is kept: yours, the learning loop's (below) and the shipped seed, and
+   any one can be put back from the performance page. The session is also given
+   the X handles in `config.yaml` as already verified, and a copy of the
+   account's recent pieces as they stand in the queue (`earlier_pieces.md` in the
+   piece's folder, each marked posted or not), so a follow-up or a scorecard
+   quotes what the account actually wrote.
 9. What X says. **Studio → what X says** (`/studio/performance`) is the
    dashboard for the posted pieces, and what it shows is fed back into the next
    session. Each piece is measured on its first post 48 hours after it went out
@@ -1299,7 +1328,9 @@ reference pieces in `studio\exemplars\`.
 | A draft sits on the approved page marked `claimed` and never posts | the run that claimed it died before it posted (a sleep, a power cut, the Stop button). Press "Release" beside it once the claim is over 30 minutes old, or run `python run_publish.py --release-failed`; check on the publishing page first that no part of it reached X |
 | The control panel says a step is already running, or a run's step is marked `locked` | that step is running in this window, another window or the scheduler (part 6); wait for it and press the button again. Other steps can run meanwhile |
 | The control panel will not start: `Address already in use` | another `run_app.py` or `run_queue.py` window is open; close it or use `--port 8001` |
-| A studio piece says `no browser to draw the cards with` (its run's log: `no Chromium-family browser found`) | the cards are drawn by Edge, Chrome or Chromium; put the browser's full path on `render: browser:` in `studio\config.yaml` (Edge is usually `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`) and press Resume on the piece. The piece stops before polishing, its cards as written |
+| A studio piece says `no browser to draw the cards with` (its run's log: `no Chromium-family browser found`) | the cards are drawn by Edge, Chrome or Chromium; put the browser's full path on `render: browser:` in `studio\config.yaml` between single quotes (Edge is usually `browser: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`) and press Resume on the piece. The piece stops before polishing, its cards as written |
+| A studio piece says `card card_1.html could not be drawn: a file could not be read or written` | another program has that card's picture open (an image viewer you opened from the piece's folder): close it; the next polish round draws the card again, and a piece that failed meanwhile has Resume |
+| `run_ops.py run` never runs the studio | on purpose: a session runs an hour or more and would hold the whole run. Create the `pipeline-studio` task (part 6), which runs `run_ops.py run --only studio` |
 | A studio piece fails at once with `unknown option '--restricted'` (or `--safe-mode`) | your Claude Code is older than the studio expects: `npm install -g @anthropic-ai/claude-code`, then Resume. As a stopgap remove that flag from `cli_flags` in `studio\config.yaml` |
 | The radar page says the last scan `failed` | the line beside it says why (Claude Code not logged in, the time limit, an answer that was not JSON). Nothing was stored from it; press **Scan now**, or the next automatic run tries again. `radar: timeout_minutes` in `studio\config.yaml` gives a slow scan longer |
 | The calendar shows one event twice with different dates | the date moved and both reports were kept. **Dismiss** the old one |

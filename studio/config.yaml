@@ -90,9 +90,12 @@ x:
   max_cards_total: 4            # pictures per piece (X allows 4 per post)
 
 # The card renderer (studio/render.py). Blank = find Edge, Chrome or Chromium.
-# STUDIO_BROWSER in .env overrides.
+# STUDIO_BROWSER in .env overrides. A full path goes between the single quotes, as is:
+#   browser: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+# (between double quotes YAML takes each backslash for an escape, \M is none, and the
+# studio could not load its settings at all).
 render:
-  browser: ""
+  browser: ''
   timeout_seconds: 60
 
 # The radar (studio/radar.py, studio/scan.py, /studio/radar): where topics come from.

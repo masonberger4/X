@@ -86,6 +86,18 @@ def _write_log(workspace: Path, line: str) -> None:
         pass
 
 
+def _echo(ctx: Context, line: str) -> None:
+    """Show a line on the run's output, never at the cost of the lines after it. A console
+    that cannot show a character raises from print (a Windows pipe is cp1252 and strict,
+    and a session's narration is full of arrows, >= signs and Greek letters), and one
+    event's lines are said in a loop: a raise would keep the rest of them out of
+    session.log too. run_studio.py makes its own print safe; this guards any echo."""
+    try:
+        ctx.echo(line)
+    except Exception:  # a display hook must never cost the log a line
+        log.debug("could not echo %r", line, exc_info=True)
+
+
 def _run_stage(
     ctx: Context, piece: S.Piece, stage: str, prompt_text: str, *, first: bool
 ) -> claude_cli.SessionResult:
@@ -105,7 +117,7 @@ def _run_stage(
 
     def say(line: str) -> None:
         _write_log(workspace, line)
-        ctx.echo(f"[piece {piece.id} {stage}] {line}")
+        _echo(ctx, f"[piece {piece.id} {stage}] {line}")
 
     def on_event(event: dict[str, Any]) -> None:
         nonlocal started
@@ -244,7 +256,7 @@ def fresh_session(
         f"a fresh session {new} takes the piece over from its files"
     )
     _write_log(Path(piece.workspace), note)
-    ctx.echo(f"[piece {piece.id} {stage}] {note}")
+    _echo(ctx, f"[piece {piece.id} {stage}] {note}")
     log.warning("piece %s: %s", piece.id, note)
     piece = S.get_piece(ctx.conn, piece.id) or piece
     return _run_stage(ctx, piece, stage, P.fresh_session_prompt(stage, prompt_text), first=True)

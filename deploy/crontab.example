@@ -27,6 +27,12 @@ MAILTO=""
 # Overlapping fires exit 2 immediately thanks to the lock file.
 */30 * * * *  cd $REPO && $PY run_ops.py run >> logs/ops.log 2>&1
 
+# The studio (step 10): one long Claude Code session per post, an hour or more, so it is
+# not in the plain run above (which would stop for as long). Three times a day; it starts
+# a piece only when studio/config.yaml's `auto` limits allow (one a day as shipped). It
+# takes only the studio's own lock, so the pipeline's fires keep running beside it.
+10 6,12,18 * * *  cd $REPO && $PY run_ops.py run --only studio >> logs/ops.log 2>&1
+
 # Health checks with notifications (ALERT_WEBHOOK_URL / SMTP_* from .env), hourly at :15.
 15 * * * *    cd $REPO && $PY run_ops.py health --alert >> logs/ops.log 2>&1
 

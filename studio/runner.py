@@ -4,6 +4,7 @@ editor's requests, and decide whether to start a new piece (and on what)."""
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sqlite3
 import time
@@ -68,7 +69,18 @@ def _db_conn() -> sqlite3.Connection:
 def _data_folder() -> Path:
     from approval_queue import store as queue_store
 
-    return queue_store.db_path().resolve().parent
+    return absolute(queue_store.db_path()).parent
+
+
+def absolute(path: str | Path) -> Path:
+    r"""`path` made absolute as written, never resolved. A piece's folder is its session's
+    working folder, and resolve() follows links: on Windows it turns a mapped network drive
+    (Z:\Pipeline) into its UNC form (\\server\share\Pipeline). The npm install's
+    claude.cmd runs through cmd.exe, which cannot start in a UNC folder and starts in
+    C:\Windows instead, where the session may write nothing: every piece would end without
+    its fact base. The drive letter the data folder was given is kept. (panel/frozen.py and
+    run_ops.py keep it the same way for the folder each step runs in.)"""
+    return Path(os.path.abspath(path))
 
 
 def references() -> list[str]:
@@ -240,9 +252,11 @@ def build_brief(
         piece_id=piece.id,
         today=today,
         timezone=tzname,
-        workspace=str(Path(piece.workspace).resolve()),
+        # The folder as the session is started in it (absolute, not resolved), so the
+        # paths the prompt names are the ones its working folder has.
+        workspace=str(absolute(piece.workspace)),
         # the piece's own copy, made before each stage (studio/session.py:copy_reference)
-        reference_dir=str(Path(piece.workspace).resolve() / P.REFERENCE_DIR),
+        reference_dir=str(absolute(piece.workspace) / P.REFERENCE_DIR),
         references=references(),
         topic=piece.topic,
         story=story,
@@ -511,7 +525,7 @@ def new_piece(
         requested_angle=angle,
         checkpoint=checkpoint,
         session_id=session_id,
-        workspace=str(folder.resolve()),
+        workspace=str(absolute(folder)),
         model=str(cfg["model"]),
         effort=str(cfg.get("effort") or ""),
         story_item=T.story_item(cluster_id) if cluster_id is not None else "",

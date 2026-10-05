@@ -19,6 +19,7 @@ import json
 import logging
 import re
 import shutil
+import sys
 import threading
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -743,6 +744,24 @@ def test_a_new_piece_gets_its_own_folder_and_a_fresh_session(
     assert (piece.topic, piece.cluster_id) == (topic, cluster_id)
     assert (piece.model, piece.effort) == (cfg["model"], cfg["effort"])
     assert piece.story_item == ""  # story 42 is not in the feed: no item to remember
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="making a link needs privileges there")
+def test_a_piece_folder_keeps_the_data_folders_own_path(sconn, cfg, db_file, monkeypatch):
+    """The data folder reached through a link (on Windows, a mapped network drive Z: that
+    resolve() would turn into \\\\server\\share, where the npm claude.cmd cannot start) is
+    the folder the piece's session is started in and the prompt names: never resolved."""
+    mapped = db_file.parent / "Z"
+    mapped.symlink_to(db_file.parent, target_is_directory=True)
+    monkeypatch.setenv("DB_PATH", str(mapped / db_file.name))
+
+    piece = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, checkpoint=True)
+
+    ws = Path(piece.workspace)
+    assert ws.parent == mapped / "studio_pieces" and ws.is_dir()
+    brief = brief_for(sconn, cfg, piece)
+    assert brief.workspace == piece.workspace
+    assert brief.reference_dir == str(mapped / "studio_pieces" / ws.name / P.REFERENCE_DIR)
 
 
 def test_a_new_piece_on_a_feed_story_remembers_one_of_its_items(sconn, cfg):
@@ -1808,6 +1827,31 @@ def test_an_abbreviated_flag_is_refused(cli_calls, capsys, argv):
     assert stop.value.code == 2
     assert "unrecognized arguments" in capsys.readouterr().err
     assert cli_calls == {}
+
+
+def test_a_character_a_windows_pipe_cannot_show_never_ends_a_print(monkeypatch):
+    """On Windows the runs page, run_ops.py and Task Scheduler's log give run_studio.py a
+    cp1252 stdout that raises on an arrow, a >= sign or a Greek letter: such a character
+    is written as its escape instead, and --list (here) prints every piece."""
+    import io
+
+    title = "ORR ≥ 40% → TGF-β trap"
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="cp1252", errors="strict", write_through=True)
+    monkeypatch.setattr(sys, "stdout", console)
+
+    def listing() -> int:
+        print(f"piece 1: {title}")
+        print("piece 2: a plain title")
+        return 0
+
+    monkeypatch.setattr(runner, "print_list", listing)
+
+    assert run_studio.main(["--list"]) == 0
+    assert raw.getvalue().decode("cp1252").splitlines() == [
+        "piece 1: ORR \\u2265 40% \\u2192 TGF-\\u03b2 trap",
+        "piece 2: a plain title",
+    ]
 
 
 def test_a_story_must_be_a_number(cli_calls, capsys):

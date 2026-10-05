@@ -430,9 +430,10 @@ Claude, and never edits content; it runs the other CLIs as subprocesses.
 ```bash
 python run_ops.py run                 # lock; ingest -> score -> draft [-> publish -> feedback]
 python run_ops.py run --only ingest   # a subset
+python run_ops.py run --only studio   # the studio's own entry: no run lock, only its own
 python run_ops.py run --dry-run       # print the argv per step, run and record nothing
 python run_ops.py health [--json] [--alert]   # checks; exit 1 if anything is 'fail'
-python run_ops.py backup [--keep N]   # verified SQLite online backup into backups/
+python run_ops.py backup [--keep N]   # verified SQLite online backup into backups/ (+ playbook)
 python run_ops.py status              # last run per step, last health, row counts, backup age
 python run_ops.py prune --days 90     # ops-owned tables only (pipeline_runs, health_checks, alerts_sent)
 ```
@@ -441,7 +442,13 @@ Settings live in `ops/config.yaml` (step order, per-step `timeout_seconds` where
 no limit, as `verify` uses, per-step `lock:` names, the control panel's automatic runs
 `auto_run_enabled` / `auto_run_times` / `auto_run_steps` / `auto_run_grace_minutes` /
 `auto_run_backup_hours` (the first automatic run each day also takes a verified backup),
-health thresholds and budget caps, backup dir/keep, alert channels and cooldown). The
+health thresholds and budget caps, backup dir/keep and `with_db`, the files beside the
+database kept with each backup as `pipeline-<stamp>.<name>` (the studio's
+`studio_playbook.md`), alert channels and cooldown). A plain `run` leaves out the
+`manual` steps and the `skip_when_busy` one, the studio: its session runs an hour or more,
+which would hold the whole run (and the run lock every fire takes) for as long, so it has
+a schedule entry of its own, `run --only studio`, which takes only the studio's own lock
+(a run of `skip_when_busy` steps alone never takes the run lock). The
 shipped staleness limits (13h, and `source_stale_min_hours`) fit three runs a day;
 tighten them if a scheduler runs every 30 minutes. The `publish` step is
 a dry run and stays one: posting is manual only, so `run_ops.py run` refuses to start when
@@ -461,8 +468,9 @@ Slack/Discord/Mattermost incoming webhooks) or email (`SMTP_*`,
 summaries and counts only.
 
 Deploy files: `deploy/crontab.example`, `deploy/pipeline.service`,
-`deploy/pipeline.timer`, and `deploy/README.md` (VPS setup, lock/backup/log
-locations, how to restore a backup).
+`deploy/pipeline.timer`, `deploy/pipeline-studio.service` and `deploy/pipeline-studio.timer`
+(the studio's own entry, with no unit time limit: each stage has its own), and
+`deploy/README.md` (VPS setup, lock/backup/log locations, how to restore a backup).
 
 ## Conference abstracts and KOL list (step 6)
 
@@ -822,10 +830,12 @@ and that it changes no file. A stage whose CLI stopped a sub-agent before it rep
 running total, so the row takes the difference from the total the piece's session last
 reported (`session_cost` in the piece's meta).
 
-**Running it**: the `studio` step in `ops/config.yaml` (automatic, right after
-`score`, `skip_when_busy` so a long session sits a run out instead of holding the
-others back, along with the steps its own run still has to come behind it,
-`JobManager.queued_behind`) acts on the editor's requests and starts a new piece when
+**Running it**: the `studio` step in `ops/config.yaml` (in the panel's automatic runs
+right after `score`, `skip_when_busy` so a long session sits a run out instead of holding
+the others back, along with the steps its own run still has to come behind it,
+`JobManager.queued_behind`; a plain `run_ops.py run` leaves it out, and cron, Task
+Scheduler and systemd run it from an entry of its own, `run_ops.py run --only studio`)
+acts on the editor's requests and starts a new piece when
 `auto.max_new_per_day` (per calendar day in the root `timezone:`, the clock the run
 times are set in) and `auto.min_hours_between` allow, no piece waits at the checkpoint
 and a card browser was found (without one the step fails rather than start a piece
@@ -836,7 +846,13 @@ run end, while no studio run holds the lock (`studio/runner.py:settle_stopped`).
 carries on in the same session; a session Claude Code has cleaned up (after 30 days by
 default) is replaced by a fresh one that reads the piece's files first. Each stage is
 told the date and the playbook as they are when it starts. A piece whose folder is gone
-fails and says so, and the run goes on.
+fails and says so, and the run goes on. A card picture another program holds open (an
+image viewer, on Windows) is a card that could not be drawn, never a crash. A piece's
+folder is the data folder's path as given, never resolved: on Windows a mapped network
+drive would otherwise become a UNC path, which the npm `claude.cmd` cannot start in
+(`studio/runner.py:absolute`; `panel/frozen.py` and `run_ops.py` keep the drive the same
+way). `run_studio.py` writes a character its console cannot show (a cp1252 pipe on
+Windows) as its escape rather than fail the line, and session.log gets every line either way.
 Tables: `studio_pieces`, `studio_runs`, `studio_topics`, `studio_scans`,
 `studio_radar_topics`, `studio_catalysts`, `studio_playbook_versions`,
 `studio_manual_metrics`.
