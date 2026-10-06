@@ -12,7 +12,7 @@ METRICS = ("impressions", "likes", "reposts", "replies", "quotes", "bookmarks")
 # count as one like): a small account's posts mostly get no engagement at all, and
 # without a reach term every such post scores 0 and selection has nothing to tell apart.
 # `conversation` is the weighted sum below, a derived KPI that
-# can be selected on (feedback/config.yaml `kpi`, swarm/config.yaml `evolve.kpi`) exactly
+# can be selected on (feedback/config.yaml `kpi`) exactly
 # like a raw metric; it is never stored, always computed from the stored counts.
 CONVERSATION = "conversation"
 CONVERSATION_WEIGHTS = {

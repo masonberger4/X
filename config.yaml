@@ -27,10 +27,6 @@ models:
   # menin inhibitor), so it runs on Opus 5.5.
   scorer: claude-opus-5-5
   scorer_effort: low              # low | medium | high | xhigh | max; blank = model default
-  # Drafting writes the posts the account is judged on. DRAFT_MODEL in .env
-  # overrides this; leave that blank to use this value.
-  drafter: claude-opus-5-5
-  drafter_effort: low
   # Optional second opinion for `digest.py --auto-rate`: a stronger model rates
   # each digest entry 1-5 the way the human does with --rate. Stored with
   # rater='auto:<model>' so it never masquerades as a human decision.
@@ -42,7 +38,7 @@ models:
 
 claude_code:                      # how every model call reaches Claude (claude_cli.py)
   binary: claude                  # CLI on PATH; it must be logged in (`claude login`)
-  timeout_seconds: 600            # per call (a swarm cell can run several minutes)
+  timeout_seconds: 600            # per call
   extra_args: []                  # appended verbatim, e.g. ["--fallback-model", "sonnet"]
   # --safe-mode on every call: your own Claude Code set-up (CLAUDE.md files, hooks, MCP
   # servers, plugins, output styles) stays out of the pipeline's calls, which must answer
@@ -362,11 +358,10 @@ companies:
 
 # X handles (draft/tags.py). An `x:` on a company entry (feeds above, `branding.companies`
 # below) is the account a post writes as @handle when it names that company; every journal,
-# society and regulator with a handle is listed under `mentions:`. The drafter is only ever
-# shown the handles of accounts the source names or that own the source URL's host, and a
-# post that names one of those without its @handle is discarded in code, as is a drug or
-# trial name without its # (both are hard rule 11 in draft/prompt.py). A company without
-# `x:` is simply written by name: handles are never guessed. Handles as of Sept 2026;
+# society and regulator with a handle is listed under `mentions:`. The studio is given
+# these handles as verified (studio/runner.py:app_handles), so its checks accept them
+# without a page that shows the account. A company without `x:` is simply written by
+# name: handles are never guessed. Handles as of Sept 2026;
 # verify each on x.com before relying on it.
 mentions:
   - {name: Journal of Clinical Oncology,     handle: JCO_ASCO,        aliases: [JCO, J Clin Oncol],        domains: [ascopubs.org]}
@@ -395,18 +390,10 @@ mentions:
   - {name: FDA Oncology Center of Excellence, handle: FDAOncology,    aliases: [OCE, Oncology Center of Excellence]}
   - {name: EMA,                              handle: EMA_News,        aliases: [European Medicines Agency], domains: [ema.europa.eu]}
 
-# Company branding in table images (draft/branding.py). A `ticker:` on a company feed
-# entry above, or an entry here for a company without a feed, puts "($TICKER)" after that
-# company's name in a table's company/sponsor column; a PNG at <logos_dir>/<key>.png is
-# drawn beside it. `python run_logos.py` fills that folder from each company's own site
-# icon (its apple-touch-icon or favicon): the site is `domain:` here, else the host of
-# the company's feed URL with ir./investors./www. stripped (hosts on an IR platform such
-# as gcs-web.com need an explicit `domain:`). The pipeline itself never downloads
-# anything; review the folder after a run. Cells naming a company not listed here are
-# left untouched. Tickers as of Sept 2026; verify after any listing change or acquisition.
+# Companies without a feed above (draft/tags.py): their names, so a company is never
+# taken for a drug name, and their `x:` handles. Tickers as of Sept 2026; verify after any
+# listing change or acquisition.
 branding:
-  logos_dir: assets/logos
-  company_columns: [company, sponsor, developer, partner, owner, acquirer]
   companies:
     - {key: jnj,          name: Johnson & Johnson,       ticker: JNJ,  aliases: [J&J, Janssen], domain: jnj.com, x: JNJNews}
     - {key: pfizer,       name: Pfizer,                  ticker: PFE,  domain: pfizer.com, x: pfizer}

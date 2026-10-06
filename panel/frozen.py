@@ -34,17 +34,11 @@ CLIS = (
     "run_ingest",
     "run_score",
     "digest",
-    "run_draft",
-    "run_verify",
     "run_queue",
     "run_app",
     "run_publish",
     "run_feedback",
     "run_ops",
-    "run_logos",
-    "run_evolve",
-    "run_scrub_notes",
-    "run_unlink",
     "run_studio",
 )
 
@@ -78,14 +72,13 @@ def bundle_manifest(root: Path = REPO_ROOT) -> tuple[list[tuple[str, str]], list
     """(datas, hiddenimports) for the PyInstaller spec.
 
     datas are (source path, destination folder inside the bundle) pairs: the root
-    config.yaml, every step's own config.yaml, the voice guide, the template folders,
+    config.yaml, every step's own config.yaml, the template folders,
     the studio's brief, angles, playbook seed, fonts and reference pieces, and a copy of
     each CLI script so `ops/runner.py`'s existence check passes.
     """
     datas: list[tuple[str, str]] = [(str(root / "config.yaml"), ".")]
     for cfg in sorted(root.glob("*/config.yaml")):
         datas.append((str(cfg), cfg.parent.name))
-    datas.append((str(root / "draft" / "voice.md"), "draft"))
     for pkg in ("approval_queue", "panel", "studio"):
         datas.append((str(root / pkg / "templates"), f"{pkg}/templates"))
     # The studio's brief, angle library, playbook seed, card fonts and reference pieces.

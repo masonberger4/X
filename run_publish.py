@@ -14,9 +14,8 @@ before posting, so overlapping runs cannot post it twice.
 runs `--live --now --draft ID`; the caps in publish/config.yaml still apply). The order set
 on the panel's approved page (schedule.position) is honoured before the config's policy.
 
-A draft whose chart was rendered (run_draft.py) and not dropped in the queue has that PNG
-attached to the post it is anchored to (the first, before step 9 phase four), with alt
-text, unless media.attach_images is false in
+Each picture a draft carries (the studio's cards) that was not dropped in the queue is
+attached to the post it is anchored to, with alt text, unless media.attach_images is false in
 publish/config.yaml. The dry run prints the image path and alt text.
 
 A draft whose attempt posted nothing (status 'failed') goes back to approved on its own, up to

@@ -178,7 +178,7 @@ def taken_stories(conn: sqlite3.Connection) -> set[int]:
     """The feed stories a new piece is not offered. One story, one piece of writing: the
     studio's own (a piece of any stage, a queued topic) and every story with a draft that
     did not fail, waiting, approved, rejected or posted (approval_queue/store.py's
-    read-only drafted_cluster_ids; run_draft leaves the studio's stories alone in turn)."""
+    read-only drafted_cluster_ids)."""
     from approval_queue import store as queue_store
 
     return S.used_cluster_ids(conn) | queue_store.drafted_cluster_ids(conn)

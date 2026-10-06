@@ -3,14 +3,7 @@
 {% block content %}
 <h1>{{ status|capitalize }} drafts <span class="meta">({{ drafts|length }})</span></h1>
 {% if notice %}<p class="flash">{{ notice }}</p>{% endif %}
-{% if choosing %}<p class="banner warn"><a href="/choose">{{ choosing }} draft{{ 's' if choosing != 1 else '' }} waiting for your A/B pick</a>: verify skips them until you pick.</p>{% endif %}
-<p class="meta">Tell the drafter what to change and it rewrites the post; open a draft for the full text, claims and approve buttons. Your notes and rejection reasons teach the drafter: see the <a href="/voice">voice report</a>.</p>
-{% if status == "pending" %}
-  {% with buttons=[{"label": "Draft", "steps": ["draft"], "title": "draft posts for the stories that cleared the score threshold"},
-                   {"label": "Retry failed", "steps": ["draft_retry"], "title": "draft again the stories (last 20 days) whose only drafts failed the hard rules"},
-                   {"label": "Verify", "steps": ["verify"], "title": "check every unchecked claim against the web (and auto-revise)"}],
-          back="/queue" %}{% include "_run.html" %}{% endwith %}
-{% endif %}
+<p class="meta">Open a draft for the full text, its cards and the approve buttons. A studio piece is revised from its studio page.</p>
 {% if status == "approved" %}
   <p class="meta">Waiting to be published by <code>run_publish.py</code> at the next slot, in the order below.
   {% if hidden_posted %}{{ hidden_posted }} already posted, hidden. <a href="/status/approved?posted=1">Show posted</a>.
@@ -74,21 +67,8 @@
         <div class="meta">{{ first[:400] }}{% if first|length > 400 %}…{% endif %}</div>
         {% if d.rejection_reason %}<div class="meta over">{{ d.rejection_reason }}</div>{% endif %}
         {% if studio_holds is defined and studio_holds.get(d.id) %}<div class="meta"><span class="pill warn">on hold</span> {{ studio_holds[d.id] }}</div>{% endif %}
-        {% set k = checks.get(d.id) %}
-        {% if k %}<div class="meta">claims:
-          {% if k.contradicted %}<span class="badge contradicted">{{ k.contradicted }} contradicted</span>{% endif %}
-          {% if k.supported %}<span class="badge supported">{{ k.supported }} supported</span>{% endif %}
-          {% if k.unverified %}<span class="badge">{{ k.unverified }} unverified</span>{% endif %}
-          {% if k.unchecked %}<span class="badge">{{ k.unchecked }} unchecked</span>{% endif %}
-          {% if k.auto_rounds %}<span class="badge">auto-revised {{ k.auto_rounds }}×{% if k.contradicted or k.unverified %}, needs you{% endif %}</span>{% endif %}
-        </div>{% endif %}
-        {% if status == "pending" and d.studio_piece %}
-        {% if HAS_PANEL %}<div class="meta"><a href="/studio/{{ d.studio_piece }}">fact base, fact-check log and Revise in the studio</a></div>{% endif %}
-        {% elif status == "pending" %}
-        <form method="post" action="/drafts/{{ d.id }}/revise" class="revise">
-          <input name="instructions" placeholder="what should change?{% if k and (k.contradicted or k.unverified) %} (leave empty to fix the failed claims){% endif %}">
-          <button>Revise</button>
-        </form>
+        {% if status == "pending" and d.studio_piece and HAS_PANEL %}
+        <div class="meta"><a href="/studio/{{ d.studio_piece }}">fact base, fact-check log and Revise in the studio</a></div>
         {% endif %}
       </td>
       <td class="meta">{{ d.rationale }}</td>

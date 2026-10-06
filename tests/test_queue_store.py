@@ -4,7 +4,7 @@ import pytest
 
 from approval_queue import store
 from draft.schema import Claim, Draft
-from tests.conftest import URL, seed_item
+from tests.conftest import seed_item
 
 
 def make_draft(**kw):
@@ -37,16 +37,6 @@ def test_connect_uses_db_path_env(tmp_path, monkeypatch):
     assert p.exists()
 
 
-def test_fetch_candidates_returns_empty_without_step1_tables(tmp_path, monkeypatch):
-    path = tmp_path / "no_step1.db"
-    monkeypatch.setenv("DB_PATH", str(path))
-    c = store.connect(path)
-    try:
-        assert store.fetch_candidates(min_score=0.0, since_hours=1000, conn=c) == []
-    finally:
-        c.close()
-
-
 def test_drafts_created_at_index_created_idempotently(db_file):
     c1 = store.connect(db_file)
     c1.close()
@@ -58,48 +48,6 @@ def test_drafts_created_at_index_created_idempotently(db_file):
         assert len(rows) == 1
     finally:
         c2.close()
-
-
-def test_fetch_candidates_filters_by_score_and_age(conn):
-    seed_item(conn, "hi", total=9.0)
-    seed_item(conn, "low", total=3.0)
-    seed_item(conn, "old", total=9.5, hours_ago=100)
-    seed_item(conn, "pre", source="biorxiv", total=8.0)
-    cands = store.fetch_candidates(min_score=7.0, since_hours=48, conn=conn)
-    assert [c.item_id for c in cands] == ["hi", "pre"]
-    c = cands[0]
-    assert c.url == URL and c.suggested_angle == "angle hi" and c.rationale == "rationale hi"
-    assert c.scores["novelty"] == 8.0 and c.total == 9.0
-    assert "88%" in c.abstract
-
-
-def test_fetch_candidates_uses_latest_score_per_cluster(conn):
-    cid = seed_item(conn, "x", total=2.0, hours_ago=5)
-    conn.execute(
-        """INSERT INTO scores (cluster_id, model, prompt_version, total, rationale,
-                               suggested_angle, raw_response, scored_at)
-           VALUES (?, 'm', 'v2', 9.5, 'new', 'new angle', '{}', ?)""",
-        (cid, "2999-01-01T00:00:00+00:00"),
-    )
-    conn.commit()
-    cands = store.fetch_candidates(min_score=7.0, since_hours=48, conn=conn)
-    assert len(cands) == 1 and cands[0].total == 9.5 and cands[0].suggested_angle == "new angle"
-    assert cands[0].cluster_id == cid
-
-
-def test_fetch_candidates_one_per_cluster_prefers_longest_abstract(conn):
-    cid = seed_item(conn, "pr", source="company_x", total=9.0, abstract="short")
-    seed_item(conn, "paper", source="pubmed", total=9.0, cluster_id=cid)
-    cands = store.fetch_candidates(min_score=7.0, since_hours=48, conn=conn)
-    assert [c.item_id for c in cands] == ["paper"]
-
-
-def test_has_draft_covers_whole_cluster(conn):
-    cid = seed_item(conn, "a", total=9.0)
-    seed_item(conn, "b", total=9.0, cluster_id=cid)
-    store.insert_draft(conn, item_id="a", cluster_id=cid, model="m", draft=make_draft())
-    assert store.has_draft(conn, "b", cid)
-    assert not store.has_draft(conn, "b")
 
 
 def test_drafted_cluster_ids_are_every_story_with_a_draft_that_did_not_fail(conn):
@@ -126,62 +74,6 @@ def test_drafted_cluster_ids_are_every_story_with_a_draft_that_did_not_fail(conn
 
     expected = {cid for status, cid in ids.items() if status != store.STATUS_FAILED}
     assert store.drafted_cluster_ids(conn) == expected | {unclustered, kept}
-
-
-def test_the_studio_holds_no_story_before_its_first_run(conn):
-    assert store.studio_held_clusters(conn) == set()
-
-
-def test_studio_tables_from_before_story_items_still_say_what_they_hold(conn):
-    """A database whose studio tables predate story_item (the studio has not run since the
-    upgrade): the held stories are read from cluster_id alone, never an error."""
-    conn.executescript(
-        """
-        CREATE TABLE studio_pieces (id INTEGER PRIMARY KEY, cluster_id INTEGER, stage TEXT);
-        CREATE TABLE studio_topics (id INTEGER PRIMARY KEY, cluster_id INTEGER, piece_id INTEGER);
-        INSERT INTO studio_pieces (cluster_id, stage) VALUES (5, 'research_ready');
-        INSERT INTO studio_pieces (cluster_id, stage) VALUES (6, 'discarded');
-        INSERT INTO studio_topics (cluster_id, piece_id) VALUES (7, NULL), (8, 1), (NULL, NULL);
-        """
-    )
-    assert store.studio_held_clusters(conn) == {5, 7}
-
-
-def test_a_researching_piece_holds_the_stories_it_was_offered_until_it_names_one(conn):
-    """studio/session.py:research records the shortlist in the piece's meta before the
-    session starts; while the piece researches on no story those are held (run_draft's
-    `offered=False` look before storing a draft leaves them out). Unreadable meta holds
-    nothing."""
-    conn.executescript(
-        """
-        CREATE TABLE studio_pieces (id INTEGER PRIMARY KEY, cluster_id INTEGER, stage TEXT,
-                                    meta_json TEXT NOT NULL DEFAULT '{}');
-        CREATE TABLE studio_topics (id INTEGER PRIMARY KEY, cluster_id INTEGER, piece_id INTEGER);
-        INSERT INTO studio_pieces (cluster_id, stage, meta_json) VALUES
-            (NULL, 'researching', '{"offered_stories": [1, 2, true, "3"]}'),
-            (4, 'researching', '{"offered_stories": [4, 5]}'),
-            (NULL, 'failed', '{"offered_stories": [6]}'),
-            (NULL, 'research_ready', '{"offered_stories": [7]}'),
-            (NULL, 'researching', '{not json'),
-            (NULL, 'researching', '[8]');
-        """
-    )
-    assert store.studio_researching_offers(conn) == {1, 2}
-    assert store.studio_held_clusters(conn) == {1, 2, 4}
-    assert store.studio_held_clusters(conn, offered=False) == {4}
-
-
-def test_insert_get_and_one_draft_per_item(conn):
-    seed_item(conn, "i1")
-    did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    assert store.has_draft(conn, "i1") and not store.has_draft(conn, "i2")
-    row = store.get_draft(conn, did)
-    assert row.status == store.STATUS_PENDING
-    assert row.draft == make_draft()
-    assert row.title == "Title i1" and row.total == 8.5 and row.source == "pubmed"
-    with pytest.raises(sqlite3.IntegrityError):
-        store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    assert store.get_draft(conn, 999) is None
 
 
 def test_failed_draft_stored_with_reason(conn):
@@ -447,90 +339,6 @@ def test_actions_without_category_still_work(conn):
         fn(conn, did)
         assert store.list_decisions(conn, did)[0]["category"] is None
     assert store.validate_category(None) is None
-
-
-def test_record_examples_writes_rows_per_kind(conn):
-    seed_item(conn, "old")
-    seed_item(conn, "new")
-    old = store.insert_draft(conn, item_id="old", model="m", draft=make_draft())
-    e_id = store.edit(conn, old, thread=["edited", "a", "b", "c"])
-    r_id = store.reject(conn, old, note="meh")
-    new = store.insert_draft(conn, item_id="new", model="m", draft=make_draft())
-    assert store.record_examples(conn, new, [e_id], [r_id]) == 2
-    rows = store.list_examples(conn, new)
-    assert [(r["decision_id"], r["kind"]) for r in rows] == [(e_id, "edit"), (r_id, "rejection")]
-    assert all(r["draft_id"] == new and r["created_at"] for r in rows)
-    assert store.record_examples(conn, new) == 0
-    assert store.list_examples(conn, old) == []
-
-
-def test_fetch_decisions_for_voice_joins_items_source_and_url(conn):
-    seed_item(conn, "i1", source="biorxiv")
-    did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.edit(conn, did, thread=["e ", "1", "2", "3"], category="voice")
-    store.reject(conn, did, note="later")
-    rows = store.fetch_decisions_for_voice(conn, "2000-01-01T00:00:00+00:00")
-    assert [r["action"] for r in rows] == ["edit", "reject"]  # oldest first
-    r = rows[0]
-    assert r["source"] == "biorxiv" and r["url"] == URL and r["draft_id"] == did
-    assert r["category"] == "voice" and r["draft_status"] == "rejected"
-    assert '"thread"' in r["original_text"] and "e " in r["edited_text"]
-    assert r["draft_created_at"] and r["item_id"] == "i1"
-    # since in the future -> nothing; datetime accepted too
-    from datetime import UTC, datetime, timedelta
-
-    assert store.fetch_decisions_for_voice(conn, datetime.now(UTC) + timedelta(days=1)) == []
-    assert len(store.fetch_decisions_for_voice(conn, datetime.now(UTC) - timedelta(days=1))) == 2
-    assert len(store.fetch_decisions_for_voice(conn)) == 2
-
-
-def test_fetch_decisions_for_voice_without_step1_tables(tmp_path):
-    conn = store.connect(tmp_path / "solo.db")
-    did = store.insert_draft(conn, item_id="orphan", model="m", draft=make_draft())
-    store.approve(conn, did, note="fine")
-    rows = store.fetch_decisions_for_voice(conn, "2000-01-01")
-    assert len(rows) == 1 and rows[0]["source"] == "" and rows[0]["url"] == ""
-    stats = store.fetch_draft_stats(conn, "2000-01-01")
-    assert len(stats) == 1 and stats[0]["source"] == "" and stats[0]["status"] == "approved"
-    conn.close()
-
-
-def test_studio_drafts_never_reach_the_drafters_voice_examples(conn):
-    # The studio's Discard rejects its pending draft with an app-written note, and an edit
-    # of a studio long post is the studio's voice: neither is an example for the drafter.
-    seed_item(conn, "i1", source="biorxiv")
-    mine = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.reject(conn, mine, note="too much hype")
-    studio = store.insert_draft(
-        conn, item_id=store.studio_item_id(7), model="opus (studio)", draft=make_draft()
-    )
-    store.edit(conn, studio, thread=["a long post, edited"], approve_after=False)
-    store.reject(conn, studio, note="discarded in the studio")
-
-    rows = store.fetch_decisions_for_voice(conn, "2000-01-01")
-    assert [(r["draft_id"], r["note"]) for r in rows] == [(mine, "too much hype")]
-    assert [r["id"] for r in store.fetch_draft_stats(conn, "2000-01-01")] == [mine]
-
-    import run_draft
-
-    _, edits, rejections = run_draft.build_examples(conn, {"examples": {}})
-    assert edits == [] and [r.draft_id for r in rejections] == [mine]
-
-
-def test_fetch_draft_stats(conn):
-    seed_item(conn, "a", source="pubmed")
-    seed_item(conn, "b", source="fda")
-    d1 = store.insert_draft(conn, item_id="a", model="m", draft=make_draft())
-    d2 = store.insert_draft(
-        conn, item_id="b", model="m", draft=make_draft(), status=store.STATUS_FAILED
-    )
-    store.reject(conn, d1)
-    rows = store.fetch_draft_stats(conn, "2000-01-01")
-    assert [(r["id"], r["source"], r["status"]) for r in rows] == [
-        (d1, "pubmed", "rejected"),
-        (d2, "fda", "failed"),
-    ]
-    assert rows[0]["item_id"] == "a" and rows[0]["created_at"] and rows[0]["model"] == "m"
 
 
 def test_revise_replaces_whole_draft_keeps_status_and_logs_decision(conn):

@@ -51,7 +51,7 @@ Rubric 0–10 on: novelty, clinical significance, audience interest, expertise f
 (cell therapy / gene editing bonus), timeliness. Threshold gate; top ~5–10/day
 advance. Log every score for later tuning.
 
-### 3. Draft (stronger model, claude-sonnet / claude-opus)
+### 3. Draft (stronger model, claude-sonnet / claude-opus; retired, see "The studio")
 Inputs: source text, voice guide (tone, sample posts, banned phrases), and the
 originality rule (interpretation required).
 Output JSON: thread (3–6 posts), exactly one of chart / table, suggested_visual,
@@ -65,7 +65,8 @@ Actions: approve / edit / reject, plus reopen for an approved draft that has not
 posted yet and release for one whose publish attempt posted nothing (a failure, or
 a claim left behind by a run that died), which puts it back in line without taking
 it off the approved list. ~10 min per day.
-Edit history is saved as voice-guide training data.
+Edit history is kept with each draft (the voice-learning loop that reused it was retired
+with the drafter).
 
 ### 5. Publish (X API v2 via tweepy)
 2–3 daily slots in the configured time zone (`timezone:` in
@@ -126,8 +127,9 @@ Roadmap, one PR each:
    next angle and shape by Thompson sampling, and have Opus propose playbook edits from
    the best and worst performers for the editor to approve. Until there are 20 to 30
    pieces the numbers are noise and the playbook stays editorial judgement.
-5. Retire the old drafter, swarm and claim verifier once the studio has shipped
-   enough pieces to compare.
+5. Retire the old drafter, swarm and claim verifier. (done: the studio is the only
+   writer; `run_draft.py`, `run_verify.py`, `run_evolve.py`, `swarm/` and the A/B pick
+   pages are gone)
 
 ---
 
@@ -180,7 +182,7 @@ source. Ask me before adding any dependency not listed above.
 Do not build drafting, posting, or any X API integration yet.
 ```
 
-### 9. Swarm (takes the human out of the creative loop)
+### 9. Swarm (retired: removed with the drafter it competed against; kept here as the record of what was built)
 Premise ("more is different"): a single cheap model is a poor analyst, but
 many cheap calls with narrow jobs, local rules and no view of the whole,
 arranged in layers, may beat one strong call. So no agent writes a thread:

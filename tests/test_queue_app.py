@@ -1,21 +1,15 @@
-import json
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
 
-import claude_cli
 from approval_queue import app as queue_app
 from approval_queue import publishing, store
 from approval_queue.app import app
-from draft import drafter
-from draft.chart import Table
 from draft.schema import Claim, Draft
 from publish import store as publish_store
 from tests.conftest import seed_item
-from verify import store as verify_store
-from verify.verifier import ClaimCheck
 
 
 @pytest.fixture
@@ -44,13 +38,12 @@ def test_index_lists_pending_with_source_score_rationale(client, draft_id):
     assert f"/drafts/{draft_id}" in body
 
 
-def test_detail_shows_post_thread_claims_and_lengths(client, draft_id):
+def test_detail_shows_post_thread_and_lengths(client, draft_id):
     r = client.get(f"/drafts/{draft_id}")
     assert r.status_code == 200
     body = r.text
     assert "1/3 Preprint. ORR 88%. one" in body and "3/3 three" in body
     assert "Single post" not in body
-    assert "[low]" in body and "does not appear" in body
     assert "/280" in body
     assert client.get("/drafts/999").status_code == 404
 
@@ -72,31 +65,6 @@ def test_approve_action_no_table_has_no_notice(client, conn, draft_id):
     assert "notice=" not in r.headers["location"]
     row = store.get_draft(conn, draft_id)
     assert row.status == "approved"
-
-
-def test_approve_action_drops_unrendered_table_with_notice(client, conn):
-    seed_item(conn, "i2", source="biorxiv")
-    d = Draft(
-        thread=["Preprint. ORR 88%. one", "two", "three"],
-        suggested_visual="table",
-        why_it_matters="matters",
-        table=Table("T", ["a", "b"], [["x", "y"], ["z", "w"]]),
-    )
-    did = store.insert_draft(conn, item_id="i2", model="m", draft=d)
-    r = client.post(f"/drafts/{did}/approve", data={"note": "good"})
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/queue?notice=")
-    assert "not%20verified%20when%20the%20draft%20was%20approved" in r.headers["location"]
-    row = store.get_draft(conn, did)
-    assert row.status == "approved"
-    assert row.draft.table is None
-    dec = store.list_decisions(conn, did)
-    actions = {d["action"] for d in dec}
-    assert "approve" in actions and "edit" in actions
-    approve_dec = next(d for d in dec if d["action"] == "approve")
-    assert approve_dec["note"] == "good"
-    body = client.get(r.headers["location"]).text
-    assert "Table dropped" in body and "not verified when the draft was approved" in body
 
 
 def test_edit_action_saves_original_and_edited(client, conn, draft_id):
@@ -180,158 +148,6 @@ def test_edit_form_accepts_category_and_rejects_unknown(client, conn, draft_id):
     r = client.post(f"/drafts/{draft_id}/edit", data={**data, "category": "factual"})
     assert r.status_code == 303
     assert store.list_decisions(conn, draft_id)[0]["category"] == "factual"
-
-
-def test_voice_route_exists(client, draft_id):
-    assert client.get("/voice").status_code == 200
-
-
-# --- revise (AI rewrite on the human's note) ----------------------------------------
-
-
-# Numbers verbatim in the seeded abstract (tests.conftest.ABSTRACT); every draft needs a visual.
-CHART = {
-    "title": "Phase 2 outcomes",
-    "labels": ["ORR", "Median PFS"],
-    "values": [88, 14.6],
-    "unit": "",
-    "note": "n=97",
-}
-
-
-def _revision_json(lead):
-    return json.dumps(
-        {
-            "thread": [lead, "r2", "r3"],
-            "suggested_visual": "",
-            "why_it_matters": "revised",
-            "claims_to_verify": [{"claim": "new claim", "confidence": "medium"}],
-            "chart": CHART,
-        }
-    )
-
-
-def _stub_call(monkeypatch, responses):
-    calls = []
-
-    def fake(system, user, model):
-        calls.append((system, user, model))
-        r = responses.pop(0)
-        if isinstance(r, Exception):
-            raise r
-        return r
-
-    monkeypatch.setattr(drafter, "call_anthropic", fake)
-    monkeypatch.setattr(drafter, "model_name", lambda: "stub-model")
-    return calls
-
-
-def test_revise_rewrites_draft_from_instructions_and_keeps_pending(
-    client, conn, draft_id, monkeypatch
-):
-    calls = _stub_call(monkeypatch, [_revision_json("Preprint. tighter. ORR 88%.")])
-    r = client.post(
-        f"/drafts/{draft_id}/revise", data={"instructions": "tighter opening", "category": "voice"}
-    )
-    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}?revised=1"
-    row = store.get_draft(conn, draft_id)
-    assert row.status == "pending"
-    assert row.draft.thread[0].startswith("Preprint. tighter.")
-    assert row.draft.thread[1] == "r2" and row.draft.chart is not None
-    assert [c.claim for c in row.draft.claims_to_verify] == ["new claim"]
-    assert row.model == "stub-model"
-    (dec,) = store.list_decisions(conn, draft_id)
-    assert dec["action"] == "revise" and dec["note"] == "tighter opening"
-    assert dec["category"] == "voice"
-    system, user, model = calls[0]
-    assert "tighter opening" in user and "Preprint. ORR 88%. one" in user
-    assert model == "stub-model"
-    body = client.get(f"/drafts/{draft_id}?revised=1").text
-    assert "Revised." in body and "revise" in body
-    assert "- post 1: Preprint. ORR 88%. one" in body  # diff of the AI rewrite is shown
-
-
-def test_revise_with_empty_box_fixes_failed_claims_and_resets_checks(
-    client, conn, draft_id, monkeypatch
-):
-    verify_store.insert_check(
-        conn,
-        draft_id,
-        ClaimCheck(0, "Number '15'...", "contradicted", "https://src", "it was 14", "wrong", True),
-        "checker",
-    )
-    calls = _stub_call(monkeypatch, [_revision_json("Preprint. fixed. ORR 88%.")])
-    r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": ""})
-    assert r.status_code == 303
-    user = calls[0][1]
-    assert "FACT-CHECK FAILURES" in user and "it was 14" in user and "https://src" in user
-    assert verify_store.checks_for_draft(conn, draft_id) == []  # re-verified next run
-    (dec,) = store.list_decisions(conn, draft_id)
-    assert dec["note"] == "fix fact-check failures"
-    assert not verify_store.has_contradiction(conn, draft_id)
-
-
-def test_revise_keeps_supported_verdicts_for_unchanged_claims(client, conn, draft_id, monkeypatch):
-    verify_store.insert_check(
-        conn,
-        draft_id,
-        ClaimCheck(0, "ORR was 88%.", "supported", "https://src", "88%", "", True),
-        "checker",
-    )
-    verify_store.insert_check(
-        conn, draft_id, ClaimCheck(1, "n=40", "unverified", "", "", "thin", False), "checker"
-    )
-    verify_store.insert_check(
-        conn,
-        draft_id,
-        ClaimCheck(2, "Phase 3", "supported", "https://src", "ph3", "", True),
-        "checker",
-    )
-    body = json.loads(_revision_json("Preprint. tighter. ORR 88%."))
-    body["claims_to_verify"] = [
-        {"claim": "n=40", "confidence": "low"},
-        {"claim": "orr was 88%", "confidence": "high"},  # same claim, new position and case
-        {"claim": "Phase 3 in 2027", "confidence": "low"},  # changed text: checked again
-    ]
-    _stub_call(monkeypatch, [json.dumps(body)])
-    assert client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"}).status_code == 303
-    checks = verify_store.checks_for_draft(conn, draft_id)
-    assert [(c.claim_index, c.claim, c.verdict) for c in checks] == [
-        (1, "orr was 88%", "supported")
-    ]
-    assert checks[0].source_url == "https://src" and checks[0].trusted
-    row = store.get_draft(conn, draft_id)
-    assert verify_store.unchecked_indexes(conn, row) == [0, 2]
-
-
-def test_revise_with_nothing_to_do_or_failed_model_leaves_draft_alone(
-    client, conn, draft_id, monkeypatch
-):
-    r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": ""})
-    assert r.status_code == 303 and "error=" in r.headers["location"]
-    _stub_call(monkeypatch, [json.dumps({"thread": ["no url"]})] * drafter.MAX_ATTEMPTS)
-    r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
-    assert r.status_code == 303 and "error=" in r.headers["location"]
-    # The model is reached only through the Claude Code CLI. When it cannot start, the draft
-    # is left as it was and the page the redirect lands on tells the operator why.
-    missing = claude_cli.ClaudeCliUnavailable(
-        "'claude' not found on PATH; install Claude Code and run `claude login`"
-    )
-    _stub_call(monkeypatch, [missing] * drafter.MAX_ATTEMPTS)
-    monkeypatch.setattr(drafter, "_sleep_backoff", lambda a, s: None)
-    r = client.post(f"/drafts/{draft_id}/revise", data={"instructions": "x"})
-    assert r.status_code == 303
-    assert "not found on PATH; install Claude Code" in unquote(r.headers["location"])
-    assert "install Claude Code and run" in client.get(r.headers["location"]).text
-    row = store.get_draft(conn, draft_id)
-    assert row.draft.thread[0] == "Preprint. ORR 88%. one"
-    assert store.list_decisions(conn, draft_id) == []
-    assert client.post("/drafts/999/revise", data={"instructions": "x"}).status_code == 404
-
-
-def test_pending_page_has_inline_revise_box(client, draft_id):
-    body = client.get("/queue").text
-    assert f'action="/drafts/{draft_id}/revise"' in body
 
 
 def test_approved_page_offers_reopen_but_not_approve_reject_or_revise(client, conn, draft_id):

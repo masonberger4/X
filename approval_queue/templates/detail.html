@@ -23,8 +23,6 @@
   {% endif %}
 </p>
 {% if error %}<p class="flash over">{{ error }}</p>{% endif %}
-{% if revised %}<p class="flash">Revised. Read the new text below; claims whose text changed lost their verdict; supported claims that stayed the same kept theirs (run <code>python run_verify.py</code> or wait for the scheduler).</p>{% endif %}
-{% if redrawn %}{% set kept = image_grades | selectattr("kept") | first %}<p class="flash">Picture redrawn from the same spec{% if kept %}, kept at {{ kept.score }}/10 after {{ image_grades|length }} render{{ "s" if image_grades|length != 1 else "" }}{% endif %}. The text, the numbers and the verdicts are unchanged.</p>{% endif %}
 {% if d.rejection_reason %}<p class="flash over">Hard-rule failure: {{ d.rejection_reason }}</p>{% endif %}
 {% if d.rationale %}<p><strong>Scorer rationale:</strong> {{ d.rationale }}</p>{% endif %}
 {% if d.suggested_angle %}<p><strong>Suggested angle:</strong> {{ d.suggested_angle }}</p>{% endif %}
@@ -32,16 +30,14 @@
 {% if d.draft.suggested_visual %}<p><strong>Suggested visual:</strong> {{ d.draft.suggested_visual }}</p>{% endif %}
 
 {% if d.draft.shape != 'thread' or d.draft.wanted_visuals == 0 or d.draft.wanted_visuals == 2 %}
-<p class="meta">Format: <strong>{{ 'single post' if d.draft.shape == 'single' else (('long post' if d.draft.thread|length == 1 else d.draft.thread|length ~ ' long posts, each') ~ ' up to ' ~ d.draft.max_chars ~ ' chars' if d.draft.shape == 'long' else 'thread') }}</strong>{% if d.draft.wanted_visuals is not none %}, {{ d.draft.wanted_visuals }} picture{{ 's' if d.draft.wanted_visuals != 1 else '' }}{% endif %}{% if not d.studio_piece %} (a step 9 format genome){% endif %}.</p>
+<p class="meta">Format: <strong>{{ 'single post' if d.draft.shape == 'single' else (('long post' if d.draft.thread|length == 1 else d.draft.thread|length ~ ' long posts, each') ~ ' up to ' ~ d.draft.max_chars ~ ' chars' if d.draft.shape == 'long' else 'thread') }}</strong>{% if d.draft.wanted_visuals is not none %}, {{ d.draft.wanted_visuals }} picture{{ 's' if d.draft.wanted_visuals != 1 else '' }}{% endif %}.</p>
 {% endif %}
 {% if image_url %}
 <h2>Image</h2>
 {% if d.studio_piece %}
 <p class="meta">Attached to post {{ first_anchor }} when published. Designed and checked in the studio session; the studio page shows how.</p>
-{% elif d.draft.table %}
-<p class="meta">Attached to post {{ first_anchor }} when published. Drawn by code from the table below after every cell was fact-checked; a blank cell is one the checker could not tie to a primary source.</p>
 {% else %}
-<p class="meta">Attached to post {{ first_anchor }} when published. Rendered by code from the numbers below; check every bar against the source.</p>
+<p class="meta">Attached to post {{ first_anchor }} when published.</p>
 {% endif %}
 <p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid var(--border, #ccc)"></p>
 <p class="meta">{{ image_alt }}</p>
@@ -50,14 +46,6 @@
   <input name="note" placeholder="why (optional)">
   <button>Drop this picture</button> <span class="meta">the other picture stays</span>
 </form>
-{% endif %}
-{% if image_grades %}
-<details>
-  <summary class="meta">Image grader: {% for g in image_grades %}{% if g.kept %}<strong>{{ g.score }}/10</strong> (kept){% else %}{{ g.score }}/10{% endif %}{% if not loop.last %} → {% endif %}{% endfor %} over {{ image_grades|length }} render{{ 's' if image_grades|length != 1 else '' }}</summary>
-  {% for g in image_grades %}
-  <p class="meta">Render {{ g.iteration }}: {{ g.score }}/10{% if g.kept %} (kept){% endif %}{% if g.criteria %} — {% for name, v in g.criteria.items() %}{{ name }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if g.flaws %} — flaws: {{ g.flaws|join('; ') }}{% endif %}{% if g.fixes %} — fixes: {{ g.fixes|join('; ') }}{% endif %}</p>
-  {% endfor %}
-</details>
 {% endif %}
 {% for im in extra_images %}
 <p class="meta">{{ 'Second picture' if extra_images|length == 1 else 'Picture ' ~ (loop.index + 1) }}, attached to post {{ im.anchor }} when published.</p>
@@ -72,45 +60,7 @@
   <input name="note" placeholder="why (optional)">
   <button>Drop {{ ('both images' if extra_images|length == 1 else 'all pictures') if extra_images else 'image' }}</button> <span class="meta">the post goes out text-only</span>
 </form>
-{% if d.draft.chart or d.draft.table %}
-<form class="inline" method="post" action="/drafts/{{ d.id }}/image/redraw">
-  <button>Redraw</button> <span class="meta">remake the picture from the same {{ 'table and its verdicts' if d.draft.table else 'numbers' }}; nothing else changes</span>
-</form>
-{% endif %}
-{% elif d.draft.chart %}
-<h2>Image</h2>
-<p class="meta">The drafter proposed a chart ({{ d.draft.chart.title }}) but no image was rendered: images are disabled in draft/config.yaml or matplotlib is not installed. Nothing will be attached.</p>
-{% elif d.draft.table %}
-<h2>Image</h2>
-<p class="flash">The drafter proposed a table ({{ d.draft.table.title }}). Its cells are being fact-checked on the web (<code>python run_verify.py</code>); the picture is drawn once every cell has a verdict. Approving before then posts the text alone.</p>
-{% endif %}
 
-{% if d.draft.table %}
-<h2>Table cells</h2>
-{% if cells_contradicted %}<p class="flash over">{{ cells_contradicted }} table cell{{ "s were" if cells_contradicted != 1 else " was" }} contradicted by the fact-checker. Press Revise below (the drafter is shown the cell, the note and the quote), retype the cell here, or approve to post the text alone.</p>{% endif %}
-<p class="meta">{{ table_checks|length }} of {{ d.draft.table.cells()|length }} cells checked. A supported cell from a trusted source keeps its text; anything else is blanked in the picture; a contradicted cell holds the picture back until it is fixed (Revise hands it to the drafter with the fact-checker's note, or retype it below; approving as is posts the text alone). "trust host" adds that site to the trusted list for good and redraws the picture from the verdicts already stored.</p>
-<form method="post" action="/drafts/{{ d.id }}/table">
-<div style="overflow-x:auto"><table class="cells">
-  <thead><tr>{% for col in d.draft.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
-  <tbody>
-  {% for row in d.draft.table.rows %}
-    {% set r = loop.index0 %}
-    <tr>
-    {% for cell in row %}
-      {% set k = table_checks.get((r, loop.index0)) %}
-      <td class="cell {% if k %}{{ 'shown' if k.shown else k.verdict }}{% elif cell %}unchecked{% endif %}">
-        {% if d.editable %}<input type="text" name="cell_{{ r }}_{{ loop.index0 }}" value="{{ cell or "" }}" maxlength="60" size="{{ [cell|length, 8]|max }}">{% else %}{{ cell or "" }}{% endif %}
-        {% if k %}<div class="meta">{{ k.label }}{% if k.model == "human" %} (typed in){% endif %}{% if k.source_url %} · <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">source</a>{% endif %}{% if k.trustable %} · <button type="submit" class="link" formaction="/drafts/{{ d.id }}/trust" name="host" value="{{ k.host }}" title="Add {{ k.host }} to trusted_domains in verify/config.yaml and redraw the table">trust {{ k.host }}</button>{% endif %}</div>
-        {% elif cell %}<div class="meta">not checked yet</div>{% endif %}
-      </td>
-    {% endfor %}
-    </tr>
-  {% endfor %}
-  </tbody>
-</table></div>
-{% if d.editable %}<p class="meta"><button type="submit">Save cells</button> Retype a cell to correct it or clear it to blank it. Saving counts every cell you left standing that the fact-checker could not verify (or verified from an untrusted source) as checked by you, as well as the ones you changed — no web call — and the picture is redrawn from the verdicts at once; headers, title and text stay as they are. A contradicted cell still has to be corrected or its host trusted.</p>{% endif %}
-</form>
-{% if d.draft.table.note %}<p class="meta">{{ d.draft.table.note }}</p>{% endif %}
 {% endif %}
 
 <h2>{{ 'Post' if d.draft.thread|length == 1 else 'Thread' }}</h2>
@@ -121,32 +71,6 @@
   <div class="meta {% if n > limit %}over{% endif %}">{{ n }}/{{ limit }}</div>
 {% endfor %}
 
-<h2>Claims to verify</h2>
-{% if d.draft.claims_to_verify %}
-{% if contradicted %}<p class="flash over">A claim was contradicted by its source. Press Revise below (the drafter fixes it), or tick "approve anyway".</p>{% endif %}
-{% if auto_rounds %}<p class="meta">Auto-revised {{ auto_rounds }} time{{ "s" if auto_rounds != 1 }} by the verify-revise loop{% if claim_problems %}; it stopped with {{ claim_problems }} claim problem{{ "s" if claim_problems != 1 }} left, so this one needs you{% else %}; every checked claim is now supported{% endif %}.</p>{% endif %}
-<ul class="claims">
-{% for c in d.draft.claims_to_verify %}
-  {% set k = checks.get(loop.index0) %}
-  <li>
-    <span class="{{ c.confidence }}">[{{ c.confidence }}]</span> {{ c.claim }}
-    {% if k %}
-      <div class="check {{ k.verdict }}">
-        <strong>{{ k.label }}</strong>
-        {% if k.source_url %}· <a href="{{ k.source_url }}" target="_blank" rel="noopener noreferrer">{{ k.source_url }}</a>{% endif %}
-        {% if k.trustable %}· <form method="post" action="/drafts/{{ d.id }}/trust" class="inline"><input type="hidden" name="host" value="{{ k.host }}"><button type="submit" class="link" title="Add {{ k.host }} to trusted_domains in verify/config.yaml">trust {{ k.host }}</button></form>{% endif %}
-        {% if k.quote %}<blockquote>{{ k.quote }}</blockquote>{% endif %}
-        {% if k.note %}<div class="meta">{{ k.note }}</div>{% endif %}
-        <div class="meta">checked {{ k.checked_at|localtime }} by {{ k.model }}. Open the link and read the sentence before approving.</div>
-      </div>
-    {% else %}
-      <div class="meta">not checked yet (run <code>python run_verify.py</code>)</div>
-    {% endif %}
-  </li>
-{% endfor %}
-</ul>
-{% else %}<p class="meta">None flagged.</p>{% endif %}
-
 {% if d.abstract %}
 <details><summary>Source abstract</summary><p>{{ d.abstract }}</p></details>
 {% endif %}
@@ -155,7 +79,6 @@
 <div class="actions">
   <form class="inline" method="post" action="/drafts/{{ d.id }}/approve">
     <button>Approve</button>
-    {% if contradicted %}<label><input type="checkbox" name="override" value="1"> approve anyway</label>{% endif %}
   </form>
   {% if d.status == "approved" and releasable %}
   <form class="inline" method="post" action="/drafts/{{ d.id }}/release"
@@ -179,25 +102,9 @@
   </form>
 </div>
 
-<h2>Revise</h2>
 {% if d.studio_piece %}
-<p>Revise this piece on {% if HAS_PANEL %}<a href="/studio/{{ d.studio_piece }}">its studio page</a>{% else %}its studio page in the control panel (run_app.py){% endif %}: the session that researched and wrote it rewrites it from your note and fact-checks what changed. The drafter's Revise would flatten its long posts and drop its cards.</p>
-{% else %}
-<form method="post" action="/drafts/{{ d.id }}/revise">
-  <label>What should change?<br><textarea name="instructions" rows="3" placeholder="e.g. lead with the durability data, drop the second thread post, less hype in the last line"></textarea></label>
-  {% if claim_problems %}
-  <p class="meta">{{ claim_problems }} claim(s) failed or could not be verified. They are fixed in the same round whatever you type, so the box may stay empty.</p>
-  {% else %}
-  <p class="meta">The drafter rewrites the post from your note, keeps everything else, and the hard rules are re-checked in code. The draft stays pending for you to read again.</p>
-  {% endif %}
-  <label>Why<br>
-    <select name="category">
-      <option value="">(no category)</option>
-      {% for c in DECISION_CATEGORIES %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-    </select>
-  </label>
-  <p><button>Revise with AI</button> <span class="meta">takes 10–30 seconds; a status bar shows while it runs</span></p>
-</form>
+<h2>Revise</h2>
+<p>Revise this piece on {% if HAS_PANEL %}<a href="/studio/{{ d.studio_piece }}">its studio page</a>{% else %}its studio page in the control panel (run_app.py){% endif %}: the session that researched and wrote it rewrites it from your note and fact-checks what changed.</p>
 {% endif %}
 
 <details{% if edit_open %} open{% endif %}>
@@ -212,7 +119,6 @@
       {% for c in DECISION_CATEGORIES %}<option value="{{ c }}"{% if c == edit_category %} selected{% endif %}>{{ c }}</option>{% endfor %}
     </select>
   </label>
-  <p class="meta">Voice edits become examples for the next drafts; factual and hard-rule fixes do not.</p>
   <p>
     <button>Save &amp; approve</button>
     <button name="keep_pending" value="1">Save, keep pending</button>

@@ -48,11 +48,7 @@ steps:
   # Step 10, the studio (run_studio.py, studio/config.yaml): one long Opus session per
   # post. Each run acts on the editor's requests from the studio page, then starts a new
   # piece when studio/config.yaml's `auto` limits allow (at most one a day as shipped). In
-  # the automatic runs it sits right after score so it sees the freshest stories, and
-  # before draft so a story it takes is not also drafted as a short thread (run_draft.py
-  # skips a story a studio piece or queued topic holds, whatever the piece's stage, and
-  # every story offered to a piece still researching, so a draft step running beside a
-  # session, as under cron, leaves those alone too). No
+  # the automatic runs it sits right after score so it sees the freshest stories. No
   # time limit (0): a session is research, writing, a cold fact-check and cards, often an
   # hour; each stage has its own limit in studio/config.yaml, and a stopped piece resumes
   # from the studio page. skip_when_busy: in the automatic runs a session still running at
@@ -84,35 +80,6 @@ steps:
     required: false
     manual: true
     timeout_seconds: 0
-  # No time limit (0): every swarm cell is one CLI launch and a story is ~110 of them
-  # at the planned fan_out and layers, so a run can take an hour or more. Drafts are
-  # stored as they land, so the runs page's Stop button loses only the story in flight.
-  - name: draft
-    argv: ["python", "run_draft.py"]
-    enabled: true
-    required: true
-    timeout_seconds: 0
-  # Manual only (the pending page's "Retry failed" button, or run_ops.py run --only
-  # draft_retry): draft again the stories whose only drafts failed the hard rules,
-  # looking back 20 days rather than draft's 48 hours. A plain run and the automatic
-  # runs never start it; it shares draft's lock so the two never run at once.
-  - name: draft_retry
-    argv: ["python", "run_draft.py", "--retry-failed", "--since-hours", "480", "--limit", "10"]
-    enabled: true
-    required: false
-    manual: true
-    lock: draft
-    timeout_seconds: 0
-  # Step 2b: check each new draft's claims against the web and attach the evidence so
-  # the queue shows it. Optional: a failure here leaves the claims "unchecked", never
-  # blocks the run. No time limit (0): each claim is one web-search call of a minute
-  # or more and a backlog can take an hour. Every verdict is saved as it lands, so
-  # the runs page's Stop button (or a usage limit) only loses the claim in flight.
-  - name: verify
-    argv: ["python", "run_verify.py"]
-    enabled: true
-    required: false
-    timeout_seconds: 0
   # Publishing here is a dry run and stays one: run_publish.py without flags only
   # prints what it would post. Posting is manual only (the panel's "Publish now",
   # or run_publish.py with its live flag run by hand), so run_ops.py refuses to
@@ -131,13 +98,6 @@ steps:
     enabled: true
     required: false
     timeout_seconds: 300
-  # Step 9 phase two: score posted swarm drafts against X and retire losing genomes.
-  # No network; it reads the snapshots the feedback step just took.
-  - name: evolve
-    argv: ["python", "run_evolve.py"]
-    enabled: true
-    required: false
-    timeout_seconds: 0             # breed makes one CLI call per writer child
   # Step 10's learning loop (studio/config.yaml `learn`): measure the posted studio pieces
   # on the snapshots the feedback step just took (or the numbers typed in on the
   # performance page) and, once enough scored pieces are new to it, rewrite the playbook
@@ -166,7 +126,7 @@ run_log_tail_chars: 4000         # stdout/stderr kept per step per run
 # Automatic runs: while the control panel (run_app.py) or the desktop window
 # (run_desktop.py) is open, it runs the steps below on its own at each time of day,
 # local time in the root config.yaml `timezone:`. Everything but publishing: only
-# ingest, score, draft, verify, feedback, evolve and studio can ever start this way (checked by
+# ingest, score, feedback and studio can ever start this way (checked by
 # the script a step runs, not its name, in ops/autorun.py), those runs cannot post
 # whatever .env says, and posting stays the approved page's "Publish now".
 # The runs page's switch and time field edit auto_run_enabled and auto_run_times (the
@@ -178,7 +138,7 @@ run_log_tail_chars: 4000         # stdout/stderr kept per step per run
 # pipeline-run (HOWTO Part 6) together is safe but wasteful: pick one.
 auto_run_enabled: true
 auto_run_times: ["06:00", "12:00", "18:00"]
-auto_run_steps: [ingest, score, studio_scan, studio, draft, verify, feedback, evolve, studio_learn]
+auto_run_steps: [ingest, score, studio_scan, studio, feedback, studio_learn]
 auto_run_grace_minutes: 60
 # Daily backup: an automatic run that starts when the newest backup in backups.dir is
 # older than this many hours also takes one, beside the run (the same verified backup as
@@ -193,7 +153,7 @@ health:
   # Tighten these (e.g. 3 and 6) if the Task Scheduler runs every 30 minutes instead.
   max_hours_since_ingest: 13     # 'warn' past one run gap, 'fail' past two
   max_hours_since_score: 13      # 0 unscored clusters is normal; a backlog older than this is not
-  max_hours_since_draft: 48      # drafts only appear when something clears the score threshold
+  max_hours_since_draft: 48      # studio pieces reach the queue at most once a day as shipped
   source_stale_multiplier: 3     # a source is stale when last_run_at > multiplier * cadence,
   source_stale_min_hours: 13     # but never before this many hours (the night's run gap)
   max_source_failure_fraction: 0.34   # (error + never ran + stale) / enabled sources -> 'fail'
@@ -204,7 +164,7 @@ health:
   # doing far more model work than a normal day:
   #   scoring: scores written in 24h; prefilter.daily_cap bounds a normal day, and a
   #            PROMPT_VERSION bump re-scores the backlog on top of it.
-  #   drafting: PLAN.md advances the top 5-10/day, so 15/day leaves headroom.
+  #   drafting: drafts queued in 24h; the studio queues about one a day.
   # Exceeding a cap is 'fail', 80% of it is 'warn'.
   scores_per_day_max: 150
   drafts_per_day_max: 15

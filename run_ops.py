@@ -155,7 +155,7 @@ def cmd_run(args: argparse.Namespace, cfg: dict[str, Any]) -> int:
         )
         return 1
     if not only:
-        # A manual step (draft_retry) runs only when --only names it. A skip_when_busy step
+        # A manual step (studio_now) runs only when --only names it. A skip_when_busy step
         # (the studio, whose session runs for an hour or more) has a schedule entry of its
         # own, `run_ops.py run --only studio`: in this run it would hold back every step
         # after it and the next fires, which exit 2 on the run lock, or are not started at

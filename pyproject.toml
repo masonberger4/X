@@ -1,7 +1,7 @@
 [project]
 name = "cancer-research-x"
 version = "0.1.0"
-description = "AI-assisted ingest, scoring, and drafting pipeline for a cancer-research X account (human-in-the-loop)."
+description = "AI-assisted ingest, scoring, and studio pipeline for a cancer-research X account (human-in-the-loop)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -23,19 +23,12 @@ dev = [
     "pytest>=8.0",
     "pytest-mock>=3.14",
     "ruff>=0.6",
-    "matplotlib>=3.8",  # so the chart-rendering tests run for real
-]
-# Rendering the drafter's chart spec to a PNG (draft/chart.py). Without it drafts are
-# stored and published text-only; run_draft.py logs a warning per chart it could not draw.
-images = [
-    "matplotlib>=3.8",
 ]
 # The desktop window (run_desktop.py) and the build that turns it into Pipeline.exe
 # (deploy/desktop.spec). The pipeline itself never needs either.
 desktop = [
     "pywebview>=5.0",
     "pyinstaller>=6.0",
-    "matplotlib>=3.8",  # so Pipeline.exe can draw draft charts (PyInstaller has a hook for it)
 ]
 
 [build-system]
@@ -43,10 +36,10 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_draft", "run_queue", "run_app", "run_desktop", "pipeline_cli", "run_publish", "run_feedback", "run_ops", "run_verify", "run_studio"]
+py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_queue", "run_app", "run_desktop", "pipeline_cli", "run_publish", "run_feedback", "run_ops", "run_studio"]
 
 [tool.setuptools.packages.find]
-include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "panel*", "publish*", "feedback*", "ops*", "verify*", "swarm*", "studio*"]
+include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "panel*", "publish*", "feedback*", "ops*", "studio*"]
 
 [tool.ruff]
 line-length = 100
@@ -61,7 +54,6 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.ruff.lint.per-file-ignores]
 "score/rubric.py" = ["E501"]  # prompt text and few-shot examples are long by nature
 "score/rater.py" = ["E501"]   # same: the rater's prompt text
-"verify/verifier.py" = ["E501"]  # same: the verifier's prompt text
 "filter/link.py" = ["E501"]  # same: the story linker's prompt text
 "studio/render.py" = ["E501"]  # the layout checker is JavaScript inside a string
 "studio/safety.py" = ["E501"]  # the advice patterns read best one per line

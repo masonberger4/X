@@ -116,7 +116,6 @@ def test_the_approval_queue_is_part_of_the_same_app(client, conn, draft_id):
     assert client.get("/").status_code == 200  # the dashboard, not the queue
     assert f"/drafts/{draft_id}" in client.get("/queue").text
     assert "Preprint. ORR 88%." in client.get(f"/drafts/{draft_id}").text
-    assert client.get("/voice").status_code == 200
     r = client.post(f"/drafts/{draft_id}/approve", data={"note": "good"})
     assert r.status_code == 303 and r.headers["location"] == "/queue"
     assert queue_store.get_draft(conn, draft_id).status == "approved"
@@ -124,7 +123,7 @@ def test_the_approval_queue_is_part_of_the_same_app(client, conn, draft_id):
 
 def test_the_nav_links_both_halves_together(client):
     body = client.get("/").text
-    for link in ('href="/"', 'href="/sources"', 'href="/runs"', 'href="/queue"', 'href="/voice"'):
+    for link in ('href="/"', 'href="/sources"', 'href="/runs"', 'href="/queue"', 'href="/studio"'):
         assert link in body
 
 
@@ -137,7 +136,7 @@ def test_the_panel_has_no_publish_button(client):
 
 def test_the_queue_pages_keep_the_panel_links_in_the_nav(client):
     """The queue renders with its own template env; inside the panel it must still link back."""
-    for path in ("/queue", "/status/approved", "/voice"):
+    for path in ("/queue", "/status/approved"):
         body = client.get(path).text
         assert 'href="/"' in body and 'href="/feed"' in body and 'href="/runs"' in body, path
 
@@ -205,19 +204,9 @@ def test_the_feed_page_runs_ingest_and_score_with_one_button(client, monkeypatch
     assert r.headers["location"] == "/runs"
 
 
-def test_the_pending_page_offers_draft_and_verify_and_shows_the_run_in_flight(client, monkeypatch):
-    body = client.get("/queue").text
-    assert ">Draft<" in body and ">Verify<" in body and 'value="verify"' in body
-    assert "disabled" not in body.split('class="runbar"')[1].split("</div>")[0]
-    run = {"id": "x", "steps": ["draft"], "active_step": "draft", "active_for": "3s"}
-    monkeypatch.setattr(panel_app, "current_runs", lambda: [{**run, "started": "now"}])
-    monkeypatch.setattr(panel_app, "busy_steps", lambda: {"draft"})
-    panel_app._adopt_queue_routes()  # re-register the (patched) globals on the queue's env
-    body = client.get("/queue").text
-    bar = body.split('class="runbar"')[1].split("</div>")[0]
-    # only the busy step's button is disabled: Verify still starts beside the draft run
-    assert bar.count("disabled") == 1 and "draft is already running" in bar
-    assert "running" in bar and "watch the log" in bar and "disabled" in bar
+def test_the_pending_page_has_no_run_buttons(client):
+    """Drafting and verifying are gone, so the pending page starts nothing."""
+    assert 'name="step"' not in client.get("/queue").text
 
 
 def test_the_approved_page_has_publish_now_and_set_schedule(client, conn, draft_id, monkeypatch):

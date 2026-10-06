@@ -13,9 +13,7 @@ publishing order, only step 3's dead schedule row goes, so the next run consider
 `release_reason` is the one gate, read by both the button and the route.
 
 Others ask the reopen question through here too: the studio, before it brings a rejected
-draft back to pending with a revision (studio/ingest.py, which then calls `forget`), and
-the operator passes run_unlink.py and run_scrub_notes.py, which leave alone any draft
-`block_reason` says step 3 holds.
+draft back to pending with a revision (studio/ingest.py, which then calls `forget`).
 """
 
 from __future__ import annotations
