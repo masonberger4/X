@@ -1,20 +1,14 @@
 """Hard rule 11: @handles for accounts we know, #hashtags for drug names and NCT numbers."""
 
-from draft import drafter
-from draft.prompt import HARD_RULES, build_user_prompt
 from draft.schema import validate_output
 from draft.tags import (
     company_names,
     drug_names,
-    handles_block,
     load_handles,
     nct_ids,
     relevant_handles,
     tag_problems,
 )
-from swarm.cells import cell_problems
-from swarm.genome import HOOK, Slot
-from swarm.prompts import Brief, cell_rules, propose_prompt
 
 CFG = {
     "companies": {
@@ -112,14 +106,6 @@ def test_tag_problems():
     ]
 
 
-def test_hard_rules_and_prompt_carry_the_rule():
-    assert "11. Mentions and hashtags" in HARD_RULES and "@JCO_ASCO" in HARD_RULES
-    hs = load_handles(CFG)[:1]
-    user = build_user_prompt(title="t", abstract="a", url=URL, source="s", handles=hs)
-    assert handles_block(hs) in user and "- @Merck = Merck" in user
-    assert "X HANDLES" not in build_user_prompt(title="t", abstract="a", url=URL, source="s")
-
-
 def _draft(*posts):
     return validate_output(
         {
@@ -131,37 +117,3 @@ def _draft(*posts):
             "table": None,
         }
     )
-
-
-def test_check_hard_rules_enforces_tags():
-    hs = load_handles(CFG)[:1]
-    d = _draft("Merck data", "KEYNOTE-189 (NCT04487080) read", "third", "last")
-    probs = drafter.check_hard_rules(d, url=URL, source="s", handles=hs)
-    assert "thread[0] names Merck without its handle @Merck" in probs
-    assert "thread[1] trial number(s) without a hashtag: NCT04487080 -> #NCT04487080" in probs
-    d = _draft("@Merck data", "KEYNOTE-189 (#NCT04487080) read", "third", "last")
-    assert drafter.check_hard_rules(d, url=URL, source="s", handles=hs) == []
-
-
-def test_numbers_in_ignores_tags():
-    assert drafter.numbers_in("#NCT04487080 and @JCO_ASCO: ORR 88% in 40") == ["88%", "40"]
-
-
-def test_story_handles_reads_root_config(monkeypatch):
-    monkeypatch.setattr(drafter, "_root_config", lambda: CFG)
-    hs = drafter.story_handles(source_text="Merck says", url=URL, source="pubmed")
-    assert [h.handle for h in hs] == ["Merck", "JCO_ASCO"]
-    monkeypatch.setattr(drafter, "_root_config", dict)
-    assert drafter.story_handles(source_text="Merck says", url=URL, source="pubmed") == []
-
-
-def test_swarm_cells_and_prompts():
-    hs = load_handles(CFG)[:1]
-    kw = dict(source_text="Merck 88%", slot=HOOK, is_preprint=False)
-    assert cell_problems("Merck reports 88% ORR", handles=hs, **kw) == [
-        "names Merck without its handle @Merck"
-    ]
-    assert cell_problems("@Merck reports 88% ORR", handles=hs, **kw) == []
-    assert "#NCT04487080" in cell_rules() and "never invent" in cell_rules()
-    brief = Brief(title="t", abstract="a", url=URL, source="s", handles=tuple(hs))
-    assert "- @Merck = Merck" in propose_prompt(brief, Slot("hook", "r"), {})

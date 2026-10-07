@@ -940,26 +940,6 @@ def test_a_story_the_session_picks_is_kept_with_one_of_its_items(rig, conn):
     assert (p.cluster_id, p.story_item) == (story, "s1")
 
 
-def test_the_stories_offered_to_a_research_are_held_from_the_drafter_while_it_runs(rig, conn):
-    # Recorded before the session starts, so a draft step beside it leaves them alone
-    # (approval_queue/store.py:studio_held_clusters); once research names one, the rest go
-    # back to the drafter.
-    story, other = seed_item(conn, "s1", total=44), seed_item(conn, "s2", total=40)
-    rig.shortlist = [P.Story(cluster_id=story, title="s1"), P.Story(cluster_id=other, title="s2")]
-    seen: dict[str, Any] = {}
-
-    def research(ws: Path, call: Call) -> None:
-        seen["held"] = queue_store.studio_held_clusters(conn)
-        seen["named"] = queue_store.studio_held_clusters(conn, offered=False)
-        write_research(ws, {**RESEARCH, "story_id": story})
-
-    rig.cli.work["research"] = research
-    SS.research(rig.ctx, rig.new_piece(checkpoint=True))
-
-    assert seen == {"held": {story, other}, "named": set()}
-    assert queue_store.studio_held_clusters(conn) == {story}
-
-
 @pytest.mark.parametrize(
     ("status", "refused"), [(queue_store.STATUS_PENDING, True), (queue_store.STATUS_FAILED, False)]
 )
@@ -997,7 +977,6 @@ def test_a_story_the_drafter_wrote_while_research_ran_is_not_written_twice(
     assert (p.cluster_id, p.meta["failed_stage"]) == (None, "research")
     assert p.meta["research"]["story_id"] == story  # what the session found, kept to read
     assert rig.no_draft(p)
-    assert queue_store.studio_held_clusters(conn) == set()  # a stopped research holds nothing
 
     rig.shortlist = [P.Story(cluster_id=other, title="s2")]
     rig.cli.work["research"] = lambda ws, call: write_research(ws, {**RESEARCH, "story_id": other})

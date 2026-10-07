@@ -88,7 +88,6 @@ def test_the_manifest_names_every_settings_file_template_and_cli():
     assert root / "config.yaml" in sources
     for cfg in root.glob("*/config.yaml"):
         assert cfg in sources, f"{cfg} is not bundled"
-    assert root / "draft" / "voice.md" in sources
     assert root / "approval_queue" / "templates" in sources
     assert root / "panel" / "templates" in sources
     for cli in frozen.CLIS:

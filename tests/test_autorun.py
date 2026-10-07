@@ -123,9 +123,7 @@ def test_the_studio_runs_automatically_but_its_buttons_never_do():
         button = Step("studio_x", ["python", "run_studio.py", flag], manual=True)
         assert "manual" in autorun.ineligible(button)
     refused = autorun.ineligible(Step("x", ["python", "run_ops.py", "run"]))
-    assert refused == (
-        "only ingest, score, draft, verify, feedback, evolve and studio run automatically"
-    )
+    assert refused == "only ingest, score, feedback and studio run automatically"
 
 
 SHIPPED_AUTO_STEPS = [
@@ -133,10 +131,7 @@ SHIPPED_AUTO_STEPS = [
     "score",
     "studio_scan",
     "studio",
-    "draft",
-    "verify",
     "feedback",
-    "evolve",
     "studio_learn",
 ]
 
@@ -366,7 +361,7 @@ def _settings(**over):
     cfg = {
         "auto_run_enabled": True,
         "auto_run_times": ["06:00", "12:00", "18:00"],
-        "auto_run_steps": ["ingest", "score", "draft", "verify", "feedback", "evolve"],
+        "auto_run_steps": ["ingest", "score", "feedback"],
         "auto_run_grace_minutes": 60,
     }
     cfg.update(over)
@@ -400,9 +395,7 @@ def test_a_time_fires_once_and_nothing_before_the_app_opened_is_made_up(tmp_path
         )
     )
     r.tick(la(2026, 10, 1, 12, 1))
-    assert [s for s, _ in r.jobs.started] == [
-        ["ingest", "score", "draft", "verify", "feedback", "evolve"]
-    ]
+    assert [s for s, _ in r.jobs.started] == [["ingest", "score", "feedback"]]
     assert r.outcomes[0].text.startswith("started") and r.outcomes[0].slot == la(2026, 10, 1, 12)
 
 
@@ -451,27 +444,27 @@ def test_a_time_missed_while_asleep_runs_on_wake_only_within_the_grace(tmp_path)
 
 def test_a_time_waits_for_a_busy_step_then_gives_up_after_the_grace(tmp_path):
     jobs = FakeJobs()
-    jobs.busy = {"draft"}  # the 06:00 run is still drafting
+    jobs.busy = {"score"}  # the 06:00 run is still scoring
     r = _runner(tmp_path, jobs)
     r.tick(la(2026, 10, 1, 11, 59))
-    assert r.tick(la(2026, 10, 1, 12, 0)).startswith("waiting: draft still running")
+    assert r.tick(la(2026, 10, 1, 12, 0)).startswith("waiting: score still running")
     jobs.busy = set()
     r.tick(la(2026, 10, 1, 12, 20))  # freed within the grace: runs
     assert len(jobs.started) == 1
-    jobs.busy = {"verify"}
+    jobs.busy = {"feedback"}
     r.tick(la(2026, 10, 1, 18, 0))
     r.tick(la(2026, 10, 1, 19, 5))  # still busy past the grace: skipped, with the reason
     assert len(jobs.started) == 1
-    assert r.outcomes[0].text == "skipped: verify still running"
-    jobs.refuse = "draft is already running; wait for it to finish"  # a human beat us to it
+    assert r.outcomes[0].text == "skipped: feedback still running"
+    jobs.refuse = "score is already running; wait for it to finish"  # a human beat us to it
     jobs.busy = set()
     r.tick(la(2026, 10, 2, 5, 59))
-    assert r.tick(la(2026, 10, 2, 6, 0)).startswith("waiting: draft is already running")
+    assert r.tick(la(2026, 10, 2, 6, 0)).startswith("waiting: score is already running")
 
 
 # The three studio steps share one lock, so a session in flight makes all three busy.
 STUDIO_BUSY = {"studio", "studio_now", "studio_resume"}
-REST = ["ingest", "score", "studio_scan", "draft", "verify", "feedback", "evolve", "studio_learn"]
+REST = ["ingest", "score", "studio_scan", "feedback", "studio_learn"]
 
 
 def test_a_busy_studio_sits_the_run_time_out_while_the_other_steps_start(tmp_path):
@@ -520,12 +513,12 @@ def test_a_run_time_whose_every_step_is_still_running_is_skipped(tmp_path):
 
 def test_a_busy_step_that_cannot_sit_out_still_holds_the_run_time(tmp_path):
     jobs = FakeJobs()
-    jobs.busy = STUDIO_BUSY | {"draft"}
+    jobs.busy = STUDIO_BUSY | {"feedback"}
     r = _runner(tmp_path, jobs, _settings(auto_run_steps=SHIPPED_AUTO_STEPS))
     r.tick(la(2026, 10, 1, 5, 59))
-    assert r.tick(la(2026, 10, 1, 6, 0)) == "waiting: draft still running"  # not the studio
+    assert r.tick(la(2026, 10, 1, 6, 0)) == "waiting: feedback still running"  # not the studio
     assert jobs.started == [] and r.pending == la(2026, 10, 1, 6)
-    jobs.busy = set(STUDIO_BUSY)  # the draft run finished; the studio session goes on
+    jobs.busy = set(STUDIO_BUSY)  # the feedback run finished; the studio session goes on
     r.tick(la(2026, 10, 1, 6, 10))
     assert jobs.started == [(REST, True)]
     assert jobs.notes == ["left out studio: still running from an earlier run"]
@@ -535,23 +528,23 @@ def test_only_a_step_marked_skip_when_busy_sits_a_run_time_out(tmp_path):
     steps = [
         Step("ingest", ["python", "run_ingest.py"]),
         Step("studio", ["python", "run_studio.py"]),  # the name alone does not make it skip
-        Step("evolve", ["python", "run_evolve.py"], skip_when_busy=True),
+        Step("feedback", ["python", "run_feedback.py", "snapshot"], skip_when_busy=True),
     ]
     jobs = FakeJobs(steps)
-    jobs.busy = {"studio", "evolve"}
-    r = _runner(tmp_path, jobs, _settings(auto_run_steps=["ingest", "studio", "evolve"]))
+    jobs.busy = {"studio", "feedback"}
+    r = _runner(tmp_path, jobs, _settings(auto_run_steps=["ingest", "studio", "feedback"]))
     r.tick(la(2026, 10, 1, 5, 59))
     assert r.tick(la(2026, 10, 1, 6, 0)) == "waiting: studio still running"
-    jobs.busy = {"evolve"}
+    jobs.busy = {"feedback"}
     r.tick(la(2026, 10, 1, 6, 5))
     assert jobs.started == [(["ingest", "studio"], True)]
-    assert jobs.notes == ["left out evolve: still running from an earlier run"]
+    assert jobs.notes == ["left out feedback: still running from an earlier run"]
 
 
 def test_steps_waiting_behind_a_busy_studio_in_an_earlier_run_sit_the_time_out_too(tmp_path):
     jobs = FakeJobs()
     # the 06:00 run's, after its studio
-    later = ["draft", "verify", "feedback", "evolve", "studio_learn"]
+    later = ["feedback", "studio_learn"]
     jobs.busy = STUDIO_BUSY | set(later)
     jobs.behind = dict.fromkeys(later, "studio")
     r = _runner(tmp_path, jobs, _settings(auto_run_steps=SHIPPED_AUTO_STEPS))
@@ -594,8 +587,8 @@ def _fill_studio_slots(jobs: JobManager) -> None:
 
 
 def test_a_studio_session_outlasting_the_gap_holds_back_only_itself(tmp_path, monkeypatch):
-    """The shipped run lists the studio before draft. When its session is still going at
-    the next run time, draft, verify, feedback and evolve are not running: they wait in
+    """The shipped run lists the studio before feedback. When its session is still going
+    at the next run time, feedback and studio_learn are not running: they wait in
     that run behind the studio. The time runs ingest and score instead of waiting the grace
     out on steps that cannot start, then skipping everything."""
     cfg = load_ops_config()
@@ -605,7 +598,7 @@ def test_a_studio_session_outlasting_the_gap_holds_back_only_itself(tmp_path, mo
     # One studio run leaves the other writing slots free; fill them (two editor's pieces).
     assert not STUDIO_BUSY & jobs.busy_steps()
     _fill_studio_slots(jobs)
-    later = {"draft", "verify", "feedback", "evolve"}
+    later = {"feedback", "studio_learn"}
     assert later | STUDIO_BUSY <= jobs.busy_steps()
     behind = jobs.queued_behind({"studio"})
     assert later <= set(behind) and set(behind.values()) == {"studio"}
@@ -622,7 +615,7 @@ def test_a_studio_session_outlasting_the_gap_holds_back_only_itself(tmp_path, mo
     assert r.tick(la(2026, 10, 1, 12, 0)) == "started run j1200"
     [(names, auto, note)] = started
     assert names == ["ingest", "score"] and auto is True
-    assert "left out draft: still to run in an earlier run, after studio" in note
+    assert "left out feedback: still to run in an earlier run, after studio" in note
     r.stop()
 
 
@@ -630,14 +623,16 @@ def test_a_step_behind_a_quick_live_step_is_still_waited_for(tmp_path):
     cfg = load_ops_config()
     cfg["lock_path"] = str(tmp_path / "p.lock")
     jobs = JobManager(cfg, tmp_path, db_path=tmp_path / "t.db")
-    job = _live_auto_run(jobs, "draft", done=["ingest", "score", "studio"])
-    # draft is live and not a slow step: verify, feedback and evolve come right after it
+    job = _live_auto_run(jobs, "feedback", done=["ingest", "score", "studio_scan", "studio"])
+    # feedback is live and not a slow step: studio_learn comes right after it
     assert jobs.queued_behind({"studio"}) == {}
     # between two steps nothing is live, and nothing can be said to wait behind a slow one
-    job.results.append(StepResult("draft", [], la(2026, 10, 1, 7), la(2026, 10, 1, 8), exit_code=0))
+    job.results.append(
+        StepResult("feedback", [], la(2026, 10, 1, 7), la(2026, 10, 1, 8), exit_code=0)
+    )
     job.active_step = None
     assert jobs.queued_behind({"studio"}) == {}
-    assert {"verify", "feedback", "evolve"} <= jobs.busy_steps()
+    assert {"studio_learn"} <= jobs.busy_steps()
 
 
 def test_a_step_another_run_is_running_is_not_queued_behind_anything(tmp_path):
@@ -645,21 +640,21 @@ def test_a_step_another_run_is_running_is_not_queued_behind_anything(tmp_path):
     cfg["lock_path"] = str(tmp_path / "p.lock")
     jobs = JobManager(cfg, tmp_path, db_path=tmp_path / "t.db")
     _live_auto_run(jobs, "studio", done=["ingest", "score"])
-    assert "draft" in jobs.queued_behind({"studio"})
-    # a human's draft_retry run holds the draft lock with its live step: draft is busy for
-    # real, so the time waits for it
+    assert "studio_learn" in jobs.queued_behind({"studio"})
+    # a human's studio_learn_now run holds the studio_learn lock with its live step:
+    # studio_learn is busy for real, so the time waits for it
     by_name = {s.name: s for s in jobs.steps()}
-    retry = Job(
+    learn = Job(
         id="retry",
-        steps=["draft_retry"],
+        steps=["studio_learn_now"],
         started_at=la(2026, 10, 1, 11),
-        plan=[by_name["draft_retry"]],
+        plan=[by_name["studio_learn_now"]],
     )
-    retry.active_step = "draft_retry"
-    jobs._live.append(retry)
+    learn.active_step = "studio_learn_now"
+    jobs._live.append(learn)
     behind = jobs.queued_behind({"studio"})
-    assert "draft" not in behind and "draft_retry" not in behind
-    assert {"verify", "feedback", "evolve"} <= set(behind)
+    assert "studio_learn" not in behind and "studio_learn_now" not in behind
+    assert "feedback" in behind
 
 
 def test_publish_is_never_started_even_when_listed(tmp_path):

@@ -14,11 +14,8 @@ to X until part 5.
    ```
    git clone https://github.com/masonberger4/X.git
    cd X
-   pip install -e ".[dev,images]"
+   pip install -e ".[dev]"
    ```
-   `images` is the chart drawing library (matplotlib) for the picture that goes
-   with a post (part 3, step 1). Without it everything still works, posts
-   just go out text-only.
 2. Create your private settings file and open it.
    ```
    copy .env.example .env
@@ -26,7 +23,6 @@ to X until part 5.
    ```
    Set these lines and save:
    ```
-   DRAFT_MODEL=
    NCBI_EMAIL=you@example.com
    ```
    Claude needs nothing in this file: it runs through the Claude Code CLI with
@@ -43,7 +39,7 @@ to X until part 5.
    ```
    The last line must print `"result":"ok"` inside the output. Every model
    call the pipeline makes (scoring, story linking, the model's yes/no,
-   drafting, grading pictures, checking claims) runs this CLI as you, so it
+   the studio's sessions) runs this CLI as you, so it
    uses your account and anything run on a schedule (part 6) must run as the
    same Windows user. The health checks (parts 6 and 8) have a `cli` line that
    fails when the app cannot find `claude`.
@@ -104,395 +100,39 @@ source only when it is due, and score only scores what is new.
 
 ---
 
-## Part 3. Drafting and approving posts (start after a few days of part 2)
+## Part 3. Approving posts (start after a few days of part 2)
 
-The studio (part 9) is now the main way posts are made: one Opus session per
-piece, researched, fact-checked and with designed cards. The drafter below still
-runs and writes shorter threads for the day's other stories. One story gets one
-piece of writing: the drafter skips a story the studio holds (a studio piece on it
-you have not discarded, even one waiting for you at the research checkpoint or
-stopped, a topic queued for it on the studio page, or a story offered to a studio
-piece still researching, until the research picks one), and the studio never picks a
-story that already has a draft. A run says `N left to the studio` when it skips some,
-and looks again before each story, so a studio session that starts beside a long
-draft run gets the stories the run has not reached (`left to the studio since this
-run started`). Only the story the run is already writing can meet the studio's
-research: if the run's thread lands first, the piece stops before writing and says
-so (Resume researches another story); if the research picks the story first, the
-run does not keep its thread.
+Every post is written by the studio (part 9): one Opus session per piece,
+researched, fact-checked and with designed cards. The older single drafter
+(`run_draft.py`), the swarm and its A/B pick page, the claim checker
+(`run_verify.py`) and the voice report were retired; the studio is the only writer.
+A finished piece lands in the approval queue as a pending draft.
 
-1. Draft posts for the top stories.
-   ```
-   python run_draft.py
-   ```
-   Writes one draft (a 3 to 6 post thread with a chart or a table) for up to 10
-   stories from the last 48 hours scoring at or above the digest threshold
-   (30 of 50, from `config.yaml`). Drafts that break a hard rule (advice,
-   made-up numbers, a link in a post, too long, a missing @handle or #tag)
-   are stored as failed, not shown.
-
-   You are the jury. Each story is written twice, once by the swarm (many
-   cheap calls) and once by the single strong drafter, and with `jury: human`
-   in `swarm\config.yaml` (the shipped value) both land on the queue's
-   **Pick A/B** page side by side, in random order and unlabelled. Press
-   "Pick A" or "Pick B" for the one you would rather post; it becomes the
-   pending draft and the next pick opens, and the page then tells you which
-   one you picked. "Reject both" rejects the story. Verify does not check a
-   draft until you have picked, and the pending page shows how many picks are
-   waiting; with none waiting the page says "Nothing to pick right now". Your
-   picks are what step 9 learns from: only a post you gave to
-   the swarm counts for the swarm's writer recipes. `jury: model` goes back to
-   the AI jury of `judge_votes` cheap judges.
-
-   No post carries a link of any kind (rule 2). Not the source URL, not a
-   registry link, not a company page: X shows a post with an outbound link to
-   fewer readers, and posting a URL is billed as an extra request through the
-   X API. The source is named in words instead (the journal, the company, the
-   meeting), with its @handle where the pipeline knows one. A draft with a URL
-   or a bare domain in any post is sent back to the model and, if it keeps
-   writing one, stored as failed.
-
-   No post uses a colon or a dash (rule 13, `draft/style.py`). The em dash, the
-   en dash, "--" and a spaced " - " all count; a colon between digits (8:30,
-   2:1) is fine. Posts should read like a person talking. A draft that breaks
-   this is sent back to the model like any other hard rule, and a human edit
-   that breaks it is never used as a voice example.
-
-   Posts put a dollar size on the market a therapy targets (the market it is
-   going after, the leader's sales, a comparable deal, published peak sales
-   estimates). These figures usually are not in the source, so they are the one
-   exception to "every number verbatim": each goes into the draft's claims to
-   verify and is checked on the web by `run_verify.py` before approval, like any
-   other claim. The guidance is the "Size the prize" section of `draft/voice.md`.
-
-   The first post is held to its own rule on top of that (rule 12): no thread
-   position marker ("1/6"), no "thread", no emoji, and under 220 characters. X
-   ranks a thread on what its opening post does in the first minutes, and a
-   reader handed a summary they cannot answer never reaches post 2. A single or
-   long post opens the same way; only the 220-character cap is lifted there
-   (the format's own limit applies instead). The cap lives in `draft\hook.py`
-   (`HOOK_MAX_CHARS`) if you want a different length.
-
-   Drafts written before the link ban still carry a URL in a post. To take it
-   out, run
-
-       python run_unlink.py --dry-run
-
-   to list them, then without the flag to strip the link (and the lead-in that
-   only introduced it, "Full results:") from every post and drop a post that was
-   nothing but the link. It is pure text: no model call, no network, pictures
-   untouched, the draft keeps its status, and each change is logged as an edit
-   holding the before and after. A draft already posted (or one a publish run
-   has claimed) is left alone, and so is a studio piece (part 9: its session
-   writes without links, and a ticker like `ROG.SW/RHHBY` is not one); a draft
-   whose every post is nothing but a link is named in the log for you to revise
-   by hand in the queue. By default it covers pending and approved drafts;
-   `--status STATUS` (repeatable) narrows it, `-v` shows per draft detail.
-
-   Posts tag what X can link. A journal, society, regulator or company the
-   pipeline knows the X account of is written as its @handle when a post names
-   it (`@JCO_ASCO`, `@Merck`), and every formal drug name and ClinicalTrials.gov
-   number is a hashtag as the source spells it (`#Trastuzumab Deruxtecan`,
-   `#cilta-cel`, `#NCT04487080`); a trial's name (KEYNOTE-189) stays plain text,
-   and nothing else is a hashtag. Handles come
-   from `config.yaml` only: `x: Merck` on a company's line under
-   `companies: feeds:` or `branding: companies:`, and the `mentions:` list for
-   journals, societies and regulators (`name`, `handle`, `aliases`, `domains`
-   for the URL hosts that identify it, and `match_names: false` for a journal
-   named after an ordinary word such as Blood, which is then recognised by its
-   host only). The drafter is only shown the handles of accounts the story
-   names or that own the source URL's host, and never invents one: a company
-   without `x:` is written by name. Verify each handle on x.com before adding
-   it; a wrong handle mentions a stranger. Drafts written before the rule, or
-   before a handle was added, are brought under it with
-   `python run_draft.py --retag`: every pending and approved draft not yet
-   posted whose posts break the rule is revised with the one instruction to
-   change only the tags (a `revise` decision on the draft page, the rest of
-   the text and the visual kept; claim checks carry over as after any
-   revision). `--retag --dry-run` lists what would change without a call. A
-   studio piece (part 9) is left alone: it is revised from its studio page.
-   ```
-   python run_draft.py --dry-run                 # show what would be drafted
-   python run_draft.py --min-score 38 --limit 5  # only the strongest few
-   python run_draft.py --since-hours 24          # only stories from the last day
-   python run_draft.py --retry-failed            # try again on stories whose draft failed
-   python run_draft.py --retag                   # apply @handles and #tags to current drafts
-   ```
-   In the panel, the pending page's **Retry failed** button runs the `draft_retry` step
-   from `ops/config.yaml`: `--retry-failed --since-hours 480 --limit 10`, so failed
-   stories from the last 20 days are drafted again. It is a `manual: true` step:
-   `run_ops.py run` skips it unless `--only draft_retry` names it, the automatic runs
-   never start it, and it shares draft's lock so the two never run side by side.
-   A draft may come with a picture. Nothing draws it freehand: when the source
-   has two or more comparable numbers (arms, endpoints, cohorts) the drafter
-   lists them as a small bar-chart spec, every number in it is checked
-   against the source the same way the post text is (one miss and the chart
-   is dropped, with a note under "Claims to verify"), and the code draws the
-   chart to `images\draft_<id>.png` next to `pipeline.db`. "Suggested visual"
-   on the draft page is still just the model's one-line idea for you; the
-   chart is what actually gets attached. `images: enabled: false` in
-   `draft\config.yaml` turns the drawing off. Every picture (chart or table)
-   shares one card layout: 16:9, an accent rule and an
-   "IMMUNO-ONCOLOGY · DATA BRIEF" eyebrow, the title, horizontal bars with a
-   light track showing the full scale and the verified value at each tip
-   (tables get a rounded header row and zebra rows), and a footer with the
-   note on the left and the source host on the right. The colours are NOT
-   fixed: `draft\chart.py` ships eight named palettes (navy, teal, crimson,
-   forest, amber, plum, slate and midnight, a dark card), and a picture's
-   palette and whether each bar gets its own hue (`multi_colour`) are layout
-   knobs like text size, so the designer genome a draft starts from and the
-   image grader both choose them. The eyebrow text and the font list are
-   constants at the top of the rendering section of `draft\chart.py`; the
-   palettes sit just below them and a new one is a new entry in `PALETTES`.
-
-   Every picture is then graded. A second model looks at the PNG and scores
-   it 1 to 10 on three things: easy to read, good use of colour and graphics,
-   little empty space. It also lists the flaws it saw and a fix for each.
-   A score of 8 or more is done. Below that the code applies the grader's
-   layout and colour changes (text size, bar thickness, row spacing, a
-   highlighted first bar, gridlines, the scale track, the palette, one hue
-   per bar) and draws the picture again, up to four
-   times, and keeps the best-scoring version. The grader is told that the
-   same navy card every time is a flaw and to try another palette when a
-   picture is merely competent; a bold try costs nothing because the best
-   render is what stays. A low score always costs another
-   render: if the grader names no layout change, the code steps the text size and
-   row spacing up itself. The grader can only move layout;
-   it can never add or change a number, a label or a title. Each draft page in
-   the queue shows the scores under the image ("Image grader: 6/10 → 8/10")
-   with the flaws and fixes behind a click. `images: grader:` in
-   `draft\config.yaml` sets `enabled`, the `model`, `min_score` and
-   `max_iterations`; `IMAGE_GRADER_MODEL` in `.env` overrides the model. Each
-   grade is one model call with the image, so a draft costs up to four extra
-   calls. If the grader fails (Claude Code not logged in, a bad reply) the
-   picture is kept as drawn and the log says so. Besides the overall score
-   the grader rates a checklist of professional touches (readable at
-   thumbnail size, clear hierarchy, aligned columns, a rounded 3D header,
-   logos and tickers in company cells, consistent numbers, a quiet source
-   line, and whether the card would stand out from the account's other
-   cards), and those per-item scores show next to each render on the draft
-   page.
-
-   A chart comes in three kinds, and the drafter picks the one that fits the
-   data. **Grouped** puts two to four arms side by side across up to six
-   endpoints that share a unit (drug vs control on ORR and CR rate) for a
-   randomised readout. **Stat** draws one to four headline numbers as big
-   tiles, each with its own unit (a single-arm ORR of 73% next to a median PFS
-   of 11 months). **Bars** is one endpoint across arms, doses, cohorts or
-   competitors. Every number in each kind is checked against the source. A bar
-   chart whose bars are all equal (two arms both "in phase 3") compares nothing,
-   so the draft is sent back to the model.
-
-   Every card also shows the story's company logo in its top right corner: the
-   company whose own site published the story (its `domain:`, or its feed's
-   site), otherwise the first configured company the chart or table title
-   names. A card from a journal or a regulator about no configured company has
-   no header logo.
-
-   Company cells in a table, and chart bars labelled with a company, get a
-   stock ticker and a logo automatically when
-   the company is configured. In a table that means the row-label column and
-   every column headed company, sponsor, developer, partner, owner or
-   acquirer; only an exact configured name matches, so a trial or drug name
-   in the first column is left alone. Add `ticker: AMGN` to the company's line under
-   `companies: feeds:` in `config.yaml`, or list a company that has no feed
-   under `branding: companies:` (with `aliases:` for other spellings, e.g.
-   J&J). That `domain:` also makes the company's own press releases a trusted
-   source for the fact-checker, so a table cell backed by jnj.com or pfizer.com
-   is kept rather than blanked. For logos run
-
-       python run_logos.py
-
-   once (the shipped repo has no logo files, so until you do every card shows
-   tickers only): for every configured company it opens the company's own website
-   (`domain:` on the config line, or the feed's host with `ir.` / `investors.`
-   / `www.` removed) and saves the icon that site advertises (its
-   apple-touch-icon, else the largest favicon) as `assets\logos\<key>.png`.
-   Look through the folder afterwards and delete any you do not like; a
-   company whose feed sits on an investor-relations platform (gcs-web.com
-   and the like) needs a `domain:` in its config line, and the run tells you
-   which ones. `--only amgen --only jnj` limits it to those keys, `--force`
-   refetches existing files (after a rebrand), `--dry-run` only prints what
-   it would fetch. You can always drop a press-kit PNG in by hand instead
-   (see `assets\logos\README.md`). The pipeline itself downloads nothing:
-   a company that is not configured is drawn exactly as the drafter wrote
-   it, and a private company listed without a ticker gets its logo only. The
-   table header is drawn as a rounded navy bar with a shadow.
-   A picture's footnote (`note` in the chart or table spec) is a caption the
-   reader sees under the card: the n, the design, an as-of date, a caveat. A
-   caption that instructs you instead ("verify each cell against current FDA
-   labels before posting", "TODO") is a hard rule failure, so the drafter
-   retries. To clean up drafts made before that rule existed, run
-
-       python run_scrub_notes.py --dry-run
-
-   to list them, then without the flag to blank those captions and redraw the
-   pictures. It touches nothing else: the numbers, rows and post text stay as
-   they are, each change is logged as an edit on the draft, and a draft that
-   is already posted is left alone. By default it covers pending and
-   approved drafts; `--status STATUS` (repeatable) narrows it, `-v` shows per
-   draft detail.
-
-   The other kind of picture is a comparison table (a competitor landscape,
-   a catalyst list, deal terms side by side): 2-8 rows, 2-5 columns, the
-   first column naming the company, asset or trial. Unlike a chart its cells
-   may come from the model's own knowledge, so it is NOT drawn here: step 2
-   fact-checks every cell on the web first (see below). Until then the draft
-   page shows the cells and says the picture is pending.
-2. Check the claims. Each draft lists the facts the model added from its own
-   knowledge (competitor pipelines, deal terms, cost claims). This step sends
-   each one to Claude with web search on, which finds a primary source and
-   quotes the sentence that supports or contradicts it.
-   ```
-   python run_verify.py
-   ```
-   ```
-   python run_verify.py --dry-run     # list the claims, no calls
-   python run_verify.py --redo        # check again, replacing old verdicts
-   python run_verify.py --draft 12    # one draft
-   python run_verify.py --limit 3     # at most 3 drafts this run
-   ```
-   The same run then handles comparison tables: every cell that is not
-   verbatim in the source article is one more web-search call (the row label
-   and column header are sent with it, so "Agenus, Stage: Phase 2" stands on
-   its own). Once every cell has a verdict the table is drawn to
-   `images\draft_<id>.png` with a blank where a cell could not be tied to a
-   trusted primary source (the footer says so), or dropped, on the draft's
-   record, when fewer than `min_supported_ratio` of the fact cells passed,
-   fewer than two rows kept a verified label, or the table had more than
-   `max_cells_per_draft` cells. A contradicted cell does not drop the table:
-   it is kept, with its verdicts and without a picture, until the cell is
-   fixed (by a Revise, the verify-revise loop or your own retyping); approving
-   it as is posts the text alone and records why. `tables:` in
-   `verify\config.yaml` holds those knobs and `enabled: false` skips tables
-   altogether (they then stay unrendered and are dropped at approval).
-   To take yourself out of the run-verify, press-Revise, run-verify loop, turn
-   on the verify-revise loop:
-   ```
-   python run_verify.py --auto-revise       # this run only
-   python run_verify.py --no-auto-revise    # skip it once when the config has it on
-   ```
-   The shipped `verify\config.yaml` has `auto_revise: enabled: true`, so the
-   scheduler does it every time; set it to `false` to make it opt-in per run.
-   After the claim pass, a draft that still has a
-   contradicted or unverified claim goes back through the drafter with those
-   claims (the same thing as pressing Revise with an empty box), supported
-   verdicts are kept, only the new or changed claims are checked, and that
-   repeats until every claim is supported or a limit is hit: `max_rounds`
-   per run (3) and `max_rounds_per_draft` over the draft's life (0, meaning
-   no lifetime cap; set a number to make a draft wait for you after that many
-   automatic revisions). A
-   revision that leaves the claims unchanged is thrown away and the loop
-   stops, so the verdicts you see are always real ones. The queue shows
-   "auto-revised N×" on each draft, with "needs you" when the loop gave up
-   and a claim problem remains; those are the only ones to open with the
-   Revise box. A comparison table's contradicted cells go to the drafter in
-   the same round, worded as the checker saw them ("Agenus, Stage: Phase 3
-   planned") with the note, the quote and the source, and the cells the round
-   changed are checked before the next one; blanked cells are left alone.
-   The table pass therefore runs before the loop. Each round costs one drafter
-   call plus one web call per new claim or changed cell.
-   About one to two minutes per claim. Verdicts are only "verified" when
-   the source is on a trusted site (`verify\config.yaml`, plus every company
-   site in `config.yaml`); anything else is shown as a lead with a
-   "trust <host>" link beside it. Pressing it (a society's own page such as
-   learn.astct.org, say) adds that host to `trusted_domains` in
-   `verify\config.yaml` for good, flips every stored verdict from that host
-   to trusted, and redraws this draft's table from the verdicts it already
-   has: no new web call, no text change. A status bar at the top of the page
-   says so while it runs (redrawing and grading the picture can take up to a
-   minute) and the page reloads when it is done. Doing it by hand is the same: add
-   the host to the list and rerun `run_verify.py --draft <id>`. Once the
-   scheduler in part 6 is running, this happens automatically after every
-   drafting run, so by the time you open the queue the evidence is already
-   attached; running it by hand is only for drafts you made by hand.
-3. Open the approval page.
+1. Open the approval page.
    ```
    python run_app.py
    ```
    Then open http://localhost:8000/queue in a browser (the front page is the
    dashboard; part 8 explains it). `python run_queue.py` still opens the
    approval page on its own if that is all you want. For each draft: approve,
-   revise or reject. An approve is not final: "Reopen" on the approved page
+   edit or reject. An approve is not final: "Reopen" on the approved page
    brings a draft that has not gone out yet back here as pending. Press Ctrl+C
    in the window to stop the server when done.
-   To change a post, do not retype it: write what should change in the
-   "what should change?" box (on the list next to each draft, or under
-   "Revise" on the draft's page) and press Revise. The drafter rewrites the
-   post from your note, keeps the rest as it was, the hard rules are checked
-   again in code, and the draft comes back to you still pending with a
-   before/after diff in its history. It takes 10-30 seconds: a yellow status
-   bar at the top of the page shows while the drafter works, the form is
-   locked so it cannot be sent twice, and the page reloads by itself. If the model
-   cannot produce a valid rewrite the draft is left untouched and the page
-   says why. Pick a reason (voice, factual, not newsworthy, hard rule, other)
-   when you revise or reject; your notes feed the voice report. "Edit by hand"
-   is still there, folded away, for a one-word fix. A save that breaks a rule (a post
-   over 280 characters, URLs counting as 23, or an empty thread) is refused on the
-   same page: the reason sits at the top, your text stays in the boxes, and nothing is
-   saved or approved. The same goes for Approve while a claim is contradicted.
-   If the draft has a chart it is shown under "Image" with the exact text a
-   screen reader will get (the alt text), and it is attached to the first
-   post when published. Check every bar against the source like any other
-   number. "Drop image" posts the text alone; when the draft carries two
-   pictures (a step 9 format genome) the button reads "Drop both images" and
-   each picture also has its own "Drop this picture" beside it
-   (`POST /drafts/{id}/image/{index}/drop`), which removes that one and the
-   spec behind it and leaves the other in place. A Revise redraws the chart from
-   the new draft (or removes it if the new draft has none). "Redraw" remakes
-   the picture from the same spec: a chart is rendered again through the
-   grader loop, a table is redrawn from the cell verdicts already stored.
-   No web call, no text change, and the table is kept (unlike "Drop image").
-   It runs while you wait, and the grader loop can take up to a minute, so a
-   bar at the top of the page says it is working and the button greys out
-   until the page reloads. When it is done the page says the picture was
-   redrawn and what the grader kept it at; a table that is still waiting on a
-   cell, or held back by a contradicted one, says that instead (the picture is
-   only redrawn once every cell has a verdict and none is contradicted). The
-   picture on the page is always the file on disk, never a copy your browser
-   kept from before the redraw.
-   A table shows under "Table cells" with each cell's verdict and source link
-   (green: kept; amber: blanked in the picture; red: contradicted). The
-   picture appears once every cell is checked and none is contradicted; a
-   contradicted cell is shown to the drafter on the next Revise (empty box
-   is enough) with the fact-checker's note, quote and source, exactly like a
-   contradicted claim. Approving before that posts
-   the text alone and records why, so a picture is never attached after you
-   stopped looking. A Revise keeps the verdict of every cell whose row label,
-   column and text did not change.
-   While a draft still awaits your decision (pending, which a reopened draft
-   is again) every cell is a text box: retype a cell to correct it,
-   clear it to blank it in the picture, then press "Save cells". Saving counts
-   as checking every cell by hand ("supported (typed in)", no web call): the
-   ones you changed, and the ones you left standing that the fact-checker
-   could not verify or verified from an untrusted source, which is also what
-   retyping a cell to exactly what was there already means. A cell already
-   supported from a trusted source keeps its own verdict and a contradicted
-   cell still has to be corrected (or its host trusted). The picture
-   is redrawn at once through the same render-or-drop step as the verifier.
-   Headers, title and the post text never change here; use Edit for the text.
-   The history logs the edit with the number of cells changed.
-   Under "Claims to verify" each claim shows its verdict, the source link and
-   the quoted sentence. Open the link and read the sentence before approving;
-   the verdict is a lead, the link is the proof. A contradicted claim blocks
-   Approve until the draft is revised or you tick "approve anyway". Every
-   revision also hands the drafter each claim that was contradicted (to
-   correct or remove, using the fact-checker's note and quote) or could not
-   be verified (to soften or drop), so pressing Revise with an empty box
-   fixes the failed claims on their own. After a revision a supported claim
-   whose wording did not change keeps its verdict; every other verdict is
-   discarded and the next `run_verify.py` (or the scheduler) checks the new
-   or changed claims.
-4. After a couple of weeks, see what your edits are asking for and paste the
-   suggestions you agree with into `draft\voice.md`. Only the drafter's own
-   drafts count here and in the examples the drafter is shown: a studio piece
-   (part 9) is written in the studio's voice, so its edits and rejections stay
-   out of both.
-   ```
-   python -m draft.voice_report
-   python -m draft.voice_report --weeks 8 --out voice.md
-   ```
-   The approval page also has this at http://localhost:8000/voice
+2. To change a piece in words, use its studio page (part 9): the queue's draft
+   page points there. "Edit by hand", folded away on the draft page, is there for
+   a one-word fix. A save that breaks a rule (a post over the draft's length limit,
+   or an empty thread) is refused on the same page: the reason sits at the top, your
+   text stays in the boxes, and nothing is saved or approved. Pick a reason (voice,
+   factual, not newsworthy, hard rule, other) when you reject.
+3. The piece's cards are shown under "Image" with the exact text a screen
+   reader will get (the alt text), each attached to the post it is anchored to
+   when published. "Drop image" posts the text alone; with two or more pictures
+   the button reads "Drop both images" and each picture also has its own "Drop
+   this picture" beside it (`POST /drafts/{id}/image/{index}/drop`), which removes
+   that one and leaves the others in place.
+4. While the studio is working on a piece (a running stage, or a request you
+   made waiting), its draft is "on hold": approve, edit, reject and the picture
+   drops are refused until the session is done.
 
 ---
 
@@ -577,8 +217,8 @@ Set `posting: api` to go back to posting through the X API (the steps below).
    python run_publish.py --live --now --draft 17  # post draft 17 now (what the panel's "Publish now" runs)
    ```
    A thread's replies are numbered " (2/4)", " (3/4)" and so on; its first post goes out
-   exactly as approved, with no " (1/4)", because the drafter keeps a position
-   marker off the opening post (rule 12) and the first post is the one X shows
+   exactly as approved, with no " (1/4)", because the opening post carries no
+   position marker and the first post is the one X shows
    people who do not follow the account (`thread_numbering` in
    `publish\config.yaml`: `replies`, `all` or `none`).
    Every draft is a thread and is posted as one. When several drafts wait for one
@@ -603,8 +243,8 @@ Set `posting: api` to go back to posting through the X API (the steps below).
    claimed draft is skipped by every later run. That button is also what frees
    one of those, once the claim is more than 30 minutes old (younger than that
    a run may still be posting it, and the button says so).
-4. Pictures. A draft's chart (part 3) is uploaded and attached to its first
-   post with alt text; the dry run prints the file and the alt text. If the
+4. Pictures. A piece's cards (part 9) are uploaded and attached to the posts
+   they are anchored to, with alt text; the dry run prints the file and the alt text. If the
    upload fails nothing is posted and the draft is marked failed, since you
    approved it with the picture. `media: attach_images: false` in
    `publish\config.yaml` posts every draft text-only.
@@ -614,7 +254,7 @@ Set `posting: api` to go back to posting through the X API (the steps below).
 ## Part 6. Running it on a schedule (Windows Task Scheduler)
 
 You may not need this part. While the control panel or desktop window is open it
-already runs ingest, score, studio_scan, studio, draft, verify, feedback, evolve and studio_learn on
+already runs ingest, score, studio_scan, studio, feedback and studio_learn on
 its own at 01:00, 03:00, 06:00, 09:32, 12:00 and 15:00 (part 8, "Automatic runs"), and it never publishes. Task
 Scheduler is the other way: it runs even with the app closed and can wake the
 PC, but it needs the tasks below. Pick one for `pipeline-run` and
@@ -628,8 +268,8 @@ task from step 2 if you want that. `pipeline-backup` is not needed with them. Th
 30 minutes, set `max_hours_since_ingest` back to 3, `max_hours_since_score` to 6
 and `source_stale_min_hours` to 0 for earlier warnings.
 
-1. Try the orchestrator by hand first. It runs ingest, score, draft and
-   verify in order and records each step. It leaves the `studio` step out:
+1. Try the orchestrator by hand first. It runs ingest, score, studio_scan,
+   publish (a dry run), feedback and studio_learn in order and records each step. It leaves the `studio` step out:
    one studio session runs for an hour or more, and the whole run (and every
    `pipeline-run` after it, which Task Scheduler does not start while one is
    still going) would wait for it. The studio has a task of its own,
@@ -638,16 +278,6 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    Each step takes its own lock
    (`<lock_path>.<lock name>`) while it runs, so a step the control panel is
    already running is skipped as `locked` and the rest carry on.
-   The `draft_retry` step is `manual: true`: a plain `run_ops.py run` and the
-   automatic runs skip it, and it runs only from the pending page's "Retry failed"
-   button or `run_ops.py run --only draft_retry`.
-   The `verify` step runs after `draft` and is optional: if it fails, the
-   claims show as "not checked yet" and the run carries on. The `draft` and
-   `evolve` steps have no time limit: with the swarm on, every cell is one
-   Claude Code CLI launch and a run can take an hour or more.
-   `parallel_calls` in `swarm\config.yaml` (6 shipped) launches that many
-   cells, or judge matches, side by side; set it to 1 if the CLI hits its
-   usage limits, which costs time, not draft quality.
    Until that settles, run the steps by hand from the panel and post from
    the approved page; the scheduler can come back later.
    ```
@@ -679,12 +309,11 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    5): `run_ops.py run` refuses to start if any step in `ops\config.yaml`
    carries `--live`, so press "Publish now" on the approved page when you want
    a draft to go out.
-   The `feedback` and `evolve` steps are on in `ops\config.yaml`: the account
+   The `feedback` step is on in `ops\config.yaml`: the account
    has the paid X API read tier, so put the bearer token on `X_BEARER_TOKEN=`
-   in `.env` (Part 7) and every scheduled run also snapshots metrics and
-   scores the swarm. Without the token the feedback step fails with an error
-   in the log and the run carries on (it is optional). `evolve` runs `run_evolve.py` after `feedback` and
-   never calls the network.
+   in `.env` (Part 7) and every scheduled run also snapshots metrics. Without
+   the token the feedback step fails with an error in the log and the run
+   carries on (it is optional).
 4. Alerts (optional): put a Slack or Discord incoming-webhook URL on
    `ALERT_WEBHOOK_URL=` in `.env`, or fill the `SMTP_*` and `ALERT_EMAIL_*`
    lines, and the hourly health task will message you when a source or step
@@ -712,9 +341,10 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    posting slots and voice guide. It applies none of them; tell me which you
    want and I will commit them. The studio learns from the same snapshots on its
    own (part 9, "What X says"); without this tier, type its numbers in there.
-   Studio posts show as their own `studio` group in the tables, but the feed and
-   voice-guide proposals compare the drafter's posts only: there is no `studio`
-   feed to slow down or speed up.
+   Studio posts show as their own `studio` group in the tables. The feed and
+   voice-guide proposals compare the retired drafter's posts only, so with the
+   studio as the only writer they have nothing new to work from (the voice guide
+   they name, `draft\voice.md`, was removed with the drafter).
 
    Every table in it is ranked by one KPI, `kpi:` in `feedback\config.yaml`.
    The shipped value is `conversation`: not a number X reports, but a weighted
@@ -722,66 +352,9 @@ and `source_stale_min_hours` to 0 for earlier warnings.
    2, a like 1, an impression 0.05, so 20 impressions equal one like). The
    engagement counts are the signals the ranker pays for; impressions are in at
    a small weight because a small account's posts mostly get no engagement, and
-   without them nearly every post scores 0 and evolve cannot tell genomes apart.
+   without them nearly every post scores 0.
    Set `kpi: impressions` (or `likes`,
-   `replies`, ...) to measure a raw count instead. `evolve.kpi` in
-   `swarm\config.yaml` is the same setting for step 9 and ships the same way,
-   so the genomes, designers and formats that survive are the ones that got
-   people talking, not the ones that got scrolled past.
-3. Swarm fitness (step 9, once snapshots exist). Scores every posted swarm
-   draft against the posts before it and retires the genomes that keep
-   losing, so the next drafts come from the winners:
-   ```
-   python run_evolve.py                     # score, prune, breed, report
-   python run_evolve.py report              # the tables only, no change
-   python run_evolve.py prune --dry-run     # see what would be retired
-   python run_evolve.py breed --dry-run     # see what children would be bred
-   python run_evolve.py breed --force       # breed before any recipe has min_posts scored posts
-   ```
-   Each post is scored on its metrics about two days after it went out
-   (`horizon_hours: 48` in `swarm\config.yaml`), so a post from this morning
-   is not compared with week-old ones; until then it has no score. A thread's
-   own second post is not counted as a reply to it (`subtract_self_reply`).
-   A writer recipe is only credited with posts where the swarm's text was the
-   one posted (not the single drafter's) and that were not single posts; a
-   picture style only with posts whose chart run_draft drew in that style
-   (a table is not counted). A picture keeps its style when it is redrawn: a
-   revision, the fact-checker's table or a scrubbed caption starts from the
-   style the draft was first drawn in, not the house style. The report's
-   header says how many posts were credited to a writer.
-   The recipes that have done better write more of the posts: each story's
-   writer, picture style and format are drawn by chance weighted by how
-   likely each is to be the best (`allocation: thompson`), so a recipe that
-   keeps winning is used more while the others still get tried, and a new
-   child starts from its parent's record. That head start wears off each
-   time the child's work cannot count (its text loses to the single
-   drafter, or its drafts are never posted), and a recipe that has had 15
-   such drafts without one post counted is retired (`max_dead_runs`) so a
-   new child can take its place. Until a kind has a scored post, its
-   recipes simply take turns.
-   Retirement is deliberately slow: a recipe is retired only when it is
-   well below the rest (`prune_rule: confidence`, `retire_confidence:
-   0.9`), at most one per kind per run. At three posts a day most gaps are
-   luck, and the old rule (`prune_rule: median`) retired whichever recipe
-   happened to sit below the middle at every look, which is how the
-   population churned without getting better. The check is repeated as
-   posts arrive, so over months a recipe that is no worse can still be
-   retired now and then; the chance weighting above, not retirement, is
-   what moves the posts towards the better recipes.
-   The report's last two lines are the swarm-vs-control measurement: whether
-   the posts the jury (you, under `jury: human`) gave to the swarm did better
-   on X than the ones it gave to the single strong drafter. `breed` replaces each retired recipe
-   with a child of a winner that changes one thing (one strong-model call per
-   writer child; a designer child, the picture style, and a format child,
-   thread or single or long post and how many pictures on which posts, need
-   no model). Formats are judged only after `format_min_posts` posts. The
-   control panel's **Swarm** page shows the family tree and every score.
-   Every single and long format is posted as exactly one tweet.
-   A long post needs X Premium on the account: without it X refuses the post
-   and the draft shows as failed on the approved page; lower
-   `formats: long_max_chars` in `swarm\config.yaml` or retire `long-1` on the
-   Swarm page's table by asking me to.
-
+   `replies`, ...) to measure a raw count instead.
 ---
 
 ## Part 8. The control panel (one window for everything)
@@ -809,11 +382,6 @@ motion, that bar stands still too. Four pages:
   same verified copy `run_ops.py backup` makes, into the same `backups\`
   folder, with your studio playbook beside it (the oldest beyond
   `backups: keep` in `ops\config.yaml` are removed, playbook copies too).
-  Under Drafting, how many stories you said yes to on the feed have no draft
-  yet. A yes sends a story to drafting whatever its score or age: the next
-  draft run takes those first, then the best-scored new stories (score at
-  `scoring: threshold` in `config.yaml` or above, scored in the last 48
-  hours), at most `--limit` (10) a run.
 - **Sources** (`/sources`) — every source from `config.yaml`: when it last
   ran, how many items it fetched, how many were new, and the last error if
   it failed. A source in red has been failing; one in amber has not run for
@@ -824,8 +392,7 @@ motion, that bar stands still too. Four pages:
   about, pick yes (post this) or no and write why; a box with the reason
   categories appears while you type the explanation, which is required.
   This is the same decision `digest.py --rate` asks for at the terminal, and
-  it is what the scoring gets tuned against later. It does not change what
-  gets drafted today. Use the window links to
+  it is what the scoring gets tuned against later. Use the window links to
   look back 72 hours or a week, to show 10, 25 or 100 stories (100 is the
   most the page lists), or to ignore the score threshold. "Hide decided"
   drops the stories you have already answered, so what is left is your
@@ -833,11 +400,7 @@ motion, that bar stands still too. Four pages:
   window. "Show decided" brings them back. The "Ingest and score" button at
   the top runs those two steps (the same run the runs page starts); the
   page says a run is going and the log is on the runs page.
-- **Pending** (`/queue`) — the approval queue from part 3, with two buttons
-  at the top: "Draft" runs the drafter for the stories that cleared the
-  threshold, "Verify" runs the claim check (and the auto-revise loop) on
-  every unchecked claim. Both run on the runs page; this page just starts
-  them and says when one is going.
+- **Pending** (`/queue`) — the approval queue from part 3.
 - **Approved** (`/status/approved`) — the drafts waiting for a slot, and
   where you decide what posts when. "Publish now" next to a draft posts that
   one draft right away, outside the slots (the daily cap and the minimum gap
@@ -849,7 +412,7 @@ motion, that bar stands still too. Four pages:
   draft without a number follows the numbered ones by score. The order is
   kept on the draft (shown as #1, #2) until it posts. "Reopen" next to a
   waiting draft takes it back off the list and makes it pending again, so you
-  can revise, edit or reject it; the order you saved for it is forgotten
+  can edit or reject it; the order you saved for it is forgotten
   rather than coming back the next time you approve it, and the box beside the
   button puts your reason in the draft's history. It is refused for anything
   already on X — posted, or a thread that stopped halfway — and for a draft a
@@ -887,22 +450,16 @@ motion, that bar stands still too. Four pages:
 - **Radar** (`/studio/radar`) — part 9: where topics come from. The day's scan
   topics, the feed's top stories and the catalyst calendar, each with **Write
   it**, and the **Scan now** button.
-- **Swarm** (`/swarm`) — step 9's recipes (writer genomes, designers and
-  formats): live or retired, posts scored, median score, parent, and the
-  swarm-vs-control line. A view only; `run_evolve.py` does the breeding and
-  retiring. A draft's page says its format and shows every picture with the
-  post it goes on.
 - **Feedback** (`/feedback`) — followers over time, your posts ranked by
   impressions, and the suggestions from the latest weekly report. The
   suggestions are proposals only; applying one means editing a settings file.
 - **Runs** (`/runs`) — every run's log, whichever page started it: the
-  feed's "Ingest and score", the pending page's "Draft" and "Verify", the
-  approved page's "Publish now", or the checkboxes here (tick the steps you
+  feed's "Ingest and score", the studio's buttons, the approved page's "Publish now", or the checkboxes here (tick the steps you
   want and press "Run selected steps"). The page updates as the run goes: the step in progress is shown
   with how long it has been running and its log so far, refreshed every few
   seconds as the step writes, each finished step keeps its final log, and the
   steps still to come are listed. Runs of different steps go at the same
-  time: start a draft run and a verify run together, or open a second desktop
+  time: start an ingest run while a studio session works, or open a second desktop
   window and run something there. The one thing that never happens is the
   same step running twice. Its button is greyed out while it runs in this
   window, and a step another window or the scheduler (part 6) is already
@@ -915,12 +472,8 @@ motion, that bar stands still too. Four pages:
   While a run is going there is a "Stop this run" button: it ends the
   current step (and anything it started, such as the Claude window) and
   skips the rest. Nothing is lost; the next run picks up where it left off.
-  The verify step has no time limit (`timeout_seconds: 0` in
-  `ops/config.yaml`): a backlog of drafts can take an hour or more, and each
-  claim's verdict is saved the moment it lands, so stopping the run keeps
-  every claim already checked and only the one in flight is redone next time.
 - **Automatic runs** (top of `/runs`) — while the panel or the desktop window
-  is open it runs ingest, score, studio_scan, studio, draft, verify, feedback, evolve and studio_learn on its own,
+  is open it runs ingest, score, studio_scan, studio, feedback and studio_learn on its own,
   at 01:00, 03:00, 06:00, 09:32, 12:00 and 15:00 local time as shipped. Publishing is never one of
   them: posting stays the approved page's "Publish now", and an automatic run
   cannot post even if `.env` allows posting. The box says whether it is on,
@@ -955,19 +508,15 @@ motion, that bar stands still too. Four pages:
   - When an automatic run finishes it records a health check and, if a check
     is failing, sends the alert from part 6 (webhook or email), since nobody
     was watching it.
-  - Each automatic run costs what pressing the buttons costs. The verify step's
-    auto-revise has no lifetime cap per draft as shipped
-    (`max_rounds_per_draft: 0` in `verify\config.yaml`), so a draft with a
-    claim that never checks out is revised again at every run; set a number
-    there if that adds up.
-- **Pending / Approved / Rejected / Failed / Voice report** — the
+  - Each automatic run costs what pressing the buttons costs.
+- **Pending / Approved / Rejected / Failed** — the
   approval pages from part 3. The Approved page is the waiting list for
   `run_publish.py`: each row says `waiting`, `posted` (a link to the tweet),
   `failed` or `partial thread`, and drafts already posted are hidden until you
   press "Show posted". The draft page shows the same, with the posting time.
 
 Links to other websites (a story's source, a DOI, a posted tweet, a
-claim check's source, a draft's primary source) open in a new tab, or in your
+draft's primary source) open in a new tab, or in your
 browser from the desktop window, so the page you were on stays put.
 
 The one thing it writes outside its own pages is a decision on the feed page.
@@ -976,8 +525,8 @@ Everything else is a view.
 Two things it deliberately will not do. It never posts to X on its own:
 posting is the approved page's "Publish now" and nothing else, and the
 automatic runs never include it. And it edits only a few settings: the posting
-caps on `/publishing`, the automatic runs' switch and times on `/runs`, and a
-trusted domain from a draft's page. Change `config.yaml` or `draft\voice.md`
+caps on `/publishing`, the automatic runs' switch and times on `/runs`, and the
+studio's playbook. Change `config.yaml` or `studio\brief\voice.md`
 on disk (ask me to commit it), not in the browser.
 
 Anyone who can reach the page can run the pipeline, so keep it on
@@ -1022,8 +571,8 @@ the whole folder wherever you like; inside it:
 - `Pipeline.exe` is the app. Double-click it.
 - `pipeline-cli.exe` is what the runs page uses to run each step. Leave it
   next to `Pipeline.exe`.
-- the settings files (`config.yaml`, `ops\config.yaml`, `verify\config.yaml`,
-  `draft\voice.md` and the others) are under `_internal\`. Editing them there
+- the settings files (`config.yaml`, `ops\config.yaml`, `studio\config.yaml`
+  and the others) are under `_internal\`. Editing them there
   works, but they are copies: the next build takes the repo's versions again,
   so make lasting changes in the repo and rebuild.
 
@@ -1132,24 +681,19 @@ and long posts need X Premium.
    run times are set in, so the day's first run that may start a piece does,
    whatever minute yesterday's started at. An automatic piece picks its own story
    from the top scored stories of the last two days that the account has not
-   written about (no studio piece on it and no draft from the drafter), or finds a
+   written about (no studio piece on it and no draft that did not fail), or finds a
    better one with its own news scan, and writes straight through (`auto:
    checkpoint: false`). It is also offered the radar (item 10): the day's scan
    topics and the catalysts coming up or just passed. It is told every piece of
    the last 10 days (`topics: avoid_days` in `studio\config.yaml`), finished or
    still waiting for you, so it does not repeat a topic. The piece is tied to a
-   feed story only when it is one the app offered it (so the drafter leaves that
-   story to the studio); a number it made up ties it to nothing. While it
-   researches, the drafter leaves every story it was offered alone (a draft run
-   beside it, such as cron's 30-minute run, skips them too). If the drafter had
-   already started the story the piece picks and its thread lands first, the
-   piece stops before writing with `story N got a draft from the drafter while
-   this research ran`: Resume researches another story, Discard ends it. Expect
+   feed story only when it is one the app offered it; a number it made up ties
+   it to nothing. Expect
    it in the queue 30 to 90 minutes after the run starts. A
    session still running at the next run time sits that run out
    (`skip_when_busy`) instead of holding the other steps back, and so do the
    steps still waiting behind it in its own run
-   (draft, verify, feedback, evolve): that run gets to them when the session
+   (feedback, studio_learn): that run gets to them when the session
    ends, and the new run says so in its note on the runs page.
 3. Or start one yourself. Open **Studio** in the panel's top bar, type a topic
    ("next-gen CTLA-4", "Merck's KRAS G12D deal", "what ESMO week means for
@@ -1184,8 +728,7 @@ and long posts need X Premium.
    told to flag any target figure no source published. So read what the post says
    about each target before you approve. The piece's page lists the targets it
    cites, and the copy-paste page asks you to check they are still each firm's
-   latest before posting. Drafter threads, charts and tables cite no analyst
-   targets at all.
+   latest before posting.
 6. Changes. Type them on the piece's page and press **Revise**: the session that
    wrote it rewrites it, fact-checks what changed and replaces the queue draft.
    A draft you rejected comes back to pending with the revision; one you already
@@ -1225,7 +768,7 @@ and long posts need X Premium.
    piece: its files stay in the `studio_pieces` folder, and a draft of it still
    pending in the queue is
    rejected. A piece discarded before it reached the queue gives its story back to
-   the drafter.
+   the shortlist.
 8. The playbook. **Studio → The playbook** is the short note every session
    reads when it researches and when it writes: what works on this account and
    the mistakes the fact-checks keep catching. Edit and save it (the box under it
@@ -1367,14 +910,12 @@ reference pieces in `studio\exemplars\`.
 | `git pull` refuses because you edited a file | `git checkout <file>` to discard, or ask me to commit the change |
 | Scoring says `scoring 0 clusters` right after a keyword change | `python run_score.py --refilter` |
 | Scoring says `pass: 0, deferred: N` | today's cap of 150 is spent; the N wait for tomorrow, or raise `daily_cap` in `config.yaml` |
-| The queue still shows `N unchecked` after `run_verify.py` | claims past `max_claims_per_draft` in `verify/config.yaml` (50) are never checked; raise it. If the run ended with `M errors`, rerun: a failed web call leaves the claim unchecked |
 | A source keeps erroring | it is logged and skipped; the others still run. Paste the line to me |
 | A source says `Expecting value: line 1 column 1 (char 0)` | the API answered with an empty body. `api.biorxiv.org` does this (Sept 2026), so both preprint sources point at `api.medrxiv.org/details` in `config.yaml`, which serves the `biorxiv` and `medrxiv` servers alike |
 | A company feed says `404 Not Found` | the company moved or retired its RSS feed. Open its press page, find the current feed and edit that company's `url` in `companies.feeds` in `config.yaml` (Cellectis, for one, now publishes at `/en/feed/?post_type=press_release`) |
 | `clinicaltrials_oncology` says `403 Forbidden` | ClinicalTrials.gov blocks a Python program that calls itself a browser. Its entry in `config.yaml` has its own `user_agent` starting with `python-httpx/` for that reason; if the line was removed, put it back |
-| A score run logs `safeguards flagged this message` | the CLI's usage-policy check tripped on a batch full of biology abstracts. The scorer does not retry the same prompt; it halves the batch and scores each half in a fresh call, down to single stories. A single story still refused is logged and left for the next run. `scorer_effort` / `drafter_effort` in `config.yaml` set how hard the model thinks (`low` is the cheapest) |
-| A draft shows as failed with `refused by the usage-policy safeguard` | the CLI's usage-policy check refuses that story's prompt, and would every time, so it is not sent again on every run. To try it once more: `python run_draft.py --retry-failed`, or write it in the studio |
-| Score, draft or verify runs fail at once with `unknown option '--safe-mode'` | your Claude Code is older than the pipeline expects: `npm install -g @anthropic-ai/claude-code`, then run again. As a stopgap set `safe_mode: false` under `claude_code:` in `config.yaml` (your own CLAUDE.md and hooks then reach every call) |
+| A score run logs `safeguards flagged this message` | the CLI's usage-policy check tripped on a batch full of biology abstracts. The scorer does not retry the same prompt; it halves the batch and scores each half in a fresh call, down to single stories. A single story still refused is logged and left for the next run. `scorer_effort` in `config.yaml` set how hard the model thinks (`low` is the cheapest) |
+| Score runs fail at once with `unknown option '--safe-mode'` | your Claude Code is older than the pipeline expects: `npm install -g @anthropic-ai/claude-code`, then run again. As a stopgap set `safe_mode: false` under `claude_code:` in `config.yaml` (your own CLAUDE.md and hooks then reach every call) |
 | Want a completely fresh start | delete `pipeline.db`, then `python run_ingest.py --force` |
 | The dashboard's `cli` check says `'claude' not found on PATH` | every model call runs the Claude Code CLI; install it and log in (part 1, step 3). If `claude` works in a Command Prompt but not from the app or a scheduled task, put its full path on `binary:` under `claude_code:` in `config.yaml` (`where claude` lists it; use the line ending in `claude.cmd`) |
 | A step keeps running after you closed the app (a `claude` window keeps reopening) | that was the behaviour before the Stop button; on an old checkout, `taskkill /F /IM pythonw.exe` ends it (or `python.exe` if you started the app from a command prompt) |
@@ -1410,14 +951,10 @@ can set its own `min_abstract_chars` when its feed only carries a one-line
 summary, as the Fierce Biotech and BioPharma Dive entries do; `linking:` is the
 story-linking pass that merges a release with the trade-press write-ups of it
 before scoring, `enabled: false` turns it off),
-`draft\config.yaml` (how human edits are reused; `images: enabled` draws or
-skips the chart), `verify\config.yaml`
-(the fact-checking model and the trusted source sites), `publish\config.yaml`
+`publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules; `media: attach_images`
-attaches or skips the chart; posting itself is manual only), `feedback\config.yaml`,
-`swarm\config.yaml` (step 9: the cheap model, how many cells per post, how many
-layers, the jury size; `enabled: false` or `--no-swarm` goes back to the single
-drafter), `studio\config.yaml` (part 9: the studio's model and effort, how many
+attaches or skips the cards; posting itself is manual only), `feedback\config.yaml`,
+`studio\config.yaml` (part 9: the studio's model and effort, how many
 automatic pieces a day, whether they stop after research, stage time limits, the
 session's tools, the card browser, `radar:` for the daily scan and the catalyst
 calendar, and `learn:` for what X teaches the next session: the horizon, the

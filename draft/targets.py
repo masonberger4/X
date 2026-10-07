@@ -2,8 +2,8 @@
 
 An analyst's target belongs in a post only with what it rests on and whether the post's
 catalyst is in it. The studio's sessions can research that (studio/qa.py:check_price_targets
-holds each citation to it); a drafter thread cannot, so the drafter cites none
-(drafter.check_hard_rules, swarm/cells.py:cell_problems). Both find the citations here.
+holds each citation to it, and studio/safety.py blocks a target of the account's own).
+Both find the citations here.
 
 A citation is a phrase (price target, target price, price objective, the consensus, Street
 or average analyst target) or a per-share figure written next to the word target, PT or

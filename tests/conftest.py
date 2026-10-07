@@ -11,34 +11,26 @@ import pytest
 import config
 import run_app
 import run_desktop
-import run_draft
-import run_evolve
 import run_feedback
 import run_ops
 import run_publish
 import run_queue
-import run_verify
 from approval_queue import store
 from db import Database
-from draft import drafter
 from ingest.base import Item
 
 # Every module that loads .env at runtime. Tests must not see the developer's .env
-# (drafting model, DB path, keys, PUBLISH_ENABLED ...), so load_dotenv is a no-op under pytest.
+# (DB path, keys, PUBLISH_ENABLED ...), so load_dotenv is a no-op under pytest.
 _DOTENV_USERS = (
     config,
-    drafter,
     run_app,
     run_desktop,
-    run_draft,
-    run_evolve,
     run_feedback,
     run_ops,
     run_publish,
     run_queue,
-    run_verify,
 )
-_ENV_FROM_DOTENV = ("DRAFT_MODEL", "DB_PATH", "PUBLISH_ENABLED")
+_ENV_FROM_DOTENV = ("DB_PATH", "PUBLISH_ENABLED")
 
 
 @pytest.fixture(autouse=True)
@@ -47,17 +39,6 @@ def _isolate_from_dotenv(monkeypatch):
         monkeypatch.setattr(mod, "load_dotenv", lambda *a, **k: False)
     for name in _ENV_FROM_DOTENV:
         monkeypatch.delenv(name, raising=False)
-
-
-@pytest.fixture(autouse=True)
-def _no_image_grader_network(monkeypatch):
-    """The image grader is on by default; tests that want it replace this stub."""
-    from draft import grader
-
-    def offline(*a, **k):
-        raise RuntimeError("image grader network call in tests")
-
-    monkeypatch.setattr(grader, "call_grader", offline)
 
 
 # Modules that test the CLI plumbing itself: they fake the process, not the launchers.
@@ -88,13 +69,6 @@ def _never_spawn_the_cli(request, monkeypatch):
 
     monkeypatch.setattr(claude_cli, "run_claude", refuse)
     monkeypatch.setattr(claude_cli, "run_session", refuse)
-
-
-@pytest.fixture(autouse=True)
-def _swarm_off(monkeypatch):
-    """Step 9's swarm is on in the shipped config; every test runs the plain drafter unless it
-    turns the swarm on itself (see tests/test_swarm_run_draft.py)."""
-    monkeypatch.setattr(run_draft, "load_swarm_config", lambda *a, **k: {"enabled": False})
 
 
 @pytest.fixture(autouse=True)

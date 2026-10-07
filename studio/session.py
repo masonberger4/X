@@ -342,10 +342,8 @@ def research(
             )
             _write_log(workspace, f"research.json names story {story_id}, not one offered; ignored")
         elif story_id in queue_store.drafted_cluster_ids(ctx.conn):
-            # The drafter wrote it while research ran: a draft step was already on the
-            # story when the offers were made (approval_queue/store.py:studio_held_clusters
-            # holds them from then on). One story, one piece of writing, so the piece stops
-            # here rather than write the story a second time.
+            # The story got a draft while research ran. One story, one piece of writing,
+            # so the piece stops here rather than write the story a second time.
             S.update_piece(ctx.conn, piece.id, **updates)
             return _fail(
                 ctx,

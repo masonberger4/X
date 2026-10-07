@@ -1,6 +1,6 @@
 """X mentions and hashtags: the accounts a post must @-mention and the names it must #-tag.
 
-The rule (HARD RULES 11 in draft/prompt.py, mirrored here in code): a post that names an
+The rule (from the retired drafter's hard rule 11): a post that names an
 account we know the X handle of (the journal or society that published the source, the
 company whose release it is, a regulator) writes it as @handle, and a formal drug name
 (#Trastuzumab Deruxtecan, #cilta-cel) is written as a hashtag. A trial is tagged by its

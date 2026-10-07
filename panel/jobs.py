@@ -1,8 +1,8 @@
 """Run orchestrator steps from the web UI, each run in a background thread of its own.
 
 Runs go side by side: every step takes its own lock (`ops.lock.step_lock_path` with the
-step's lock name, `lock:` in ops/config.yaml) while it runs, so a draft run and a verify
-run, here or in another desktop window or from cron, run at once, while the same step
+step's lock name, `lock:` in ops/config.yaml) while it runs, so a studio session and an
+ingest run, here or in another desktop window or from cron, run at once, while the same step
 never runs twice. Starting a run whose step is already running in this window is refused
 up front; a step another window or cron is running is skipped as `locked` when its turn
 comes. "Publish now" takes the publish step's lock, so one publish at a time. A run holds
@@ -11,7 +11,7 @@ be started again by hand while that run drafts.
 
 Automatic runs (`start(..., auto=True)`, started by `panel/autorun.py` at the times in
 ops/config.yaml) may launch only the scripts in `ops.autorun.AUTO_SCRIPTS` (ingest, score,
-draft, verify, feedback, evolve; never the publisher, run_ops.py or pipeline_cli.py) and run
+studio, feedback; never the publisher, run_ops.py or pipeline_cli.py) and run
 with posting switched off in their environment, so even a publisher reached some other way
 would only rehearse. Their run_id carries `ops.store.AUTO_RUN_MARK`, and like cron's run
 they record a health report and may send an alert when they finish.

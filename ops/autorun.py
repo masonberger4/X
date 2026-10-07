@@ -31,10 +31,7 @@ AUTO_SCRIPTS = frozenset(
     {
         "run_ingest.py",
         "run_score.py",
-        "run_draft.py",
-        "run_verify.py",
         "run_feedback.py",
-        "run_evolve.py",
         "run_studio.py",
     }
 )
@@ -134,7 +131,7 @@ def ineligible(step: Any) -> str | None:
     if getattr(step, "manual", False):
         return "it is a manual step (a button on its page)"
     if len(argv) < 2 or argv[0] != "python" or argv[1] not in AUTO_SCRIPTS:
-        return "only ingest, score, draft, verify, feedback, evolve and studio run automatically"
+        return "only ingest, score, feedback and studio run automatically"
     return None
 
 

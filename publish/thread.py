@@ -2,7 +2,7 @@
 
 The only text change allowed here is appending " (n/N)" to a post, and only when it still
 fits; the opening post is left as approved unless `thread_numbering: all` asks otherwise,
-since rule 12 (draft/hook.py) keeps a position marker off it. Anything else (trimming,
+since an opening post carries no position marker. Anything else (trimming,
 rewording) belongs in the approval queue.
 """
 

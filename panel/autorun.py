@@ -6,9 +6,9 @@ automatic run of `auto_run_steps`. Which steps may run, and how times are read, 
 `ops/autorun.py`; this module only keeps the clock and the bookkeeping.
 
 Posting stays manual only. The steps go through `JobManager.start(..., auto=True)`, which
-refuses any step that is not one of ingest, score, draft, verify, feedback, evolve or
-studio (by the script it runs, not by its name), and any manual step, and runs the rest
-with posting switched off in their environment. This module never touches "Publish now".
+refuses any step that is not one of ingest, score, feedback or studio (by the script it
+runs, not by its name), and any manual step, and runs the rest with posting switched off
+in their environment. This module never touches "Publish now".
 
 When a run time fires:
 - Only times that pass while this runner is on and leading count. The watermark `last`

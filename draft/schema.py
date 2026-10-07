@@ -35,7 +35,7 @@ ANCHOR_WORDS = ("first", "last", "middle")
 MAX_VISUALS = 2
 DEFAULT_LONG_MAX_CHARS = 4000
 
-# No post carries a link of any kind (draft/hook.py), so a single or long post is exactly
+# No post carries a link of any kind, so a single or long post is exactly
 # what its name says: one post, with the source named in words rather than linked.
 SINGLE_SHAPE_POSTS = 1
 

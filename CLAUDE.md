@@ -4,7 +4,7 @@ Project guidance for Claude Code. Read PLAN.md before making changes.
 
 ## What this is
 A human-in-the-loop pipeline that ingests immuno-oncology news, scores it with
-Claude, and drafts X posts for human approval. Every model call runs the Claude
+Claude, and writes X posts (the studio) for human approval. Every model call runs the Claude
 Code CLI (`claude -p`) logged in with the operator's account (`claude login`);
 there is no Anthropic API path and no API key. The account is the
 business and investing side of immuno-oncology biotech (CAR-T and cell therapy,
@@ -12,24 +12,23 @@ T-cell engagers and bispecifics, adjacent IO science): trial results and what
 they mean, upcoming catalysts for public companies, M&A and financing. The AI
 writes as a PhD-level immuno-oncology analyst at a hedge fund. Python 3.11+,
 SQLite.
-All seven build steps are implemented: 1 ingest + dedup + prefilter + score +
-digest, 2 draft + human approval queue, 3 publish to X, 4 feedback loop,
-5 operations (orchestrator, health, alerts, backups), 6 conference abstracts +
-KOL X list + HTTP retry, 7 voice learning loop, 8 control panel (one web app over
-the whole workflow), 9 swarm drafting (phase one: many cheap cells + layers + jury
-against the single strong drafter; phase two: X fitness, round-robin seed genomes and
-pruning via `run_evolve.py`; phase three: breeding of writer genomes by one strong call
-and of designer genomes, the picture's starting `Style`, by a random knob step, and the
-panel's `/swarm` page; phase four: the format itself, thread or single or long post and how
-many pictures on which posts, is a third bred population), 10 the studio (one long Claude
-Code session per post on Opus 5.5 at max effort: research, fact base, long post, cards,
-its own cold fact-check; the app checks it and queues it; `run_studio.py`, `/studio`). The
+Built steps: 1 ingest + dedup + prefilter + score + digest, 2 the human approval queue,
+3 publish to X, 4 feedback loop, 5 operations (orchestrator, health, alerts, backups),
+6 conference abstracts + KOL X list + HTTP retry, 8 control panel (one web app over the
+whole workflow), 10 the studio (one long Claude Code session per post on Opus 5.5 at max
+effort: research, fact base, long post, cards, its own cold fact-check; the app checks it
+and queues it; `run_studio.py`, `/studio`). The studio is the only writer: step 2's single
+drafter (`run_draft.py`), step 2b's claim checker (`run_verify.py`), step 7's voice
+learning loop and step 9's swarm (`swarm/`, `run_evolve.py`, the A/B pick pages, `/swarm`)
+were retired and their code removed. Their old tables (`draft_examples`, `image_grades`,
+`swarm_*`, `claim_checks`, `table_checks`) are left alone in an existing database, never
+read or written. The
 kickoff prompt that built
 each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 `PUBLISH_ENABLED=1` **and** `--live`, and posting is **manual only**: a human presses
 "Publish now" on the approved page or runs `run_publish.py --live` by hand. Nothing posts on
 a timer (the panel has no automatic publisher, its automatic runs start only ingest, score,
-draft, verify, feedback and evolve, and `run_ops.py run` refuses any configured step
+the studio's steps and feedback, and `run_ops.py run` refuses any configured step
 carrying `--live`).
 
 ## Commands
@@ -42,8 +41,6 @@ carrying `--live`).
   a required explanation that starts with a reason category from
   `score/editorial.py`; stored in `ratings` as 5/1, and the model rater answers the
   same question as `rater='auto:<model>'`; human decisions stay the ground truth),
-  `python run_draft.py` (`--no-swarm` for the single drafter only), `python run_verify.py`
-  (claim checks with web search),
   `python run_queue.py` (approval UI on localhost:8000),
   `python run_app.py` (control panel: dashboard, sources, runs and the queue, same port;
   the run buttons sit on the pages they affect and "Publish now" lives on the approved page),
@@ -54,13 +51,6 @@ carrying `--live`).
   only ever run by a human, never by cron or the ops step; `--draft ID` targets one
   approved draft),
   `python run_feedback.py snapshot|report|followers`,
-  `python run_evolve.py [score|prune|breed|report] [--dry-run] [--force]` (step 9: swarm
-  fitness from X and pruning, no network; `breed` makes the one strong-model call per
-  writer child),
-  `python run_scrub_notes.py [--status STATUS] [--dry-run] [-v]` (operator command: blanks
-  picture captions written to the operator in queued drafts and redraws them),
-  `python run_unlink.py [--status STATUS] [--dry-run] [-v]` (operator command: strips the
-  source URL out of a queued draft's posts, since no post carries a link),
   `python run_studio.py [--now|--resume-only|--topic T|--story ID] [--angle KEY]
   [--checkpoint|--no-checkpoint] [--list] [--dry-run]` (step 10: the studio's automatic run,
   or one piece now; see `studio/config.yaml`), `python run_studio.py --scan|--scan-now
@@ -68,8 +58,7 @@ carrying `--live`).
   `python run_studio.py --learn|--learn-now [--dry-run]` (step 10's learning loop: score
   the posted pieces against X, rewrite the playbook when due or now),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
-  `ops/config.yaml` and `deploy/`), `python run_logos.py [--only KEY] [--force] [--dry-run]`
-  (operator command: each configured company's own site icon into `assets/logos/`)
+  `ops/config.yaml` and `deploy/`)
 
 ## Rules
 - **Config drives everything.** Feeds, queries, company list, keywords,
@@ -82,21 +71,19 @@ carrying `--live`).
   `user_agent` (`Source.user_agent()` falls back to `http.user_agent`); the ClinicalTrials.gov
   source must keep a `python-httpx/` token in it, since that host's firewall rejects a
   Python client claiming to be a browser.
-- **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`, `get_bytes`;
+- **Network I/O is confined** to `ingest/http.py` (`get_text`, `get_json`;
   the only caller of `httpx.get` is its private `_request`, which retries
   429/5xx/transport errors and never logs headers),
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
-  (Claude), `draft/drafter.py:call_anthropic` (an older name: it runs the CLI),
-  `score/rater.py:call_model`
+  (Claude), `score/rater.py:call_model`
   (the `digest.py --auto-rate` second-opinion rater, and the call behind
-  `filter/link.py` story linking), `draft/grader.py:call_grader` (the image
-  grader: the CLI with `tools=["Read"]` opens the PNG), `studio/scan.py:call_scanner`
+  `filter/link.py` story linking), `studio/scan.py:call_scanner`
   (the radar's daily scan: the CLI with `tools=["WebSearch","WebFetch"]`, its own time
   limit), `studio/playbook.py:call_rewriter` (the studio's learning loop: one playbook
   rewrite, no tools, its own time limit), `claude_cli.run_claude` (the only place that
   spawns the Claude Code CLI and the
-  app's only way to reach Claude: every Claude call site above, and step 2b's
-  `verify/verifier.py:call_model`, routes through it; there is no Anthropic API
+  app's only way to reach Claude beside `claude_cli.run_session`, the studio's sessions:
+  every Claude call site above routes through it; there is no Anthropic API
   path, no `anthropic` SDK and no API key, and `claude_cli.cli_env` drops
   `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` from the child's environment so the
   CLI always runs on its own login, drops `CLAUDE_AUTO_BACKGROUND_TASKS` and sets
@@ -156,10 +143,9 @@ carrying `--live`).
   `fmt_datetime` -> "2026-06-01 08:30 PDT", `fmt_date`, `install_jinja_filters` ->
   the Jinja filters `|localtime` / `|localdate`) and the only reader of the root
   `config.yaml` key `timezone:` (`America/Los_Angeles`). Converted: the panel's
-  dashboard/publishing/feedback pages, the queue's draft detail and voice pages,
+  dashboard/publishing/feedback pages, the queue's draft detail page,
   `panel/feed.py`, `digest.py`, `run_ops.py status`, `ops/health.py`'s report heading,
-  `ops/alert.py`'s alert body, `feedback/report.py`'s heading, `draft/voice_report.py`'s
-  window line and edit headings. Still UTC on purpose, as sort/parse keys: backup
+  `ops/alert.py`'s alert body, `feedback/report.py`'s heading. Still UTC on purpose, as sort/parse keys: backup
   filenames `backups/pipeline-<UTC stamp>.sqlite`, the `run_id` stamps and
   `feedback/store.py:day_of`'s `captured_on` bucket; relative ages are zone-independent.
   `publish/config.yaml` and `feedback/config.yaml` keep their own `timezone:` because
@@ -181,9 +167,7 @@ carrying `--live`).
   phrase, a per-share figure in dollars or a listing's currency next to target, PT, PO or
   fair value, a fact base's rating shorthand; links are blanked first, and "targets PD-1",
   the median target lesion, a $5B target market, a revenue or EPS target, a takeover
-  target's deal price and a CVR's fair value are not): a drafter thread cites none
-  (`target_problems`, from `check_hard_rules` per post and on its chart and table text,
-  column headers included, and from `swarm/cells.py:cell_problems`), and a studio piece
+  target's deal price and a CVR's fair value are not): a studio piece
   lists each in piece.json's `price_targets` (`qa.TARGET_FIELDS`: firm, target,
   `previous`, date, `rests_on`, the `catalyst`s the post says to watch, `in_model`
   yes/no/partly/unknown, `effect` unless yes, the firm's published `cases`, `post_says`,
@@ -193,138 +177,54 @@ carrying `--live`).
   `qa.card_table_targets`) that no entry lists as its target, previous or
   case), while `studio/safety.py:advice_problems` blocks a target, fair value, value per
   share or computed change of the account's own (`_OWN_TARGET`, per-share figures only)
-  in a post, on a card or in its alt text. Preprints are labelled as
-  preprints. `draft/drafter.py:check_hard_rules` enforces all of this in code
-  after generation (plus 280 chars/post with URLs as 23, the link ban,
-  and verbatim-number verification); drafts that fail are stored as `failed`.
-  Market context in dollars is the one exception to verbatim numbers (rule 4,
-  `drafter.money_numbers`): a `$` figure or an amount in millions/billions may come from the
-  model's knowledge, is listed in `claims_to_verify` and checked by step 2b; swarm cells let
-  it through and `flag_unverified_numbers` skips a number an existing claim already carries.
-- **Mentions and hashtags are a hard rule** (rule 11 in `draft/prompt.py:hard_rules`,
-  mirrored by `draft/tags.py:tag_problems`, called from `check_hard_rules` per post and
-  from `swarm/cells.py:cell_problems` per cell): an account whose X handle the story is
-  given (`config.yaml`: `x:` on a `companies.feeds` / `branding.companies` entry, and the
+  in a post, on a card or in its alt text. Preprints are labelled as preprints.
+- **Mentions use known handles only.** `draft/tags.py:load_handles` reads the X handles
+  `config.yaml` gives (`x:` on a `companies.feeds` / `branding.companies` entry, and the
   `mentions:` list of journals, societies and regulators with `domains:` and
-  `match_names:`) must be written as @handle when a post names it, and a formal drug name
-  (INN stem regex, `-cel` short names) or ClinicalTrials.gov number (`NCT` + 8 digits,
-  `tags.nct_ids`) must be a hashtag, while a trial's name (KEYNOTE-189) stays plain text; a configured company name (`tags.company_names`, `drafter.known_company_names`)
-  is never a drug, so Genmab is not `#Genmab`. Handles are never guessed: `drafter.story_handles` (`tags.load_handles` +
-  `relevant_handles`: named in the source text, owning the URL host, or the
-  `company_<key>` source) is the only list the model sees (`X HANDLES` in the user prompt,
-  `Brief.handles` for the swarm) and the only one enforced. `numbers_in` ignores
-  `@`/`#` tokens so an NCT number's digits are not a number to verify. Publish's re-check
-  and human-approved texts are untouched.
-- **No post carries a link** (`draft/hook.py:link_problems`, pure; rule 2 in
-  `draft/prompt.py:hard_rules`, enforced per post from `check_hard_rules` and per cell from
-  `swarm/cells.py:cell_problems`). Not the source URL, not a registry link, not a bare
+  `match_names:`); `studio/runner.py:app_handles` hands them to the studio's research and
+  write prompts, and they are the set `runner.known_handles` lets `studio/qa.py` accept without a
+  verifying page. Handles are never guessed. `tags.py` also keeps `tag_problems`,
+  `nct_ids`, `drug_names` and `company_names` (a configured company name is never a drug,
+  so Genmab is not `#Genmab`), which no pipeline code calls since the drafter was retired.
+- **No post carries a link.** Not the source URL, not a registry link, not a bare
   domain: X shows a post with an outbound link to fewer non-followers and posting a URL is
   billed as an extra request through the X API, so the source is named in words (the
-  journal, the company, the meeting) with its @handle where rule 11 gives one. Nothing has
+  journal, the company, the meeting) with its @handle where one is known.
+  `studio/safety.py` blocks a link or a bare domain in a post or on a card. Nothing has
   to carry a URL, so `draft/schema.py:Format` normalises every non-thread shape to exactly
-  one post (`SINGLE_SHAPE_POSTS`), `publish/thread.py:split_thread` neither requires a URL
-  nor numbers that one post, and the prompts hand the model the primary source URL for
-  reference only. `run_unlink.py` is the one-off operator pass over queued drafts written
-  before the rule (`hook.strip_links`, pure: the link and the lead-in that introduced it
-  come out, a post that was only a link is dropped; `store.edit` with the status unchanged,
-  no model call; studio drafts are skipped), as `run_scrub_notes.py` is for captions. Both
-  leave alone what `approval_queue/publishing.py:block_reason` says step 3 holds (live on X,
-  posted, partial or claimed). Publish's re-check and human-approved texts are untouched.
-- **Posts talk like a human** (`draft/style.py:style_problems`, pure; rule 13 in
-  `draft/prompt.py:hard_rules`, enforced per post from `check_hard_rules` and per cell from
-  `swarm/cells.py:cell_problems`). No colon (one between digits, 8:30 or 2:1, is fine) and
-  no dash: em dash, en dash, `--` or a spaced ` - `. Publish's re-check and human-approved
-  texts are untouched.
-- **The first post is the hook** (`draft/hook.py:hook_problems`, pure; rule 12 in
-  `draft/prompt.py:hook_rule`, enforced from `check_hard_rules` on `thread[0]` and from
-  `swarm/cells.py:cell_problems` on a hook cell). It carries no thread position marker
-  ("1/6"), no "thread" and no emoji, and it stays within `HOOK_MAX_CHARS`: X ranks a thread
-  on its opening post, and an unanswerable summary there costs the rest of the thread its
-  readers. A single or long post is its own opener and only the hook's length cap is lifted
-  there (the format's `max_chars` applies).
+  one post (`SINGLE_SHAPE_POSTS`) and `publish/thread.py:split_thread` neither requires a
+  URL nor numbers that one post.
 - **KPIs are weighted, not counted.** `feedback/models.py:CONVERSATION_WEIGHTS` defines the
   derived `conversation` KPI (reply/quote x3, bookmark/repost x2, like x1, impression x0.05) beside the six
-  stored counts; `Metrics.get` and `swarm/store.py:_metrics` both serve it, and it is the
-  shipped `kpi:` in `feedback/config.yaml` and `evolve.kpi` in `swarm/config.yaml`, so the
-  report and the swarm's selection point at conversation rather than at reach. `swarm/`
-  imports `feedback.models` for those weights only (pure dataclasses, no DB, no network).
-- **The shape of a draft is a gene, not a constant** (step 9 phase four). `Draft.thread`
-  is always the list of posts; `draft/schema.py:Format` (shape `thread` | `single` |
-  `long`, `min_posts`/`max_posts`, `visuals` 0-2, one anchor word per visual, `max_chars`)
-  says what `validate_output(data, fmt)` and `check_hard_rules(..., fmt)` require, and
-  with `fmt=None` they require the phase-one physics: a 3-6 post thread with exactly one
-  of `chart`/`table`. A single post is a one-element thread of 280 chars; a long post is
-  one element of up to `formats.long_max_chars` (`swarm/config.yaml`, a Premium long-form
-  post) written as sections. The first visual may be a chart or a table; a further one
-  (`visuals` in the output, `Draft.extra_visuals`) must be a chart. `Draft.shape`,
-  `anchors` (1-based post per visual), `max_chars` and `wanted_visuals` are stored in
-  `drafts.format_json` (guarded migration; `drafter.format_of` rebuilds the Format for a
-  revision) and every rendered picture in `drafts.images_json` (`store.set_image(...,
-  index=k)`, `image_file(id, k)`; `image_path`/`image_alt` stay the first picture).
-- **Draft images** (`draft/chart.py`): the drafter's `chart` is a chart
-  SPEC (title, labels, values, unit, note), never a picture; `Chart.kind` is `bars` (the
-  original), `grouped` (arms in `series` across endpoint labels) or `stat` (1-4 headline tiles
-  with per-tile `units`), and a plain bar chart's JSON keeps its five keys.
-  `chart.flat_chart_problems` sends back a bar chart whose bars are all equal, and
-  `branding.story_logo` (source site via `Brand.domains`, else the title) is the
-  `header_logo` drawn top right on every card; `suggested_visual` stays a
-  text hint for the reviewer. `drafter.verify_chart` checks every number in it verbatim
-  against the source and `drafter.chart_problems` turns one miss into a retry reason
-  (never a silent drop; a draft that never gets it right is stored `failed`).
-  `run_draft.py` and the queue's revise route render the chart through `approval_queue/images.py:attach_chart` (matplotlib,
-  the `images` extra, imported inside `render_chart`; fail-soft: no image, never no
-  draft) to `<db folder>/images/draft_<id>.png` (`store.image_dir()`); `drafts.chart_json`
-  and `drafts.image_path` are guarded migrations. `images.enabled` in `draft/config.yaml`
-  turns rendering off. **A note is a caption, not an aside**: a chart's or table's `note` is
-  printed under the picture, so `chart.py:note_problems` (called from `check_hard_rules` for
-  both) fails a draft whose note addresses the operator ("verify each cell before posting",
-  "TODO") and the attempt is retried. `run_scrub_notes.py` is the one-off pass over
-  queued drafts made before that rule: `store.clear_visual_notes` blanks the caption (an
-  `edit` decision, text unchanged) and the picture is drawn again. **Colour is a knob, not a constant**: `draft/chart.py:PALETTES` holds
-  the named palettes and `Style.palette` / `Style.multi_colour` pick one, so the designer
-  genome and the image grader (`draft/grader.py`, whose knob list and checklist name them;
-  `distinctiveness` replaced the old house-style row) both vary it; `Style.apply` ignores an
-  unknown palette. Company bars in a chart are branded like table cells
-  (`branding.brand_chart` from `images.attach_chart`: ticker in the label, logo in the
-  gutter, `render_chart(logos=)`); `brand_table` also tries the row-label column. The queue serves it at `/drafts/{id}/image` and `store.drop_image`
-  is the only way a human removes it (every picture at once). Step 3 attaches each picture
-  to the post it is anchored to, the first post before phase four (`publish/store.py`
-  reads `format_json`/`images_json` into `Approved.shape`, `max_chars`, `images`;
+  stored counts; `Metrics.get` serves it, and it is the shipped `kpi:` in
+  `feedback/config.yaml`, so the report points at conversation rather than at reach.
+- **A draft's shape and pictures.** `Draft.thread` is always the list of posts;
+  `draft/schema.py:Format` (shape `thread` | `single` | `long`, `min_posts`/`max_posts`,
+  `visuals` 0-2, one anchor word per visual, `max_chars`) is what a draft carries: a studio
+  piece is shape `long` at the studio's `x.long_post_max`. `Draft.shape`, `anchors`
+  (1-based post per visual) and `max_chars` are stored in `drafts.format_json` (guarded
+  migration) and every picture in `drafts.images_json` (`store.set_image(..., index=k)`,
+  `image_file(id, k)` under `store.image_dir()`, `<db folder>/images/`;
+  `image_path`/`image_alt` stay the first picture). `draft/chart.py` keeps only the chart
+  and table SPEC types (`Chart` with `kind` `bars` | `grouped` | `stat`, `Table`), their
+  validation, the JSON round trip (`visual_from_json`) and `alt_text`; it draws nothing
+  (the matplotlib renderer, the image grader and the `images` extra were removed). The
+  queue serves a picture at `/drafts/{id}/image`, and `store.drop_image` (every picture)
+  or `POST /drafts/{id}/image/{index}/drop` (one) is the only way a human removes one.
+  Step 3 attaches each picture to the post it is anchored to (`publish/store.py` reads
+  `format_json`/`images_json` into `Approved.shape`, `max_chars`, `images`;
   `run_publish.images_for` / `publish_one(images=)`; `publish/thread.py` checks each post
   against the draft's `max_chars`; `publish/client.py:upload_media`, v2 media/upload +
   media/metadata, then POST /2/tweets with `media_ids`); `media.attach_images` in
   `publish/config.yaml` turns that off, an upload failure before post 1 posts nothing and
   marks the draft `failed`, a later one leaves a partial thread.
-- **Draft tables** (`draft/chart.py:Table`, the alternative to a chart; `Draft.visual` is
-  whichever is set, both stored in `chart_json` with `kind: table` for a table): cells may
-  go beyond the source, so `attach_chart` never renders one. `run_verify.py`'s table pass
-  (`verify/tables.py`, pure) marks cells verbatim in the article as supported
-  (`model='source'`), sends every other cell to `verify_claim` as
-  `"<row label>, <column>: <cell>"`, stores verdicts in `table_checks` (verify's second
-  table), and once every cell has one either renders through
-  `approval_queue/images.py:attach_table` with unsupported cells blanked, or drops the
-  table via `store.drop_table` (an `edit` decision carrying the reason) on a contradicted
-  cell, too few supported cells (`tables.min_supported_ratio`), fewer than two verified row
-  labels, or more than `tables.max_cells_per_draft` cells. This is the one place step 2b
-  changes a draft row, and it never touches the text. The queue's approve route drops a
-  table whose picture was not rendered yet; revise calls
-  `verify/store.py:carry_over_table_checks` (same row label, column and cell text keeps
-  its verdict). `check_hard_rules` scans table cells for advice phrases.
-- Step 2 reads step 1's tables only through
-  `approval_queue/store.py:fetch_candidates` (one candidate per cluster: score at or
-  above the bar within `--since-hours`, plus every story whose latest human feed rating is
-  yes whatever its score or age, those first). **One story, one piece of writing**:
-  `run_draft.py` skips a story the studio holds (`store.studio_held_clusters`, read-only
-  on `studio_pieces` / `studio_topics`, empty when they are missing: a piece not
-  discarded at any stage, or an unclaimed queued topic, a merged story followed through
-  its `story_item`, and every story offered to a piece still researching on no story,
-  `store.studio_researching_offers` over its `offered_stories`), looked at again before
-  each story, and does not store a draft whose story a piece's research named meanwhile
-  (`offered=False`); the studio's shortlist skips a story with a draft that did not
-  fail (`store.drafted_cluster_ids`, followed through the draft's item), and research
-  fails a piece whose named story got such a draft while it ran; the dashboard's
-  feed-yes count (`ops/store.py:fetch_feed_yes_undrafted`) leaves the studio's out. Its own
-  tables are `drafts`, `decisions`, `draft_examples` and `image_grades`; edits log original vs edited text.
+- Step 2 is the approval queue (`approval_queue/`); the studio is what fills it.
+  **One story, one piece of writing**: the studio's shortlist skips a story with a draft
+  that did not fail (`store.drafted_cluster_ids`, followed through the draft's item), and
+  research fails a piece whose named story got such a draft while it ran.
+  Its own tables are `drafts` and `decisions`; edits log original vs edited text
+  (`store.parse_decision_text` reads a decision's text back). A leftover `choosing` draft
+  from the retired A/B pick is migrated to `pending` by `store.connect`.
   An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
   decision carrying the text and the optional note) puts an approved draft back to
   `pending`. `POST /drafts/{id}/release` is the other half: a draft whose publish attempt
@@ -349,66 +249,11 @@ carrying `--live`).
   itself on re-approval. There is no snooze: a draft left `snoozed` in an older database
   is migrated to `pending` by `store.connect`, and `drafts.snoozed_until` stays in the
   schema as a dead column so old databases need no rebuild.
-  A human asks for changes in words, not by retyping: `POST /drafts/{id}/revise`
-  calls `draft/drafter.py:revise_item` (same `call_anthropic`, same schema check and
-  `check_hard_rules` loop as `draft_item`; the user prompt is
-  `draft/prompt.py:build_revision_user_prompt`) with the current draft, the
-  instructions and every step 2b check that is contradicted or unverified. The result
-  replaces the whole draft via `store.revise` (status unchanged, a `revise` decision
-  holds the before/after, `note` is the instruction), then the route calls
-  `verify/store.py:carry_over_checks`: a `supported` verdict whose claim text is unchanged
-  (up to case, spacing, trailing full stop) is re-indexed and kept, every other
-  `claim_checks` row is dropped. On any failure the draft is untouched. `revise` decisions are never
-  few-shot examples (the AFTER text is not human-written); publish honours the latest
-  `edit` or `revise` text.
-- Step 7 (voice learning) turns recent `decisions` into few-shot examples via
-  `draft/examples.py` and builds the block once per `run_draft.py` run. Examples
-  never override the hard rules: an edited text that fails `check_hard_rules` is
-  never selected, the block sits before `HARD_RULES` in the system prompt, and
-  every output is still checked in code. `draft/voice_report.py` only PROPOSES
-  `voice.md` changes; a human edits `draft/voice.md` by hand. Settings live in
-  `draft/config.yaml`; `decisions.category` is added by a guarded migration in
-  `approval_queue/store.py:connect`; `draft_examples` records what each draft
-  was shown. Step 7 reads `items` only through `fetch_decisions_for_voice` /
-  `fetch_draft_stats` (source and url); both leave studio drafts (`studio:%` item ids)
-  out, so the drafter learns from its own drafts only.
-- Step 2b (`verify/`) checks `claims_to_verify` against the web. Its only
-  network call is `verify/verifier.py:call_model` (the CLI with
-  `tools=["WebSearch","WebFetch"]` under `verify/config.yaml`'s own `timeout_seconds`;
-  the image grader's `["Read"]` and the radar scan's own web tools are the only other
-  `tools` lists passed to `claude_cli.run_claude`). It owns
-  `claim_checks`, reads drafts only through `approval_queue.store`, never edits a
-  draft's text itself, and a verdict is `trusted` only for hosts in `verify/config.yaml` or
-  a company's own site (`verifier.trusted_hosts`: each `companies.feeds` URL host and
-  `domain:`, plus every `branding.companies` `domain:`). `run_verify._decide` re-derives
-  trust from each stored verdict's source URL against the current host list, so adding a
-  company to config makes its checked cells count without a new web call. The render/drop
-  step itself lives in `verify/render.py:finalize_table` (the one module in `verify/` that
-  writes the picture), shared with the queue's **trust button**: `POST /drafts/{id}/trust`
-  beside an "(untrusted source)" verdict calls `verify/settings.py:add_trusted_domain` (a
-  line edit of `trusted_domains` in `verify/config.yaml`, comments kept; the one key the
-  queue writes in any settings file), `verify/store.py:mark_host_trusted` (flips `trusted`
-  on stored verdicts from that host, verdicts untouched) and, for a pending draft with a
-  table, `finalize_table`; no web call, no text change. The one exception is the **verify-revise loop**
-  (`verify/autorevise.py`, `run_verify.py --auto-revise` or `auto_revise.enabled` in
-  `verify/config.yaml`, on in the shipped config; `--no-auto-revise` skips a run): after
-  the claim pass, a draft with a
-  contradicted or unverified claim is revised through the queue's own path
-  (`drafter.revise_item` with `claim_problems` and no instructions, `store.revise` with
-  note `autorevise.AUTO_NOTE`, `carry_over_checks`), its new claims are checked, and the
-  round repeats until every claim is supported or `max_rounds` (per run) /
-  `max_rounds_per_draft` (per draft, counted from `revise` decisions with that note;
-  0, the shipped value, means no lifetime cap) is
-  hit. A revision whose claim set and table rows are unchanged is discarded; a draft with
-  an unchecked claim is never revised. A table's contradicted cells join the round as
-  `cell_problems` (`autorevise.cell_problems`, claims worded by `tables.cell_claim`, a
-  "TABLE CELL FAILURES" section in `build_revision_user_prompt`), so `run_verify.py` runs
-  the table pass before the loop and `verify_table` again after each round; blanked cells
-  never do. A contradicted cell no longer drops a table: `tables.decide` returns `BLOCKED`,
-  `finalize_table` keeps the table and its verdicts without a picture, and the queue's
-  approve route drops it then with the count in the note. `claim_problems` and
-  `cell_problems` live there and the queue app imports them. The queue blocks approve (409) on a contradicted claim
-  unless `override=1`.
+  The queue changes a draft only by hand: approve, edit (`POST /drafts/{id}/edit`, a long
+  draft held to its own `max_chars`), reject, reopen, release and the picture drops. A
+  change in words goes to the studio: a studio piece is revised from its `/studio` page
+  (`store.revise`, a `revise` decision holding the before/after); publish honours the
+  latest `edit` or `revise` text.
 - Step 3 reads step 2's tables only through `publish/store.py:fetch_approved`
   (edited_text from `decisions` wins over `thread_json`; it also resolves the draft's
   image path and alt text). Its own tables are
@@ -417,7 +262,7 @@ carrying `--live`).
   manual only (see the top of this file) and idempotent via the claim; partial threads
   are never retried automatically. `publish/thread.py` appends " (n/N)" to a thread's
   replies only under the shipped `thread_numbering: replies` in `publish/config.yaml`,
-  keeping the opening post marker-free as rule 12 asks (`all` numbers it too, `none`
+  keeping the opening post marker-free (`all` numbers it too, `none`
   numbers nothing; `scheduler.numbering_mode` normalises the value).
   The queue touches those two tables only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
@@ -433,8 +278,8 @@ carrying `--live`).
   PROPOSE rubric/prefilter/slot changes; a human applies them and bumps
   `PROMPT_VERSION`. Analysis and suggestions are pure (no DB, no network). Studio posts
   are the report group `studio` (`fetch_post_context`); the feed (`sources[...]`) and
-  voice-guide proposals compare the drafter's posts only (`suggest.NOT_A_FEED`,
-  `_drafter_rows`).
+  voice-guide proposals compare the retired drafter's posts only (`suggest.NOT_A_FEED`,
+  `_drafter_rows`; the voice-guide ones still name `draft/voice.md`, removed with it).
 - Step 5 (`ops/`) never imports another step's modules: `run_ops.py run`
   executes the other CLIs as subprocesses (order, timeouts, enabled/required in
   `ops/config.yaml`, which must never contain `--live`; a test asserts it) under
@@ -458,7 +303,7 @@ carrying `--live`).
   apart round the clock, YAML's base-60 ints read back), `slots_between` / `next_slot`
   (wall-clock times in a zone that is a parameter), `settings_of` and `plan` /
   `ineligible`, the allowlist: a step may run automatically only as
-  `python <AUTO_SCRIPTS>` (ingest, score, studio, draft, verify, feedback, evolve) with nothing
+  `python <AUTO_SCRIPTS>` (ingest, score, studio, feedback) with nothing
   starting like the live flag (`posts_live`, which `run_ops.py` now uses too, so an
   abbreviated flag is refused; `run_publish.py` parses with `allow_abbrev=False`).
   `ops/config.py:save_auto_run` writes only `auto_run_enabled` / `auto_run_times` (top-level
@@ -493,7 +338,7 @@ carrying `--live`).
   `ops/runner.terminate_active()` kills the live step's process tree (own process group on
   POSIX, `taskkill /T` on Windows) and the remaining steps are skipped as `cancelled`; the
   runs page's Stop button and `run_desktop.py` closing both call it. Run buttons sit on the
-  pages they affect (feed: ingest + score; pending: draft, verify; each posts `step` and
+  pages they affect (feed: ingest + score; the studio pages: the studio steps; each posts `step` and
   `back` to `/runs`, and the log stays on the runs page; `approval_queue/templates/_run.html`
   renders them from the `current_run` / `publish_live` template globals the panel installs
   on both template envs, so the standalone queue shows none). The one argv the panel builds
@@ -537,104 +382,21 @@ carrying `--live`).
   The studio performance page's "add the post's link" (`panel/publishing.py:add_head_link`,
   wired into `studio/web.py` as its `add_link` hook) writes post 1's X id through step 3's
   own `publish/store.py:set_head_tweet`, only over a `manual-` marker. The
-  panel never writes `config.yaml`, `draft/voice.md` or a draft's text. The settings it
+  panel never writes `config.yaml` or a draft's text. The settings it
   edits itself are two keys of `publish/config.yaml` and two of `ops/config.yaml`
   (`auto_run_enabled`, `auto_run_times` through `ops/config.py:save_auto_run`, from
-  `POST /runs/auto`; the step list stays file-only), and the included queue routes add
-  `trusted_domains` in `verify/config.yaml`, above: `POST /publishing/caps` calls
+  `POST /runs/auto`; the step list stays file-only): `POST /publishing/caps` calls
   `publish/scheduler.py:save_caps` (`max_posts_per_day`, `min_gap_minutes`; line edits,
   comments kept). The dashboard's "Back up now" (`POST /backup`) calls `ops/backup.py:backup` into `backups.dir` with `backups.keep`, as `run_ops.py backup` does. It has no authentication: `run_app.py` binds localhost by default, and every POST must come from the app's own pages: `approval_queue/app.py:SameOriginOnly` (installed on the queue app and the panel's, so the queue's and the studio's routes too) answers 403 when `Origin`, or `Referer` without one, names another host than `Host` (or is `null`); a request with neither (tests, curl) passes. `/publishing` and
   `/feedback` are otherwise views: no post button, and a report's suggestions are rendered,
   never applied. The desktop build (`run_desktop.py`, `pipeline_cli.py`, `deploy/desktop.spec`)
   changes no step: `panel/frozen.py` decides the data dir (exe folder when frozen, else
   the repo root), the step interpreter (`pipeline-cli` when frozen) and the bundle
-  manifest (every `*/config.yaml`, `draft/voice.md`, both template dirs, each CLI script
+  manifest (every `*/config.yaml`, the studio's brief, angles, playbook seed, fonts and
+  reference pieces, the template dirs, each CLI script
   as a marker for `ops/runner.py:cli_missing`, which also looks in `sys._MEIPASS`).
   `pipeline_cli.py` dispatches only the names in `panel/frozen.py:CLIS`. pywebview and
   PyInstaller live in the `desktop` extra only.
-- **Step 9 (`swarm/`) writes a thread one post at a time from many cheap calls.**
-  `swarm/genome.py:Genome` (slots + rules + `fan_out`/`layers`, seeded from
-  `DEFAULT_GENOME` into `swarm_genomes`) is the heritable part; `swarm/prompts.py`
-  and `swarm/cells.py` are pure (a cell sees the brief, its slot's rule, the earlier
-  chosen cells and the per-post hard rules, never the whole thread);
-  `swarm/engine.py:run_swarm` does proposals, Mixture-of-Agents synthesis layers,
-  `cell_problems` drops, `dedupe`, a pairwise-judge `tournament` per slot and one
-  assembly through `draft/drafter.py:generate` (the public name of the draft_item
-  attempt loop: schema, `check_hard_rules`, `chart_problems`, retries), and
-  `compare` is the jury against the control draft (ties go to the control). With `jury: human`
-  (`swarm/config.yaml`, shipped) `compare` is skipped: `run_draft.store_for_pick` stores the
-  swarm's draft in status `store.STATUS_CHOOSING` with the control's in `drafts.choice_json`
-  (guarded migration; `store.set_choice`/`get_choice`, a coin flip for which is shown as A)
-  and quick chart previews (`store.preview_file`); the queue's `/choose` pages show both
-  blind and `approval_queue/choosing.py` (the queue's one door to `swarm/store.py`) resolves
-  the pick: `store.resolve_choice` makes the row `pending` with the picked text,
-  `swarm_store.record_human_pick` sets the run's winner, then the picture is drawn. Nothing
-  downstream reads `choosing` (verify, the pending list and publish ask for `pending`);
-  approve/edit/revise refuse it (409) and `ops/store.py` counts it as waiting. Every
-  call takes `call=` and defaults to `draft.drafter.call_anthropic`; no new network
-  module and no `claude-*` ID in code (`swarm/config.yaml` holds the cheap model).
-  `run_draft.py:draft_with_swarm` stores the winner through `store.insert_draft`
-  exactly as before, so verify, the queue, publish and feedback are unchanged;
-  `swarm/store.py` owns `swarm_runs` / `swarm_variants` / `swarm_genomes` /
-  `swarm_fitness`; its one read of another step's tables is `fetch_head_metrics`
-  (step 3 `posts` + step 4 `tweet_metrics`, read-only, empty when missing).
-  `run_draft.draw_genomes` picks each story's writer, designer and format by Thompson
-  sampling on their credited scores (`evolve.allocation: thompson`,
-  `swarm/store.py:thompson_next` over `fitness_scores`, pure `fitness.thompson_pick`;
-  `inherited_priors` gives a child its parent's posterior, the parent's own prior being
-  its parent's, halved every `evolve.dead_half_life` of the child's `dead_runs`, the runs
-  that can never be credited to it); a kind with no scored post, or
-  `allocation: round_robin`, rotates instead (`next_genome`, then `next_format` and
-  `next_designer(writer_id=, format_id=)`, counting runs since the newest live genome of
-  that kind was born so a child joins an even rotation; the seeds are
-  `swarm/genome.py:SEED_GENOMES`; `swarm_runs.designer_id`; `images.attach_chart(style=)`
-  is the Style the first render starts from, recorded on the draft by
-  `approval_queue/store.py:set_style` (`drafts.style_json`, guarded migration) so every
-  later render without a `style` (a revision, the verifier's table, a scrubbed caption)
-  starts from it too, and `swarm_store.mark_styled` records that a chart, first or extra,
-  was drawn in it). **A genome owns its topology**: `swarm/config.yaml` `fan_out`/`layers`
-  are only the fallback for a row without them. `swarm/fitness.py` is pure (relative
-  KPI `(value + evolve.smoothing) / (baseline + smoothing)` against the trailing median,
-  per-genome scores keyed by `genome_id`, `designer_id` or `format_id`, `bet_summary`,
-  `prune_confident` and the old median `prune`). **Fitness measures what a genome
-  did**: `fetch_head_metrics` reads each head on its first snapshot at least
-  `evolve.horizon_hours` old (younger posts are not scored and are nobody's baseline)
-  and, with `evolve.subtract_self_reply`, without the thread's own post-2 reply;
-  `run_evolve.credit` blanks `swarm_fitness.genome_id` when the control's text was posted
-  or the format was a single post (`fitness.writer_credited`) and `designer_id` unless the
-  chart was drawn in its Style (`swarm_runs.styled`, `designer_credited`), and `cmd_score`
-  drops rows for runs it did not score (`keep_fitness`), so the report, breeding, pruning,
-  allocation and the panel count a genome's own posts only. `evolve.prune_rule:
-  confidence` retires a genome only when its mean log relative is below the pooled
-  rest's with probability `1 - (1 - retire_confidence) / k` (a t test, per look; nothing
-  while no genome has two posts), at most `max_retire_per_run` per kind per run; when
-  that retires nobody, a genome with no credited post after `evolve.max_dead_runs` dead
-  runs is retired instead (`run_evolve._never_credited`). `median` is the old coin-flip
-  rule. `swarm/genome.py:asks_for_url` is the one URL check: `validate_child` applies it
-  to a child's changed slots, and `ensure_tables` rewrites a live closer that still asks
-  for the source URL (`store.closer_without_url`: the old seed rule becomes
-  `CLOSER_RULE`, a reworded one loses only the URL clause). `swarm/mutate.py` breeds: `breed_writer` is
-  the one strong-model call (through `call_anthropic`) and `validate_child` /
-  `diff_count` enforce exactly one change inside the bounds in `swarm/genome.py`;
-  `breed_designer` is pure code (one Style knob stepped, a flag flipped or the palette
-  swapped; `evolve.designer_population_size` is their population). `run_evolve.py` writes only
-  `swarm_fitness` and `swarm_genomes` and is the `evolve` step in `ops/config.yaml`.
-  `swarm_genomes.kind`, `swarm_runs.designer_id` and `swarm_fitness.designer_id` are
-  guarded migrations. The panel's `/swarm` page reads through
-  `ops/store.py:fetch_swarm_population` / `fetch_swarm_bet` (read-only, empty when
-  missing) and renders `panel/views.py:swarm_rows` / `bet_summary_row` (pure); it never
-  breeds or retires. **Phase four**: `swarm/genome.py:FormatGenome` (kind `format`,
-  `SEED_FORMATS`: thread with one picture, with two, with none, single post, long post) is
-  drafted round-robin (`next_format`, `swarm_runs.format_id`, `swarm_fitness.format_id`,
-  guarded); `run_draft.py` turns it into a `Format` with `formats.long_max_chars` and
-  hands the same one to the swarm and the control. The engine runs ONE cell
-  (`prompts.SINGLE_SLOT`) for a single post and the genome's slots as sections of
-  `formats.long_section_chars` for a long post (`cells.cell_problems(max_chars=,
-  needs_preprint=)`), and `assemble_prompt(..., fmt)` says the shape. Formats
-  are pruned with `evolve.format_min_posts` (a coarse gene needs more posts) and bred by
-  pure code (`mutate.breed_format`: one field stepped to a neighbour, named by
-  `format_name`); `evolve.format_population_size` is their population.
-  `tests/conftest.py` turns the swarm off for every test that does not opt in.
 - **Step 10 (`studio/`) is one long Claude Code session per post.** The app chooses the
   topic and the angles on offer, runs the session, checks what comes back and queues it; it
   never writes or rewrites the post. Every stage is `claude_cli.run_session` (the second
@@ -659,7 +421,7 @@ carrying `--live`).
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
   `story_id`, an int or digit string, sets the piece's cluster only when it is in
   `offered_stories`, the shortlist ids every research run of the piece was offered,
-  recorded before the session starts so the drafter holds off them, and has no draft
+  recorded before the session starts, and has no draft
   that did not fail), an
   optional checkpoint (`research_ready`, the editor's Continue), write (`posts/NN.txt`,
   `cards/card_N.html`, a cold fact-check by a fresh sub-agent logged in `factcheck.md`,
@@ -676,8 +438,7 @@ carrying `--live`).
   go back to the session up to `max_polish_rounds` and then ride along as warnings, and one
   review round always shows the session its PNGs), then `studio/ingest.py`: a pending draft
   with `item_id` `studio:<piece id>` (`approval_queue/store.py:studio_item_id`,
-  `DraftRow.studio_piece`), shape `long` at `x.long_post_max`, no claims (step 2b skips
-  it), every card copied to `image_file(id, k)` and anchored to its post, each
+  `DraftRow.studio_piece`), shape `long` at `x.long_post_max`, no claims, every card copied to `image_file(id, k)` and anchored to its post, each
   `recheck_before_posting` fact a `store.RECHECK_PREFIX` line of `why_it_matters`
   (`store.recheck_lines`, listed by the panel's copy-paste page through
   `Approved.why_it_matters`, plus one line naming the analyst targets the posts still
@@ -857,40 +618,20 @@ timeutil.py  display timezone: UTC storage -> one human-facing zone (root `timez
           fmt_datetime/fmt_date, Jinja |localtime / |localdate
 claude_cli.py  the only way to Claude: the Claude Code CLI in print mode (run_claude,
           build_argv, parse_envelope, cli_env)
-draft/    schema.py (Draft, Format, validate_output), hook.py (rule 2: the link ban;
-          rule 12: the opening post),
-          chart.py (chart + table specs, verification, PNG rendering, Style
-          knobs, 3D header, logos), grader.py (image grader: ImageGrade, CHECKLIST,
-          grade_image, call_grader), branding.py (tickers + logos for company cells),
-          logos.py (site icon discovery + PNG normalisation for run_logos.py), prompt.py,
-          voice.md, drafter.py, config.yaml, settings.py, tags.py (Handle, load_handles,
-          relevant_handles, trial_names, drug_names, tag_problems), targets.py
-          (price-target citations: target_mentions, target_figures, target_problems,
-          field_figure, SHARE_FIGURE),
-          examples.py (EditExample, select_edit_examples, format_examples_block),
-          voice_report.py (VoiceReport, build_report, render_markdown, CLI)
-approval_queue/  store.py (drafts, decisions, draft_examples, fetch_candidates,
-          fetch_decisions_for_voice, fetch_draft_stats, record_examples, image_dir,
-          set_image, drop_image, image_grades), images.py (attach_chart, attach_table,
-          render-grade loop), app.py (/voice,
+draft/    what the studio and the queue share, no model calls: schema.py (Draft, Format,
+          validate_output), chart.py (chart + table specs, validation, JSON round trip,
+          alt_text; no renderer), tags.py (Handle, load_handles, relevant_handles,
+          nct_ids, drug_names, tag_problems), targets.py (price-target citations:
+          target_mentions, target_figures, target_problems, field_figure, SHARE_FIGURE)
+approval_queue/  store.py (drafts, decisions, image_dir, set_image, drop_image,
+          studio_hold, drafted_cluster_ids, parse_decision_text),
+          publishing.py (the queue's door to step 3), app.py (/queue, /drafts/{id},
           /drafts/{id}/image), templates/
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
           ratings), jobs.py (JobManager, background step runs, "Publish now", automatic mode),
           autorun.py (AutoRunner: the timer for everything but publishing), frozen.py (data dir,
           step interpreter and bundle manifest for the desktop build),
-          app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback, /swarm), templates/
-swarm/    config.yaml, settings.py, genome.py (Slot, Genome, DEFAULT_GENOME), prompts.py
-          (Brief, cell/judge/assembly prompts, parse_winner), cells.py (cell_problems,
-          dedupe, tournament), engine.py (run_swarm, compare, SwarmFailed),
-          fitness.py (score, genome_scores, bet_summary, prune), mutate.py (Parent,
-          breed_writer, validate_child, breed_designer, breed_format, format_neighbours),
-          store.py (swarm_genomes with kind writer|designer|format, swarm_runs,
-          swarm_variants, swarm_fitness, next_genome, next_designer, next_format,
-          fetch_head_metrics, fetch_winning_threads)
-verify/   config.yaml, settings.py (add_trusted_domain), verifier.py (ClaimCheck,
-          verify_claim, call_model), store.py (claim_checks, table_checks,
-          mark_host_trusted), tables.py (cell claims, source-backed cells, the render/drop
-          decision), render.py (finalize_table: decide, then draw or drop)
+          app.py (dashboard, /sources, /feed, /runs, /publishing, /feedback), templates/
 publish/  config.yaml, scheduler.py, thread.py, store.py (schedule, posts,
           fetch_approved, is_live, forget = release_unclaimed + release_failed,
           release_claimed for a stale claim),
@@ -903,7 +644,6 @@ ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
           autorun.py (pure: run times, slot clock, the automatic-run allowlist),
           backup.py, store.py (pipeline_runs, health_checks, alerts_sent +
           read-only adapters)
-assets/   logos/<company key>.png (human-supplied company logos for table cells)
 deploy/   crontab.example, pipeline.service, pipeline.timer, pipeline-studio.service,
           pipeline-studio.timer, desktop.spec, README.md
 studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, variety),
@@ -921,7 +661,7 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           evidence.py (what X says, from the DB), playbook.py (the file, its
           versions, the rewrite), dashboard.py (pure views of /studio/performance),
           web.py + templates/ (/studio pages, /studio/radar)
-run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py
+run_ingest.py  run_score.py  digest.py  run_queue.py
 run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py
-run_logos.py  run_evolve.py  run_unlink.py  run_studio.py   (CLIs)
+run_studio.py   (CLIs)
 ```

@@ -10,14 +10,12 @@ import re
 import struct
 import zlib
 from pathlib import Path
-from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
 
 from approval_queue import store
 from approval_queue.app import app
-from draft import drafter
 from draft.schema import Draft
 from publish import store as publish_store
 from studio import ingest, qa
@@ -146,10 +144,10 @@ def test_the_pending_list_names_a_studio_draft_by_its_piece(client, conn, tmp_pa
     row = row_of(body, draft_id)
     assert f"<strong>Studio piece {piece_id}</strong>" in row
     assert f'<a href="/studio/{piece_id}">fact base, fact-check log and Revise' in row
-    # revised in the studio only: no drafter Revise box on its row
-    assert f'action="/drafts/{draft_id}/revise"' not in body
-    # a drafter draft on the same page keeps its title and its own Revise box
-    assert "Title i1" in row_of(body, plain) and f'action="/drafts/{plain}/revise"' in body
+    # revised in the studio only: no Revise box on the page
+    assert "/revise" not in body
+    # an older drafter draft on the same page keeps its title
+    assert "Title i1" in row_of(body, plain)
     assert "/studio/" not in row_of(body, plain)
 
 
@@ -174,33 +172,12 @@ def test_the_detail_page_names_the_piece_and_links_its_studio_page(client, conn,
         assert f'action="/drafts/{draft_id}/{action}"' in body
 
 
-def test_a_drafter_draft_keeps_its_title_and_its_revise_form(client, conn):
+def test_a_drafter_draft_keeps_its_title_and_has_no_revise_form(client, conn):
     draft_id = drafter_draft(conn)
     body = client.get(f"/drafts/{draft_id}").text
     assert "<h1>Title i1</h1>" in body and "Studio piece" not in body
     # no link to a studio piece (the nav's radar link is every page's)
-    assert f'action="/drafts/{draft_id}/revise"' in body and not re.search(r"/studio/\d", body)
-
-
-def test_the_queue_never_revises_a_studio_draft_itself(client, conn, tmp_path, monkeypatch):
-    piece_id, draft_id, _ = put_piece(conn, tmp_path, POSTS)
-
-    def no_drafter(**kwargs):
-        raise AssertionError("the drafter was asked to revise a studio piece")
-
-    monkeypatch.setattr(drafter, "revise_item", no_drafter)
-    monkeypatch.setattr(drafter, "call_anthropic", no_drafter)
-    for form in ({"instructions": "lead with the cold-tumour data"}, {}):
-        r = client.post(f"/drafts/{draft_id}/revise", data=form)
-        assert r.status_code == 303
-        location = unquote(r.headers["location"])
-        assert location.startswith(f"/drafts/{draft_id}?error=")
-        assert "written in the studio" in location and f"(/studio/{piece_id})" in location
-    row = store.get_draft(conn, draft_id)
-    assert row.draft.thread == POSTS and row.status == "pending"
-    assert store.list_decisions(conn, draft_id) == []
-    page = client.get(r.headers["location"]).text
-    assert "This piece was written in the studio; revise it from its studio page" in page
+    assert "/revise" not in body and not re.search(r"/studio/\d", body)
 
 
 def test_editing_a_studio_post_is_held_to_its_own_limit(client, conn, tmp_path):

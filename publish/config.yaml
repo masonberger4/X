@@ -37,8 +37,8 @@ policy:
   prefer_breaking: true
   order: score_desc   # score_desc | oldest_first
 
-# Draft images (the chart run_draft.py rendered and the reviewer saw in the queue).
-# attach_images: true uploads it and attaches it to the FIRST post of the thread
+# Draft images (the studio's cards the reviewer saw in the queue).
+# attach_images: true uploads each and attaches it to the post it is anchored to,
 # with alt text; false posts text only, whatever the draft carries. An upload failure
 # refuses the post rather than posting text-only, because the reviewer approved it with
 # the image.

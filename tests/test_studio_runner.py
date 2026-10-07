@@ -991,10 +991,10 @@ def test_an_open_piece_is_offered_the_top_stories_no_piece_has_used(sconn, cfg):
 
 def test_an_open_piece_is_not_offered_a_story_the_drafter_already_has(sconn, cfg):
     """One story, one piece of writing: a story with a draft that did not fail (waiting,
-    in the A/B pick, approved, rejected) is the drafter's; a failed draft leaves it free."""
+    approved, rejected; the retired drafter's included) is taken; a failed draft leaves it
+    free."""
     statuses = {
         "pending": queue_store.STATUS_PENDING,
-        "choosing": queue_store.STATUS_CHOOSING,
         "approved": queue_store.STATUS_APPROVED,
         "rejected": queue_store.STATUS_REJECTED,
         "failed": queue_store.STATUS_FAILED,

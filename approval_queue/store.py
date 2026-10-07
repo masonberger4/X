@@ -5,25 +5,19 @@ Owns four tables (created with CREATE TABLE IF NOT EXISTS in the shared pipeline
   drafts(id INTEGER PK, item_id TEXT UNIQUE, cluster_id, model, thread_json,
          suggested_visual, why_it_matters, claims_json, status, rejection_reason,
          created_at, updated_at,
-         chart_json, image_path)   -- added by guarded migrations: the drafter's chart spec
-            -- (draft/chart.py) and the PNG rendered from it, relative to image_dir()
-         choice_json   -- guarded migration: while status is 'choosing', the other variant
-            -- of a swarm run (the row holds one, this the other) for the human A/B pick
+         chart_json, image_path, images_json, format_json)   -- added by guarded
+            -- migrations: a visual spec (draft/chart.py), the pictures (relative to
+            -- image_dir()) and the draft's shape
   decisions(id INTEGER PK, draft_id FK, action, original_text, edited_text, note, created_at,
-            category)   -- category added by step 7 through a guarded ALTER TABLE migration
-            -- action 'revise': the drafter rewrote the text on the human's instructions
-            -- (note); original_text/edited_text hold the before/after like an 'edit'.
-  draft_examples(id INTEGER PK, draft_id FK, decision_id FK, kind 'edit'|'rejection',
-                 created_at)   -- step 7: which examples each draft was shown
-  image_grades(id INTEGER PK, draft_id FK, ...)   -- the image grader's verdicts from the
-                 -- render-grade loop in approval_queue/images.py
+            category)
+            -- action 'revise': the studio rewrote the piece on the editor's request (note);
+            -- original_text/edited_text hold the before/after like an 'edit'.
+  draft_examples, image_grades   -- left from the retired drafter: still created so an old
+            -- database opens unchanged, never read or written
 
-Never modifies the items or scores tables. Step 7 reads items only through
-fetch_decisions_for_voice / fetch_draft_stats, and only for source and url; items.cluster_id
-is also read to follow a story that linking merged (drafted_cluster_ids,
-studio_held_clusters). The studio's studio_pieces and studio_topics are read only by
-studio_hold, studio_held_clusters and studio_researching_offers (read-only, nothing when
-the tables are missing).
+Never modifies the items or scores tables. items.cluster_id is read to follow a story that
+linking merged (drafted_cluster_ids). The studio's studio_pieces is read only by
+studio_hold (read-only, nothing when the table is missing).
 """
 
 from __future__ import annotations
@@ -31,23 +25,18 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from draft.chart import (
     IMAGES_DIRNAME,
     Chart,
-    Table,
     chart_from_json,
     table_from_json,
-    validate_table,
-    visual_from_json,
 )
 from draft.schema import Claim, Draft
-from score.editorial import YES_THRESHOLD
 
 DEFAULT_DB_PATH = "./pipeline.db"
 
@@ -55,11 +44,7 @@ STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"  # drafter produced output that broke a hard rule
-# Step 9 with `jury: human`: the swarm and the control both drafted this story and a human
-# has not yet picked one. Nothing downstream reads it: verify, the queue's pending list and
-# publish all ask for 'pending' by name, so a draft waits here until the pick.
-STATUS_CHOOSING = "choosing"
-STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_FAILED, STATUS_CHOOSING)
+STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_FAILED)
 # Statuses a reviewer may still change a draft in: only a draft still awaiting a decision.
 EDITABLE_STATUSES = (STATUS_PENDING,)
 
@@ -83,10 +68,6 @@ DECISION_CATEGORIES = (
     CATEGORY_HARD_RULE,
     CATEGORY_OTHER,
 )
-
-EXAMPLE_KIND_EDIT = "edit"
-EXAMPLE_KIND_REJECTION = "rejection"
-EXAMPLE_KINDS = (EXAMPLE_KIND_EDIT, EXAMPLE_KIND_REJECTION)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS drafts (
@@ -189,6 +170,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # again, so it is reviewed rather than hidden forever. Idempotent, and a no-op on a
     # fresh DB (no such row).
     conn.execute("UPDATE drafts SET status = ? WHERE status = 'snoozed'", (STATUS_PENDING,))
+    # The retired swarm's A/B pick is gone too: a draft left awaiting it holds one variant, which
+    # becomes an ordinary pending draft.
+    conn.execute("UPDATE drafts SET status = ? WHERE status = 'choosing'", (STATUS_PENDING,))
     conn.commit()
 
 
@@ -278,8 +262,8 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     """Open the shared pipeline DB and make sure our tables exist."""
     # check_same_thread=False: FastAPI opens the connection in a worker thread and uses it
     # on the event loop (or in the threadpool a slow route hands its work to); each request
-    # uses its connection sequentially, so this is safe. timeout=30: a CLI run (run_verify,
-    # run_draft) writing the same file makes us wait, not fail, as the other stores do.
+    # uses its connection sequentially, so this is safe. timeout=30: a CLI run (run_studio,
+    # run_publish) writing the same file makes us wait, not fail, as the other stores do.
     conn = sqlite3.connect(str(path or db_path()), check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -291,109 +275,6 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
 # ---------------------------------------------------------------------------
 # Adapter onto step 1's tables
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class Candidate:
-    """A scored item ready for drafting. Built only by fetch_candidates()."""
-
-    item_id: str
-    cluster_id: int | None
-    source: str
-    url: str
-    title: str
-    abstract: str
-    published_at: str | None
-    total: float
-    rationale: str
-    suggested_angle: str
-    scores: dict[str, float] = field(default_factory=dict)
-
-
-# STEP 1 SCHEMA (db.py): scores are per *cluster* (one cluster = one story), items carry
-# cluster_id. The latest score for a cluster is the one with the highest scores.id.
-#   items(id TEXT PK, source, url, doi, title, abstract, published_at, fetched_at,
-#         dedup_hash UNIQUE, cluster_id FK, raw_json)
-#   clusters(id PK, title, norm_title, doi, published_at, created_at, prefilter_status, ...)
-#   scores(id PK, cluster_id FK, model, prompt_version, novelty, clinical_significance,
-#          audience_interest, expertise_fit, timeliness, evidence_level, hype_risk, total,
-#          rationale, suggested_angle, raw_response, scored_at)
-# One candidate per cluster: the member with the longest abstract (best for verifying numbers),
-# then earliest published_at, then id.
-_CANDIDATES_SQL = """
-SELECT i.id, i.cluster_id, i.source, i.url, i.title, i.abstract, i.published_at,
-       s.novelty, s.clinical_significance, s.audience_interest, s.expertise_fit,
-       s.timeliness, s.total, s.rationale, s.suggested_angle
-FROM clusters c
-JOIN scores s ON s.id = (SELECT id FROM scores WHERE cluster_id = c.id ORDER BY id DESC LIMIT 1)
-JOIN items i ON i.id = (SELECT id FROM items WHERE cluster_id = c.id
-                        ORDER BY LENGTH(abstract) DESC, published_at IS NULL, published_at, id
-                        LIMIT 1)
-WHERE {approved} (s.total >= :min_score AND s.scored_at >= :since)
-ORDER BY {approved_first} s.total DESC, s.scored_at DESC
-"""
-
-# A story the editor said yes to on the feed (latest human rating at or above
-# score/editorial.py's YES_THRESHOLD) is drafted whatever its score or age, and first.
-_APPROVED_SQL = """(SELECT rating FROM ratings
-                    WHERE cluster_id = c.id AND (rater IS NULL OR rater = 'human')
-                    ORDER BY id DESC LIMIT 1) >= {yes}"""
-
-
-def fetch_candidates(
-    min_score: float, since_hours: float, conn: sqlite3.Connection | None = None
-) -> list[Candidate]:
-    """Return items scored at or above min_score within the last since_hours, plus every
-    story the editor said yes to on the feed whatever its score or age, those first.
-
-    This is the ONLY place step 2 reads the items/scores tables.
-    """
-    own = conn is None
-    conn = conn or connect()
-    try:
-        if not step1_tables_present(conn):
-            return []
-        since = (datetime.now(UTC) - timedelta(hours=since_hours)).replace(microsecond=0)
-        approved = ""
-        approved_first = ""
-        if conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ratings'"
-        ).fetchone():
-            rule = _APPROVED_SQL.format(yes=int(YES_THRESHOLD))
-            approved = f"COALESCE({rule}, 0) OR"
-            approved_first = f"COALESCE({rule}, 0) DESC,"
-        sql = _CANDIDATES_SQL.format(approved=approved, approved_first=approved_first)
-        rows = conn.execute(sql, {"min_score": min_score, "since": since.isoformat()}).fetchall()
-    finally:
-        if own:
-            conn.close()
-    out: list[Candidate] = []
-    for r in rows:
-        out.append(
-            Candidate(
-                item_id=r["id"],
-                cluster_id=r["cluster_id"],
-                source=r["source"] or "",
-                url=r["url"] or "",
-                title=r["title"] or "",
-                abstract=r["abstract"] or "",
-                published_at=r["published_at"],
-                total=float(r["total"] or 0),
-                rationale=r["rationale"] or "",
-                suggested_angle=r["suggested_angle"] or "",
-                scores={
-                    k: float(r[k] or 0)
-                    for k in (
-                        "novelty",
-                        "clinical_significance",
-                        "audience_interest",
-                        "expertise_fit",
-                        "timeliness",
-                    )
-                },
-            )
-        )
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -549,30 +430,10 @@ def find_by_item(conn: sqlite3.Connection, item_id: str) -> DraftRow | None:
     return get_draft(conn, int(r[0])) if r else None
 
 
-def has_draft(
-    conn: sqlite3.Connection,
-    item_id: str,
-    cluster_id: int | None = None,
-    *,
-    ignore_failed: bool = False,
-) -> bool:
-    """True if this item, or any item in the same cluster (same story), already has a draft.
-    With ignore_failed, drafts that failed the hard rules do not count (run_draft
-    --retry-failed)."""
-    where = "item_id = ?" if cluster_id is None else "(item_id = ? OR cluster_id = ?)"
-    params: tuple = (item_id,) if cluster_id is None else (item_id, cluster_id)
-    if ignore_failed:
-        where += " AND status != ?"
-        params += (STATUS_FAILED,)
-    row = conn.execute(f"SELECT 1 FROM drafts WHERE {where}", params).fetchone()
-    return row is not None
-
-
 def drafted_cluster_ids(conn: sqlite3.Connection) -> set[int]:
     """Every story with a draft that did not fail the hard rules, whatever else its status
     (waiting, approved, rejected, posted): the studio's shortlist leaves these out
-    (studio/runner.py:taken_stories), as run_draft leaves the studio's stories alone
-    (`studio_held_clusters`). One story, one piece of writing. A draft's story is also
+    (studio/runner.py:taken_stories). One story, one piece of writing. A draft's story is also
     followed through its item to the cluster that holds it now, since story linking folds
     one cluster into another."""
     ids = {
@@ -592,87 +453,6 @@ def drafted_cluster_ids(conn: sqlite3.Connection) -> set[int]:
             )
         }
     return ids
-
-
-def studio_held_clusters(conn: sqlite3.Connection, *, offered: bool = True) -> set[int]:
-    """The stories the studio holds, which run_draft leaves to it (one story, one piece of
-    writing): the story of every studio piece that was not discarded, whatever its stage (a
-    piece waiting at the research checkpoint, still running, failed or interrupted lands in
-    the queue later, on that story), and of every topic queued on the studio page that no
-    piece has taken yet. A story that linking merged into another cluster is followed
-    through the item the studio keeps with it (`story_item`), before the next studio run
-    points its rows there. A read-only look at the studio's own studio_pieces and
-    studio_topics (studio/store.py owns them); empty before the studio's first run.
-
-    With `offered`, also every story offered to a piece still researching on no story yet
-    (`offered_stories` in its meta, recorded before its session starts): the session may
-    name any of them, and they are the undrafted top stories the drafter would take next.
-    They are released when research names one or stops. offered=False is the stories a
-    piece or topic is on, for run_draft's last look before it stores a draft."""
-    from studio import store as studio_store
-
-    tables = ("studio_pieces", "studio_topics")
-    if not all(_columns(conn, t) for t in tables):  # no columns: the table does not exist
-        return set()
-    held = studio_researching_offers(conn) if offered else set()
-    discarded = studio_store.STAGE_DISCARDED
-    sql = [
-        "SELECT cluster_id FROM studio_pieces WHERE stage != ? AND cluster_id IS NOT NULL",
-        "SELECT cluster_id FROM studio_topics WHERE piece_id IS NULL AND cluster_id IS NOT NULL",
-    ]
-    args: list[Any] = [discarded]
-    if all("story_item" in _columns(conn, t) for t in tables) and step1_tables_present(conn):
-        sql += [
-            "SELECT i.cluster_id FROM studio_pieces p JOIN items i ON i.id = p.story_item "
-            "WHERE p.stage != ?",
-            "SELECT i.cluster_id FROM studio_topics t JOIN items i ON i.id = t.story_item "
-            "WHERE t.piece_id IS NULL",
-        ]
-        args.append(discarded)
-    rows = conn.execute(" UNION ".join(sql), args).fetchall()
-    return held | {int(r[0]) for r in rows if r[0] is not None}
-
-
-def studio_researching_offers(conn: sqlite3.Connection) -> set[int]:
-    """The stories offered to the studio pieces still researching on no story yet (read
-    from the meta studio/session.py:research writes; JSON parsed here, so no SQLite JSON
-    functions are needed). Empty when the studio's table is missing."""
-    from studio import store as studio_store
-
-    if "meta_json" not in _columns(conn, "studio_pieces"):
-        return set()
-    held: set[int] = set()
-    for (meta,) in conn.execute(
-        "SELECT meta_json FROM studio_pieces WHERE stage = ? AND cluster_id IS NULL",
-        (studio_store.STAGE_RESEARCHING,),
-    ):
-        try:
-            ids = json.loads(meta or "{}").get("offered_stories")
-        except (ValueError, AttributeError):
-            continue
-        if isinstance(ids, list):
-            held |= {i for i in ids if isinstance(i, int) and not isinstance(i, bool)}
-    return held
-
-
-def delete_failed_drafts(
-    conn: sqlite3.Connection, item_id: str, cluster_id: int | None = None
-) -> int:
-    """Remove the failed drafts for a story (and their draft_examples rows) so run_draft
-    --retry-failed can insert a fresh one; drafts.item_id is UNIQUE. Returns rows removed."""
-    where = "item_id = ?" if cluster_id is None else "(item_id = ? OR cluster_id = ?)"
-    params: tuple = (item_id,) if cluster_id is None else (item_id, cluster_id)
-    ids = [
-        r[0]
-        for r in conn.execute(
-            f"SELECT id FROM drafts WHERE {where} AND status = ?", params + (STATUS_FAILED,)
-        )
-    ]
-    for draft_id in ids:
-        conn.execute("DELETE FROM draft_examples WHERE draft_id = ?", (draft_id,))
-        conn.execute("DELETE FROM drafts WHERE id = ?", (draft_id,))
-    conn.commit()
-    return len(ids)
 
 
 def insert_draft(
@@ -939,165 +719,6 @@ def revise(
     return did
 
 
-# ---------------------------------------------------------------------------
-# Step 9 human jury: one row per story holds one variant, choice_json the other.
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class Variant:
-    role: str  # 'swarm' | 'control'
-    model: str
-    draft: Draft
-
-
-@dataclass
-class Choice:
-    """A draft awaiting the human A/B pick. `a` and `b` are the two variants in the order
-    the pick page shows them; which is which was drawn at random when the row was stored."""
-
-    a: Variant
-    b: Variant
-
-    def side(self, label: str) -> Variant:
-        if label == "A":
-            return self.a
-        if label == "B":
-            return self.b
-        raise ValueError(f"unknown side {label!r}")
-
-
-def _variant_json(draft: Draft, model: str) -> dict[str, Any]:
-    return {
-        "model": model,
-        "thread": draft.thread,
-        "suggested_visual": draft.suggested_visual,
-        "why_it_matters": draft.why_it_matters,
-        "claims": [c.__dict__ for c in draft.claims_to_verify],
-        "chart_json": _chart_json(draft),
-        "format_json": _format_json(draft),
-    }
-
-
-def _variant_draft(d: dict[str, Any]) -> Draft:
-    draft = Draft(
-        thread=list(d.get("thread") or []),
-        suggested_visual=d.get("suggested_visual") or "",
-        why_it_matters=d.get("why_it_matters") or "",
-        claims_to_verify=[Claim(**c) for c in d.get("claims") or []],
-        chart=chart_from_json(d.get("chart_json")),
-        table=table_from_json(d.get("chart_json")),
-    )
-    _apply_format_json(draft, d.get("format_json"))
-    return draft
-
-
-def set_choice(
-    conn: sqlite3.Connection,
-    draft_id: int,
-    *,
-    row_role: str,
-    alt_role: str,
-    alt: Draft,
-    alt_model: str,
-    row_is_a: bool,
-) -> None:
-    """Store the variant the row does not hold, and which one the pick page shows as A."""
-    data = {
-        "row_role": row_role,
-        "row_is_a": bool(row_is_a),
-        "alt": {"role": alt_role, **_variant_json(alt, alt_model)},
-    }
-    conn.execute(
-        "UPDATE drafts SET choice_json = ? WHERE id = ?",
-        (json.dumps(data, ensure_ascii=False), draft_id),
-    )
-    conn.commit()
-
-
-def get_choice(conn: sqlite3.Connection, draft_id: int) -> Choice | None:
-    """The two variants of a draft awaiting the A/B pick; None when it is not awaiting one."""
-    row = get_draft(conn, draft_id)
-    if row is None or row.status != STATUS_CHOOSING:
-        return None
-    text = conn.execute("SELECT choice_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
-    if not text or not text[0]:
-        return None
-    data = json.loads(text[0])
-    alt = data["alt"]
-    mine = Variant(str(data["row_role"]), row.model, row.draft)
-    other = Variant(str(alt["role"]), str(alt.get("model") or ""), _variant_draft(alt))
-    return Choice(mine, other) if data.get("row_is_a") else Choice(other, mine)
-
-
-def resolve_choice(conn: sqlite3.Connection, draft_id: int, label: str) -> Variant:
-    """The human picked side `label` ('A' or 'B'): the row takes that variant's text,
-    visual and claims (unchanged when it already holds it), drops any preview picture,
-    forgets the other variant and becomes 'pending', so verify and the review take it from
-    here. No decision row: the pick is recorded on the swarm run. Returns the picked
-    variant; KeyError when the draft is not awaiting a pick."""
-    choice = get_choice(conn, draft_id)
-    if choice is None:
-        raise KeyError(f"draft {draft_id} is not awaiting an A/B pick")
-    picked = choice.side(label)
-    d = picked.draft
-    conn.execute(
-        """UPDATE drafts SET thread_json = ?, suggested_visual = ?, why_it_matters = ?,
-                             claims_json = ?, model = ?, chart_json = ?, format_json = ?,
-                             image_path = NULL, image_alt = NULL, images_json = NULL,
-                             choice_json = NULL, status = ?, updated_at = ?
-           WHERE id = ?""",
-        (
-            json.dumps(d.thread),
-            d.suggested_visual,
-            d.why_it_matters,
-            json.dumps([c.__dict__ for c in d.claims_to_verify]),
-            picked.model,
-            _chart_json(d),
-            _format_json(d),
-            STATUS_PENDING,
-            _now(),
-            draft_id,
-        ),
-    )
-    conn.commit()
-    return picked
-
-
-def preview_file(draft_id: int, label: str, index: int = 0) -> Path:
-    """Where the pick page's preview of side `label`'s picture `index` lives."""
-    return image_dir() / f"choice_{draft_id}_{label}_{index}.png"
-
-
-def drop_previews(draft_id: int) -> None:
-    for path in image_dir().glob(f"choice_{draft_id}_*.png"):
-        path.unlink(missing_ok=True)
-
-
-def set_style(conn: sqlite3.Connection, draft_id: int, style: dict | None) -> None:
-    """Record the Style (as Style.to_dict) every picture of this draft starts from; None
-    clears it (the house style)."""
-    conn.execute(
-        "UPDATE drafts SET style_json = ? WHERE id = ?",
-        (json.dumps(style) if style is not None else None, draft_id),
-    )
-    conn.commit()
-
-
-def get_style(conn: sqlite3.Connection, draft_id: int) -> dict | None:
-    """The Style set_style recorded for this draft, or None (the house style)."""
-    if "style_json" not in _columns(conn, "drafts"):
-        return None
-    row = conn.execute("SELECT style_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
-    if not row or not row[0]:
-        return None
-    try:
-        data = json.loads(row[0])
-    except ValueError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def set_image(
     conn: sqlite3.Connection,
     draft_id: int,
@@ -1134,123 +755,6 @@ def set_image(
             (json.dumps(images), _now(), draft_id),
         )
     conn.commit()
-
-
-@dataclass
-class ImageGradeRow:
-    id: int
-    draft_id: int
-    iteration: int
-    score: int
-    flaws: list[str]
-    fixes: list[str]
-    adjustments: dict
-    style: dict
-    model: str
-    kept: bool
-    created_at: str
-    criteria: dict = field(default_factory=dict)
-
-
-def record_image_grade(
-    conn: sqlite3.Connection,
-    draft_id: int,
-    *,
-    iteration: int,
-    score: int,
-    flaws: list[str],
-    fixes: list[str],
-    adjustments: dict,
-    style: dict,
-    model: str,
-    criteria: dict | None = None,
-) -> int:
-    """One grader verdict for one render of a draft's image (draft/grader.py)."""
-    _require(conn, draft_id)
-    cur = conn.execute(
-        "INSERT INTO image_grades (draft_id, iteration, score, flaws_json, fixes_json, "
-        "adjustments_json, style_json, model, kept, created_at, criteria_json) "
-        "VALUES (?,?,?,?,?,?,?,?,0,?,?)",
-        (
-            draft_id,
-            iteration,
-            score,
-            json.dumps(flaws),
-            json.dumps(fixes),
-            json.dumps(adjustments),
-            json.dumps(style),
-            model,
-            _now(),
-            json.dumps(criteria or {}),
-        ),
-    )
-    conn.commit()
-    return int(cur.lastrowid)
-
-
-def mark_image_grade_kept(conn: sqlite3.Connection, draft_id: int, grade_id: int) -> None:
-    """Flag the grade whose render the draft keeps; every other grade of the draft is not."""
-    conn.execute("UPDATE image_grades SET kept = 0 WHERE draft_id = ?", (draft_id,))
-    conn.execute("UPDATE image_grades SET kept = 1 WHERE id = ?", (grade_id,))
-    conn.commit()
-
-
-def clear_image_grades(conn: sqlite3.Connection, draft_id: int) -> None:
-    conn.execute("DELETE FROM image_grades WHERE draft_id = ?", (draft_id,))
-    conn.commit()
-
-
-def list_image_grades(conn: sqlite3.Connection, draft_id: int) -> list[ImageGradeRow]:
-    rows = conn.execute(
-        "SELECT * FROM image_grades WHERE draft_id = ? ORDER BY iteration, id", (draft_id,)
-    ).fetchall()
-    return [
-        ImageGradeRow(
-            id=r["id"],
-            draft_id=r["draft_id"],
-            iteration=r["iteration"],
-            score=r["score"],
-            flaws=json.loads(r["flaws_json"] or "[]"),
-            fixes=json.loads(r["fixes_json"] or "[]"),
-            adjustments=json.loads(r["adjustments_json"] or "{}"),
-            style=json.loads(r["style_json"] or "{}"),
-            model=r["model"],
-            kept=bool(r["kept"]),
-            created_at=r["created_at"],
-            criteria=json.loads(r["criteria_json"] or "{}"),
-        )
-        for r in rows
-    ]
-
-
-def clear_visual_notes(
-    conn: sqlite3.Connection, draft_id: int, note: str | None = None
-) -> list[str]:
-    """Blank the caption of every visual of a draft whose note addresses the operator
-    (draft/chart.py:note_problems), leaving the numbers, rows and text untouched. Returns
-    the captions that were cleared, empty when there was nothing to clear. The picture
-    itself is re-rendered by the caller (run_scrub_notes.py); an 'edit' decision with the
-    text unchanged records what went."""
-    from draft.chart import note_problems
-
-    row = _require(conn, draft_id)
-    draft = row.draft
-    cleared: list[str] = []
-    for visual in draft.visuals:
-        if visual is not None and visual.note and note_problems(visual.note, "note"):
-            cleared.append(visual.note)
-            visual.note = ""
-    if not cleared:
-        return []
-    conn.execute(
-        "UPDATE drafts SET chart_json = ?, format_json = ?, updated_at = ? WHERE id = ?",
-        (_chart_json(draft), _format_json(draft), _now(), draft_id),
-    )
-    text = _serialise_text(draft.thread)
-    reason = note or "caption cleared: " + "; ".join(cleared)
-    _record_decision(conn, draft_id, ACTION_EDIT, text, text, reason, None)
-    conn.commit()
-    return cleared
 
 
 def drop_image(
@@ -1342,74 +846,6 @@ def _drop_one_image(conn: sqlite3.Connection, row: DraftRow, index: int, note: s
             pass
 
 
-def chart_for(conn: sqlite3.Connection, draft_id: int) -> Chart | None:
-    r = conn.execute("SELECT chart_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
-    return chart_from_json(r["chart_json"]) if r else None
-
-
-def visual_for(conn: sqlite3.Connection, draft_id: int) -> Chart | Table | None:
-    r = conn.execute("SELECT chart_json FROM drafts WHERE id = ?", (draft_id,)).fetchone()
-    return visual_from_json(r["chart_json"]) if r else None
-
-
-def edit_table(
-    conn: sqlite3.Connection, draft_id: int, rows: list[list[str]], note: str | None = None
-) -> tuple[Table, Table, list[tuple[int, int]]]:
-    """The human retyped table cells. Validate the new grid against the current headers
-    (same shape rules as the drafter's output: 2-8 rows, a non-empty row label, cells up to
-    TABLE_MAX_CELL_CHARS; an empty body cell is allowed and simply blank), store it in
-    chart_json, forget the now-stale picture, and log an 'edit' decision with the text
-    unchanged so the history shows it. The text is never touched. Returns (old, new,
-    changed) where changed lists the (row, col) positions whose text differs, so the
-    caller can record their verdicts. Raises ChartError on a bad grid, ValueError when the
-    draft has no table."""
-    row = _require(conn, draft_id)
-    old = row.draft.table
-    if old is None:
-        raise ValueError("this draft has no table")
-    new = validate_table(
-        {"title": old.title, "columns": old.columns, "rows": rows, "note": old.note}
-    )
-    assert new is not None
-    changed = [
-        (r, c)
-        for r in range(max(len(old.rows), len(new.rows)))
-        for c in range(len(old.columns))
-        if (old.rows[r][c] if r < len(old.rows) else None)
-        != (new.rows[r][c] if r < len(new.rows) else None)
-    ]
-    path = resolve_image(row.image_path)
-    conn.execute(
-        "UPDATE drafts SET chart_json = ?, image_path = NULL, image_alt = NULL, updated_at = ? "
-        "WHERE id = ?",
-        (json.dumps(new.to_dict()), _now(), draft_id),
-    )
-    text = _serialise_text(row.draft.thread)
-    _record_decision(
-        conn,
-        draft_id,
-        ACTION_EDIT,
-        text,
-        text,
-        note or f"table cells edited by the reviewer ({len(changed)} changed)",
-        None,
-    )
-    conn.commit()
-    if path is not None and changed:
-        try:
-            path.unlink()
-        except OSError:
-            pass
-    return old, new, changed
-
-
-def drop_table(conn: sqlite3.Connection, draft_id: int, reason: str) -> None:
-    """Step 2b decided the draft's table cannot be shown (a contradicted cell, too few
-    supported cells). Same as drop_image but with the fact-checker's reason in the decision
-    note, so the history says why the post went out text-only."""
-    drop_image(conn, draft_id, note=f"table dropped by the fact-checker: {reason}")
-
-
 def reject(
     conn: sqlite3.Connection,
     draft_id: int,
@@ -1451,117 +887,34 @@ def list_decisions(conn: sqlite3.Connection, draft_id: int | None = None) -> lis
 def _serialise_text(thread: list[str]) -> str:
     """Canonical text form of a draft for the decisions log: JSON so it round-trips.
     (Rows from before threads-only carry {"single_post", "thread"} or a bare post;
-    draft.examples.parse_decision_text reads every form.)"""
+    parse_decision_text reads every form.)"""
     return json.dumps({"thread": list(thread)}, ensure_ascii=False)
 
 
-# ---------------------------------------------------------------------------
-# Step 7: voice learning loop (examples audit trail + read adapters)
-# ---------------------------------------------------------------------------
+def parse_decision_text(text: str | None) -> list[str]:
+    """Inverse of _serialise_text: the thread a decision row stored.
 
-
-def record_examples(
-    conn: sqlite3.Connection,
-    draft_id: int,
-    edit_ids: Iterable[int] = (),
-    rejection_ids: Iterable[int] = (),
-) -> int:
-    """Log which decisions were shown as examples when this draft was generated.
-
-    Returns the number of rows written. This is the audit trail for "did the examples help";
-    step 4's report can join draft_examples to posts later.
+    Current rows store JSON {"thread": [...]}. Rows from before threads-only stored
+    {"single_post", "thread"} (the single post leads, then the thread) or a bare post; both
+    still parse, so old history still reads.
     """
-    now = _now()
-    rows = [(draft_id, int(d), EXAMPLE_KIND_EDIT, now) for d in edit_ids]
-    rows += [(draft_id, int(d), EXAMPLE_KIND_REJECTION, now) for d in rejection_ids]
-    if rows:
-        conn.executemany(
-            "INSERT INTO draft_examples (draft_id, decision_id, kind, created_at)"
-            " VALUES (?, ?, ?, ?)",
-            rows,
-        )
-        conn.commit()
-    return len(rows)
-
-
-def list_examples(conn: sqlite3.Connection, draft_id: int) -> list[sqlite3.Row]:
-    return conn.execute(
-        "SELECT * FROM draft_examples WHERE draft_id = ? ORDER BY id", (draft_id,)
-    ).fetchall()
-
-
-def _since_text(since: datetime | str | None) -> str:
-    if since is None:
-        return ""
-    if isinstance(since, datetime):
-        if since.tzinfo is None:
-            since = since.replace(tzinfo=UTC)
-        return since.astimezone(UTC).replace(microsecond=0).isoformat()
-    return str(since)
+    if text is None:
+        return []
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict) and ("thread" in data or "single_post" in data):
+            thread = data.get("thread")
+            posts = [str(p) for p in thread] if isinstance(thread, list) else []
+            single = data.get("single_post")
+            if single:
+                posts.insert(0, str(single))
+            return posts
+    return [text] if text else []
 
 
 #: Every studio draft's item_id, as a LIKE pattern (the prefix holds no wildcard).
 _STUDIO_LIKE = STUDIO_ITEM_PREFIX + "%"
-
-
-def _items_table_present(conn: sqlite3.Connection) -> bool:
-    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='items'").fetchone()
-    return row is not None
-
-
-def fetch_decisions_for_voice(
-    conn: sqlite3.Connection, since: datetime | str | None = None
-) -> list[sqlite3.Row]:
-    """Decisions made at or after `since`, joined with their draft and the item's source/url.
-
-    Columns: id, draft_id, action, original_text, edited_text, note, category, created_at,
-    draft_status, draft_created_at, item_id, source, url. Oldest first. On a database without
-    step 1's items table, source and url are empty strings. This (with fetch_draft_stats) is
-    the ONLY place step 7 reads the items table, and only for source and url.
-
-    Studio drafts (item_id `studio:<piece id>`) are left out: the drafter learns its voice
-    from its own drafts, and a studio long post written in the studio's voice (or a Discard's
-    app-written rejection) is no example of what it should or should not write.
-    """
-    if _items_table_present(conn):
-        item_cols = "COALESCE(i.source, '') AS source, COALESCE(i.url, '') AS url"
-        item_join = "LEFT JOIN items i ON i.id = d.item_id"
-    else:
-        item_cols = "'' AS source, '' AS url"
-        item_join = ""
-    sql = f"""
-        SELECT x.id, x.draft_id, x.action, x.original_text, x.edited_text, x.note,
-               x.category, x.created_at,
-               d.status AS draft_status, d.created_at AS draft_created_at, d.item_id,
-               {item_cols}
-        FROM decisions x
-        JOIN drafts d ON d.id = x.draft_id
-        {item_join}
-        WHERE x.created_at >= ? AND d.item_id NOT LIKE ?
-        ORDER BY x.created_at, x.id
-    """
-    return conn.execute(sql, (_since_text(since), _STUDIO_LIKE)).fetchall()
-
-
-def fetch_draft_stats(
-    conn: sqlite3.Connection, since: datetime | str | None = None
-) -> list[sqlite3.Row]:
-    """Drafts created at or after `since`: id, item_id, source, status, created_at, model.
-
-    source is '' when step 1's items table is absent. Oldest first. Studio drafts are left
-    out, as in fetch_decisions_for_voice.
-    """
-    if _items_table_present(conn):
-        source_col = "COALESCE(i.source, '') AS source"
-        item_join = "LEFT JOIN items i ON i.id = d.item_id"
-    else:
-        source_col = "'' AS source"
-        item_join = ""
-    sql = f"""
-        SELECT d.id, d.item_id, {source_col}, d.status, d.created_at, d.model
-        FROM drafts d
-        {item_join}
-        WHERE d.created_at >= ? AND d.item_id NOT LIKE ?
-        ORDER BY d.created_at, d.id
-    """
-    return conn.execute(sql, (_since_text(since), _STUDIO_LIKE)).fetchall()

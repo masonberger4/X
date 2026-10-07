@@ -936,35 +936,6 @@
     .actions form.inline { display: inline-block; white-space: nowrap; margin: 0 .3rem .5rem 0; vertical-align: middle; }
 
     /* --------------------------------------------------------------------------
-       The working bar (long forms): fixed at the top, sunset progress tube
-       -------------------------------------------------------------------------- */
-    #working {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 10;
-      padding: .55rem 1rem;
-      font-weight: 600;
-      color: var(--text);
-      background: rgba(14, 4, 34, .97);
-      border-bottom: 1px solid var(--accent);
-      box-shadow: 0 2px 22px rgba(255, 60, 190, .35);
-    }
-    #working.on { display: block; }
-    #working .track { height: 4px; margin-top: .4rem; overflow: hidden; border-radius: 2px; background: rgba(255, 255, 255, .1); }
-    #working .fill {
-      height: 100%;
-      width: 30%;
-      border-radius: 2px;
-      background: linear-gradient(90deg, var(--accent-2), var(--accent), var(--orange));
-      box-shadow: 0 0 10px rgba(255, 60, 190, .8);
-      animation: slide 1.2s ease-in-out infinite;
-    }
-    @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
-
-    /* --------------------------------------------------------------------------
        Scrollbars (WebKit fallback; scrollbar-color covers current Chromium)
        -------------------------------------------------------------------------- */
     ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -975,7 +946,7 @@
     /* --------------------------------------------------------------------------
        Narrow windows
        -------------------------------------------------------------------------- */
-    /* a half-screen window: wide tables (sources, steps, swarm, feedback) keep
+    /* a half-screen window: wide tables (sources, steps, feedback) keep
        inside the panel by tightening the cells and the tracked header labels.
        Never overflow-wrap:anywhere on cells: it splits words like "backup|s". */
     @media (max-width: 760px) {
@@ -999,12 +970,6 @@
        Motion off when asked (the targeted rules, then a safety net)
        -------------------------------------------------------------------------- */
     @media (prefers-reduced-motion: reduce) {
-      #working .fill {
-        animation: none;
-        width: 100%;
-        margin-left: 0;
-        background: repeating-linear-gradient(90deg, var(--accent) 0 12px, var(--orange) 12px 24px);
-      }
       button:active:not(:disabled) { transform: none; }
       *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
     }
@@ -1012,7 +977,6 @@
     /* --------------------------------------------------------------------------
        Functional rules: kept last so nothing above can override them
        -------------------------------------------------------------------------- */
-    form.busy button, form.busy input, form.busy textarea, form.busy select { opacity: .6; pointer-events: none; }
     body:not(.ordering) .order-only { display: none; }
     body.ordering .order-hide { display: none; }
   </style>
@@ -1026,48 +990,14 @@
   <a href="/feed">Feed</a>
   <a href="/runs">Runs</a>
   <span class="sep">|</span>
-  {% endif %}<a href="/choose">Pick A/B</a>
-  <a href="/queue">Pending</a>
+  {% endif %}<a href="/queue">Pending</a>
   <a href="/status/approved">Approved</a>
   <a href="/status/rejected">Rejected</a>
   <a href="/status/failed">Failed</a>
-  <a href="/voice">Voice report</a>
   {% if HAS_PANEL %}<span class="sep">|</span>
   <a href="/publishing">Publishing</a>
-  <a href="/feedback">Feedback</a>
-  <a href="/swarm">Swarm</a>{% endif %}
+  <a href="/feedback">Feedback</a>{% endif %}
 </nav>
-<div id="working" role="status" aria-live="polite"><span class="msg"></span><div class="track"><div class="fill"></div></div></div>
 <main>{% block content %}{% endblock %}</main>
-<script>
-  // Long-running forms (the AI revise, and anything that redraws and grades the picture)
-  // give no feedback while the browser waits for the redirect; show a status bar and lock
-  // the form so it is not sent twice. The route is the submitting button's formaction when
-  // it has one (the "trust host" button inside the table-cells form), else the form's action.
-  var WORKING = [
-    ["/revise", "Revising with AI\u2026 the drafter is rewriting the post; the page reloads when it is done (usually 10\u201330 seconds)."],
-    ["/trust", "Trusting the source\u2026 adding the host to trusted_domains, flipping its verdicts and redrawing the picture; the page reloads when it is done (up to a minute when the picture is graded)."],
-    ["/table", "Saving cells\u2026 redrawing the picture from the verdicts; the page reloads when it is done (up to a minute when the picture is graded)."],
-    ["/image/redraw", "Redrawing the picture\u2026 the page reloads when it is done (up to a minute when the picture is graded)."]
-  ];
-  document.addEventListener("submit", function (ev) {
-    var form = ev.target;
-    var button = ev.submitter;
-    var route = (button && button.hasAttribute("formaction")) ? button.getAttribute("formaction") : form.getAttribute("action") || "";
-    var msg = null;
-    WORKING.forEach(function (w) { if (route.slice(-w[0].length) === w[0]) msg = w[1]; });
-    if (/\/choose\/\d+$/.test(route)) msg = "Saving your pick… drawing the picture for it; the next pick loads when it is done (up to a minute when the picture is graded).";
-    if (!msg) return;
-    if (form.classList.contains("busy")) { ev.preventDefault(); return; }
-    form.classList.add("busy");
-    var bar = document.getElementById("working");
-    bar.querySelector(".msg").textContent = msg;
-    bar.classList.add("on");
-  });
-  window.addEventListener("pageshow", function () {
-    document.getElementById("working").classList.remove("on");
-    document.querySelectorAll("form.busy").forEach(function (f) { f.classList.remove("busy"); });
-  });
-</script>
 </body>
 </html>

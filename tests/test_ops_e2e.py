@@ -376,24 +376,16 @@ def test_default_ops_config_never_contains_live():
         "studio",
         "studio_now",
         "studio_resume",
-        "draft",
-        "draft_retry",
-        "verify",
         "publish",
         "feedback",
-        "evolve",
         "studio_learn",
         "studio_learn_now",
     ]
-    assert steps["verify"]["enabled"] and not steps["verify"]["required"]
-    # the retry button's step runs only when named: never in a plain run or automatically
-    assert steps["draft_retry"]["manual"] is True and steps["draft_retry"]["lock"] == "draft"
-    assert steps["evolve"]["enabled"] is True and steps["evolve"]["required"] is False
     # the shipped publish step runs, but as a dry run: its argv never carries --live
     assert steps["publish"]["enabled"] is True
     assert steps["publish"]["argv"] == ["python", "run_publish.py"]
     assert steps["feedback"]["enabled"] is True and steps["feedback"]["required"] is False
-    for name in ("ingest", "score", "draft"):
+    for name in ("ingest", "score"):
         assert steps[name]["enabled"] and steps[name]["required"]
     for step in cfg["steps"]:
         assert "--live" not in step["argv"]
@@ -462,7 +454,7 @@ def test_the_learning_steps_have_their_own_lock_and_only_the_plain_one_runs_on_i
     # after the snapshot it learns from, in the automatic runs too
     order = [s["name"] for s in cfg["steps"]]
     assert order.index("feedback") < order.index("studio_learn")
-    assert cfg["auto_run_steps"][-2:] == ["evolve", "studio_learn"]
+    assert cfg["auto_run_steps"][-2:] == ["feedback", "studio_learn"]
     import run_studio
 
     assert run_studio._parse_args(steps["studio_learn"]["argv"][2:]).learn is True
@@ -479,18 +471,16 @@ def test_default_config_dry_run_lists_real_clis(capsys):
     for line in out.splitlines():
         name, reason = line.split()[:2]
         names.append(name)
-        if name in ("ingest", "score", "draft"):
+        if name in ("ingest", "score"):
             assert reason == "dry" and sys.executable in line
-        if name in ("feedback", "evolve"):
+        if name == "feedback":
             assert reason == "dry" and sys.executable in line  # on, and the CLI exists
     # A plain run leaves out the manual steps and the studio, which has a schedule entry of
     # its own (a session would hold the whole run, and the run lock, for an hour or more).
-    assert names.index("score") < names.index("draft")
     assert "studio" not in names
     assert "studio_now" not in names and "studio_resume" not in names
-    assert "draft_retry" not in names
     # the radar's scan and the learning step stay in it (each at most daily, its own lock)
-    assert names.index("score") < names.index("studio_scan") < names.index("draft")
+    assert names.index("score") < names.index("studio_scan") < names.index("feedback")
     assert names.index("feedback") < names.index("studio_learn")
     assert "studio_scan_now" not in names and "studio_learn_now" not in names
     assert run_ops.main(["run", "--dry-run", "--only", "studio"]) == 0

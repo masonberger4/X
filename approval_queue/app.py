@@ -2,14 +2,9 @@
 
 Routes:
   GET  /queue                 pending drafts (source, score, rationale); / redirects here
-  GET  /drafts/{id}           detail: thread, visual, claims_to_verify (+ step 2b
-                              verdicts with source links), edit form
-  POST /drafts/{id}/approve   refused with 409 while a claim is contradicted, unless the
-                              form carries override=1
+  GET  /drafts/{id}           detail: posts, pictures, edit form
+  POST /drafts/{id}/approve
   POST /drafts/{id}/edit      saves edited text (+ approves unless 'keep_pending' is set)
-  POST /drafts/{id}/revise    the drafter rewrites the draft from the form's 'instructions'
-                              and from every claim step 2b contradicted (or could not
-                              verify); the draft stays pending, old claim checks are dropped
   POST /drafts/{id}/reject
   POST /drafts/{id}/reopen    sends an approved draft back to pending, unless step 3 has
                               already claimed or posted it
@@ -18,10 +13,10 @@ Routes:
                               left behind by a run that died), so the next run tries it
                               again; the draft stays approved
   GET  /status/{status}       approved / rejected / failed lists
-  GET  /voice                 voice report (step 7) from live data; ?weeks=N
 
-Step 7: the edit and reject forms take an optional category (why the draft was edited or
-rejected); the detail page shows a before/after diff for every edit.
+The edit and reject forms take an optional category (why the draft was edited or
+rejected); the detail page shows a before/after diff for every edit. A studio piece is
+revised from its studio page, which resumes the session that wrote it.
 
 A studio draft (step 10) is held while the studio works on its piece or a run of it waits
 (store.studio_hold): approve, edit, reject and the picture drops answer 409 with the reason,
@@ -40,8 +35,7 @@ from __future__ import annotations
 import difflib
 import logging
 from collections.abc import Iterator, Mapping
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import parse_qs, quote, urlsplit
@@ -54,24 +48,9 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 import timeutil
-from approval_queue import choosing, images, publishing, store
-from draft import drafter
-from draft.chart import ChartError, alt_text, validate_table
-from draft.examples import parse_decision_text
-from draft.prompt import VOICE_PATH
+from approval_queue import publishing, store
+from draft.chart import alt_text
 from draft.schema import MAX_POST_CHARS, tweet_length
-from draft.settings import load_draft_config
-from draft.voice_report import build_report
-from verify import render as verify_render
-from verify import settings as verify_settings
-from verify import store as verify_store
-from verify import tables as verify_tables
-from verify.autorevise import (  # noqa: F401  (re-exported)
-    auto_rounds_used,
-    cell_problems,
-    claim_problems,
-)
-from verify.verifier import CONTRADICTED, trusted_hosts
 
 log = logging.getLogger(__name__)
 
@@ -203,7 +182,7 @@ def _category(form: dict[str, str]) -> str | None:
 
 def _post_lines(text: str | None) -> list[str]:
     """A decision text (JSON or bare post) as display lines, one per thread post."""
-    return [f"post {i}: {p}" for i, p in enumerate(parse_decision_text(text), 1)]
+    return [f"post {i}: {p}" for i, p in enumerate(store.parse_decision_text(text), 1)]
 
 
 def decision_diff(original_text: str | None, edited_text: str | None) -> list[tuple[str, str]]:
@@ -261,13 +240,11 @@ def index(request: Request, conn: Conn, notice: str = ""):
         {
             "drafts": drafts,
             "status": "pending",
-            "checks": _check_summaries(conn, drafts),
             "studio_holds": _studio_holds(conn, drafts),
             "publish": {},
             "hidden_posted": 0,
             "show_posted": False,
             "notice": notice,
-            "choosing": len(store.list_drafts(conn, store.STATUS_CHOOSING)),
         },
     )
 
@@ -276,24 +253,6 @@ def _studio_holds(conn, drafts) -> dict[int, str]:
     """Per studio draft the studio is working on: why it is held (store.studio_hold)."""
     holds = {d.id: store.studio_hold(conn, d) for d in drafts if d.studio_piece is not None}
     return {draft_id: why for draft_id, why in holds.items() if why}
-
-
-def _check_summaries(conn, drafts) -> dict[int, dict[str, int]]:
-    """Per draft: how many claims are supported / contradicted / unverified / unchecked, and
-    how many automatic revisions (run_verify.py --auto-revise) it has had."""
-    out: dict[int, dict[str, int]] = {}
-    for d in drafts:
-        n = len(d.draft.claims_to_verify)
-        if not n:
-            continue
-        rows = verify_store.checks_for_draft(conn, d.id)
-        counts = {"supported": 0, "contradicted": 0, "unverified": 0}
-        for c in rows:
-            counts[c.verdict] = counts.get(c.verdict, 0) + 1
-        counts["unchecked"] = n - len(rows)
-        counts["auto_rounds"] = auto_rounds_used(conn, d.id)
-        out[d.id] = counts
-    return out
 
 
 @app.get("/status/{status}", response_class=HTMLResponse)
@@ -317,7 +276,6 @@ def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
         {
             "drafts": drafts,
             "status": status,
-            "checks": _check_summaries(conn, drafts),
             "studio_holds": _studio_holds(conn, drafts),
             "publish": publish,
             "releasable": _releasable(conn, drafts, publish),
@@ -345,15 +303,8 @@ def detail(
     request: Request,
     conn: Conn,
     error: str = "",
-    revised: int = 0,
-    redrawn: int = 0,
 ):
-    row = store.get_draft(conn, draft_id)
-    if row is not None and row.status == store.STATUS_CHOOSING:
-        return RedirectResponse(f"/choose/{draft_id}", status_code=303)
-    return _render_detail(
-        request, conn, draft_id, error=error, revised=bool(revised), redrawn=bool(redrawn)
-    )
+    return _render_detail(request, conn, draft_id, error=error)
 
 
 def _render_detail(
@@ -362,24 +313,18 @@ def _render_detail(
     draft_id: int,
     *,
     error: str = "",
-    revised: bool = False,
-    redrawn: bool = False,
     edit_form: dict[str, str] | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
-    """The detail page. A refused form post (text over 280 characters, a contradicted claim)
+    """The detail page. A refused form post (text over 280 characters, a studio hold)
     renders this same page with the error at the top instead of FastAPI's bare JSON error,
     which has no way back; `edit_form` keeps what the human typed in the edit form."""
     row = store.get_draft(conn, draft_id)
     if row is None:
         raise HTTPException(404, "no such draft")
     decisions = _decision_views(store.list_decisions(conn, draft_id))
-    checks = {c.claim_index: c for c in verify_store.checks_for_draft(conn, draft_id)}
     image_file = store.resolve_image(row.image_path)
     has_image = image_file is not None
-    table_checks = {(k.row, k.col): k for k in verify_store.table_checks_for_draft(conn, draft_id)}
-    cells_contradicted = len(cell_problems(row.draft.table, table_checks.values()))
-    image_grades = store.list_image_grades(conn, draft_id)
     publish_states = store.publish_states(conn, [draft_id])
     publish_info = publish_states.get(draft_id)
     edit_form = edit_form or {}
@@ -391,9 +336,6 @@ def _render_detail(
             "studio_hold": store.studio_hold(conn, row),
             "publish": publish_info,
             "releasable": _releasable(conn, [row], publish_states).get(draft_id, False),
-            "table_checks": table_checks,
-            "image_grades": image_grades,
-            "table_unverified": row.draft.table is not None and not has_image,
             "image_url": f"/drafts/{draft_id}/image?v={_stamp(image_file)}" if has_image else "",
             "image_alt": row.image_alt
             or (alt_text(row.draft.visual, row.url) if row.draft.visual else ""),
@@ -414,27 +356,10 @@ def _render_detail(
             "edit_note": edit_form.get("note", ""),
             "edit_category": edit_form.get("category", ""),
             "edit_open": bool(edit_form),
-            "checks": checks,
-            "contradicted": any(c.verdict == "contradicted" for c in checks.values()),
-            "cells_contradicted": cells_contradicted,
-            "claim_problems": len(claim_problems(checks.values())) + cells_contradicted,
-            "auto_rounds": auto_rounds_used(conn, draft_id),
             "error": error,
-            "revised": revised,
-            "redrawn": redrawn,
         },
         status_code=status_code,
     )
-
-
-# --- step 9 human jury: the blind A/B pick -------------------------------------
-
-
-def _awaiting_pick(conn, draft_id: int) -> None:
-    """Refuse a review action on a draft still awaiting its A/B pick."""
-    row = store.get_draft(conn, draft_id)
-    if row is not None and row.status == store.STATUS_CHOOSING:
-        raise HTTPException(409, "pick A or B first (/choose)")
 
 
 def _studio_held(request: Request, conn, draft_id: int) -> HTMLResponse | None:
@@ -448,131 +373,6 @@ def _studio_held(request: Request, conn, draft_id: int) -> HTMLResponse | None:
     return _render_detail(request, conn, draft_id, error=f"Not done: {hold}.", status_code=409)
 
 
-@app.get("/choose", response_class=HTMLResponse)
-def choose_index(request: Request, conn: Conn, notice: str = ""):
-    """The oldest draft awaiting a pick, or a page saying none is waiting."""
-    rows = store.list_drafts(conn, store.STATUS_CHOOSING)
-    if not rows:
-        return templates.TemplateResponse(
-            request,
-            "choose_empty.html",
-            {"notice": notice, "pending": len(store.list_drafts(conn, store.STATUS_PENDING))},
-        )
-    url = f"/choose/{rows[0].id}"
-    if notice:
-        url += f"?notice={quote(notice)}"
-    return RedirectResponse(url, status_code=303)
-
-
-@app.get("/choose/{draft_id}", response_class=HTMLResponse)
-def choose(draft_id: int, request: Request, conn: Conn, notice: str = ""):
-    row = store.get_draft(conn, draft_id)
-    if row is None:
-        raise HTTPException(404, "no such draft")
-    choice = store.get_choice(conn, draft_id)
-    if choice is None:
-        return RedirectResponse(f"/drafts/{draft_id}", status_code=303)
-    waiting = store.list_drafts(conn, store.STATUS_CHOOSING)
-    sides = []
-    for label in choosing.SIDES:
-        v = choice.side(label)
-        sides.append(
-            {
-                "label": label,
-                "draft": v.draft,
-                "previews": {
-                    k: f"/choose/{draft_id}/image/{label}/{k}"
-                    f"?v={_stamp(store.preview_file(draft_id, label, k))}"
-                    for k in choosing.preview_indexes(draft_id, label, v.draft)
-                },
-            }
-        )
-    return templates.TemplateResponse(
-        request,
-        "choose.html",
-        {
-            "d": row,
-            "sides": sides,
-            "left": len(waiting),
-            "position": next((i + 1 for i, w in enumerate(waiting) if w.id == draft_id), 1),
-            "notice": notice,
-        },
-    )
-
-
-@app.get("/choose/{draft_id}/image/{label}/{index}", include_in_schema=False)
-def choose_image(draft_id: int, label: str, index: int):
-    if label not in choosing.SIDES:
-        raise HTTPException(404, "no such side")
-    path = store.preview_file(draft_id, label, index)
-    if not path.is_file():
-        raise HTTPException(404, "no preview")
-    return _image_response(path)
-
-
-@app.post("/choose/{draft_id}")
-async def choose_pick(draft_id: int, request: Request, conn: Conn):
-    """The human picked A or B: that variant becomes the pending draft, the swarm run
-    records who won, and the picture is drawn for it. Then on to the next pick."""
-    form = await read_form(request)
-    label = form.get("side", "")
-    if label not in choosing.SIDES:
-        raise HTTPException(400, "side must be A or B")
-
-    def work():
-        row = store.get_draft(conn, draft_id)
-        if row is None:
-            raise HTTPException(404, "no such draft")
-        try:
-            picked = choosing.pick(conn, draft_id, label, source_url=row.url)
-        except KeyError as exc:
-            raise HTTPException(409, "this draft is not awaiting a pick") from exc
-        who = (
-            "the swarm's (many cheap calls)"
-            if picked.role == "swarm"
-            else ("the control's (the single strong drafter)")
-        )
-        notice = f"Draft {draft_id}: you picked {label}, {who}. It is now pending."
-        return RedirectResponse(f"/choose?notice={quote(notice)}", status_code=303)
-
-    return await run_in_threadpool(work)
-
-
-@app.post("/choose/{draft_id}/reject")
-async def choose_reject(draft_id: int, request: Request, conn: Conn):
-    """Neither is worth posting: reject the story; the run has no winner."""
-    form = await read_form(request)
-    row = store.get_draft(conn, draft_id)
-    if row is None:
-        raise HTTPException(404, "no such draft")
-    if row.status != store.STATUS_CHOOSING:
-        raise HTTPException(409, "this draft is not awaiting a pick")
-    choosing.reject_both(conn, draft_id, _note(form), _category(form))
-    notice = f"Draft {draft_id}: both rejected."
-    return RedirectResponse(f"/choose?notice={quote(notice)}", status_code=303)
-
-
-@app.get("/voice", response_class=HTMLResponse)
-def voice(request: Request, conn: Conn, weeks: int | None = None):
-    """Voice report (step 7) rendered from live drafts/decisions; nothing is changed."""
-    cfg = load_draft_config()
-    if weeks is None:
-        weeks = int(cfg["report"].get("weeks", 4))
-    if weeks < 1:
-        raise HTTPException(400, "weeks must be >= 1")
-    now = datetime.now(UTC)
-    since = now - timedelta(weeks=weeks)
-    report = build_report(
-        store.fetch_draft_stats(conn, since),
-        store.fetch_decisions_for_voice(conn, since),
-        VOICE_PATH.read_text(encoding="utf-8"),
-        cfg,
-        now=now,
-        weeks=weeks,
-    )
-    return templates.TemplateResponse(request, "voice.html", {"r": report, "weeks": weeks})
-
-
 def _redirect_home(*, notice: str = "") -> RedirectResponse:
     url = "/queue"
     if notice:
@@ -582,40 +382,15 @@ def _redirect_home(*, notice: str = "") -> RedirectResponse:
 
 @app.post("/drafts/{draft_id}/approve")
 async def approve(draft_id: int, request: Request, conn: Conn):
-    _awaiting_pick(conn, draft_id)
     form = await read_form(request)
     held = _studio_held(request, conn, draft_id)
     if held is not None:
         return held
-    if verify_store.has_contradiction(conn, draft_id) and not form.get("override"):
-        return _render_detail(
-            request,
-            conn,
-            draft_id,
-            error="Not approved: a claim in this draft was contradicted by its source. "
-            "Edit it, or tick 'approve anyway'.",
-            status_code=409,
-        )
-    row = store.get_draft(conn, draft_id)
-    if row is None:
+    if store.get_draft(conn, draft_id) is None:
         raise HTTPException(404, "no such draft")
-    notice = ""
-    if row.draft.table is not None and store.resolve_image(row.image_path) is None:
-        # The table's cells were never all verified (or one was contradicted and never
-        # fixed), so its picture must never be attached after the human has stopped looking:
-        # the post goes out text-only, on the record.
-        bad = cell_problems(row.draft.table, verify_store.table_checks_for_draft(conn, draft_id))
-        why = (
-            f"{len(bad)} contradicted cell(s) unfixed when the draft was approved"
-            if bad
-            else "not verified when the draft was approved"
-        )
-        store.drop_table(conn, draft_id, why)
-        log.info("draft %d: unverified table dropped at approval", draft_id)
-        notice = f"Table dropped: {why}."
     store.approve(conn, draft_id, note=_note(form))
-    log.info("draft %d approved%s", draft_id, " (override)" if form.get("override") else "")
-    return _redirect_home(notice=notice)
+    log.info("draft %d approved", draft_id)
+    return _redirect_home()
 
 
 def _edit_problem(thread: list[str], limit: int = MAX_POST_CHARS) -> str | None:
@@ -636,7 +411,6 @@ def _edit_problem(thread: list[str], limit: int = MAX_POST_CHARS) -> str | None:
 
 @app.post("/drafts/{draft_id}/edit")
 async def edit(draft_id: int, request: Request, conn: Conn):
-    _awaiting_pick(conn, draft_id)
     form = await read_form(request)
     held = _studio_held(request, conn, draft_id)
     if held is not None:
@@ -677,108 +451,16 @@ async def edit(draft_id: int, request: Request, conn: Conn):
     return _redirect_home()
 
 
-@app.post("/drafts/{draft_id}/revise")
-async def revise(draft_id: int, request: Request, conn: Conn):
-    """Send the draft back through the drafter with the human's instructions. Claims that
-    step 2b contradicted (or could not verify), and every table cell it contradicted, are
-    always included, so a draft can be
-    revised with an empty instruction box just to fix its fact-check failures. On success
-    the draft is replaced, stays pending, and its claim checks are dropped, except a
-    supported verdict whose claim text is unchanged, which is carried over so run_verify
-    only checks the claims that are new or changed; on failure nothing changes and the
-    detail page shows why."""
-    _awaiting_pick(conn, draft_id)
-    form = await read_form(request)
-    studio_row = store.get_draft(conn, draft_id)
-    if studio_row is not None and studio_row.studio_piece is not None:
-        # The studio wrote it: the drafter would flatten its long posts and drop its cards.
-        # The studio's own Revise resumes the session that wrote it.
-        return _detail_redirect(
-            draft_id,
-            error="This piece was written in the studio; revise it from its studio page "
-            f"(/studio/{studio_row.studio_piece}), which resumes the session that wrote it.",
-        )
-
-    def work():
-        row = store.get_draft(conn, draft_id)
-        if row is None:
-            raise HTTPException(404, "no such draft")
-        instructions = form.get("instructions", "").strip() or None
-        problems = claim_problems(verify_store.checks_for_draft(conn, draft_id))
-        cells = cell_problems(row.draft.table, verify_store.table_checks_for_draft(conn, draft_id))
-        if not instructions and not problems and not cells:
-            return _detail_redirect(
-                draft_id, error="say what should change, or run the claim check first"
-            )
-        category = _category(form)
-        try:
-            result = drafter.revise_item(
-                current=row.draft,
-                instructions=instructions,
-                claim_problems=problems,
-                cell_problems=cells,
-                title=row.title,
-                abstract=row.abstract,
-                url=row.url,
-                source=row.source,
-                suggested_angle=row.suggested_angle or None,
-                rationale=row.rationale or None,
-                # Looked up at call time so tests can monkeypatch draft.drafter.call_anthropic.
-                call=drafter.call_anthropic,
-            )
-        except drafter.DraftRejected as exc:
-            log.warning("draft %d: revision broke a hard rule: %s", draft_id, exc)
-            return _detail_redirect(draft_id, error=f"the revision broke a hard rule: {exc}")
-        except Exception as exc:  # CLI or network errors: keep the draft as it was
-            log.error("draft %d: revision failed: %s", draft_id, exc)
-            return _detail_redirect(draft_id, error=f"revision failed: {exc}")
-        note = instructions
-        if problems and not note:
-            note = "fix fact-check failures"
-        store.revise(
-            conn, draft_id, draft=result.draft, model=result.model, note=note, category=category
-        )
-        kept = verify_store.carry_over_checks(
-            conn, draft_id, [c.claim for c in result.draft.claims_to_verify]
-        )
-        kept_cells = verify_store.carry_over_table_checks(
-            conn, draft_id, row.draft.table, result.draft.table
-        )
-        images.attach_chart(conn, draft_id, result.draft.chart, source_url=row.url)
-        if result.draft.extra_visuals:
-            images.attach_extra_charts(
-                conn, draft_id, result.draft.extra_visuals, source_url=row.url
-            )
-        log.info(
-            "draft %d revised (%d attempt(s), %d claim problem(s), %d verdict(s) and %d table "
-            "cell(s) kept)",
-            draft_id,
-            result.attempts,
-            len(problems),
-            kept,
-            kept_cells,
-        )
-        return _detail_redirect(draft_id, revised=True)
-
-    return await run_in_threadpool(work)
-
-
-def _detail_redirect(
-    draft_id: int, *, error: str = "", revised: bool = False, redrawn: bool = False
-) -> RedirectResponse:
+def _detail_redirect(draft_id: int, *, error: str = "") -> RedirectResponse:
     url = f"/drafts/{draft_id}"
     if error:
         url += f"?error={quote(error)}"
-    elif revised:
-        url += "?revised=1"
-    elif redrawn:
-        url += "?redrawn=1"
     return RedirectResponse(url, status_code=303)
 
 
 def _stamp(path: Path | None) -> int:
-    """Modification time of a rendered picture, the `v=` in its URL: a redraw writes the
-    same file name, so without it a browser can show the previous picture."""
+    """Modification time of a rendered picture, the `v=` in its URL: a revision writes
+    the same file name, so without it a browser can show the previous picture."""
     try:
         return int(path.stat().st_mtime) if path is not None else 0
     except OSError:
@@ -788,13 +470,13 @@ def _stamp(path: Path | None) -> int:
 def _image_response(path: Path) -> FileResponse:
     """A draft's PNG. `no-cache` means revalidate, not "do not cache": the browser still
     gets a 304 from the ETag while the file is unchanged, and the new picture the moment a
-    redraw or a cell edit rewrites it."""
+    revision rewrites it."""
     return FileResponse(str(path), media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/drafts/{draft_id}/image", include_in_schema=False)
 def image(draft_id: int, conn: Conn):
-    """The rendered chart PNG, exactly the file run_publish.py would attach."""
+    """The first picture, exactly the file run_publish.py would attach."""
     row = store.get_draft(conn, draft_id)
     if row is None:
         raise HTTPException(404, "no such draft")
@@ -806,7 +488,7 @@ def image(draft_id: int, conn: Conn):
 
 @app.get("/drafts/{draft_id}/image/{index}", include_in_schema=False)
 def image_at(draft_id: int, index: int, conn: Conn):
-    """Phase four: the k-th rendered picture (index 0 is /drafts/{id}/image)."""
+    """The k-th picture (index 0 is /drafts/{id}/image)."""
     row = store.get_draft(conn, draft_id)
     if row is None:
         raise HTTPException(404, "no such draft")
@@ -820,7 +502,7 @@ def image_at(draft_id: int, index: int, conn: Conn):
 
 @app.post("/drafts/{draft_id}/image/drop")
 async def drop_image(draft_id: int, request: Request, conn: Conn):
-    """Post the text without the chart: forgets the spec, deletes the PNG, logs a decision."""
+    """Post the text without pictures: deletes every PNG, logs a decision."""
     form = await read_form(request)
     held = _studio_held(request, conn, draft_id)
     if held is not None:
@@ -835,9 +517,7 @@ async def drop_image(draft_id: int, request: Request, conn: Conn):
 
 @app.post("/drafts/{draft_id}/image/{index}/drop")
 async def drop_one_image(draft_id: int, index: int, request: Request, conn: Conn):
-    """Phase four: drop just this picture, keeping the others. The pictures after it move
-    down a place; the spec that made it (the chart or table for index 0, the extra chart
-    after) goes with it and the text is untouched."""
+    """Drop just this picture, keeping the others; the ones after it move down a place."""
     form = await read_form(request)
     held = _studio_held(request, conn, draft_id)
     if held is not None:
@@ -850,150 +530,6 @@ async def drop_one_image(draft_id: int, index: int, request: Request, conn: Conn
         raise HTTPException(404, str(exc)) from exc
     log.info("draft %d: image %d dropped by the reviewer", draft_id, index)
     return _detail_redirect(draft_id)
-
-
-@app.post("/drafts/{draft_id}/image/redraw")
-async def redraw_image(draft_id: int, conn: Conn):
-    """Remake the picture from the spec the draft already has: a chart is rendered again
-    through the render-grade loop, a table is redrawn from the cell verdicts already
-    stored (verify/render.py:finalize_table). The spec, the verdicts and the text are
-    untouched and no web call is made; only the PNG and its grades are replaced."""
-
-    def work():
-        row = store.get_draft(conn, draft_id)
-        if row is None:
-            raise HTTPException(404, "no such draft")
-        if row.draft.visual is None:
-            return _detail_redirect(draft_id, error="this draft has no chart or table to redraw")
-        if row.draft.table is not None:
-            cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
-            hosts = trusted_hosts(cfg, verify_render.root_config())
-            decision = verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
-            log.info("draft %d: table redrawn by the reviewer (%s)", draft_id, decision.status)
-            # Only a RENDER decision draws: pending, blocked and dropped tables leave the
-            # picture alone, and the page's own flashes say why. Do not claim a redraw then.
-            return _detail_redirect(draft_id, redrawn=decision.status == verify_tables.RENDER)
-        else:
-            path = images.attach_chart(conn, draft_id, row.draft.chart, source_url=row.url)
-            log.info("draft %d: chart redrawn by the reviewer -> %s", draft_id, path)
-            if path is None:
-                return _detail_redirect(draft_id, error="the chart could not be rendered")
-        return _detail_redirect(draft_id, redrawn=True)
-
-    return await run_in_threadpool(work)
-
-
-@app.post("/drafts/{draft_id}/trust")
-async def trust_source(draft_id: int, request: Request, conn: Conn):
-    """The "Trust this source" button beside an "(untrusted source)" verdict: add the host
-    to `trusted_domains` in verify/config.yaml (the one settings key the queue edits), flip
-    every stored verdict from that host to trusted, and redraw this draft's table from the
-    verdicts it already has. No web call is made and no text changes."""
-    form = await read_form(request)
-
-    def work():
-        row = store.get_draft(conn, draft_id)
-        if row is None:
-            raise HTTPException(404, "no such draft")
-        try:
-            host = verify_settings.normalize_host(form.get("host", ""))
-        except ValueError as exc:
-            return _detail_redirect(draft_id, error=str(exc))
-        added = verify_settings.add_trusted_domain(host)
-        changed = verify_store.mark_host_trusted(conn, host)
-        log.info(
-            "draft %d: host %s %s, %d verdict(s) now trusted",
-            draft_id,
-            host,
-            "added to trusted_domains" if added else "already trusted",
-            changed,
-        )
-        if row.draft.table is not None and row.editable:
-            cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
-            hosts = trusted_hosts(cfg, verify_render.root_config()) | {host}
-            verify_render.finalize_table(conn, row, cfg=cfg, hosts=hosts)
-        return _detail_redirect(draft_id)
-
-    return await run_in_threadpool(work)
-
-
-def _vouched_cells(table, changed, checks) -> list[tuple[int, int]]:
-    """The cells of a saved grid the reviewer vouches for without changing their text: a
-    non-empty cell the fact-checker could not verify, or verified from a source that is not
-    trusted, so it would be blanked in the picture. Saving the form is the reviewer saying
-    the grid is right, which is also what retyping a cell to exactly what was there already
-    means — that edit leaves no diff, so `changed` never sees it. A contradicted cell is
-    never vouched for: it has to be corrected (or the host trusted) before the picture is
-    drawn."""
-    done = set(changed)
-    by_pos = {(k.row, k.col): k for k in checks}
-    out: list[tuple[int, int]] = []
-    for r, row in enumerate(table.rows):
-        for c, cell in enumerate(row):
-            if (r, c) in done or not (cell or "").strip():
-                continue
-            k = by_pos.get((r, c))
-            if k is None or (not k.shown and k.verdict != CONTRADICTED):
-                out.append((r, c))
-    return out
-
-
-@app.post("/drafts/{draft_id}/table")
-async def edit_table(draft_id: int, request: Request, conn: Conn):
-    """The cell form under "Table cells": the reviewer retypes cells (`cell_<row>_<col>`,
-    every position of the current grid; a cleared body cell stays blank in the picture).
-    Headers, title and text are untouched. A cell the reviewer typed counts as supported by
-    the reviewer (`table_checks.model = 'human'`), unchanged cells keep the verdict they
-    have, and the picture is redrawn from those verdicts through the same render/drop step
-    as run_verify. No web call is made."""
-    form = await read_form(request)
-
-    def work():
-        row = store.get_draft(conn, draft_id)
-        if row is None:
-            raise HTTPException(404, "no such draft")
-        if row.draft.table is None:
-            return _detail_redirect(draft_id, error="this draft has no table")
-        if not row.editable:
-            return _detail_redirect(
-                draft_id, error="only a draft still awaiting a decision can have its table edited"
-            )
-        old = row.draft.table
-        rows = [
-            [form.get(f"cell_{r}_{c}", "") for c in range(len(old.columns))]
-            for r in range(len(old.rows))
-        ]
-        try:
-            new = validate_table(
-                {"title": old.title, "columns": old.columns, "rows": rows, "note": old.note}
-            )
-        except ChartError as exc:
-            return _detail_redirect(draft_id, error=str(exc))
-        probe = replace(row.draft, table=new)
-        found = drafter.check_hard_rules(probe, url=row.url, source=row.source)
-        problems = [p for p in found if p.startswith("table")]
-        if problems:
-            return _detail_redirect(draft_id, error="; ".join(problems))
-        _, new, changed = store.edit_table(conn, draft_id, rows)
-        verify_store.carry_over_table_checks(conn, draft_id, old, new)
-        vouched = _vouched_cells(new, changed, verify_store.table_checks_for_draft(conn, draft_id))
-        recorded = verify_store.mark_cells_human(conn, draft_id, new, changed + vouched)
-        log.info(
-            "draft %d: %d table cell(s) edited by the reviewer, %d vouched for unchanged, "
-            "%d recorded as human-supported",
-            draft_id,
-            len(changed),
-            len(vouched),
-            recorded,
-        )
-        fresh = store.get_draft(conn, draft_id)
-        cfg = verify_settings.load_verify_config(verify_settings.CONFIG_PATH)
-        hosts = trusted_hosts(cfg, verify_render.root_config())
-        decision = verify_render.finalize_table(conn, fresh, cfg=cfg, hosts=hosts)
-        log.info("draft %d: table %s after the edit", draft_id, decision.status)
-        return _detail_redirect(draft_id)
-
-    return await run_in_threadpool(work)
 
 
 @app.post("/drafts/{draft_id}/reject")

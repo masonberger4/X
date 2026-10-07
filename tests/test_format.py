@@ -1,14 +1,9 @@
-"""Step 9 phase four: the format is a gene. Schema, hard rules, prompt text, storage,
-publishing anchors, the swarm engine on a single and a long post, and format breeding."""
-
-import json
-import random
+"""A draft's format: schema bounds, storage of shape and pictures, picture drops and
+publishing anchors."""
 
 import pytest
 
 from approval_queue import store as qstore
-from draft import drafter
-from draft.prompt import HARD_RULES, build_system_prompt, hard_rules
 from draft.schema import (
     MAX_POST_CHARS,
     Format,
@@ -19,11 +14,7 @@ from draft.schema import (
 )
 from publish import store as pstore
 from publish.thread import ThreadError, split_thread
-from swarm import engine, mutate
-from swarm.genome import SEED_FORMATS, FormatGenome
-from swarm.prompts import SINGLE_SLOT, Brief
-from tests.conftest import ABSTRACT, URL, seed_item
-from tests.test_swarm_engine import CFG, DEFAULT_GENOME, FakeModel
+from tests.conftest import seed_item
 
 CHART = {"title": "Outcomes", "labels": ["ORR", "PFS"], "values": [88, 14.6], "unit": ""}
 CHART2 = {"title": "Cohort", "labels": ["ORR", "n"], "values": [88, 97], "unit": ""}
@@ -80,148 +71,7 @@ def test_validate_output_without_a_format_is_the_old_physics():
         validate_output(out(visuals=[CHART2]))
 
 
-def test_validate_output_reads_the_format():
-    two = Format(visuals=2, anchors=("first", "last"))
-    d = validate_output(out(visuals=[CHART2]), two)
-    assert len(d.visuals) == 2 and d.anchors == [1, 3] and d.wanted_visuals == 2
-    assert d.extra_visuals[0].title == "Cohort"
-    with pytest.raises(SchemaError, match="carries 2 visual"):
-        validate_output(out(), two)
-    none = Format(visuals=0, anchors=())
-    d = validate_output(out(chart=None), none)
-    assert d.visuals == [] and d.anchors == [] and d.wanted_visuals == 0
-    with pytest.raises(SchemaError, match="no visual"):
-        validate_output(out(), none)
-    single = validate_output(out(thread=["all in one"]), single_format())
-    assert single.shape == "single" and single.anchors == [1]
-    with pytest.raises(SchemaError, match="single post is 1 post"):
-        validate_output(out(), single_format())
-    long = validate_output(out(thread=["a\n\nb\n\nc"]), long_format(2000))
-    assert long.shape == "long" and long.max_chars == 2000
-    with pytest.raises(SchemaError, match="carries 2 visual"):
-        validate_output(out(visuals=[None]), two)
-    one_left = validate_output(out(), Format(visuals=1, anchors=("first",)))
-    one_left.wanted_visuals, one_left.anchors = 2, [1, 3]
-    assert drafter.format_of(one_left) is None  # never re-demands a dropped picture
-    two_kept = validate_output(out(visuals=[CHART2]), two)
-    assert drafter.format_of(two_kept).visuals == 2
-    assert "visuals" in drafter._as_output(two_kept)
-    assert "extra_visuals" not in drafter._as_output(two_kept)
-
-
-def test_no_shape_carries_a_link():
-    """Rule 2: no post carries a link, so a single or long post is exactly one post and
-    the source is named in words."""
-    fmt = single_format()
-    ok = validate_output(out(thread=["the claim, no link here"]), fmt)
-    assert drafter.check_hard_rules(ok, url=URL, source="pubmed", fmt=fmt) == []
-
-    linked = validate_output(out(thread=[f"the claim {URL}"]), fmt)
-    problems = drafter.check_hard_rules(linked, url=URL, source="pubmed", fmt=fmt)
-    assert any("thread[0] contains a link" in p for p in problems)
-
-    other_link = validate_output(out(thread=["the claim, see example.com/x"]), fmt)
-    problems = drafter.check_hard_rules(other_link, url=URL, source="pubmed", fmt=fmt)
-    assert any("thread[0] contains a link" in p for p in problems)
-
-    # the long post's body is not held to the hook's 220-character cap
-    long_body = "x" * 900
-    d = validate_output(out(thread=[long_body]), long_format(4000))
-    assert drafter.check_hard_rules(d, url=URL, source="pubmed", fmt=long_format(4000)) == []
-    assert long_format(4000).resolve_anchors(1) == [1]
-
-
 # ---- hard rules and prompt --------------------------------------------------------
-
-
-def test_hard_rules_use_the_format_limit_and_check_every_chart():
-    d = validate_output(out(thread=["x" * 300]), long_format(1000))
-    assert drafter.check_hard_rules(d, url=URL, source="pubmed") == []
-    # read as a thread instead, the same draft fails the per-post limit and the hook cap
-    assert drafter.check_hard_rules(d, url=URL, source="pubmed", fmt=Format()) == [
-        f"thread[0] is 300 chars (> {MAX_POST_CHARS})",
-        "first post is 300 chars (> 220); the opener is one claim, not a summary",
-    ]
-    over = validate_output(out(thread=["x" * 1200]), long_format(1000))
-    assert drafter.check_hard_rules(over, url=URL, source="pubmed") == [
-        "thread[0] is 1200 chars (> 1000)"
-    ]
-    two = validate_output(
-        out(visuals=[{**CHART2, "values": [88, 99]}]),
-        Format(visuals=2, anchors=("first", "last")),
-    )
-    assert drafter.verify_chart(two, ABSTRACT) == ["99"]
-    assert "99" in drafter.chart_problems(two, ABSTRACT)[0]
-
-
-def test_hard_rules_text_per_format():
-    assert hard_rules(None) == HARD_RULES
-    assert "exactly one visual" in HARD_RULES and "3 to 6 posts" in HARD_RULES
-    single = hard_rules(single_format())
-    assert "SINGLE post" in single and "exactly one string" in single
-    assert "NEVER write a URL" in single
-    long = hard_rules(long_format(4000))
-    assert "long-form post of at most 4000" in long
-    two = hard_rules(Format(visuals=2, anchors=("first", "last")))
-    assert "carries 2 visuals" in two
-    none = hard_rules(Format(visuals=0, anchors=()))
-    assert "NO visual" in none
-    assert build_system_prompt(None, None) == build_system_prompt()
-    assert "SINGLE post" in build_system_prompt(None, single_format())
-
-
-def test_format_of_a_stored_draft():
-    assert drafter.format_of(validate_output(out())) is None
-    d = validate_output(out(chart=None), Format(visuals=0, anchors=()))
-    assert drafter.format_of(d) == Format(visuals=0, anchors=())
-    d = validate_output(out(thread=["one"]), long_format(3000))
-    assert drafter.format_of(d).shape == "long" and drafter.format_of(d).max_chars == 3000
-    # a table dropped by the reviewer does not change what the format asked for
-    d = validate_output(out())
-    d.chart = None
-    assert drafter.format_of(d) is None
-
-
-def test_format_of_preserves_where_each_picture_was_anchored():
-    # A single-visual draft anchored to post 1 is unchanged.
-    d = validate_output(out())
-    assert drafter.format_of(d) is None
-    fmt = Format(visuals=2, anchors=("first", "last"))
-    d = validate_output(out(visuals=[CHART2]), fmt)
-    assert d.anchors == [1, 3]  # resolved against this draft's own 3-post thread
-    rebuilt = drafter.format_of(d)
-    # The second picture was anchored to the LAST post, not literally post 3: re-resolving
-    # against a revision of a different length must still land it on the new last post.
-    assert rebuilt.resolve_anchors(6) == [1, 6]
-
-
-def test_draft_item_passes_the_format_to_the_checks():
-    calls = []
-
-    def call(system, user, model):
-        calls.append(system)
-        return json.dumps(out(thread=["one post"]))
-
-    res = drafter.draft_item(
-        title="T",
-        abstract=ABSTRACT,
-        url=URL,
-        source="pubmed",
-        call=call,
-        sleep=lambda s: None,
-        fmt=single_format(),
-    )
-    assert res.draft.shape == "single" and "SINGLE post" in calls[0]
-    with pytest.raises(drafter.DraftRejected):
-        drafter.draft_item(
-            title="T",
-            abstract=ABSTRACT,
-            url=URL,
-            source="pubmed",
-            call=call,
-            sleep=lambda s: None,
-            max_attempts=1,
-        )
 
 
 # ---- storage --------------------------------------------------------------------
@@ -427,65 +277,3 @@ def test_publish_attaches_each_picture_at_its_anchor(tmp_path):
         )
         == {}
     )
-
-
-# ---- the swarm on a single and a long post -----------------------------------------
-
-
-def test_run_swarm_single_post_runs_one_cell():
-    fake = FakeModel()
-    brief = Brief(title="T", abstract=ABSTRACT, url=URL, source="pubmed")
-    res = engine.run_swarm(
-        brief, DEFAULT_GENOME, CFG, call=fake, sleep=lambda s: None, fmt=single_format()
-    )
-    assert list(res.cells) == [SINGLE_SLOT.name]
-    assert res.draft_result.draft.shape == "single"
-    thread = res.draft_result.draft.thread
-    assert len(thread) == 1 and URL not in thread[0]
-    cell_prompts = [u for s, u, _ in fake.calls if "YOUR SLOT: single" in u]
-    assert cell_prompts and all("carries NO link of any kind" in u for u in cell_prompts)
-
-
-def test_run_swarm_long_post_joins_sections_under_the_section_limit():
-    fake = FakeModel()
-    brief = Brief(title="T", abstract=ABSTRACT, url=URL, source="pubmed")
-    cfg = {**CFG, "formats": {"long_max_chars": 4000, "long_section_chars": 500}}
-    res = engine.run_swarm(
-        brief, DEFAULT_GENOME, cfg, call=fake, sleep=lambda s: None, fmt=long_format(4000)
-    )
-    assert res.draft_result.draft.shape == "long"
-    thread = res.draft_result.draft.thread
-    assert len(thread) == 1 and URL not in thread[0]
-    assert thread[0].count("\n\n") == len(DEFAULT_GENOME.slots) - 1
-    closer = next(u for _, u, _ in fake.calls if "YOUR SLOT: closer" in u)
-    assert "carries NO link of any kind" in closer
-    systems = {s for s, _, _ in fake.calls if "section of a long post" in s}
-    assert systems and all("At most 500 characters" in s for s in systems)
-    assembly = next(u for _, u, _ in fake.calls if "Assemble the draft JSON" in u)
-    assert "joined by blank lines" in assembly and "under 4000 characters" in assembly
-    assert "exactly one string" in assembly
-
-
-# ---- format genomes -----------------------------------------------------------------
-
-
-def test_seed_formats_convert_and_breed():
-    names = [f.name for f in SEED_FORMATS]
-    assert names == ["thread-1-first", "thread-2-ends", "thread-0", "single-1", "long-1"]
-    for f in SEED_FORMATS:
-        fmt = f.to_format(4000)
-        assert fmt.visuals == f.visuals
-    assert SEED_FORMATS[1].to_format(4000).anchors == ("first", "last")
-    assert SEED_FORMATS[4].to_format(2500).max_chars == 2500
-    g = FormatGenome.from_json(SEED_FORMATS[1].to_json(), id=7)
-    assert g.id == 7 and g.anchors == ["first", "last"]
-    for seed in range(30):
-        parent = random.Random(seed).choice(SEED_FORMATS)
-        child = mutate.breed_format(parent, {"thread-3-6-1f"}, random.Random(seed))
-        child.to_format(4000)  # every child is a valid Format
-        assert child.parent_id == parent.id and child.notes
-        assert child.name != "thread-3-6-1f"
-    assert mutate.format_name(SEED_FORMATS[1]) == "thread-3-6-2fl"
-    assert mutate.format_name(SEED_FORMATS[3]) == "single-1-1f"
-    n = len(mutate.format_neighbours(SEED_FORMATS[2]))
-    assert n == 6  # two shapes, +1 visual, four post-range steps

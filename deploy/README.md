@@ -10,11 +10,11 @@ claude login                                 # every model call runs this CLI, a
 cp .env.example .env && nano .env            # optional ALERT_WEBHOOK_URL / SMTP_*; no Claude key
 mkdir -p logs backups
 .venv/bin/python run_ops.py run --dry-run    # shows the argv per step; runs nothing
-.venv/bin/python run_ops.py run              # first real run (ingest -> score -> draft)
+.venv/bin/python run_ops.py run              # first real run (ingest -> score -> studio_scan -> ...)
 .venv/bin/python run_ops.py status
 ```
 
-Every model call (scoring, linking, drafting, grading, claim checks) runs the Claude
+Every model call (scoring, linking, the studio's scan, sessions and playbook rewrite) runs the Claude
 Code CLI (Node.js needed for the npm install) on the login of the user that runs the
 pipeline, so log in as `pipeline` as above. There is no API key: an `ANTHROPIC_API_KEY`
 in `.env` is ignored, kept out of the CLI's environment. cron and systemd start with a
@@ -35,8 +35,7 @@ day (the crontab's `10 6,12,18` line, or `pipeline-studio.timer`), and a plain
 or more: inside the plain run it would hold back every step after it, and the next fires
 would exit 2 on the run lock (or, under systemd, not start at all while the oneshot unit is
 still running). Its own entry takes only the studio's lock, so the pipeline keeps running
-beside it; the plain run's draft step leaves alone every story the session was offered while
-it researches, so the two never write the same story. `pipeline-studio.service` has no unit time limit (`TimeoutStartSec=infinity`):
+beside it. `pipeline-studio.service` has no unit time limit (`TimeoutStartSec=infinity`):
 each stage has its own in `studio/config.yaml`, and a unit limit would kill a session
 mid-stage. Keep `pipeline.service`'s one hour for the plain run.
 

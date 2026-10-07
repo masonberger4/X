@@ -16,7 +16,6 @@ from types import SimpleNamespace
 import pytest
 
 import claude_cli
-from draft import drafter
 from score import rubric
 from score.scorer import HeadlessResponse, Scorer, ScoringError
 
@@ -401,38 +400,6 @@ def test_scorer_ignores_a_leftover_api_backend(monkeypatch):
 # ---- drafter through the CLI ------------------------------------------------------
 
 
-def test_drafter_call_runs_the_cli_with_the_root_config(monkeypatch):
-    monkeypatch.setattr(drafter, "_root_config", lambda: {"claude_code": {"binary": "cc"}})
-    seen = {}
-
-    def fake_run(user, *, system, model, cfg, effort=None):  # no tools for the drafter
-        seen.update(user=user, system=system, model=model, cfg=cfg, effort=effort)
-        return '{"ok": true}'
-
-    monkeypatch.setattr(claude_cli, "run_claude", fake_run)
-    assert drafter.call_anthropic("SYS", "USER", "claude-sonnet-5") == '{"ok": true}'
-    assert seen == {
-        "user": "USER",
-        "system": "SYS",
-        "model": "claude-sonnet-5",
-        "cfg": {"claude_code": {"binary": "cc"}},
-        "effort": None,  # no drafter_effort: the model's default
-    }
-
-
-def test_drafter_call_needs_no_api_key_and_ignores_a_leftover_backend(monkeypatch):
-    monkeypatch.setitem(sys.modules, "anthropic", None)  # `import anthropic` now fails
-    monkeypatch.setenv("LLM_BACKEND", "api")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(drafter, "_root_config", lambda: {"models": {"backend": "api"}})
-    calls = []
-    monkeypatch.setattr(
-        claude_cli, "run_claude", lambda user, **kw: calls.append(user) or "from the CLI"
-    )
-    assert drafter.call_anthropic("SYS", "USER", "m") == "from the CLI"
-    assert calls == ["USER"]
-
-
 def test_run_with_timeout_kills_the_child_and_raises():
     """A real subprocess: the timeout must end the call (and the process) instead of
     blocking in communicate(), which is what happened on Windows through claude.cmd."""
@@ -572,19 +539,6 @@ def test_scorer_refusal_is_not_retried_and_splits_the_batch(monkeypatch, db):
     scores = scorer.score_unscored(db)
     assert len(scores) == 3
     assert calls == [3, 1, 2, 1, 1]  # no backoff retries, one split per refusal
-
-
-def test_scorer_and_drafter_pass_effort_to_cli(monkeypatch):
-    seen = []
-    monkeypatch.setattr(
-        claude_cli,
-        "run_claude",
-        lambda user, **kw: seen.append(kw.get("effort")) or json.dumps({"scores": []}),
-    )
-    Scorer({**CFG, "models": {**CFG["models"], "scorer_effort": "low"}}).create_message("U")
-    monkeypatch.setattr(drafter, "_root_config", lambda: {"models": {"drafter_effort": "low"}})
-    drafter.call_anthropic("S", "U", "m")
-    assert seen == ["low", "low"]
 
 
 def test_empty_result_names_the_stop_reason():

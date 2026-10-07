@@ -1,7 +1,7 @@
 """The app's only way to reach Claude: the Claude Code CLI in print mode.
 
-Every model call in the pipeline (the scorer, the story linker and rater, the drafter and
-the swarm, the image grader, the claim verifier) hands its prompt to `run_claude`, which
+Every one-shot model call in the pipeline (the scorer, the story linker and rater, the
+studio's radar scan and playbook rewrite) hands its prompt to `run_claude`, which
 launches `claude -p` as a subprocess. The CLI is logged in with your own Anthropic
 account, so usage counts against that account's plan; there is no API key and no other
 backend. API credentials are kept out of the child's environment (`cli_env`) so a stale
@@ -126,7 +126,7 @@ def build_argv(
     `--safe-mode` (settings["safe_mode"], on unless claude_code.safe_mode is false) keeps
     the operator's own Claude Code set-up out of the call while the login still works: their
     CLAUDE.md files and rules (yours and any in the folders above the call's), hooks (a Stop
-    hook would run on every one of the hundred calls a swarm draft makes), MCP servers,
+    hook would run on every call), MCP servers,
     plugins and output styles, any of which could reword a reply that must be JSON. The
     studio's sessions pass the same flag through studio/config.yaml's cli_flags."""
     tool_list = ",".join(tools or [])

@@ -30,7 +30,7 @@ studio_scan_now / studio_learn_now steps through the same runs, the performance 
 "add the post's link" goes through panel/publishing.py:add_head_link, and when a studio
 run ends, stopped or not, a piece it left mid-stage is marked interrupted (`_after_run`).
 
-The step 2 approval queue's routes are included unchanged (/queue, /drafts/..., /voice),
+The approval queue's routes are included unchanged (/queue, /drafts/..., /status/...),
 so the operator has one URL for the whole workflow. Everything else this app shows is
 read through `ops/store.py`'s read-only adapters; it owns no tables of its own.
 
@@ -254,7 +254,6 @@ def dashboard(request: Request, conn: Conn, backed_up: str = "", backup_error: s
             "checks": views.check_rows(report),
             "steps": views.step_rows(JOBS.steps(), last_runs, now),
             "counts": ops_store.table_counts(conn),
-            "yes_undrafted": ops_store.fetch_feed_yes_undrafted(conn),
             "db_path": str(db_path),
             "db_size_mb": db_path.stat().st_size / (1024 * 1024) if db_path.exists() else 0.0,
             "disk_free_mb": _disk_free_mb(db_path),
@@ -456,24 +455,6 @@ def feedback_page(request: Request, conn: Conn):
             "posts": ops_store.fetch_post_metrics(conn),
             "report": ops_store.fetch_latest_feedback_report(conn),
             "state": ops_store.fetch_feedback_state(conn),
-            "now": now,
-        },
-    )
-
-
-@app.get("/swarm", response_class=HTMLResponse)
-def swarm_page(request: Request, conn: Conn):
-    """Step 9: the population of writer genomes and designers, their fitness and family
-    tree, and the swarm-vs-control measurement. A view: nothing here breeds or retires."""
-    now = _now()
-    population = ops_store.fetch_swarm_population(conn)
-    return templates.TemplateResponse(
-        request,
-        "swarm.html",
-        {
-            "rows": views.swarm_rows(population, now),
-            "bet": views.bet_summary_row(ops_store.fetch_swarm_bet(conn)),
-            "present": bool(population),
             "now": now,
         },
     )

@@ -85,42 +85,14 @@ disease model" or "this is a 2, no investment angle at all" are exactly what
 I feed back into the scoring rules so it thinks more like me next week. My
 ratings are the ground truth; the AI's ratings are just a second opinion.
 
-## 5. It writes drafts
+## 5. It writes the posts: one long research session each
 
-For the stories that score high enough, Claude writes a draft: one standalone
-post, plus a short thread of three to six posts that goes deeper. Same
-persona, plus a voice guide I wrote: plain English, short sentences, name the
-company and its ticker, sceptical of small trials and press-release spin,
-always add an interpretation the press release didn't give you. What does
-this do to the company's thesis? Who else is chasing the same target and how
-far along are they? What does the manufacturing cost structure mean for
-margins?
-
-Then the hard rules. Some things are never allowed, and they're checked by
-plain code after the AI writes, not by trusting the AI to behave:
-
-- No medical advice. Ever. Describe evidence, never tell anyone what to do
-  about their treatment.
-- No investment advice. No buy, sell, hold or short, no price targets of its
-  own, no promises about returns. Describe what a result means and what the risks
-  are; the reader decides. A quick-take draft cites no analyst's target at all.
-- Every number in the draft has to appear word-for-word in the source. No
-  rounding, no "roughly", no doing the maths yourself.
-- Preprints get called preprints.
-- No post carries a link: the source is named in words. Every post fits X's
-  length limit.
-
-A draft that breaks any of these is thrown out and the AI gets another go,
-this time told exactly what it did wrong. If it fails four times the story
-is set aside for me to look at.
-
-## 5b. The big posts: one long research session each
-
-The drafts above are quick takes on the day's stories. The posts the account is
-really built on are bigger: a deal decoded, a whole drug class mapped, a company's
-next twelve months laid out, with designed charts. Those started as long chats
-with Claude where it researched for an hour, wrote, checked its own facts and drew
-the cards, and they were better than anything the drafter made.
+The posts the account is built on are big ones: a deal decoded, a whole drug class
+mapped, a company's next twelve months laid out, with designed charts. Those started
+as long chats with Claude where it researched for an hour, wrote, checked its own
+facts and drew the cards, and they were better than anything a quick drafter made.
+(There used to be a quick drafter, plus a swarm of cheap writers and a separate claim checker;
+they are gone. This is the only writer now.)
 
 So now the app does exactly that, once a day on its own or whenever I type a
 topic. It starts one long Claude session (Opus at maximum effort) and lets it
@@ -147,45 +119,26 @@ queue with its fact base and fact-check log next to it. If I want changes I say
 so in words and the same session, which still remembers everything it read,
 rewrites it. Nothing posts until I press the button.
 
-## 6. A second pass checks its homework
+## 6. I approve every single post
 
-Every draft comes with a list of "claims to verify": the things the AI added
-from its own knowledge rather than from the source, like a competitor's
-pipeline stage or what a deal was worth. Before I see the draft, each of those
-claims goes to Claude again, this time with web search switched on and one
-job: find the primary source, the company's own press release, the trial
-registry, the journal, the FDA or SEC page, and quote the exact sentence that
-supports or contradicts it. It hands back a verdict, a link and the sentence.
-
-The verdict is a lead. The link is the proof. I open it and read the sentence
-before I approve anything, and a claim the source contradicts locks the
-approve button until I fix the draft.
-
-## 7. I approve every single post
-
-Nothing goes out without me. The drafts land in a small web page on my
+Nothing goes out without me. The finished pieces land in a small web page on my
 computer where I read each one and approve it, edit it, or reject it. An
 approve is not a one-way door: as long as the post has not gone out, and no
 publish run has it in hand at that moment, I can reopen it and it comes back to
 the pile, waiting on me again.
 
-When I edit, it remembers both versions and why I changed it. Over time those
-edits get shown back to the AI as examples of how I actually want things
-written, so the drafts drift towards my voice. And once in a while it
-produces a report saying "here's what your edits keep asking for; maybe add
-these lines to the voice guide," which I read and apply by hand if I agree.
+When I edit, it remembers both versions and why I changed it.
 
-## 8. It posts, carefully
+## 7. It posts, carefully
 
 Approved posts go out at set times of day, a few a day at most, spaced out.
 Breaking news like an FDA approval can jump the queue. Posting is off by
 default and has to be switched on in two separate places before a single
 tweet is sent, because the failure mode I'm most afraid of is a bug posting
-fifty things at 3am. Every text is checked against the hard rules one more
-time right before it goes, and a post is only ever sent once even if the
+fifty things at 3am. Every text is checked once more right before it goes, and a post is only ever sent once even if the
 program runs twice.
 
-## 9. It learns what worked
+## 8. It learns what worked
 
 A week later it looks at how each post did: views, likes, replies, follower
 count over time. It cross-references that against the score and the ratings
