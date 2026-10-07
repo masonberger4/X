@@ -791,7 +791,15 @@ carrying `--live`).
   `studio_catalysts` (unique `key`, open/dismissed, `origin` scan:<id> or piece:<id>);
   `claim_topic` marks the radar topic or catalyst a queued topic came from with the piece,
   `drop_topic` puts it back. `/studio/radar` (studio/web.py) queues them through
-  `queue_topic` and starts `studio_now`. `ops/config.yaml` has the automatic
+  `queue_topic` and starts `studio_now`. **Repeats are flagged, never blocked**: `studio/repeats.py` is pure
+  (`marks`: source URLs, drug names via `draft/tags.py`, development codes, trial names, NCT
+  numbers, companies and tickers, title words; `reasons`: a shared source, drug or trial, or
+  a company plus `MIN_SHARED_WORDS` title words), compared against `store.covered_since`
+  (pieces of the last `radar.repeat_days` days not discarded, and unclaimed queued topics,
+  each with the radar topic's or catalyst's companies, sources and drug it came from) by
+  `runner.covered_for_repeats`; the radar page shows a "may repeat" flag on an untaken topic
+  or catalyst (its button "Write it anyway") and an automatic piece's brief carries
+  `Brief.radar_repeats` as a MAY REPEAT line under that radar topic. `ops/config.yaml` has the automatic
   `studio_scan` step (right before `studio`) and the manual `studio_scan_now`, both under
   the `studio_scan` lock.
   **The studio learns from X** (`studio/config.yaml` `learn:`). `studio/learn.py` is pure
@@ -909,7 +917,8 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           read-only adapters), radar.py (pure: the scan's prompt and answer, the
           calendar's dates), scan.py (the daily scan, the research harvest), learn.py
           (pure: scores, arms, the lean, the evidence text, the rewrite's prompt and
-          checks), evidence.py (what X says, from the DB), playbook.py (the file, its
+          checks), repeats.py (pure: does a radar topic or catalyst repeat a piece),
+          evidence.py (what X says, from the DB), playbook.py (the file, its
           versions, the rewrite), dashboard.py (pure views of /studio/performance),
           web.py + templates/ (/studio pages, /studio/radar)
 run_ingest.py  run_score.py  digest.py  run_draft.py  run_verify.py  run_queue.py

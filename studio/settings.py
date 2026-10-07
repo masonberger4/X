@@ -62,6 +62,7 @@ DEFAULTS: dict[str, Any] = {
         "brief_upcoming_days": 21,
         "brief_recent_days": 3,
         "feed_stories": 10,
+        "repeat_days": 30,
     },
     "learn": {
         "enabled": True,

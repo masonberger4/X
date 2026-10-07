@@ -1292,6 +1292,15 @@ and long posts need X Premium.
      preview** queues a piece on an event coming up, and **Write the reaction**
      one on an event that just passed, each with a fitting angle selected.
      **Dismiss** takes an event off (for instance an old date after it moved).
+   - **May repeat.** A topic or a catalyst that looks like a piece started in the
+     last `radar: repeat_days` days (30), or a topic still in the queue, carries a
+     **may repeat** flag naming that piece, its stage and angle, and what they share:
+     a drug or trial (a generic name, a code like AZD0486, KEYNOTE-B15, an NCT
+     number), a source URL, or a company plus at least two words of the title. Its
+     button reads **Write it anyway**: the flag never blocks, since a story with
+     real news is worth a second piece. An automatic piece sees the same flag on
+     that topic in its brief and is told to take it only with news the earlier
+     piece did not have. `repeat_days: 0` turns the flag off.
    A failed scan changes nothing: the page says why, and the next run tries
    again. The settings are `radar:` in `studio\config.yaml`.
 11. From a command prompt (the same thing the buttons do):
