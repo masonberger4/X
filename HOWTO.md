@@ -552,9 +552,9 @@ Set `posting: api` to go back to posting through the X API (the steps below).
    ```
    python run_publish.py
    ```
-   The shipped caps are `max_posts_per_day: 3` and `min_gap_minutes: 15`; they
-   are a safety limit on every post, "Publish now" included. Three a day is a
-   ceiling, not a target: three posts a day nobody answers teach the ranker to
+   The shipped caps are `max_posts_per_day: 50` and `min_gap_minutes: 5`; they
+   are a safety limit on every post, "Publish now" included. The cap is a
+   ceiling, not a target: many posts a day nobody answers teach the ranker to
    skip the account. The shipped `slots: []` means a hand-run
    `run_publish.py --live` (without `--now`) posts the top approved draft as
    soon as the gap and the daily cap allow; list times under `slots:` (e.g.
