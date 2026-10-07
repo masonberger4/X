@@ -552,9 +552,9 @@ Set `posting: api` to go back to posting through the X API (the steps below).
    ```
    python run_publish.py
    ```
-   The shipped caps are `max_posts_per_day: 3` and `min_gap_minutes: 15`; they
-   are a safety limit on every post, "Publish now" included. Three a day is a
-   ceiling, not a target: three posts a day nobody answers teach the ranker to
+   The shipped caps are `max_posts_per_day: 50` and `min_gap_minutes: 5`; they
+   are a safety limit on every post, "Publish now" included. The cap is a
+   ceiling, not a target: many posts a day nobody answers teach the ranker to
    skip the account. The shipped `slots: []` means a hand-run
    `run_publish.py --live` (without `--now`) posts the top approved draft as
    soon as the gap and the daily cap allow; list times under `slots:` (e.g.
@@ -615,7 +615,7 @@ Set `posting: api` to go back to posting through the X API (the steps below).
 
 You may not need this part. While the control panel or desktop window is open it
 already runs ingest, score, studio_scan, studio, draft, verify, feedback, evolve and studio_learn on
-its own at 06:00, 12:00 and 18:00 (part 8, "Automatic runs"), and it never publishes. Task
+its own at 01:00, 03:00, 06:00, 09:32, 12:00 and 15:00 (part 8, "Automatic runs"), and it never publishes. Task
 Scheduler is the other way: it runs even with the app closed and can wake the
 PC, but it needs the tasks below. Pick one for `pipeline-run` and
 `pipeline-studio`. Running both is
@@ -921,7 +921,7 @@ motion, that bar stands still too. Four pages:
   every claim already checked and only the one in flight is redone next time.
 - **Automatic runs** (top of `/runs`) — while the panel or the desktop window
   is open it runs ingest, score, studio_scan, studio, draft, verify, feedback, evolve and studio_learn on its own,
-  at 06:00, 12:00 and 18:00 local time as shipped. Publishing is never one of
+  at 01:00, 03:00, 06:00, 09:32, 12:00 and 15:00 local time as shipped. Publishing is never one of
   them: posting stays the approved page's "Publish now", and an automatic run
   cannot post even if `.env` allows posting. The box says whether it is on,
   when the next run is, and what happened at each recent time (started, or
