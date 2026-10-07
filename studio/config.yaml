@@ -127,6 +127,8 @@ radar:
   brief_upcoming_days: 21       # what an open piece is shown as coming up
   brief_recent_days: 3          # and as just passed
   feed_stories: 10              # the feed's top stories on the radar page
+  repeat_days: 30               # a topic or catalyst that looks like a piece started this
+                                # recently (or a queued topic) is flagged as a possible repeat
 
 # What X says, fed back into the next piece (studio/learn.py, studio/evidence.py). Each
 # posted piece is measured on its first post `horizon_hours` after it went out (step 4's

@@ -24,6 +24,7 @@ from studio import prompt as P
 from studio import qa
 from studio import radar as R
 from studio import render as render_mod
+from studio import repeats as RP
 from studio import session as SS
 from studio import store as S
 from studio import topics as T
@@ -237,12 +238,16 @@ def build_brief(
     shortlist: list[P.Story] = []
     radar: list[tuple[int, R.Topic]] = []
     coming: list[R.Catalyst] = []
+    radar_repeats: dict[int, list[str]] = {}
     if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
         # Only the research stage chooses a story; later stages have one.
         # Nor a story offered to a piece researching beside this one.
         taken = taken_stories(conn) | S.offered_elsewhere(conn, piece.id)
         shortlist = T.fetch_shortlist(cfg["topics"], exclude=taken)
         radar, coming = radar_for_brief(conn, cfg, date.fromisoformat(today))
+        covered = covered_for_repeats(conn, cfg, exclude_piece=piece.id)
+        repeats = {rid: [r.line() for r in RP.find(RP.topic_marks(t), covered)] for rid, t in radar}
+        radar_repeats = {rid: lines for rid, lines in repeats.items() if lines}
     said, lean = "", None
     if evidence is not None:
         said = E.block(evidence, cfg)
@@ -273,6 +278,7 @@ def build_brief(
         story=story,
         shortlist=shortlist,
         radar=radar,
+        radar_repeats=radar_repeats,
         coming_up=coming,
         offer=offer,
         hooks_to_avoid=hooks,
@@ -310,6 +316,22 @@ def radar_for_brief(
         back_days=int(rcfg["brief_recent_days"]),
     )
     return [(t.id, t.to_topic()) for t in topics[:RADAR_IN_BRIEF]], coming[:COMING_UP_IN_BRIEF]
+
+
+def covered_for_repeats(
+    conn: sqlite3.Connection, cfg: dict[str, Any], *, exclude_piece: int | None = None
+) -> list[tuple[Any, RP.Marks]]:
+    """What a radar topic or catalyst may repeat (studio/repeats.py), with each one's
+    marks: the pieces of the last `radar.repeat_days` days and the queued topics."""
+    days = float(cfg["radar"].get("repeat_days") or 0)
+    if days <= 0:
+        return []
+    since = datetime.now(UTC) - timedelta(days=days)
+    return [
+        (c, RP.covered_marks(c))
+        for c in S.covered_since(conn, since.isoformat(timespec="seconds"))
+        if not (c.kind == "piece" and c.id == exclude_piece)
+    ]
 
 
 def _today() -> tuple[str, str]:

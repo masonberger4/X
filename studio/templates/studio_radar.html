@@ -30,6 +30,12 @@ before the first automatic studio run.</p>
   <p><strong>{{ t.title }}</strong>
     {% if t.status == "queued" %}<span class="pill warn">queued</span>{% elif t.status == "used" %}<span class="pill ok">written</span>{% if t.piece_id %} <a href="/studio/{{ t.piece_id }}">piece {{ t.piece_id }}</a>{% endif %}{% endif %}
     <span class="meta">· {{ t.created_at|localtime }}</span></p>
+  {% set reps = topic_repeats.get(t.id) %}
+  {% if reps %}<p class="meta"><span class="pill warn">may repeat</span>
+    {% for r in reps %}{% if r.covered.kind == "piece" %}<a href="/studio/{{ r.covered.id }}">piece {{ r.covered.id }}</a>{% else %}a queued topic{% endif %}
+    ({{ r.covered.status }}{% if r.covered.angle %}, {{ angles[r.covered.angle].name if r.covered.angle in angles else r.covered.angle }}{% endif %}): {{ r.covered.label }}.
+    Shares {{ r.reasons|join("; ") }}.{% if not loop.last %}<br>{% endif %}{% endfor %}
+    Write it only if there is news that piece did not have.</p>{% endif %}
   {% if t.why_now %}<p>{{ t.why_now }}</p>{% endif %}
   <p class="meta">{% if t.angle %}Suggested angle: {{ angles[t.angle].name if t.angle in angles else t.angle }}{% endif %}
     {% if t.companies %} · {% for c in t.companies %}{{ c.name }}{% if c.ticker %} ({{ c.ticker }}){% endif %}{{ ", " if not loop.last }}{% endfor %}{% endif %}
@@ -41,7 +47,7 @@ before the first automatic studio run.</p>
       {% for key, a in angles.items() %}<option value="{{ key }}" {% if key == t.angle %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
     </select>
     <label class="meta"><input type="checkbox" name="checkpoint" value="1" {% if cfg.manual.checkpoint %}checked{% endif %}> stop after research</label>
-    <button type="submit">Write it</button>
+    <button type="submit">{{ "Write it anyway" if reps else "Write it" }}</button>
   </form>
   <form method="post" action="/studio/radar/topics/{{ t.id }}/dismiss" class="inline"><button class="link" type="submit">dismiss</button></form>
   {% endif %}
@@ -83,6 +89,8 @@ Dates are as precise as the source was; a quarter counts until it ends.</p>
     <td class="when">{{ c.when_text }}</td>
     <td>{{ c.company }}{% if c.ticker %} <span class="meta">({{ c.ticker }})</span>{% endif %}</td>
     <td>{{ kinds.get(c.kind, c.kind) }}{% if c.drug %}: {{ c.drug }}{% endif %}{% if c.detail %}<br><span class="meta">{{ c.detail }}</span>{% endif %}
+      {% set reps = catalyst_repeats.get(c.id) %}
+      {% if reps %}<br><span class="pill warn">may repeat</span> <span class="meta">{% for r in reps %}{% if r.covered.kind == "piece" %}<a href="/studio/{{ r.covered.id }}">piece {{ r.covered.id }}</a>{% else %}a queued topic{% endif %} ({{ r.covered.status }}{% if r.covered.angle %}, {{ angles[r.covered.angle].name if r.covered.angle in angles else r.covered.angle }}{% endif %}): shares {{ r.reasons|join("; ") }}{{ "; " if not loop.last }}{% endfor %}</span>{% endif %}
       <br><span class="meta">{% if c.source %}<a href="{{ c.source }}" rel="noreferrer noopener" target="_blank">source</a> · {% endif %}from {{ c.origin }}{% if c.piece_id %} · <a href="/studio/{{ c.piece_id }}">piece {{ c.piece_id }}</a>{% endif %}</span></td>
     <td>{% if c.topic_id is none and c.piece_id is none %}
       <form method="post" action="/studio/radar/catalysts/{{ c.id }}/write" class="inline">
