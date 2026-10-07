@@ -62,16 +62,20 @@ steps:
   # only the studio lock, never the run lock the pipeline's fires take.
   - name: studio
     lock: studio
+    slots: 3
     argv: ["python", "run_studio.py"]
     enabled: true
     required: false
     skip_when_busy: true
     timeout_seconds: 0
   # Manual only (the studio page's buttons): start a piece now, whatever the limits, and
-  # act on the editor's Continue / Revise / Resume requests. Both share the studio lock,
-  # so one studio run at a time.
+  # act on the editor's Continue / Revise / Resume requests. All three share the studio
+  # lock, which has `slots: 3`: up to three studio runs at once, each writing its own
+  # piece (keep it equal to studio/config.yaml `max_parallel`, which the studio enforces
+  # itself however a run was started).
   - name: studio_now
     lock: studio
+    slots: 3
     argv: ["python", "run_studio.py", "--now"]
     enabled: true
     required: false
@@ -79,6 +83,7 @@ steps:
     timeout_seconds: 0
   - name: studio_resume
     lock: studio
+    slots: 3
     argv: ["python", "run_studio.py", "--resume-only"]
     enabled: true
     required: false

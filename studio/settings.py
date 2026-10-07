@@ -24,6 +24,7 @@ STAGES = ("research", "write", "polish", "revise")
 # model ID lives in config, never in code.
 DEFAULTS: dict[str, Any] = {
     "effort": "max",
+    "max_parallel": 3,
     "auto": {
         "enabled": True,
         "max_new_per_day": 1,
@@ -115,6 +116,7 @@ def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
     cfg["model"] = str(cfg.get("model") or "").strip()
     if not cfg["model"]:
         raise ValueError("studio/config.yaml must name the writer's model (model: ...)")
+    cfg["max_parallel"] = max(1, int(cfg.get("max_parallel") or 1))
     cfg["tools"] = [str(t) for t in (cfg.get("tools") or [])]
     cfg["cli_flags"] = [str(f) for f in (cfg.get("cli_flags") or [])]
     radar = cfg["radar"]

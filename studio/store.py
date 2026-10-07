@@ -406,6 +406,19 @@ def running_pieces(conn: sqlite3.Connection) -> list[Piece]:
     return [_row(r) for r in rows]
 
 
+def offered_elsewhere(conn: sqlite3.Connection, piece_id: int) -> set[int]:
+    """The stories offered to the other pieces still researching on no story of their own
+    (their `offered_stories`): a piece written beside them is not offered the same ones."""
+    out: set[int] = set()
+    for p in running_pieces(conn):
+        if p.id == piece_id or p.stage != STAGE_RESEARCHING or p.cluster_id is not None:
+            continue
+        for sid in p.meta.get("offered_stories") or []:
+            if isinstance(sid, int) or (isinstance(sid, str) and sid.isdigit()):
+                out.add(int(sid))
+    return out
+
+
 def first_in_stage(conn: sqlite3.Connection, stage: str) -> Piece | None:
     """The oldest piece in this stage, or None (however many pieces there are)."""
     r = conn.execute(

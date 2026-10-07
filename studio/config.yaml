@@ -9,6 +9,13 @@
 model: claude-opus-5-5
 effort: max                     # low | medium | high | xhigh | max
 
+# Pieces written at once. Each studio run takes one of this many writing slots
+# (<workspace>/.studio.lock, .studio.lock.2, ...) and works on one piece at a time; a run
+# that finds every slot taken does nothing. Each session is a full Opus session on the
+# one Claude login, so three at once use the plan's limits three times as fast. Keep the
+# `slots:` of the studio steps in ops/config.yaml equal to it.
+max_parallel: 3
+
 # What the automatic run (`python run_studio.py`, the `studio` step in ops/config.yaml)
 # may start on its own. A button press (`--now`) ignores both limits.
 auto:

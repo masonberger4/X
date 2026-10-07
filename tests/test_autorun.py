@@ -577,6 +577,15 @@ def _live_auto_run(jobs: JobManager, active: str, done: list[str]):
     return job
 
 
+def _fill_studio_slots(jobs: JobManager) -> None:
+    """Live studio_now runs in every writing slot the shipped config gives but one."""
+    step = next(s for s in jobs.steps() if s.name == "studio_now")
+    for k in range(step.slots - 1):
+        job = Job(id=f"jnow{k}", steps=["studio_now"], started_at=la(2026, 10, 1, 7), plan=[step])
+        job.active_step = "studio_now"
+        jobs._live.append(job)
+
+
 def test_a_studio_session_outlasting_the_gap_holds_back_only_itself(tmp_path, monkeypatch):
     """The shipped run lists the studio before draft. When its session is still going at
     the next run time, draft, verify, feedback and evolve are not running: they wait in
@@ -586,6 +595,9 @@ def test_a_studio_session_outlasting_the_gap_holds_back_only_itself(tmp_path, mo
     cfg["lock_path"] = str(tmp_path / "p.lock")
     jobs = JobManager(cfg, tmp_path, db_path=tmp_path / "t.db")
     _live_auto_run(jobs, "studio", done=["ingest", "score"])
+    # One studio run leaves the other writing slots free; fill them (two editor's pieces).
+    assert not STUDIO_BUSY & jobs.busy_steps()
+    _fill_studio_slots(jobs)
     later = {"draft", "verify", "feedback", "evolve"}
     assert later | STUDIO_BUSY <= jobs.busy_steps()
     behind = jobs.queued_behind({"studio"})
