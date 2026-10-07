@@ -139,6 +139,9 @@ class Brief:
     # The radar (studio/radar.py), for a piece that chooses its own topic: today's scan
     # topics as (radar id, topic), and the catalysts coming up or just passed.
     radar: list[tuple[int, Topic]] = field(default_factory=list)
+    # A radar topic that looks like a piece the account has (studio/repeats.py): radar id
+    # -> one line per piece or queued topic it may repeat.
+    radar_repeats: dict[int, list[str]] = field(default_factory=dict)
     coming_up: list[Catalyst] = field(default_factory=list)
     # What X says about the account's earlier pieces (studio/evidence.py): the evidence
     # text and this piece's lean, both empty until enough pieces are measured.
@@ -245,7 +248,7 @@ def _topic_block(b: Brief) -> str:
             "THE RADAR: topics today's scan of the news proposed (no piece has used them). "
             "Check its facts yourself; its why-now is a lead, not a source."
         )
-        lines += [_radar_line(rid, t) for rid, t in b.radar]
+        lines += [_radar_line(rid, t, b.radar_repeats.get(rid, [])) for rid, t in b.radar]
     if b.coming_up:
         lines.append(
             "COMING UP: dated catalysts on the account's calendar. A preview before an "
@@ -268,7 +271,7 @@ def _topic_block(b: Brief) -> str:
     return "\n".join(lines)
 
 
-def _radar_line(radar_id: int, t: Topic) -> str:
+def _radar_line(radar_id: int, t: Topic, repeats: Sequence[str] = ()) -> str:
     lines = [f"- [radar {radar_id}] {t.title}"]
     if t.why_now:
         lines.append(f"  Why now: {t.why_now}")
@@ -281,6 +284,11 @@ def _radar_line(radar_id: int, t: Topic) -> str:
         lines.append("  " + "; ".join(tags))
     if t.sources:
         lines.append("  " + " ".join(t.sources))
+    for r in repeats:
+        lines.append(
+            f"  MAY REPEAT {r}. Take it only with news that piece did not have, and say "
+            "in research.json what is new."
+        )
     return "\n".join(lines)
 
 

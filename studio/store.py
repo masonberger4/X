@@ -406,6 +406,19 @@ def running_pieces(conn: sqlite3.Connection) -> list[Piece]:
     return [_row(r) for r in rows]
 
 
+def offered_elsewhere(conn: sqlite3.Connection, piece_id: int) -> set[int]:
+    """The stories offered to the other pieces still researching on no story of their own
+    (their `offered_stories`): a piece written beside them is not offered the same ones."""
+    out: set[int] = set()
+    for p in running_pieces(conn):
+        if p.id == piece_id or p.stage != STAGE_RESEARCHING or p.cluster_id is not None:
+            continue
+        for sid in p.meta.get("offered_stories") or []:
+            if isinstance(sid, int) or (isinstance(sid, str) and sid.isdigit()):
+                out.add(int(sid))
+    return out
+
+
 def first_in_stage(conn: sqlite3.Connection, stage: str) -> Piece | None:
     """The oldest piece in this stage, or None (however many pieces there are)."""
     r = conn.execute(
@@ -1235,3 +1248,62 @@ def set_catalyst(
             f"UPDATE studio_catalysts SET {', '.join(sets)} WHERE id = ?", (*args, int(catalyst_id))
         )
         conn.commit()
+
+
+def covered_since(conn: sqlite3.Connection, since_iso: str) -> list[Any]:
+    """What a new radar topic or catalyst may repeat (studio/repeats.py:Covered), newest
+    first: every piece started since `since_iso` that was not discarded, and every topic
+    still waiting in the queue. Each brings the companies, sources and drug of the radar
+    topic or catalyst it was queued from, when it was."""
+    from studio.repeats import Covered
+
+    radar: dict[tuple[str, int], RadarTopic] = {}
+    for r in conn.execute(
+        "SELECT * FROM studio_radar_topics WHERE piece_id IS NOT NULL OR topic_id IS NOT NULL"
+    ).fetchall():
+        t = _radar_topic(r)
+        if t.piece_id is not None:
+            radar[("piece", t.piece_id)] = t
+        if t.topic_id is not None:
+            radar[("queued", t.topic_id)] = t
+    cats: dict[tuple[str, int], CatalystRow] = {}
+    for r in conn.execute(
+        "SELECT * FROM studio_catalysts WHERE piece_id IS NOT NULL OR topic_id IS NOT NULL"
+    ).fetchall():
+        c = _catalyst(r)
+        if c.piece_id is not None:
+            cats[("piece", c.piece_id)] = c
+        if c.topic_id is not None:
+            cats[("queued", c.topic_id)] = c
+
+    def covered(kind: str, id_: int, label: str, angle: str, status: str, text: str) -> Any:
+        t, c = radar.get((kind, id_)), cats.get((kind, id_))
+        companies = [(x["name"], x["ticker"]) for x in t.companies] if t else []
+        sources = list(t.sources) if t else []
+        if c is not None:
+            companies.append((c.company, c.ticker))
+            sources += [c.source] if c.source else []
+        return Covered(
+            kind=kind,
+            id=id_,
+            label=label,
+            angle=angle,
+            status=status,
+            text=text,
+            companies=tuple(companies),
+            sources=tuple(sources),
+            drugs=(c.drug,) if c is not None and c.drug else (),
+        )
+
+    out = []
+    for t in reversed(queued_topics(conn)):
+        first = t.topic.strip().splitlines()[0] if t.topic.strip() else f"topic {t.id}"
+        out.append(covered("queued", t.id, first, t.angle, "queued", t.topic))
+    rows = conn.execute(
+        "SELECT * FROM studio_pieces WHERE created_at >= ? AND stage != ? ORDER BY id DESC",
+        (since_iso, STAGE_DISCARDED),
+    ).fetchall()
+    for p in map(_row, rows):
+        angle = p.angle or p.requested_angle
+        out.append(covered("piece", p.id, p.label, angle, p.stage, f"{p.title}\n{p.topic}"))
+    return out

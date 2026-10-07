@@ -58,16 +58,20 @@ steps:
   # only the studio lock, never the run lock the pipeline's fires take.
   - name: studio
     lock: studio
+    slots: 3
     argv: ["python", "run_studio.py"]
     enabled: true
     required: false
     skip_when_busy: true
     timeout_seconds: 0
   # Manual only (the studio page's buttons): start a piece now, whatever the limits, and
-  # act on the editor's Continue / Revise / Resume requests. Both share the studio lock,
-  # so one studio run at a time.
+  # act on the editor's Continue / Revise / Resume requests. All three share the studio
+  # lock, which has `slots: 3`: up to three studio runs at once, each writing its own
+  # piece (keep it equal to studio/config.yaml `max_parallel`, which the studio enforces
+  # itself however a run was started).
   - name: studio_now
     lock: studio
+    slots: 3
     argv: ["python", "run_studio.py", "--now"]
     enabled: true
     required: false
@@ -75,6 +79,7 @@ steps:
     timeout_seconds: 0
   - name: studio_resume
     lock: studio
+    slots: 3
     argv: ["python", "run_studio.py", "--resume-only"]
     enabled: true
     required: false
@@ -137,7 +142,7 @@ run_log_tail_chars: 4000         # stdout/stderr kept per step per run
 # from the last run waits that long for them. Running these and a Task Scheduler
 # pipeline-run (HOWTO Part 6) together is safe but wasteful: pick one.
 auto_run_enabled: true
-auto_run_times: ["06:00", "12:00", "18:00"]
+auto_run_times: ["01:00", "03:00", "06:00", "09:32", "12:00", "15:00"]
 auto_run_steps: [ingest, score, studio_scan, studio, feedback, studio_learn]
 auto_run_grace_minutes: 60
 # Daily backup: an automatic run that starts when the newest backup in backups.dir is
@@ -166,7 +171,7 @@ health:
   #            PROMPT_VERSION bump re-scores the backlog on top of it.
   #   drafting: drafts queued in 24h; the studio queues about one a day.
   # Exceeding a cap is 'fail', 80% of it is 'warn'.
-  scores_per_day_max: 150
+  scores_per_day_max: 300
   drafts_per_day_max: 15
   db_max_mb: 2048                # SQLite file size ('warn')
   disk_min_free_mb: 1024         # free space on the DB's filesystem ('fail')

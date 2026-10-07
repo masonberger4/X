@@ -53,10 +53,19 @@ class Step:
     # `run_ops.py run` leaves it out altogether: it has a schedule entry of its own
     # (`--only studio`), which takes no run lock.
     skip_when_busy: bool = False
+    # How many runs of this lock may go at once (the studio writes pieces side by side).
+    # Run k > 1 takes the lock `<lock>-k`, the first one free; 1 is the usual one at a time.
+    slots: int = 1
 
     @property
     def lock_name(self) -> str:
         return self.lock or self.name
+
+    @property
+    def slot_lock_names(self) -> list[str]:
+        """The lock names a run of this step may take, tried in order."""
+        base = self.lock_name
+        return [base] + [f"{base}-{k}" for k in range(2, max(1, self.slots) + 1)]
 
     @property
     def wait_timeout(self) -> float | None:
@@ -73,6 +82,7 @@ class Step:
             lock=str(raw.get("lock") or ""),
             manual=bool(raw.get("manual", False)),
             skip_when_busy=bool(raw.get("skip_when_busy", False)),
+            slots=max(1, int(raw.get("slots", 1) or 1)),
         )
 
 
@@ -176,7 +186,8 @@ def run_steps(
     is used, which `terminate_active()` with no argument sets.
     `lock_path`, when given, makes each step take its own lock (`ops.lock.step_lock_path`
     with the step's `lock_name`) for as long as it runs: a step whose lock another run
-    holds is skipped as `locked` and the run goes on, so different steps run side by side
+    holds is skipped as `locked` and the run goes on (a step with `slots` > 1 takes the
+    first of its slot locks that is free), so different steps run side by side
     across runs, windows and cron while one step never runs twice at once.
     """
     stop = _STOP if stop is None else stop
@@ -232,7 +243,10 @@ def run_steps(
 
         held = None
         if lock_path is not None:
-            held = lock.acquire(lock.step_lock_path(lock_path, step.lock_name))
+            for name in step.slot_lock_names:
+                held = lock.acquire(lock.step_lock_path(lock_path, name))
+                if held is not None:
+                    break
             if held is None:
                 log.warning("step %s: another run holds its lock; skipping", step.name)
                 add(StepResult(step.name, argv, now, now, skipped_reason=SKIP_LOCKED))

@@ -221,9 +221,7 @@ carrying `--live`).
 - Step 2 is the approval queue (`approval_queue/`); the studio is what fills it.
   **One story, one piece of writing**: the studio's shortlist skips a story with a draft
   that did not fail (`store.drafted_cluster_ids`, followed through the draft's item), and
-  research fails a piece whose named story got such a draft while it ran;
-  `store.studio_held_clusters` (read-only on `studio_pieces` / `studio_topics`) is what
-  the dashboard's feed-yes count (`ops/store.py:fetch_feed_yes_undrafted`) leaves out.
+  research fails a piece whose named story got such a draft while it ran.
   Its own tables are `drafts` and `decisions`; edits log original vs edited text
   (`store.parse_decision_text` reads a decision's text back). A leftover `choosing` draft
   from the retired A/B pick is migrated to `pending` by `store.connect`.
@@ -501,10 +499,19 @@ carrying `--live`).
   automatic topic, else only when `auto.max_new_per_day` (automatic pieces per calendar
   day in the root `timezone:`), `auto.min_hours_between` (any piece) and no checkpoint
   wait allow, and a card browser was found (`make_renderer`; without one the automatic run
-  exits 1 rather than spend research and writing on a piece polish would stop); one run at
-  a time (`<workspace_dir>/.studio.lock`, which a run waits `LOCK_WAIT_SECONDS` for). A
+  exits 1 rather than spend research and writing on a piece polish would stop); up to
+  `max_parallel` runs at once (studio/config.yaml, 3), each holding a writing slot
+  (`runner.slot_lock_path`: `<workspace_dir>/.studio.lock`, `.studio.lock.2`, ...; a run
+  waits `LOCK_WAIT_SECONDS` for a free one) for its life and recording it in the meta of
+  each piece it takes up (`slot`, `runner.piece_slot`); requests, queued topics, the new
+  piece and a researching piece's shortlist and `offered_stories` are claimed under
+  `.studio.claim.lock` (`runner.claiming`, `Context.claiming`), held for moments, and a
+  shortlist leaves out stories offered to a piece researching beside it
+  (`store.offered_elsewhere`). The studio steps in `ops/config.yaml` carry `slots: 3`
+  (`Step.slots`: a run takes the first free of `<lock>`, `<lock>-2`, ...; the panel's
+  `JobManager` counts a lock busy only when every slot is held). A
   killed run (Stop, a reboot, a crash) cannot mark its piece: `runner.settle_stopped`
-  does, under the studio lock and only while no run holds it, when a studio page shows or
+  does, under the claim lock and only for a piece whose slot no run holds, when a studio page shows or
   acts on a piece in a running stage (`web._current_piece`, the index) and when the panel
   sees a run of `run_studio.py` end (`JobManager.on_finish` = `panel/app.py:_after_run`).
   Every brief reads the date and the playbook when its stage starts. A piece's folder is
@@ -545,7 +552,15 @@ carrying `--live`).
   `studio_catalysts` (unique `key`, open/dismissed, `origin` scan:<id> or piece:<id>);
   `claim_topic` marks the radar topic or catalyst a queued topic came from with the piece,
   `drop_topic` puts it back. `/studio/radar` (studio/web.py) queues them through
-  `queue_topic` and starts `studio_now`. `ops/config.yaml` has the automatic
+  `queue_topic` and starts `studio_now`. **Repeats are flagged, never blocked**: `studio/repeats.py` is pure
+  (`marks`: source URLs, drug names via `draft/tags.py`, development codes, trial names, NCT
+  numbers, companies and tickers, title words; `reasons`: a shared source, drug or trial, or
+  a company plus `MIN_SHARED_WORDS` title words), compared against `store.covered_since`
+  (pieces of the last `radar.repeat_days` days not discarded, and unclaimed queued topics,
+  each with the radar topic's or catalyst's companies, sources and drug it came from) by
+  `runner.covered_for_repeats`; the radar page shows a "may repeat" flag on an untaken topic
+  or catalyst (its button "Write it anyway") and an automatic piece's brief carries
+  `Brief.radar_repeats` as a MAY REPEAT line under that radar topic. `ops/config.yaml` has the automatic
   `studio_scan` step (right before `studio`) and the manual `studio_scan_now`, both under
   the `studio_scan` lock.
   **The studio learns from X** (`studio/config.yaml` `learn:`). `studio/learn.py` is pure
@@ -609,7 +624,7 @@ draft/    what the studio and the queue share, no model calls: schema.py (Draft,
           nct_ids, drug_names, tag_problems), targets.py (price-target citations:
           target_mentions, target_figures, target_problems, field_figure, SHARE_FIGURE)
 approval_queue/  store.py (drafts, decisions, image_dir, set_image, drop_image,
-          studio_hold, drafted_cluster_ids, studio_held_clusters, parse_decision_text),
+          studio_hold, drafted_cluster_ids, parse_decision_text),
           publishing.py (the queue's door to step 3), app.py (/queue, /drafts/{id},
           /drafts/{id}/image), templates/
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
@@ -642,7 +657,8 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           read-only adapters), radar.py (pure: the scan's prompt and answer, the
           calendar's dates), scan.py (the daily scan, the research harvest), learn.py
           (pure: scores, arms, the lean, the evidence text, the rewrite's prompt and
-          checks), evidence.py (what X says, from the DB), playbook.py (the file, its
+          checks), repeats.py (pure: does a radar topic or catalyst repeat a piece),
+          evidence.py (what X says, from the DB), playbook.py (the file, its
           versions, the rewrite), dashboard.py (pure views of /studio/performance),
           web.py + templates/ (/studio pages, /studio/radar)
 run_ingest.py  run_score.py  digest.py  run_queue.py

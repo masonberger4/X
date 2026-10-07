@@ -9,6 +9,8 @@ import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ from studio import prompt as P
 from studio import qa
 from studio import radar as R
 from studio import render as render_mod
+from studio import repeats as RP
 from studio import session as SS
 from studio import store as S
 from studio import topics as T
@@ -35,7 +38,14 @@ from studio.settings import (
 
 log = logging.getLogger(__name__)
 
+# Writing slot 1's lock; slot k > 1 is `.studio.lock.k` (slot_lock_path). One run holds one
+# slot for its whole life, so at most `max_parallel` runs write at once.
 LOCK_NAME = ".studio.lock"
+# Held for moments, never across a session: while a run marks stopped pieces, takes a
+# request or a queued topic, starts a piece, or chooses a researching piece's shortlist,
+# so two runs side by side never take the same work.
+CLAIM_LOCK_NAME = ".studio.claim.lock"
+CLAIM_WAIT_SECONDS = 120.0
 SCAN_LOCK_NAME = ".studio_scan.lock"
 RADAR_IN_BRIEF = 8  # radar topics an open piece is shown
 COMING_UP_IN_BRIEF = 20  # catalysts an open piece is shown
@@ -228,10 +238,16 @@ def build_brief(
     shortlist: list[P.Story] = []
     radar: list[tuple[int, R.Topic]] = []
     coming: list[R.Catalyst] = []
+    radar_repeats: dict[int, list[str]] = {}
     if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
         # Only the research stage chooses a story; later stages have one.
-        shortlist = T.fetch_shortlist(cfg["topics"], exclude=taken_stories(conn))
+        # Nor a story offered to a piece researching beside this one.
+        taken = taken_stories(conn) | S.offered_elsewhere(conn, piece.id)
+        shortlist = T.fetch_shortlist(cfg["topics"], exclude=taken)
         radar, coming = radar_for_brief(conn, cfg, date.fromisoformat(today))
+        covered = covered_for_repeats(conn, cfg, exclude_piece=piece.id)
+        repeats = {rid: [r.line() for r in RP.find(RP.topic_marks(t), covered)] for rid, t in radar}
+        radar_repeats = {rid: lines for rid, lines in repeats.items() if lines}
     said, lean = "", None
     if evidence is not None:
         said = E.block(evidence, cfg)
@@ -262,6 +278,7 @@ def build_brief(
         story=story,
         shortlist=shortlist,
         radar=radar,
+        radar_repeats=radar_repeats,
         coming_up=coming,
         offer=offer,
         hooks_to_avoid=hooks,
@@ -301,6 +318,22 @@ def radar_for_brief(
     return [(t.id, t.to_topic()) for t in topics[:RADAR_IN_BRIEF]], coming[:COMING_UP_IN_BRIEF]
 
 
+def covered_for_repeats(
+    conn: sqlite3.Connection, cfg: dict[str, Any], *, exclude_piece: int | None = None
+) -> list[tuple[Any, RP.Marks]]:
+    """What a radar topic or catalyst may repeat (studio/repeats.py), with each one's
+    marks: the pieces of the last `radar.repeat_days` days and the queued topics."""
+    days = float(cfg["radar"].get("repeat_days") or 0)
+    if days <= 0:
+        return []
+    since = datetime.now(UTC) - timedelta(days=days)
+    return [
+        (c, RP.covered_marks(c))
+        for c in S.covered_since(conn, since.isoformat(timespec="seconds"))
+        if not (c.kind == "piece" and c.id == exclude_piece)
+    ]
+
+
 def _today() -> tuple[str, str]:
     from timeutil import display_tz, timezone_name
 
@@ -322,7 +355,11 @@ def make_renderer(cfg: dict[str, Any]) -> qa.Renderer | None:
 
 
 def make_context(
-    conn: sqlite3.Connection, cfg: dict[str, Any], *, stop_after_research: bool = False
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    *,
+    stop_after_research: bool = False,
+    claim: Callable[[], AbstractContextManager[Any]] | None = None,
 ) -> SS.Context:
     from studio import ingest
 
@@ -378,6 +415,7 @@ def make_context(
         # The editor's hand edits and dropped cards in the queue, which a revision starts
         # from instead of putting the session's old text back.
         queue_edits=lambda piece: ingest.hand_edits(conn, piece),
+        claiming=claim or nullcontext,
     )
 
 
@@ -403,56 +441,125 @@ def measure_quietly(conn: sqlite3.Connection, cfg: dict[str, Any]) -> E.Evidence
         return None
 
 
-def mark_stale(conn: sqlite3.Connection) -> list[S.Piece]:
-    """Pieces left mid-stage by a run that died. The caller holds the studio lock, so
-    no other run can be working on them."""
-    stale = S.running_pieces(conn)
-    for p in stale:
-        stage = _STAGE_OF.get(p.stage, "write")
-        S.close_open_runs(conn, p.id, "the run stopped before the stage finished")
-        S.update_piece(
-            conn,
-            p.id,
-            stage=S.STAGE_INTERRUPTED,
-            error=f"the {stage} stage stopped before it finished (stopped, timed out or crashed)",
-            meta={"failed_stage": stage},
-        )
+def max_parallel(cfg: dict[str, Any]) -> int:
+    return max(1, int(cfg.get("max_parallel") or 1))
+
+
+def slot_lock_path(root: Path, slot: int) -> Path:
+    return root / (LOCK_NAME if slot <= 1 else f"{LOCK_NAME}.{slot}")
+
+
+def piece_slot(piece: S.Piece) -> int:
+    """The writing slot of the run that last took this piece up (1 for a piece from before
+    slots, when there was one lock)."""
+    try:
+        return max(1, int(piece.meta.get("slot") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _mark_interrupted(conn: sqlite3.Connection, p: S.Piece) -> None:
+    stage = _STAGE_OF.get(p.stage, "write")
+    S.close_open_runs(conn, p.id, "the run stopped before the stage finished")
+    S.update_piece(
+        conn,
+        p.id,
+        stage=S.STAGE_INTERRUPTED,
+        error=f"the {stage} stage stopped before it finished (stopped, timed out or crashed)",
+        meta={"failed_stage": stage},
+    )
+
+
+def mark_stale(
+    conn: sqlite3.Connection, *, root: Path | None = None, own_slot: int | None = None
+) -> list[S.Piece]:
+    """Pieces left mid-stage by a run that died. Without `root` the caller holds every
+    slot, so no run can be working on any of them. With it, a piece counts as stopped when
+    it is in the caller's own slot (`own_slot`: the caller's run has only just started) or
+    its slot's lock is free (no live run holds it); a piece whose slot another run holds is
+    that run's. The caller holds the claim lock, under which a piece's slot is set."""
+    stale: list[S.Piece] = []
+    for p in S.running_pieces(conn):
+        slot = piece_slot(p)
+        if root is None or slot == own_slot:
+            _mark_interrupted(conn, p)
+        else:
+            held = lock.acquire(slot_lock_path(root, slot), trust_os_lock=True)
+            if held is None:
+                continue  # a live run is writing it
+            try:
+                _mark_interrupted(conn, p)
+            finally:
+                held.release()
+        stale.append(p)
     return stale
 
 
 def settle_stopped(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[S.Piece]:
-    """Mark the pieces a stopped run left mid-stage `interrupted`, when no studio run is
-    alive. The Stop button, a stage the ops runner timed out, a reboot or a crash kills
-    run_studio.py with no chance to say so, and the piece keeps its running stage: no
-    Resume, no discard. The OS frees the studio lock with its process, so while the lock
-    can be taken no run is working on any piece. The studio's pages call this when they
-    show or act on a piece in a running stage, and the panel when a studio run ends, so the
-    editor can Resume or discard it at once rather than at the next studio run. Returns
-    the pieces marked ([] while a run holds the lock, or none was left running)."""
+    """Mark the pieces a stopped run left mid-stage `interrupted`. The Stop button, a stage
+    the ops runner timed out, a reboot or a crash kills run_studio.py with no chance to say
+    so, and the piece keeps its running stage: no Resume, no discard. The OS frees a slot's
+    lock with its process, so a running piece whose slot lock can be taken has no run
+    working on it. The studio's pages call this when they show or act on a piece in a
+    running stage, and the panel when a studio run ends, so the editor can Resume or
+    discard it at once rather than at the next studio run. Returns the pieces marked ([]
+    when every running piece has its run, or a run is claiming work this moment)."""
     if not S.running_pieces(conn):
         return []
-    held = lock.acquire(workspace_root(_data_folder(), cfg) / LOCK_NAME, trust_os_lock=True)
-    if held is None:
-        return []  # a run is alive and working on them
+    root = workspace_root(_data_folder(), cfg)
+    claim = lock.acquire(root / CLAIM_LOCK_NAME, trust_os_lock=True)
+    if claim is None:
+        return []  # a run is taking work; the next look settles it
     try:
-        stale = mark_stale(conn)
+        stale = mark_stale(conn, root=root)
     finally:
-        held.release()
+        claim.release()
     for p in stale:
         log.warning("piece %s: its run stopped mid-stage; it can be resumed", p.id)
     return stale
 
 
-def _take_lock(path: Path) -> lock.Lock | None:
-    """The studio lock, waiting a moment for it: a page checking for a stopped run
-    (settle_stopped) holds it for as long as a few updates take, and a run starting in that
-    moment must not skip its turn as if another run were in progress."""
-    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+def _wait_for(path: Path, seconds: float) -> lock.Lock | None:
+    deadline = time.monotonic() + seconds
     while True:
         held = lock.acquire(path, trust_os_lock=True)
         if held is not None or time.monotonic() >= deadline:
             return held
         time.sleep(0.2)
+
+
+def _take_slot(root: Path, cfg: dict[str, Any]) -> tuple[int, lock.Lock] | None:
+    """The first free writing slot, waiting a moment for one: a page checking for a
+    stopped run (settle_stopped) holds a slot's lock for as long as a few updates take, and
+    a run starting in that moment must not skip its turn as if every slot were busy."""
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        for slot in range(1, max_parallel(cfg) + 1):
+            held = lock.acquire(slot_lock_path(root, slot), trust_os_lock=True)
+            if held is not None:
+                return slot, held
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.2)
+
+
+def claiming(root: Path) -> Callable[[], AbstractContextManager[None]]:
+    """The claim lock, as a context manager factory. A run that cannot take it within
+    CLAIM_WAIT_SECONDS goes on without it rather than not at all: it is only ever held for
+    moments, so that means a stuck process, not a run at work."""
+
+    @contextmanager
+    def held() -> Iterator[None]:
+        got = _wait_for(root / CLAIM_LOCK_NAME, CLAIM_WAIT_SECONDS)
+        if got is None:
+            log.warning("the studio's claim lock stayed busy; going on without it")
+        try:
+            yield
+        finally:
+            if got is not None:
+                got.release()
+
+    return held
 
 
 def allowed_to_start(
@@ -535,16 +642,27 @@ def new_piece(
     return piece
 
 
-def act_on_requests(ctx: SS.Context) -> int:
+def act_on_requests(ctx: SS.Context, *, slot: int | None = None) -> int:
+    """Act on the editor's requests, one at a time. Each is taken under the claim lock,
+    read afresh (the request before it may have run for an hour, and meanwhile the editor
+    may have discarded the piece or changed the note), cleared and its piece put in this
+    run's `slot`, so runs side by side never take the same one."""
     done = 0
-    for listed in S.pending_requests(ctx.conn):
-        # Read again: the request before this one may have run for an hour, and meanwhile the
-        # editor may have discarded this piece (which drops its request) or changed the note.
-        piece = S.get_piece(ctx.conn, listed.id)
-        if piece is None or not piece.request:
-            continue
-        what, note = piece.request, piece.request_note
-        S.update_piece(ctx.conn, piece.id, request="", request_note="")
+    seen: set[int] = set()
+    while True:
+        with ctx.claiming():
+            piece = next((p for p in S.pending_requests(ctx.conn) if p.id not in seen), None)
+            if piece is None:
+                break
+            seen.add(piece.id)
+            what, note = piece.request, piece.request_note
+            S.update_piece(
+                ctx.conn,
+                piece.id,
+                request="",
+                request_note="",
+                **({"meta": {"slot": slot}} if slot is not None else {}),
+            )
         log.info("piece %s: %s requested (stage %s)", piece.id, what, piece.stage)
         if what == S.REQUEST_CONTINUE and piece.stage == S.STAGE_RESEARCH_READY:
             out = SS.write(ctx, piece, note)
@@ -615,96 +733,43 @@ def run(
             conn.close()
     root = workspace_root(_data_folder(), cfg)
     root.mkdir(parents=True, exist_ok=True)
-    # One studio run at a time on this data folder, however it was started (the ops step,
-    # a button, a terminal): a second run would resume the same sessions.
-    held = _take_lock(root / LOCK_NAME)
-    if held is None:
-        log.info("another studio run is in progress; nothing to do")
+    # Up to `max_parallel` studio runs on this data folder, however they were started (the
+    # ops step, a button, a terminal), each in a writing slot of its own. What a run takes
+    # up (a request, a queued topic, a new piece) is claimed under the claim lock, so no two
+    # runs resume the same session or start on the same topic.
+    taken = _take_slot(root, cfg)
+    if taken is None:
+        log.info("all %d studio writing slots are busy; nothing to do", max_parallel(cfg))
         return 0
+    slot, held = taken
+    claim = claiming(root)
     conn = _db_conn()
     try:
-        stale = mark_stale(conn)
+        log.info("studio run in writing slot %d of %d", slot, max_parallel(cfg))
+        with claim():
+            stale = mark_stale(conn, root=root, own_slot=slot)
+            follow_merges(conn)
         for p in stale:
             log.warning("piece %s was interrupted mid-stage; resume it from the studio page", p.id)
-        follow_merges(conn)
-        ctx = make_context(conn, cfg)
-        act_on_requests(ctx)
+        ctx = make_context(conn, cfg, claim=claim)
+        act_on_requests(ctx, slot=slot)
         if resume_only:
             return 0
-        explicit = bool(topic) or story is not None
-        queued, dropped = (None, 0) if explicit else take_queued(conn)
-        if explicit:
-            plan = dict(
-                origin=S.ORIGIN_MANUAL,
+        with claim():
+            started = _start_piece(
+                conn,
+                cfg,
+                ctx,
+                slot=slot,
+                now=now,
                 topic=topic,
-                cluster_id=story,
+                story=story,
                 angle=angle,
-                checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint,
+                checkpoint=checkpoint,
             )
-        elif queued is not None:
-            plan = dict(
-                origin=S.ORIGIN_MANUAL,
-                topic=queued.topic,
-                cluster_id=queued.cluster_id,
-                angle=queued.angle or angle,
-                checkpoint=queued.checkpoint if checkpoint is None else checkpoint,
-            )
-            if plan["angle"] and plan["angle"] not in A.load_angles():
-                # Queued before the angle left studio/angles.yaml: the session chooses
-                # instead, rather than the topic failing every run.
-                log.warning(
-                    "queued topic %s asked for angle %r, which is no longer in the library; "
-                    "the session will choose",
-                    queued.id,
-                    plan["angle"],
-                )
-                plan["angle"] = ""
-        elif dropped:
-            # The queued topics there were had nothing left to write about: the press that
-            # started this run was for one of them, not for a piece of the studio's choosing.
-            log.info("no new piece: the queued topics were dropped")
-            return 0
-        elif now:
-            plan = dict(
-                origin=S.ORIGIN_MANUAL,
-                topic="",
-                cluster_id=None,
-                angle=angle,
-                checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint,
-            )
-        else:
-            ok, why = allowed_to_start(conn, cfg, datetime.now(UTC))
-            if not ok:
-                log.info("no new piece: %s", why)
-                return 0
-            if ctx.renderer is None:
-                # Its research and writing would be spent before polish stopped it for want
-                # of a browser, every day: an automatic piece waits for one. The step
-                # fails, so the runs page shows it; a button press still starts a piece.
-                log.error(
-                    "no new piece: %s; install Edge, Chrome or Chromium, or turn automatic "
-                    "pieces off (studio/config.yaml auto.enabled)",
-                    qa.NO_BROWSER,
-                )
-                return 1
-            plan = dict(
-                origin=S.ORIGIN_AUTO,
-                topic="",
-                cluster_id=None,
-                angle="",
-                checkpoint=bool(cfg["auto"]["checkpoint"]),
-            )
-        if plan["cluster_id"] is not None and T.fetch_story(plan["cluster_id"]) is None:
-            gone = f"story {plan['cluster_id']} is not in the feed any more (merged or removed)"
-            if queued is None:  # an explicit --story
-                log.error("%s; nothing started", gone)
-                return 2
-            # take_queued kept this topic for its words
-            log.warning("%s; writing on the queued topic's words alone", gone)
-            plan["cluster_id"] = None
-        piece = new_piece(conn, cfg, **plan)
-        if queued is not None:
-            S.claim_topic(conn, queued.id, piece.id)
+        if isinstance(started, int):
+            return started
+        piece = started
         log.info("piece %s started in %s", piece.id, piece.workspace)
         out = SS.research(ctx, piece)
         log.info("piece %s: %s (%s)", piece.id, out.stage, out.message)
@@ -712,6 +777,100 @@ def run(
     finally:
         conn.close()
         held.release()
+
+
+def _start_piece(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    ctx: SS.Context,
+    *,
+    slot: int,
+    now: bool,
+    topic: str,
+    story: int | None,
+    angle: str,
+    checkpoint: bool | None,
+) -> S.Piece | int:
+    """The piece this run starts, already in its slot, or the run's exit code when it
+    starts none. The caller holds the claim lock, so a queued topic goes to one run only."""
+    explicit = bool(topic) or story is not None
+    queued, dropped = (None, 0) if explicit else take_queued(conn)
+    if explicit:
+        plan = dict(
+            origin=S.ORIGIN_MANUAL,
+            topic=topic,
+            cluster_id=story,
+            angle=angle,
+            checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint,
+        )
+    elif queued is not None:
+        plan = dict(
+            origin=S.ORIGIN_MANUAL,
+            topic=queued.topic,
+            cluster_id=queued.cluster_id,
+            angle=queued.angle or angle,
+            checkpoint=queued.checkpoint if checkpoint is None else checkpoint,
+        )
+        if plan["angle"] and plan["angle"] not in A.load_angles():
+            # Queued before the angle left studio/angles.yaml: the session chooses
+            # instead, rather than the topic failing every run.
+            log.warning(
+                "queued topic %s asked for angle %r, which is no longer in the library; "
+                "the session will choose",
+                queued.id,
+                plan["angle"],
+            )
+            plan["angle"] = ""
+    elif dropped:
+        # The queued topics there were had nothing left to write about: the press that
+        # started this run was for one of them, not for a piece of the studio's choosing.
+        log.info("no new piece: the queued topics were dropped")
+        return 0
+    elif now:
+        plan = dict(
+            origin=S.ORIGIN_MANUAL,
+            topic="",
+            cluster_id=None,
+            angle=angle,
+            checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint,
+        )
+    else:
+        ok, why = allowed_to_start(conn, cfg, datetime.now(UTC))
+        if not ok:
+            log.info("no new piece: %s", why)
+            return 0
+        if ctx.renderer is None:
+            # Its research and writing would be spent before polish stopped it for want
+            # of a browser, every day: an automatic piece waits for one. The step
+            # fails, so the runs page shows it; a button press still starts a piece.
+            log.error(
+                "no new piece: %s; install Edge, Chrome or Chromium, or turn automatic "
+                "pieces off (studio/config.yaml auto.enabled)",
+                qa.NO_BROWSER,
+            )
+            return 1
+        plan = dict(
+            origin=S.ORIGIN_AUTO,
+            topic="",
+            cluster_id=None,
+            angle="",
+            checkpoint=bool(cfg["auto"]["checkpoint"]),
+        )
+    if plan["cluster_id"] is not None and T.fetch_story(plan["cluster_id"]) is None:
+        gone = f"story {plan['cluster_id']} is not in the feed any more (merged or removed)"
+        if queued is None:  # an explicit --story
+            log.error("%s; nothing started", gone)
+            return 2
+        # take_queued kept this topic for its words
+        log.warning("%s; writing on the queued topic's words alone", gone)
+        plan["cluster_id"] = None
+    piece = new_piece(conn, cfg, **plan)
+    # In this run's slot before the claim lock is let go: another run would otherwise
+    # take the new (researching) piece for one a stopped run left in slot 1.
+    S.update_piece(conn, piece.id, meta={"slot": slot})
+    if queued is not None:
+        S.claim_topic(conn, queued.id, piece.id)
+    return S.get_piece(conn, piece.id) or piece
 
 
 def _dry_run(

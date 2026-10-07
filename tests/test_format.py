@@ -1,5 +1,5 @@
-"""Step 9 phase four: the format is a gene. Schema, hard rules, prompt text, storage,
-publishing anchors, the swarm engine on a single and a long post, and format breeding."""
+"""A draft's format: schema bounds, storage of shape and pictures, picture drops and
+publishing anchors."""
 
 import pytest
 
@@ -277,9 +277,3 @@ def test_publish_attaches_each_picture_at_its_anchor(tmp_path):
         )
         == {}
     )
-
-
-# ---- the swarm on a single and a long post -----------------------------------------
-
-
-# ---- format genomes -----------------------------------------------------------------

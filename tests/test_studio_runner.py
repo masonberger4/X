@@ -1445,17 +1445,26 @@ def test_a_run_whose_new_piece_fails_exits_1(rig, sconn):
     assert piece.error == "error_during_execution: Tool permission denied"
 
 
-def test_a_second_run_finds_the_studio_lock_and_does_nothing(rig, sconn):
+def _hold_slots(rig, slots):
+    rig.root.mkdir(parents=True, exist_ok=True)
+    held = [lock.acquire(runner.slot_lock_path(rig.root, k), trust_os_lock=True) for k in slots]
+    assert all(h is not None for h in held)
+    return held
+
+
+def test_a_run_finds_every_writing_slot_taken_and_does_nothing(rig, sconn, cfg):
     stuck = make_piece(sconn, stage=S.STAGE_WRITING)
     S.queue_topic(sconn, topic="a queued topic")
-    held = lock.acquire(rig.root / runner.LOCK_NAME, trust_os_lock=True)
-    assert held is not None
+    n = runner.max_parallel(cfg)
+    assert n == 3  # shipped
+    held = _hold_slots(rig, range(1, n + 1))
     try:
         assert runner.run(now=True) == 0
         assert runner.run(topic=TOPIC) == 0
         assert runner.run(dry_run=True) == 0
     finally:
-        held.release()
+        for h in held:
+            h.release()
     # nothing touched: the run holding the lock may be writing that piece right now
     assert get(sconn, stuck.id).stage == S.STAGE_WRITING
     assert [p.id for p in rig.pieces()] == [stuck.id]
@@ -1464,6 +1473,60 @@ def test_a_second_run_finds_the_studio_lock_and_does_nothing(rig, sconn):
     assert runner.run(now=True) == 0  # the lock is free again
     assert get(sconn, stuck.id).stage == S.STAGE_INTERRUPTED
     assert S.queued_topics(sconn) == [] and rig.cli.stages() == ["research"]
+
+
+def test_a_run_beside_a_live_one_takes_a_free_slot_and_leaves_its_piece_alone(rig, sconn):
+    """Slot 1's run is writing a piece; a second run takes slot 2, starts the queued topic
+    and leaves the live run's piece as it is."""
+    busy = make_piece(sconn, stage=S.STAGE_WRITING, meta={"slot": 1})
+    S.queue_topic(sconn, topic="a queued topic")
+    [held] = _hold_slots(rig, [1])
+    try:
+        assert runner.run(now=True) == 0
+    finally:
+        held.release()
+    assert get(sconn, busy.id).stage == S.STAGE_WRITING
+    new = [p for p in rig.pieces() if p.id != busy.id]
+    assert len(new) == 1 and new[0].topic == "a queued topic"
+    assert runner.piece_slot(get(sconn, new[0].id)) == 2
+    assert S.queued_topics(sconn) == []
+
+
+def test_a_piece_whose_slot_is_free_is_interrupted_whatever_the_run_slot(rig, sconn, cfg):
+    """A run in slot 1 dies with its piece; the next run lands in slot 2 (slot 1 taken by a
+    new run) and still settles the dead one, since nobody holds slot 3's lock."""
+    dead = make_piece(sconn, stage=S.STAGE_POLISHING, meta={"slot": 3})
+    live = make_piece(sconn, stage=S.STAGE_WRITING, meta={"slot": 1})
+    [held] = _hold_slots(rig, [1])
+    try:
+        assert runner.run(resume_only=True) == 0
+        assert get(sconn, dead.id).stage == S.STAGE_INTERRUPTED
+        assert get(sconn, live.id).stage == S.STAGE_WRITING
+        assert runner.settle_stopped(sconn, cfg) == []
+    finally:
+        held.release()
+    assert [p.id for p in runner.settle_stopped(sconn, cfg)] == [live.id]
+
+
+def test_two_runs_take_two_queued_topics(rig, sconn):
+    S.queue_topic(sconn, topic="first topic")
+    S.queue_topic(sconn, topic="second topic")
+    [held] = _hold_slots(rig, [1])
+    try:
+        assert runner.run(now=True) == 0
+    finally:
+        held.release()
+    assert runner.run(now=True) == 0
+    assert sorted(p.topic for p in rig.pieces()) == ["first topic", "second topic"]
+
+
+def test_a_shortlist_leaves_out_the_stories_offered_to_a_piece_researching_beside_it(sconn):
+    other = make_piece(sconn, topic="", meta={"offered_stories": [7, "8"]})
+    me = make_piece(sconn, topic="")
+    assert S.offered_elsewhere(sconn, me.id) == {7, 8}
+    assert S.offered_elsewhere(sconn, other.id) == set()
+    S.update_piece(sconn, other.id, stage=S.STAGE_RESEARCH_READY)
+    assert S.offered_elsewhere(sconn, me.id) == set()  # done choosing: its story is set
 
 
 def test_the_lock_is_released_even_when_the_run_raises(rig, sconn):

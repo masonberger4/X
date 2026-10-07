@@ -38,6 +38,7 @@ import logging
 import sys
 import threading
 import uuid
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -175,11 +176,27 @@ class JobManager:
         with self._mutex:
             return next((j for j in self._live if j.publish), None)
 
+    def _slots(self, extra: list[Step] | None = None) -> dict[str, int]:
+        """How many runs each lock name allows at once (a step's `slots`, the most any
+        step sharing the lock gives)."""
+        out: dict[str, int] = {}
+        for s in [*self.steps(), *(extra or [])]:
+            out[s.lock_name] = max(out.get(s.lock_name, 1), s.slots)
+        return out
+
+    @staticmethod
+    def _full(jobs: list[Job], slots: dict[str, int]) -> set[str]:
+        """Lock names every slot of which a run in `jobs` holds."""
+        counts = Counter(name for j in jobs for name in j.lock_names)
+        return {name for name, n in counts.items() if n >= slots.get(name, 1)}
+
     def busy_steps(self) -> set[str]:
-        """Step names that cannot start now: their lock is taken by a run in this window."""
+        """Step names that cannot start now: every slot of their lock is taken by a run in
+        this window."""
+        slots = self._slots()
         with self._mutex:
-            held = {name for j in self._live for name in j.lock_names}
-        return {s.name for s in self.steps() if s.lock_name in held}
+            full = self._full(self._live, slots)
+        return {s.name for s in self.steps() if s.lock_name in full}
 
     def queued_behind(self, slow: set[str]) -> dict[str, str]:
         """Busy steps that nothing is running: every run holding their lock has them still to
@@ -188,9 +205,13 @@ class JobManager:
         slow step ends, so an automatic run time can leave them out instead of waiting for
         them (panel/autorun.py). A step whose lock a live step holds is never one of them."""
         out: dict[str, str] = {}
+        slots = self._slots()
         with self._mutex:
             live = list(self._live)
+            full = self._full(live, slots)
             for step in self.steps():
+                if step.lock_name not in full:
+                    continue  # a slot is free: it can start now
                 ahead: list[str] = []
                 for job in live:
                     if step.lock_name not in job.lock_names:
@@ -290,14 +311,15 @@ class JobManager:
     ) -> Job:
         if auto and publish:  # an automatic run never posts; nothing may combine the two
             raise JobError("an automatic run cannot publish")
-        wanted = {s.lock_name for s in plan}
+        slots = self._slots(plan)
         with self._mutex:
+            full = self._full([j for j in self._live if j.running], slots)
+            wanted = {s.lock_name for s in plan} & full
             clash = [j for j in self._live if j.running and j.lock_names & wanted]
             if clash:
                 if publish:
                     raise JobError("a publish is already in progress")
-                held = {name for j in clash for name in j.lock_names}
-                asked = [s.name for s in plan if s.lock_name in held]
+                asked = [s.name for s in plan if s.lock_name in wanted]
                 # Name the steps that actually hold the lock: ingest and score share one,
                 # so a score refused during an ingest run must say ingest, not score.
                 holders: list[str] = []

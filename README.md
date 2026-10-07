@@ -46,8 +46,8 @@ step 1's own `db.Database` API — the same one `digest.py` uses, and the run bu
 `ops/config.yaml`'s steps through `ops/runner.py` under the same per-step `ops/lock.py`
 locks cron takes, so a run started in the browser is the run cron would have started. While
 it is open the panel also runs everything but publishing on its own: `auto_run_steps`
-(ingest, score, studio_scan, studio, feedback, studio_learn) at each of `auto_run_times` (06:00, 12:00,
-18:00 shipped, in the root `timezone:`), switched and timed from `/runs`, which writes
+(ingest, score, studio_scan, studio, feedback, studio_learn) at each of `auto_run_times` (01:00, 03:00,
+06:00, 09:32, 12:00 and 15:00 shipped, in the root `timezone:`), switched and timed from `/runs`, which writes
 `auto_run_enabled` / `auto_run_times` in `ops/config.yaml`. Only `run_ingest.py`, `run_score.py`, `run_feedback.py` and `run_studio.py` can
 ever start that way, and those runs cannot post whatever `.env` says. A step
 disabled in `ops/config.yaml` is skipped, never run; the shipped `publish` step runs
@@ -559,9 +559,13 @@ acts on the editor's requests and starts a new piece when
 times are set in) and `auto.min_hours_between` allow, no piece waits at the checkpoint
 and a card browser was found (without one the step fails rather than start a piece
 whose cards cannot be drawn); `studio_now` and `studio_resume` are the studio page's
-manual buttons. One studio run at a time (`studio_pieces/.studio.lock`). A killed run
+manual buttons. Up to `max_parallel` (3) studio runs at once, each in a writing slot of
+its own (`studio_pieces/.studio.lock`, `.studio.lock.2`, ...; the studio steps carry
+`slots: 3` in `ops/config.yaml` so the panel starts that many), each writing one piece;
+what a run takes up (a request, a queued topic, a new piece's shortlist) is claimed under
+`studio_pieces/.studio.claim.lock`, so two runs never take the same one. A killed run
 leaves the piece `interrupted`: as soon as a studio page shows it or the panel sees the
-run end, while no studio run holds the lock (`studio/runner.py:settle_stopped`). Resume
+run end, once no run holds that piece's slot (`studio/runner.py:settle_stopped`). Resume
 carries on in the same session; a session Claude Code has cleaned up (after 30 days by
 default) is replaced by a fresh one that reads the piece's files first. Each stage is
 told the date and the playbook as they are when it starts. A piece whose folder is gone

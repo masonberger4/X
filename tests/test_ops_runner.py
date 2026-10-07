@@ -186,6 +186,28 @@ def test_a_skip_when_busy_step_is_skipped_like_any_other_when_its_lock_is_held(t
     assert results[1].ok and not results[0].failed
 
 
+def test_a_step_with_slots_takes_the_first_free_one(tmp_path):
+    """The studio writes pieces side by side: with `slots: 3` a run takes `studio`,
+    `studio-2` or `studio-3`, and only skips the step when all three are held."""
+    from ops import lock
+
+    base = tmp_path / "p.lock"
+    step = Step("studio", py("print('s')"), lock="studio", slots=3)
+    assert step.slot_lock_names == ["studio", "studio-2", "studio-3"]
+    held = [lock.acquire(lock.step_lock_path(base, n)) for n in ("studio", "studio-2")]
+    try:
+        [r] = run_steps([step], cwd=tmp_path, lock_path=base)
+        assert r.ok
+        held.append(lock.acquire(lock.step_lock_path(base, "studio-3")))
+        [r] = run_steps([step], cwd=tmp_path, lock_path=base)
+        assert r.skipped_reason == runner.SKIP_LOCKED
+    finally:
+        for h in held:
+            h.release()
+    assert Step.from_config({"name": "x", "argv": ["a"], "slots": 3}).slots == 3
+    assert Step.from_config({"name": "x", "argv": ["a"]}).slots == 1
+
+
 def test_step_result_properties():
     from datetime import UTC, datetime
 

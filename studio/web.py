@@ -38,7 +38,7 @@ when it wires this router in.
 
 A run that was stopped (the Stop button, a reboot, a crash) leaves its piece in a running
 stage. The pages that show or act on such a piece first ask studio/runner.py's
-settle_stopped: when no studio run holds the studio lock, the piece is `interrupted` at
+settle_stopped: when no studio run holds the piece's writing slot, it is `interrupted` at
 once, so Resume and discard are there without waiting for the next studio run.
 """
 
@@ -549,7 +549,19 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
         "later": [c for c in rows if c.date_start > soon],
     }
     suggested = {c.id: R.catalyst_text(c.to_catalyst(), today=today)[1] for c in rows}
-    from studio.runner import taken_stories  # one story, one piece of writing
+    from studio import repeats as RP
+    from studio.runner import covered_for_repeats, taken_stories  # one story, one piece
+
+    # What a topic or catalyst nobody has taken yet may repeat: a flag, never a block.
+    covered = covered_for_repeats(conn, cfg)
+    topic_repeats = {
+        t.id: RP.find(RP.topic_marks(t), covered) for t in topics if t.status == S.RADAR_NEW
+    }
+    catalyst_repeats = {
+        c.id: RP.find(RP.catalyst_marks(c), covered)
+        for c in rows
+        if c.topic_id is None and c.piece_id is None
+    }
 
     feed = T.fetch_shortlist(
         {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=taken_stories(conn)
@@ -565,6 +577,8 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
             "feed": feed,
             "calendar": calendar,
             "suggested": suggested,
+            "topic_repeats": topic_repeats,
+            "catalyst_repeats": catalyst_repeats,
             "angles": library,
             "kinds": R.KIND_LABELS,
             "today": today.isoformat(),
