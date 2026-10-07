@@ -863,9 +863,13 @@ acts on the editor's requests and starts a new piece when
 times are set in) and `auto.min_hours_between` allow, no piece waits at the checkpoint
 and a card browser was found (without one the step fails rather than start a piece
 whose cards cannot be drawn); `studio_now` and `studio_resume` are the studio page's
-manual buttons. One studio run at a time (`studio_pieces/.studio.lock`). A killed run
+manual buttons. Up to `max_parallel` (3) studio runs at once, each in a writing slot of
+its own (`studio_pieces/.studio.lock`, `.studio.lock.2`, ...; the studio steps carry
+`slots: 3` in `ops/config.yaml` so the panel starts that many), each writing one piece;
+what a run takes up (a request, a queued topic, a new piece's shortlist) is claimed under
+`studio_pieces/.studio.claim.lock`, so two runs never take the same one. A killed run
 leaves the piece `interrupted`: as soon as a studio page shows it or the panel sees the
-run end, while no studio run holds the lock (`studio/runner.py:settle_stopped`). Resume
+run end, once no run holds that piece's slot (`studio/runner.py:settle_stopped`). Resume
 carries on in the same session; a session Claude Code has cleaned up (after 30 days by
 default) is replaced by a fresh one that reads the piece's files first. Each stage is
 told the date and the playbook as they are when it starts. A piece whose folder is gone

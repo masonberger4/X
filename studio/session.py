@@ -18,6 +18,7 @@ import shutil
 import sqlite3
 import uuid
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,9 @@ class Context:
     # The editor's changes to the piece's queue draft since the last ingest, or None
     # (studio/ingest.py:hand_edits in the app); None here never looks.
     queue_edits: Callable[[S.Piece], ingest.HandEdits | None] | None = None
+    # The studio's claim lock (runner.claiming), held while a piece's shortlist is chosen
+    # and its offers recorded, since several pieces may be researched at once; a no-op here.
+    claiming: Callable[[], AbstractContextManager[Any]] = nullcontext
 
 
 @dataclass
@@ -300,11 +304,14 @@ def research(
 ) -> Outcome:
     S.update_piece(ctx.conn, piece.id, stage=S.STAGE_RESEARCHING, error="")
     piece = S.get_piece(ctx.conn, piece.id) or piece
-    brief = ctx.brief_for(piece)
-    # The stories the session may name in research.json: every one offered so far (a
-    # resumed research run may be offered a newer shortlist than the first).
-    offered = sorted({*_offered(piece), *(s.cluster_id for s in brief.shortlist)})
-    S.update_piece(ctx.conn, piece.id, meta={"offered_stories": offered})
+    # Under the studio's claim lock: a piece researching beside this one must see these
+    # offers before it builds its own shortlist, or both would be offered the same stories.
+    with ctx.claiming():
+        brief = ctx.brief_for(piece)
+        # The stories the session may name in research.json: every one offered so far (a
+        # resumed research run may be offered a newer shortlist than the first).
+        offered = sorted({*_offered(piece), *(s.cluster_id for s in brief.shortlist)})
+        S.update_piece(ctx.conn, piece.id, meta={"offered_stories": offered})
     write_earlier(Path(piece.workspace), brief)
     text = P.research_prompt(brief)
     if note.strip():  # the editor's words when pressing Resume

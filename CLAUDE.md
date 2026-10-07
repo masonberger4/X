@@ -738,10 +738,19 @@ carrying `--live`).
   automatic topic, else only when `auto.max_new_per_day` (automatic pieces per calendar
   day in the root `timezone:`), `auto.min_hours_between` (any piece) and no checkpoint
   wait allow, and a card browser was found (`make_renderer`; without one the automatic run
-  exits 1 rather than spend research and writing on a piece polish would stop); one run at
-  a time (`<workspace_dir>/.studio.lock`, which a run waits `LOCK_WAIT_SECONDS` for). A
+  exits 1 rather than spend research and writing on a piece polish would stop); up to
+  `max_parallel` runs at once (studio/config.yaml, 3), each holding a writing slot
+  (`runner.slot_lock_path`: `<workspace_dir>/.studio.lock`, `.studio.lock.2`, ...; a run
+  waits `LOCK_WAIT_SECONDS` for a free one) for its life and recording it in the meta of
+  each piece it takes up (`slot`, `runner.piece_slot`); requests, queued topics, the new
+  piece and a researching piece's shortlist and `offered_stories` are claimed under
+  `.studio.claim.lock` (`runner.claiming`, `Context.claiming`), held for moments, and a
+  shortlist leaves out stories offered to a piece researching beside it
+  (`store.offered_elsewhere`). The studio steps in `ops/config.yaml` carry `slots: 3`
+  (`Step.slots`: a run takes the first free of `<lock>`, `<lock>-2`, ...; the panel's
+  `JobManager` counts a lock busy only when every slot is held). A
   killed run (Stop, a reboot, a crash) cannot mark its piece: `runner.settle_stopped`
-  does, under the studio lock and only while no run holds it, when a studio page shows or
+  does, under the claim lock and only for a piece whose slot no run holds, when a studio page shows or
   acts on a piece in a running stage (`web._current_piece`, the index) and when the panel
   sees a run of `run_studio.py` end (`JobManager.on_finish` = `panel/app.py:_after_run`).
   Every brief reads the date and the playbook when its stage starts. A piece's folder is

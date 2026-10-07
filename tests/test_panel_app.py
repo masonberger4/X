@@ -461,10 +461,17 @@ def test_a_studio_button_pressed_during_a_session_says_what_is_running(monkeypat
     from panel.jobs import Job
 
     steps = {s.name: s for s in panel_app.JOBS.steps()}
-    live = Job(
-        id="b", steps=["studio_now"], started_at=panel_app._now(), plan=[steps["studio_now"]]
-    )
-    monkeypatch.setattr(panel_app.JOBS, "_live", [live])
+    # Every writing slot taken (the studio's steps have `slots: 3`).
+    live = [
+        Job(
+            id=f"b{k}",
+            steps=["studio_now"],
+            started_at=panel_app._now(),
+            plan=[steps["studio_now"]],
+        )
+        for k in range(steps["studio_now"].slots)
+    ]
+    monkeypatch.setattr(panel_app.JOBS, "_live", live)
     # belt and braces: should the refusal ever fail, nothing is actually run
     monkeypatch.setattr(panel_app.JOBS, "_execute", lambda job: None)
     with pytest.raises(

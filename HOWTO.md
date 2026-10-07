@@ -1114,7 +1114,15 @@ and long posts need X Premium.
    found no automatic piece starts: the `studio` step fails on the runs page with
    `no new piece: no browser to draw the cards with`, rather than spend a
    session's research and writing on a piece whose cards cannot be drawn.
-2. It runs on its own. The `studio` step sits in the automatic runs (part 8)
+2. Up to three pieces are written at once (`max_parallel: 3` in
+   `studio\config.yaml`, with `slots: 3` on the studio steps in
+   `ops\config.yaml`; change both together). Each press of "Write now" on a
+   queued topic, or a Continue, Revise or Resume, starts its own run in a free
+   writing slot, so queued topics no longer wait for the piece before them; a
+   fourth press while three run is refused until one ends. Each run is a full
+   Opus session on your one Claude login, so three at once use your plan's
+   limits three times as fast; set `max_parallel: 1` for the old one-at-a-time.
+   It runs on its own too. The `studio` step sits in the automatic runs (part 8)
    right after `score` (with Task Scheduler instead, it is the `pipeline-studio`
    task of part 6), so each run first acts on anything you asked for on the
    studio page, then starts a new piece if `studio\config.yaml` allows one: at
@@ -1375,7 +1383,7 @@ reference pieces in `studio\exemplars\`.
 | A learned playbook made the pieces worse | on the performance page, **put this version back** under the version you want; it becomes the newest version and the next session reads it. `learn: playbook: propose` in `studio\config.yaml` makes every rewrite wait for you instead |
 | A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept or restarted). Press Resume on its page; the session keeps everything it already read |
 | A studio piece says `interrupted: the CLI stopped 1 sub-agent(s) before they finished` | Claude Code ended the cold fact-check before it reported (an old Claude Code, or one started with background tasks on), so the stage did not finish. Press Resume: the session runs the stage again, fact-check included |
-| A studio piece still says `writing` (or researching, polishing, revising) after its run was stopped | another studio run holds the studio lock (a `run_studio.py` in a command prompt, or a run in a second window): the piece belongs to it until it ends. Otherwise reload the page: with no studio run going, opening it marks the piece `interrupted` |
+| A studio piece still says `writing` (or researching, polishing, revising) after its run was stopped | another studio run holds that piece's writing slot (a `run_studio.py` in a command prompt, or a run in a second window): the piece belongs to it until it ends. Otherwise reload the page: with no studio run going, opening it marks the piece `interrupted` |
 | A studio piece says `the piece's folder ... is missing` | its folder under `studio_pieces` was deleted or moved (moving the data folder moves them all). Put the folder back at that path and press Resume, or discard the piece |
 | A studio piece's log says `the CLI no longer has session ...` | Claude Code cleaned up the piece's session (it keeps 30 days by default). Nothing to do: a fresh session took the piece over from its files and carried on |
 | A studio piece says `failed: still blocked after polishing` | the page lists what the checker still found (advice wording, a link, a post over the limit). Resume with a note saying how to fix it, or Discard |

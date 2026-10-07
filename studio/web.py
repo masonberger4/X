@@ -38,7 +38,7 @@ when it wires this router in.
 
 A run that was stopped (the Stop button, a reboot, a crash) leaves its piece in a running
 stage. The pages that show or act on such a piece first ask studio/runner.py's
-settle_stopped: when no studio run holds the studio lock, the piece is `interrupted` at
+settle_stopped: when no studio run holds the piece's writing slot, it is `interrupted` at
 once, so Resume and discard are there without waiting for the next studio run.
 """
 

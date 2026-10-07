@@ -121,6 +121,22 @@ def test_different_steps_run_at_once_but_one_step_never_twice(tmp_path):
     _wait(manager.start(["slow"]))  # free again
 
 
+def test_a_step_with_slots_runs_that_many_at_once(tmp_path):
+    """The studio's steps have `slots: 3`: three pieces are written side by side and the
+    fourth press is refused until one ends."""
+    cfg = _cfg(tmp_path, [_step("write", "import time; time.sleep(1.5)")])
+    cfg["steps"][0]["slots"] = 3
+    manager = JobManager(cfg, tmp_path.parent, db_path=tmp_path / "t.db")
+    jobs = [manager.start(["write"]) for _ in range(3)]
+    assert manager.busy_steps() == {"write"}
+    with pytest.raises(JobError, match="write is already running"):
+        manager.start(["write"])
+    for job in jobs:
+        _wait(job)
+    assert [j.state for j in jobs] == [STATE_DONE] * 3  # none skipped as locked
+    assert manager.busy_steps() == set()
+
+
 def test_steps_sharing_a_lock_name_do_not_run_at_once(tmp_path):
     cfg = _cfg(
         tmp_path,
