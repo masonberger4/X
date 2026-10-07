@@ -46,8 +46,8 @@ step 1's own `db.Database` API — the same one `digest.py` uses, and the run bu
 `ops/config.yaml`'s steps through `ops/runner.py` under the same per-step `ops/lock.py`
 locks cron takes, so a run started in the browser is the run cron would have started. While
 it is open the panel also runs everything but publishing on its own: `auto_run_steps`
-(ingest, score, draft, verify, feedback, evolve) at each of `auto_run_times` (06:00, 12:00,
-18:00 shipped, in the root `timezone:`), switched and timed from `/runs`, which writes
+(ingest, score, draft, verify, feedback, evolve) at each of `auto_run_times` (01:00, 03:00,
+06:00, 09:32, 12:00 and 15:00 shipped, in the root `timezone:`), switched and timed from `/runs`, which writes
 `auto_run_enabled` / `auto_run_times` in `ops/config.yaml`. Only those six scripts can
 ever start that way, and those runs cannot post whatever `.env` says. A step
 disabled in `ops/config.yaml` is skipped, never run; the shipped `publish` step runs

@@ -146,7 +146,14 @@ def test_the_shipped_config_runs_everything_but_publishing():
     s = autorun.settings_of(cfg)
     steps = steps_from_config(cfg)
     names, dropped = autorun.plan(s["steps"], steps)
-    assert s["error"] is None and s["times"] == ["06:00", "12:00", "18:00"]
+    assert s["error"] is None and s["times"] == [
+        "01:00",
+        "03:00",
+        "06:00",
+        "09:32",
+        "12:00",
+        "15:00",
+    ]
     assert names == SHIPPED_AUTO_STEPS and not dropped
     assert "publish" not in s["steps"]
     assert "--live" not in (REPO / "ops" / "config.yaml").read_text(encoding="utf-8")
@@ -770,7 +777,10 @@ def test_the_runs_page_shows_and_saves_the_automatic_runs(panel_client):
     client, cfg_copy = panel_client
     body = client.get("/runs").text
     assert "Automatic runs" in body and 'action="/runs/auto"' in body
-    assert "06:00, 12:00, 18:00" in body and "Publishing never runs on its own" in body
+    assert (
+        "01:00, 03:00, 06:00, 09:32, 12:00, 15:00" in body
+        and "Publishing never runs on its own" in body
+    )
     r = client.post("/runs/auto", data={"times": "7:00, 19:00"})  # box unticked: off
     assert r.status_code == 303 and r.headers["location"] == "/runs?saved=auto"
     saved = load_ops_config(cfg_copy)
