@@ -60,15 +60,15 @@ POST_1 = (
     "A second-line phase 2 readout put a response rate of 41% on the table for a "
     "bispecific most of the field had written off.\n\n"
     "The part that matters is durability: the median response duration was not reached "
-    "at 14 months of follow-up."
+    "at 14 months of follow-up. I didn't expect that from this class."
 )
 POST_2 = (
     "What it changes: the class now has a data point a pivotal trial can be built around, "
     "and @Merck is a year behind with its own program.\n\nNot investment advice."
 )
 POST_SINGLE = (
-    "One post now: the readout, the durability and the year of lead, in a single read.\n\n"
-    "Not investment advice."
+    "One post now: the readout, the durability and the year of lead, in a single read. "
+    "I keep coming back to the durability.\n\nNot investment advice."
 )
 ADVICE = "You should buy the stock before the next readout."
 SUMMARY = "Two posts on the readout and what it changes for the class."

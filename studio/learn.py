@@ -11,17 +11,24 @@ with the median of every post the account made in the `learn.baseline_days` befo
 with too few posts before it to compare with is measured but not yet scored.
 
 What the scores feed:
-- `arm_stats`: per angle, shape, hook style and card count, how many pieces and the mean
-  log relative (shown as "x the median").
+- `arm_stats`: per angle, shape, hook style, card count and voice, how many pieces and the
+  mean log relative (shown as "x the median").
 - `lean`: one Thompson draw per arm among what is on offer, so a value that has done
   better is suggested more often and one with little evidence still gets tried.
+- `draw_voice`: the voice a new piece is given. The app assigns it rather than suggesting
+  it, at random (never the voice of the piece before) until `voices.lean_min_measured`
+  scored pieces carry one, then by the same kind of Thompson draw.
 - `evidence_block`: the "WHAT X SAYS" section of the prompts, with honest sample sizes.
+- `voice_edits`: per voice, what the editor did with its pieces in the queue (changed by
+  hand, how much, revisions asked, rejected): a signal that comes with every piece, long
+  before X has said anything.
 - `rewrite_prompt` / `parse_rewrite`: one model call that rewrites the playbook from the
   evidence and the editor's hand edits, checked here before it is ever used.
 """
 
 from __future__ import annotations
 
+import difflib
 import json
 import math
 import random
@@ -33,13 +40,15 @@ from statistics import median, stdev
 from typing import Any
 
 from feedback.models import CONVERSATION, CONVERSATION_WEIGHTS, METRICS, Metrics
+from studio import voices as V
 
-ARMS = ("angle", "shape", "hook_style", "cards")
+ARMS = ("angle", "shape", "hook_style", "cards", "voice")
 ARM_LABELS = {
     "angle": "Angles",
     "shape": "Shapes",
     "hook_style": "Hook styles",
     "cards": "Cards per piece",
+    "voice": "Voices",
 }
 # A relative of 0 has no logarithm; it counts as this (a post with nothing against a
 # baseline with something, and no smoothing).
@@ -112,6 +121,7 @@ class Measured:
     shape: str = ""
     hook_style: str = ""
     cards: int = 0
+    voice: str = ""  # the playbook voice it was written in ('' for none)
     source: str = "x"  # "x": step 4's snapshot; "manual": typed in by the editor
     url: str = ""
     baseline: float | None = None
@@ -284,6 +294,128 @@ def lean(
     )
 
 
+@dataclass(frozen=True)
+class VoiceDraw:
+    key: str
+    how: str  # "random", "evidence" (a Thompson draw) or "only" (one voice to give)
+    measured: int  # scored pieces with a voice the draw stood on
+
+
+def draw_voice(
+    pieces: Iterable[Measured],
+    voices: Sequence[str],
+    *,
+    previous: str,
+    rng: random.Random,
+    min_measured: int,
+    prior_sd: float,
+    default_sd: float,
+) -> VoiceDraw | None:
+    """The voice a new piece is written in, among `voices` (keys), never `previous` (the
+    voice of the piece before it) when there is another. At random until `min_measured`
+    scored pieces carry a voice (0: always at random): a few posts say little, and an even
+    draw keeps the comparison fair. Then a Thompson draw on what X says, so a voice that has
+    done better is given more often and one with little evidence still gets pieces. None
+    when there is no voice to give."""
+    keys = list(dict.fromkeys(k for k in voices if k))
+    if not keys:
+        return None
+    if len(keys) == 1:
+        return VoiceDraw(keys[0], "only", 0)
+    candidates = [k for k in keys if k != previous] or keys
+    pool = [p for p in scored(pieces) if p.voice]
+    if min_measured > 0 and len(pool) >= min_measured:
+        sd = spread(pool, default=default_sd, floor=SPREAD_FLOOR)
+        stats = arm_stats(pool, "voice")
+        key = thompson(candidates, stats, rng=rng, prior_sd=prior_sd, post_sd=sd)
+        return VoiceDraw(key, "evidence", len(pool))
+    return VoiceDraw(rng.choice(candidates), "random", len(pool))
+
+
+# --- what the editor did with each voice's pieces ------------------------------------------
+
+REVIEW_POSTED = "posted"
+REVIEW_APPROVED = "approved"
+REVIEW_REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class Reviewed:
+    """A studio piece with a voice that the editor has decided on in the queue."""
+
+    piece_id: int
+    voice: str
+    outcome: str  # REVIEW_POSTED, REVIEW_APPROVED or REVIEW_REJECTED
+    changed: float  # share of its words the editor's hand edits changed (0: as written)
+    revisions: int  # times the studio rewrote it on the editor's request
+
+
+@dataclass(frozen=True)
+class VoiceEdits:
+    voice: str
+    decided: int  # pieces approved, posted or rejected
+    edited: int  # of the ones not rejected, those the editor changed by hand
+    changed: float | None  # mean share of words changed, over the ones not rejected
+    revisions: int  # revisions asked, over every decided piece
+    rejected: int
+
+    @property
+    def kept(self) -> int:
+        return self.decided - self.rejected
+
+
+def edit_share(before: str, after: str) -> float:
+    """How much of a text the editor changed, by words: 0 untouched, 1 all of it (difflib's
+    ratio, so a word cut and a word added count alike)."""
+    a, b = before.split(), after.split()
+    if not a and not b:
+        return 0.0
+    return 1.0 - difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
+
+
+def voice_edits(reviews: Iterable[Reviewed]) -> list[VoiceEdits]:
+    """Per voice, what the editor did with its pieces: the voice rewritten least first."""
+    groups: dict[str, list[Reviewed]] = {}
+    for r in reviews:
+        if r.voice:
+            groups.setdefault(r.voice, []).append(r)
+    out = []
+    for voice, rows in groups.items():
+        kept = [r for r in rows if r.outcome != REVIEW_REJECTED]
+        out.append(
+            VoiceEdits(
+                voice=voice,
+                decided=len(rows),
+                edited=sum(1 for r in kept if r.changed > 0),
+                changed=sum(r.changed for r in kept) / len(kept) if kept else None,
+                revisions=sum(r.revisions for r in rows),
+                rejected=len(rows) - len(kept),
+            )
+        )
+    return sorted(
+        out,
+        key=lambda v: (
+            v.rejected / v.decided,
+            v.changed if v.changed is not None else 1.0,
+            v.revisions / v.decided,
+            -v.decided,
+            v.voice,
+        ),
+    )
+
+
+def voice_edits_line(v: VoiceEdits) -> str:
+    parts = [f"{v.decided} piece{'s' if v.decided != 1 else ''} decided"]
+    if v.kept:
+        parts.append(
+            f"{v.edited} of {v.kept} kept changed by hand, "
+            f"{(v.changed or 0) * 100:.0f}% of the words on average"
+        )
+    parts.append(f"{v.revisions} revision{'s' if v.revisions != 1 else ''} asked")
+    parts.append(f"{v.rejected} rejected")
+    return f"- {v.voice}: " + "; ".join(parts)
+
+
 def lean_shares(
     pieces: Iterable[Measured],
     arm: str,
@@ -333,8 +465,11 @@ def evidence_block(
     kpi: str = CONVERSATION,
     horizon_hours: float = 48,
     baseline_days: float = 30,
+    voices: bool = True,
 ) -> str:
-    """The "WHAT X SAYS" text every session reads; "" when nothing is scored yet."""
+    """The "WHAT X SAYS" text every session reads; "" when nothing is scored yet. A session
+    gets it without the voices (`voices=False`): the app gives each piece its voice, and a
+    writer told which voices do well would drift towards them and blur its own."""
     pool = scored(pieces)
     if not pool:
         return ""
@@ -349,15 +484,18 @@ def evidence_block(
             "One post's numbers are mostly the story and the day."
         )
     for arm in ARMS:
+        if arm == "voice" and not voices:
+            continue
         stats = arm_stats(pool, arm)
         if stats:
             lines.append(f"- {ARM_LABELS[arm]}: {_ranked(stats)}.")
     best = sorted(pool, key=lambda p: -(p.relative or 0))
     for label, chosen in (("Did best", best[:2]), ("Did worst", best[::-1][:2])):
         for p in chosen:
+            voice = f", {p.voice} voice" if voices and p.voice else ""
             lines.append(
                 f"- {label}: {p.title or 'piece ' + str(p.piece_id)} ({p.angle}, {p.shape}, "
-                f"{p.hook_style} hook, {p.cards} card{'s' if p.cards != 1 else ''}): "
+                f"{p.hook_style} hook, {p.cards} card{'s' if p.cards != 1 else ''}{voice}): "
                 f'{p.relative:.1f}x the median. It opened: "{_quote(p.opening)}"'
             )
         if len(pool) < 3:
@@ -412,14 +550,16 @@ def rewrite_due(
 
 REWRITE_SYSTEM = """You keep the playbook for a writer: a short working note the writer reads before every piece. The writer is an AI analyst who researches and writes long-form X posts, with designed cards, on the business and investing side of immuno-oncology biotech (CAR-T and cell therapy, T-cell engagers and bispecifics, checkpoint and adjacent IO science; trials, catalysts, deals, money). A human editor approves every piece before it is posted.
 
-Your job: rewrite the playbook so the next pieces do better on X, from the evidence you are given: how each posted piece did against the account's own median, which angles, shapes, hooks and card counts did best and worst, and what the editor changed by hand before posting (the editor's changes are strong evidence of taste).
+Your job: rewrite the playbook so the next pieces do better on X, from the evidence you are given: how each posted piece did against the account's own median, which angles, shapes, hooks, card counts and voices did best and worst, what the editor changed by hand before posting (the editor's changes are strong evidence of taste), and, by voice, how often the editor rewrote, revised or rejected its pieces.
 
 How:
 - Keep what still holds. Change what the evidence contradicts, add what it shows, cut what no longer earns its place. Do not drop the editorial principles (sourcing, the reality check, labelled estimates, the fact-check habits) unless the evidence clearly says they cost readers.
 - Small samples are weak evidence: one or two posts are a hint, say so in the changelog and word the playbook as a hypothesis to test ("try", "lean towards"), not a law.
 - Write rules the writer can act on, with the numbers that justify them where they help ("catalyst maps have done 2x the median on 4 posts: when a story has dated catalysts, show them as a timeline card").
 - Never relax the lines that are never crossed: no investment advice (no buy, sell or hold calls, no price targets of the account's own, an analyst's target cited only with what it rests on, no promised returns), no medical advice, no links in posts, no fabricated numbers, quotes or handles, every number sourced. Never tell the writer to do anything the editor would have to undo.
-- Plain markdown under the title "# Playbook", at most {max_words} words, with these sections in this order: ## Openings, ## Substance the editor values, ## Mistakes caught in fact-checks (do not repeat), ## Format, ## Cards, ## Still to learn (the feedback loop fills these in).
+- The writer is a person, not a newswire: keep the first person and the writer's own reactions ("I couldn't believe the data", "this deal doesn't make any sense to me", "I wonder why they didn't include another dose"). Never write that out of the playbook.
+- ## Voices lists the voices the app gives the pieces, one per piece at random ("### key: Name", then a few sentences on how that voice sounds, with a line or two of it). The account's numbers are kept by key: keep a voice's key whenever you keep the voice, and sharpen its wording only to make it more itself. To try a different voice, add one with a new key; to drop one the evidence has turned against, remove it. Change the voices only when the evidence by voice (X results, and what the editor changed, revised or rejected) supports it, with the numbers in the changelog: the editor reads every change to them before it is used. Keep {min_voices} to {max_voices} voices, each at most {voice_words} words and each the same person with a personality of its own, speaking in the first person.
+- Plain markdown under the title "# Playbook", at most {max_words} words not counting ## Voices, with these sections in this order: ## Openings, ## Substance the editor values, ## Mistakes caught in fact-checks (do not repeat), ## Format, ## Cards, ## Voices, ## Still to learn (the feedback loop fills these in).
 
 Reply with ONLY a JSON object: {{"playbook": "<the whole new playbook, markdown>", "changelog": ["<one line per change: what changed, and the evidence>"]}}"""
 
@@ -430,8 +570,10 @@ REQUIRED_SECTIONS = (
     "## Mistakes caught",
     "## Format",
     "## Cards",
+    V.HEADING,
     "## Still to learn",
 )
+MAX_LEARNED_VOICES = 6
 
 
 def rewrite_prompt(
@@ -441,14 +583,22 @@ def rewrite_prompt(
     *,
     evidence: str,
     max_words: int,
+    by_voice: Sequence[VoiceEdits] = (),
 ) -> tuple[str, str]:
-    """(system, user) for the one model call that rewrites the playbook."""
-    system = REWRITE_SYSTEM.format(max_words=max_words)
+    """(system, user) for the one model call that rewrites the playbook. `by_voice`: what
+    the editor did with each voice's pieces (voice_edits)."""
+    system = REWRITE_SYSTEM.format(
+        max_words=max_words,
+        min_voices=V.MIN_LEARNED,
+        max_voices=MAX_LEARNED_VOICES,
+        voice_words=V.MAX_WORDS,
+    )
     rows = []
     for p in sorted(scored(pieces), key=lambda q: q.posted_at):
+        voice = f", voice {p.voice}" if p.voice else ""
         rows.append(
             f"- {p.posted_at:%Y-%m-%d} {p.title or 'piece ' + str(p.piece_id)}: angle "
-            f"{p.angle}, {p.shape}, {p.hook_style} hook, {p.cards} card(s); "
+            f"{p.angle}, {p.shape}, {p.hook_style} hook, {p.cards} card(s){voice}; "
             f"{p.relative:.2f}x the median ({p.value:g} against {p.baseline:g}). Opened: "
             f'"{_quote(p.opening, 300)}"'
         )
@@ -458,23 +608,37 @@ def rewrite_prompt(
             f'- piece {e.piece_id}\n  BEFORE: "{_quote(e.before, 400)}"\n'
             f'  AFTER: "{_quote(e.after, 400)}"'
         )
+    off = (
+        [
+            "THE VOICES\nThe editor has turned the voices off: keep the ## Voices heading with no "
+            "voice under it."
+        ]
+        if V.has_section(playbook) and not V.parse(playbook)
+        else []
+    )
     user = "\n\n".join(
         [
             "THE CURRENT PLAYBOOK\n" + (playbook.strip() or "(empty)"),
+            *off,
             "WHAT X SAYS\n" + (evidence or "(nothing measured yet)"),
             "EVERY MEASURED PIECE\n" + ("\n".join(rows) or "(none)"),
             "WHAT THE EDITOR CHANGED BY HAND BEFORE POSTING (most recent first)\n"
             + ("\n".join(edit_rows) or "(no hand edits)"),
+            "WHAT THE EDITOR DID WITH EACH VOICE'S PIECES (the least rewritten first)\n"
+            + ("\n".join(voice_edits_line(v) for v in by_voice) or "(none decided yet)"),
             "Rewrite the playbook. Reply with the JSON object only.",
         ]
     )
     return system, user
 
 
-def parse_rewrite(text: str, *, max_words: int) -> Rewrite:
+def parse_rewrite(text: str, *, max_words: int, voices_off: bool = False) -> Rewrite:
     """The model's reply as a Rewrite, or RewriteRejected: not JSON, no playbook, a section
-    missing or too long. (The playbook is never posted: what the writer then writes is
-    checked at polish like any post, so the advice and link patterns are not run on it.)"""
+    missing or too long, a voice malformed, or too few or too many voices (the Voices
+    section has limits of its own and is left out of the word count). (The playbook is
+    never posted: what the writer then writes is checked at polish like any post, so the
+    advice and link patterns are not run on it.) `voices_off`: the current playbook lists
+    no voice (the editor turned them off), so the rewrite may list none either."""
     raw = text.strip()
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0 or end <= start:
@@ -490,9 +654,17 @@ def parse_rewrite(text: str, *, max_words: int) -> Rewrite:
     missing = [s for s in REQUIRED_SECTIONS if s not in playbook]
     if missing:
         raise RewriteRejected("the playbook lacks " + ", ".join(missing))
-    words = len(re.findall(r"\S+", playbook))
+    words = len(re.findall(r"\S+", V.without(playbook)))
     if words > max_words * 1.15:
         raise RewriteRejected(f"the playbook runs {words} words (the limit is {max_words})")
+    wrong = V.problems(playbook)
+    if wrong:
+        raise RewriteRejected("its voices: " + "; ".join(wrong))
+    n = len(V.parse(playbook))
+    if not (voices_off and n == 0) and not V.MIN_LEARNED <= n <= MAX_LEARNED_VOICES:
+        raise RewriteRejected(
+            f"it lists {n} voice(s); keep {V.MIN_LEARNED} to {MAX_LEARNED_VOICES}"
+        )
     changelog = data.get("changelog")
     lines = [" ".join(str(c).split()) for c in changelog] if isinstance(changelog, list) else []
     return Rewrite(playbook=playbook, changelog=[c for c in lines if c][:20])

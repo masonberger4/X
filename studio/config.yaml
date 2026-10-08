@@ -88,6 +88,25 @@ variety:
   avoid_recent_hooks: 2
   recent_pieces_shown: 8         # the last N written pieces hooks, shapes and openings vary from
 
+# Voices (studio/voices.py): the playbook's "## Voices" section lists them, and the app
+# gives each new piece one at random, never the voice of the piece before, so the account
+# does not always sound the same. The piece keeps it from research to revision, and the
+# performance page shows what X says by voice and how much you edit, revise or reject each
+# one. Once `lean_min_measured` scored pieces carry a voice the draw follows the evidence
+# (a voice that has done better is drawn more often, one with little evidence still gets
+# pieces); before that it stays even, since a few posts say little (0 = always at random).
+# A learned playbook that changes the voices always waits for you, whatever learn.playbook
+# says.
+# Every voice speaks as a person: the post must carry at least one sentence in the first
+# person ("I", "me", "my") per `first_person_every_chars` characters of post text, never
+# fewer than one nor asked for more than `first_person_max`. Fewer is sent back to the
+# session to fix (0 = no check).
+voices:
+  enabled: true                 # false: pieces get no voice (the first-person check stays)
+  lean_min_measured: 30
+  first_person_every_chars: 1200
+  first_person_max: 6
+
 # X limits the checker enforces (characters weighted the way X counts them).
 x:
   long_post_max: 25000          # X Premium long post

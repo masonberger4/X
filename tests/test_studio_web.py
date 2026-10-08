@@ -1100,3 +1100,13 @@ def test_the_feed_offers_a_studio_piece_for_each_story(client, conn, started):
     [topic] = S.queued_topics(conn)
     assert (topic.topic, topic.cluster_id, topic.checkpoint) == ("", cid, True)
     assert started == [["studio_now"]]
+
+
+def test_a_piece_page_names_the_voice_it_was_given(client, sconn):
+    record = {"key": "sceptic", "name": "The sceptic", "text": "Reads the footnotes first."}
+    piece = make_piece(sconn, stage=S.STAGE_READY, voice="sceptic", meta={"voice": record})
+    body = client.get(f"/studio/{piece.id}").text
+    assert "voice <strong>The sceptic</strong>" in body
+    assert "Reads the footnotes first." in body
+    plain = make_piece(sconn, stage=S.STAGE_READY)
+    assert "voice <strong>" not in client.get(f"/studio/{plain.id}").text

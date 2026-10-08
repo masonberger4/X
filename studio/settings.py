@@ -40,6 +40,12 @@ DEFAULTS: dict[str, Any] = {
     "cli_flags": ["--safe-mode", "--restricted", "--permission-mode", "dontAsk"],
     "topics": {"lookback_hours": 48, "shortlist": 8, "min_score": 30, "avoid_days": 10},
     "variety": {"avoid_recent_angles": 3, "avoid_recent_hooks": 2, "recent_pieces_shown": 8},
+    "voices": {
+        "enabled": True,
+        "lean_min_measured": 30,
+        "first_person_every_chars": 1200,
+        "first_person_max": 6,
+    },
     "x": {
         "long_post_max": 25000,
         "thread_post_max": 25000,
@@ -91,6 +97,7 @@ _SECTIONS = (
     "max_turns",
     "topics",
     "variety",
+    "voices",
     "x",
     "render",
     "radar",

@@ -44,7 +44,8 @@ from studio import render as render_mod
 from studio import session as SS
 from studio import store as S
 from studio import topics as T
-from studio.settings import EXEMPLARS_DIR, load_studio_config
+from studio import voices as V
+from studio.settings import DEFAULT_PLAYBOOK, EXEMPLARS_DIR, load_studio_config
 from tests.conftest import ABSTRACT, URL, seed_item
 
 T0 = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
@@ -54,7 +55,8 @@ NOTE = "Lead with the durability, drop the history."
 TITLE = "A written-off bispecific is back"
 POST = (
     "A second-line phase 2 readout put a response rate of 41% on the table for a "
-    "bispecific most of the field had written off.\n\nNot investment advice."
+    "bispecific most of the field had written off. I didn't expect that.\n\n"
+    "Not investment advice."
 )
 
 
@@ -2071,3 +2073,85 @@ def test_a_fresh_database_without_scores_offers_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "fresh.db"))
     assert T.fetch_shortlist(TCFG, exclude=set()) == []
     assert T.fetch_story(1) is None
+
+
+# ---- voices ---------------------------------------------------------------------------------
+
+
+def test_each_new_piece_is_given_a_voice_at_random_never_the_one_before(rig, sconn):
+    """The app gives the voice (the session never chooses it): drawn when the piece's
+    research starts, recorded with its words, told to research and to the writing stage,
+    and never the voice of the piece before."""
+    seed = V.parse(DEFAULT_PLAYBOOK.read_text(encoding="utf-8"))
+    names = {v.key: v.name for v in seed}
+    voices = []
+    for n in range(4):
+        rig.cli.calls.clear()
+        assert runner.run(topic=f"{TOPIC} {n}", checkpoint=False) == 0
+        piece = rig.pieces()[0]
+        assert piece.voice in names
+        given = piece.meta["voice"]
+        assert (given["key"], given["name"], given["drawn"]) == (
+            piece.voice,
+            names[piece.voice],
+            "random",
+        )
+        research, write = rig.cli.prompt("research"), rig.cli.prompt("write")
+        assert f"{names[piece.voice]} ({piece.voice})" in research
+        assert "YOUR VOICE FOR THIS PIECE" in write and names[piece.voice] in write
+        # a session is told its own voice, never the others, and no Voices section
+        for other, name in names.items():
+            if other != piece.voice:
+                assert name not in write and name not in research
+        assert "## Voices" not in write
+        voices.append(piece.voice)
+    assert all(a != b for a, b in zip(voices, voices[1:], strict=False))
+
+
+def test_a_piece_keeps_its_voice_as_it_was_worded_when_the_playbook_changes(
+    rig, sconn, cfg, tmp_path
+):
+    ctx = runner.make_context(sconn, cfg)
+    ws = tmp_path / "studio_pieces" / "p"
+    piece = make_piece(sconn, workspace=ws)
+    first = ctx.brief_for(piece)
+    assert first.voice is not None
+    reworded = DEFAULT_PLAYBOOK.read_text(encoding="utf-8").replace(
+        first.voice.text, "Something else entirely, said in the first person: I mean it."
+    )
+    (tmp_path / "studio_playbook.md").write_text(reworded, encoding="utf-8")
+    writing = get(sconn, piece.id)
+    S.update_piece(sconn, piece.id, stage=S.STAGE_WRITING)
+    again = ctx.brief_for(get(sconn, piece.id))
+    assert again.voice == first.voice and writing.voice == first.voice.key
+    # and a revision is reminded of it
+    assert first.voice.text in P.revise_prompt(
+        "shorter", voice=V.given(writing.voice, writing.meta.get("voice"))
+    )
+
+
+def test_no_voice_with_voices_off_or_none_in_the_playbook(rig, sconn, cfg, tmp_path):
+    ctx = runner.make_context(sconn, cfg)
+    cfg["voices"]["enabled"] = False
+    off = make_piece(sconn, workspace=tmp_path / "studio_pieces" / "a")
+    assert ctx.brief_for(off).voice is None and get(sconn, off.id).voice == ""
+    cfg["voices"]["enabled"] = True
+    (tmp_path / "studio_playbook.md").write_text(
+        "# Playbook\n\n## Voices\nNone for now.\n\n## Still to learn\n- x\n", encoding="utf-8"
+    )
+    none = make_piece(sconn, workspace=tmp_path / "studio_pieces" / "b")
+    brief = ctx.brief_for(none)
+    assert brief.voice is None and get(sconn, none.id).voice == ""
+    assert "## Voices" not in brief.playbook and "## Still to learn" in brief.playbook
+    # a copy from before voices reads the seed's
+    (tmp_path / "studio_playbook.md").write_text("# Playbook\n\nMine.\n", encoding="utf-8")
+    old = make_piece(sconn, workspace=tmp_path / "studio_pieces" / "c")
+    brief = ctx.brief_for(old)
+    assert brief.voice is not None and brief.playbook == "# Playbook\n\nMine.\n"
+
+
+def test_a_dry_run_shows_the_voice_the_next_piece_may_get_and_records_none(rig, sconn, capsys):
+    assert runner.run(dry_run=True, topic=TOPIC) == 0
+    out = capsys.readouterr().out
+    assert "THE VOICE THIS PIECE WILL BE WRITTEN IN" in out
+    assert rig.pieces() == []

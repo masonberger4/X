@@ -13,14 +13,20 @@ import pytest
 from studio import learn as L
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+VOICES = (
+    "## Voices\nThe app gives each piece one.\n\n"
+    '### desk_note: The desk note\nDry and quick. "I didn\'t expect that."\n\n'
+    '### sceptic: The sceptic\nReads the footnotes. "This deal makes no sense to me."'
+)
 SECTIONS = "\n\n".join(
-    f"{h}\n- a line"
+    VOICES if h == "## Voices" else f"{h}\n- a line"
     for h in (
         "## Openings",
         "## Substance the editor values",
         "## Mistakes caught in fact-checks (do not repeat)",
         "## Format",
         "## Cards",
+        "## Voices",
         "## Still to learn (the feedback loop fills these in)",
     )
 )

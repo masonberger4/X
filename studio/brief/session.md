@@ -15,7 +15,8 @@ blindly; the angle decides the structure.
 The voice guide and the card spec follow below. Each stage's instructions add the
 angles you may choose from and the account's playbook (what has worked on this account
 so far, updated from its X results); where the playbook and the voice guide disagree,
-the playbook wins.
+the playbook wins. The app also gives each piece one of the account's voices, named in
+the instructions: you never choose it, and you write the whole piece in it.
 
 ## How a piece is made
 
@@ -32,8 +33,8 @@ continues you.
    a page's retrieval date is not its publication date. Record corrections as you
    find them. Verify @handles on the organisation's own website (the handles the app
    lists as verified need no check).
-2. Write. Choose the angle, the shape and the hook, write the post and design the
-   cards as HTML. Then run a cold fact-check: start a fresh sub-agent (the Agent
+2. Write. In the piece's voice, choose the angle, the shape and the hook, write the
+   post and design the cards as HTML. Then run a cold fact-check: start a fresh sub-agent (the Agent
    tool) that has not seen your research, give it only the post files and the card
    HTML, and tell it to check every claim, number, date, name and handle against
    primary sources on the web and report each problem with the source. It does not

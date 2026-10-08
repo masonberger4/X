@@ -6,7 +6,9 @@
 <h1>{{ piece.label }}</h1>
 {% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
 <p class="meta">Piece {{ piece.id }} · {{ piece.origin }} · started {{ piece.created_at|localtime }} ·
-  {{ piece.model }} at {{ piece.effort or "default" }} effort · session <code>{{ piece.session_id }}</code></p>
+  {{ piece.model }} at {{ piece.effort or "default" }} effort · session <code>{{ piece.session_id }}</code>
+  {% if voice %}· voice <strong>{{ voice.name }}</strong>{% elif piece.voice %}· voice <strong>{{ piece.voice }}</strong>{% endif %}</p>
+{% if voice %}<details><summary class="meta">how {{ voice.name }} sounds (given at random when the piece started)</summary><p class="meta">{{ voice.text }}</p></details>{% endif %}
 <p>
   {% if piece.stage == "ready" %}<span class="pill ok">ready</span> in the queue as <a href="/drafts/{{ piece.draft_id }}">draft {{ piece.draft_id }}</a>
   {% elif piece.stage in ("failed", "interrupted") %}<span class="pill fail">{{ piece.stage }}</span>

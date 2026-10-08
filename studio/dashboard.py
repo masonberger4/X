@@ -1,10 +1,11 @@
 """The performance page's view (/studio/performance), pure: no DB, no network, no clock.
 
-studio/web.py gathers the rows (studio/evidence.py:measure, the playbook versions) and
-hands them in with `now`; this module turns them into what the template shows: each
-posted piece with its numbers, what each angle, shape, hook style and card count has done
-and how often the lean suggests it, where the learning loop stands, and the playbook's
-history with what each version changed.
+studio/web.py gathers the rows (studio/evidence.py:measure and reviews, the playbook
+versions) and hands them in with `now`; this module turns them into what the template
+shows: each posted piece with its numbers, what each angle, shape, hook style, card count
+and voice has done and how often the lean suggests it (for a voice: how often it is drawn),
+what the editor did with each voice's pieces, where the learning loop stands, and the
+playbook's history with what each version changed.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from studio import learn as L
 from studio import store as S
 from studio.angles import HOOK_STYLES, SHAPES
 from studio.evidence import Evidence, Posted, parse_when
+from studio.voices import Voice
 
 SHARE_DRAWS = 4000
 SHARE_SEED = 0  # the page shows the same shares on every load while the evidence stands
@@ -35,6 +37,7 @@ class PieceRow:
     angle: str
     shape: str
     hook_style: str
+    voice: str
     cards: int | None  # None while unmeasured (the page does not look it up)
     lean: dict[str, str]  # what the brief suggested, {} when none
     url: str
@@ -65,6 +68,8 @@ class ArmTable:
     arm: str
     label: str
     rows: list[ArmRow]
+    share_label: str = "Suggested"  # what the share column means for this arm
+    note: str = ""
 
 
 @dataclass
@@ -104,6 +109,7 @@ def piece_rows(ev: Evidence, cfg: dict[str, Any], now: datetime) -> list[PieceRo
                 angle=p.piece.angle,
                 shape=p.piece.shape,
                 hook_style=p.piece.hook_style,
+                voice=p.piece.voice,
                 cards=m.cards if m else None,
                 lean={k: str(v) for k, v in lean.items() if v} if isinstance(lean, dict) else {},
                 url=p.url,
@@ -119,18 +125,74 @@ def piece_rows(ev: Evidence, cfg: dict[str, Any], now: datetime) -> list[PieceRo
     return out
 
 
-def arm_tables(ev: Evidence, cfg: dict[str, Any], *, angles: Sequence[str]) -> list[ArmTable]:
+def _voice_shares(ev: Evidence, cfg: dict[str, Any], voices: Sequence[str]) -> dict[str, float]:
+    """How often each voice is drawn: evenly until enough voiced pieces are scored
+    (learn.draw_voice), then by the Thompson draw's odds; {} with voices off."""
+    vcfg, lcfg = cfg.get("voices") or {}, cfg["learn"]
+    if not vcfg.get("enabled") or not voices:
+        return {}
+    pool = [p for p in ev.scored if p.voice]
+    floor = int(vcfg.get("lean_min_measured") or 0)
+    if floor <= 0 or len(pool) < floor:
+        return {v: 1 / len(voices) for v in voices}
+    return L.lean_shares(
+        pool,
+        "voice",
+        voices,
+        rng=random.Random(SHARE_SEED),
+        prior_sd=float(lcfg["prior_sd"]),
+        default_sd=float(lcfg["post_sd"]),
+        draws=SHARE_DRAWS,
+    )
+
+
+def _voice_note(ev: Evidence, cfg: dict[str, Any], voices: Sequence[str]) -> str:
+    vcfg = cfg.get("voices") or {}
+    if not vcfg.get("enabled"):
+        return "Voices are off (voices.enabled): new pieces get none."
+    if not voices:
+        return "The playbook lists no voices: new pieces get none."
+    floor = int(vcfg.get("lean_min_measured") or 0)
+    voiced = sum(1 for p in ev.scored if p.voice)
+    if floor <= 0:
+        return "Each new piece gets a voice at random, never the one before (no evidence draw)."
+    if voiced < floor:
+        return (
+            f"Each new piece gets a voice at random, never the one before, until {floor} "
+            f"scored pieces carry one ({voiced} so far); then the draw follows the evidence."
+        )
+    return (
+        f"{voiced} scored pieces carry a voice: the draw now follows the evidence, and a "
+        "voice with little of it still gets pieces."
+    )
+
+
+def arm_tables(
+    ev: Evidence,
+    cfg: dict[str, Any],
+    *,
+    angles: Sequence[str],
+    voices: Sequence[str] = (),
+) -> list[ArmTable]:
     """Per arm, every value the account can use (untried ones too) with its measured
-    pieces, its multiple of the median and the share of leans it gets."""
+    pieces, its multiple of the median and the share of leans it gets (for voices, the
+    share of pieces it is given). `voices`: the keys the playbook lists now."""
     lcfg = cfg["learn"]
-    offer = {"angle": list(angles), "shape": list(SHAPES), "hook_style": list(HOOK_STYLES)}
+    offer = {
+        "angle": list(angles),
+        "shape": list(SHAPES),
+        "hook_style": list(HOOK_STYLES),
+        "voice": list(voices),
+    }
     enough = len(ev.scored) >= max(1, int(lcfg["lean_min_measured"]))
     tables = []
     for arm in L.ARMS:
         stats = {s.value: s for s in L.arm_stats(ev.measured, arm)}
         candidates = offer.get(arm, [])
-        shares = (
-            L.lean_shares(
+        if arm == "voice":
+            shares = _voice_shares(ev, cfg, candidates)
+        elif enough and candidates:
+            shares = L.lean_shares(
                 ev.measured,
                 arm,
                 candidates,
@@ -139,9 +201,8 @@ def arm_tables(ev: Evidence, cfg: dict[str, Any], *, angles: Sequence[str]) -> l
                 default_sd=float(lcfg["post_sd"]),
                 draws=SHARE_DRAWS,
             )
-            if enough and candidates
-            else {}
-        )
+        else:
+            shares = {}
         values = list(dict.fromkeys([*stats, *candidates]))
         rows = [
             ArmRow(
@@ -153,8 +214,59 @@ def arm_tables(ev: Evidence, cfg: dict[str, Any], *, angles: Sequence[str]) -> l
             for v in values
         ]
         rows.sort(key=lambda r: (-(r.share or 0), -(r.times or 0), -r.n, r.value))
-        tables.append(ArmTable(arm=arm, label=L.ARM_LABELS[arm], rows=rows))
+        if arm == "voice":
+            tables.append(
+                ArmTable(
+                    arm=arm,
+                    label=L.ARM_LABELS[arm],
+                    rows=rows,
+                    share_label="Drawn",
+                    note=_voice_note(ev, cfg, candidates),
+                )
+            )
+        else:
+            tables.append(ArmTable(arm=arm, label=L.ARM_LABELS[arm], rows=rows))
     return tables
+
+
+@dataclass
+class VoiceEditRow:
+    """What the editor did with one voice's pieces in the queue."""
+
+    key: str
+    name: str
+    in_playbook: bool  # False: a voice the playbook no longer lists (its pieces remain)
+    decided: int
+    edited: int
+    kept: int
+    changed: float | None  # mean share of words changed by hand, over the pieces kept
+    revisions: int
+    rejected: int
+
+
+def voice_edit_rows(reviews: Sequence[L.Reviewed], voices: Sequence[Voice]) -> list[VoiceEditRow]:
+    """Every voice the playbook lists (untried ones too) and every voice a decided piece
+    was written in, the least rewritten first, untried ones last."""
+    stats = {v.voice: v for v in L.voice_edits(reviews)}
+    names = {v.key: v.name for v in voices}
+    order = [*stats, *(k for k in names if k not in stats)]
+    rows = []
+    for key in order:
+        st = stats.get(key)
+        rows.append(
+            VoiceEditRow(
+                key=key,
+                name=names.get(key, key),
+                in_playbook=key in names,
+                decided=st.decided if st else 0,
+                edited=st.edited if st else 0,
+                kept=st.kept if st else 0,
+                changed=st.changed if st else None,
+                revisions=st.revisions if st else 0,
+                rejected=st.rejected if st else 0,
+            )
+        )
+    return rows
 
 
 def _base_for(v: S.PlaybookVersion, ordered: Sequence[S.PlaybookVersion]) -> str:
