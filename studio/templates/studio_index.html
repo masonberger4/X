@@ -51,7 +51,7 @@ pieces already posted: their numbers, what has done well, and the playbook's his
 <p class="meta">Automatic pieces: {% if cfg.auto.enabled %}on, at most {{ cfg.auto.max_new_per_day }} a day and {{ cfg.auto.min_hours_between }}h apart, {% if cfg.auto.checkpoint %}stopping{% else %}not stopping{% endif %} after research{% else %}off{% endif %} (studio/config.yaml).</p>
 {% if pieces %}
 <table>
-  <tr><th>#</th><th>Started</th><th>Stage</th><th>Piece</th><th>Angle</th><th>Draft</th></tr>
+  <tr><th>#</th><th>Started</th><th>Stage</th><th>Piece</th><th>Angle · voice</th><th>Draft</th></tr>
   {% for p in pieces %}
   <tr>
     <td><a href="/studio/{{ p.id }}">{{ p.id }}</a></td>
@@ -63,7 +63,7 @@ pieces already posted: their numbers, what has done well, and the playbook's his
         {% else %}<span class="pill warn">{{ p.stage }}</span>{% endif %}
         {% if p.request %}<br><span class="meta">{{ p.request }} requested</span>{% endif %}</td>
     <td><a href="/studio/{{ p.id }}">{{ p.label }}</a>{% if p.error %}<br><span class="meta over">{{ p.error[:160] }}</span>{% endif %}</td>
-    <td>{{ p.angle or "-" }}{% if p.shape %}<br><span class="meta">{{ p.shape }}</span>{% endif %}</td>
+    <td>{{ p.angle or "-" }}{% if p.shape %}<br><span class="meta">{{ p.shape }}</span>{% endif %}{% if p.voice %}<br><span class="meta">voice {{ p.voice }}</span>{% endif %}</td>
     <td>{% if p.draft_id %}<a href="/drafts/{{ p.draft_id }}">{{ p.draft_id }}</a>{% else %}-{% endif %}</td>
   </tr>
   {% endfor %}

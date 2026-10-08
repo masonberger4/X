@@ -607,6 +607,68 @@ def check_price_targets(piece: PieceFiles, report: Report) -> None:
         )
 
 
+# A person, not a newswire (studio/brief/voice.md, "Sound like a person"): the sentences that
+# speak as the writer. "I" counts only as the pronoun before a word or as I'm/I'd/I've/I'll,
+# never as the Roman numeral of a phase, a type, a class or a grade ("phase I trial", "type I
+# interferon", "MHC class I molecules").
+_PRONOUN_I_RE = re.compile(r"(?<![\w'\u2019-])I(?:['\u2019](?:m|d|ve|ll)\b|\s+[a-z])")
+_ROMAN_BEFORE_RE = re.compile(
+    r"\b(?:phases?|types?|class(?:es)?|grades?|stages?|parts?|cohorts?|arms?|levels?|tiers?|"
+    r"categor(?:y|ies)|sections?|schedules?|periods?|groups?|doses?|studies|study|trials?|"
+    r"figures?|tables?|chapters?|mhc|hla|factors?|complex(?:es)?|segments?|cycles?)\s+$",
+    re.I,
+)
+_ME_MY_RE = re.compile(r"(?<![\w'\u2019-])(?:[Mm]e|[Mm]y|[Mm]ine|[Mm]yself)(?![\w'\u2019-])")
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def speaks_as_writer(sentence: str) -> bool:
+    """Whether a sentence speaks in the first person (I, me, my, mine, myself)."""
+    if _ME_MY_RE.search(sentence):
+        return True
+    return any(
+        not _ROMAN_BEFORE_RE.search(sentence[: m.start()]) for m in _PRONOUN_I_RE.finditer(sentence)
+    )
+
+
+def first_person_sentences(text: str) -> int:
+    """The sentences (and bullet lines) of a text that speak in the first person."""
+    return sum(1 for s in _SENTENCE_BREAK_RE.split(text) if s.strip() and speaks_as_writer(s))
+
+
+def first_person_wanted(chars: int, every: int, most: int) -> int:
+    """The first-person sentences a post of `chars` characters needs: one per `every`
+    characters, at least one, at most `most` (0: no cap); 0 when `every` is 0."""
+    if every <= 0 or chars <= 0:
+        return 0
+    wanted = max(1, -(-chars // every))
+    return min(wanted, most) if most > 0 else wanted
+
+
+def check_first_person(piece: PieceFiles, report: Report, voices: dict[str, Any] | None) -> None:
+    """A piece that reads like a report rather than a person goes back to the session
+    (fixable): too few sentences in the first person for its length
+    (studio/config.yaml voices.first_person_every_chars / first_person_max)."""
+    cfg = voices or {}
+    text = "\n\n".join(piece.posts)
+    wanted = first_person_wanted(
+        len(text),
+        int(cfg.get("first_person_every_chars") or 0),
+        int(cfg.get("first_person_max") or 0),
+    )
+    found = first_person_sentences(text)
+    if found < wanted:
+        report.fixable.append(
+            f"the post reads like a report, not a person: {found} sentence"
+            f"{'' if found == 1 else 's'} speak{'s' if found == 1 else ''} as you (I, me, my) "
+            f"in {len(text)} characters, and a post this long needs at least {wanted}. Add "
+            "your own reactions next to the facts that caused them, in the piece's voice: "
+            "what surprised you, what doesn't add up, what you wonder about (\"I couldn't "
+            'believe the data", "this deal doesn\'t make any sense to me", "I wonder why '
+            "they didn't include another dose\"). Never an invented experience or a trade."
+        )
+
+
 NO_FACTCHECK = (
     f"{FACTCHECK_FILE} is missing or empty: run the cold fact-check (a fresh sub-agent with only "
     "the post and card text), wait for its report, fix what it finds and log it there"
@@ -661,9 +723,12 @@ def check_piece(
     renderer: Renderer | None,
     *,
     requested_angle: str = "",
+    voices: dict[str, Any] | None = None,
 ) -> Report:
     """Everything the app checks before a piece may go to the queue. `requested_angle` is
-    the angle the editor chose for the piece, if any: the session must write in it."""
+    the angle the editor chose for the piece, if any: the session must write in it.
+    `voices`: studio/config.yaml's voices section, whose first-person floor the posts must
+    meet (check_first_person; None checks nothing)."""
     piece, blocking, minor = read_piece(workspace)
     if piece is None:
         report = Report()
@@ -677,6 +742,8 @@ def check_piece(
             f"{PIECE_FILE}: the editor chose the angle {requested_angle!r} for this piece; "
             f"write it in that angle (piece.json says {piece.angle!r})"
         )
+    if piece.posts:
+        check_first_person(piece, report, voices)
     check_side_files(workspace, report)
     check_cards(piece, report, renderer)
     return report

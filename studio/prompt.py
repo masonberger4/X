@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from studio.angles import HOOK_STYLES, SHAPES, AngleOffer
 from studio.learn import Lean
 from studio.radar import KINDS, Catalyst, Topic
+from studio.voices import Voice
 
 PIECE_FILE = "piece.json"
 RESEARCH_FILE = "research.json"
@@ -147,6 +148,8 @@ class Brief:
     # text and this piece's lean, both empty until enough pieces are measured.
     evidence: str = ""
     lean: Lean | None = None
+    # The playbook voice the app gave this piece (studio/voices.py), None when it has none.
+    voice: Voice | None = None
     # The X handles the app's config gives (draft/tags.py:load_handles): (handle without
     # the @, the names it stands for). The session may use them without verifying them.
     handles: list[tuple[str, str]] = field(default_factory=list)
@@ -392,9 +395,9 @@ RECENT PIECES (do not repeat a topic unless there is genuinely new news on it)
 
 {_playbook_block(b)}
 
-{_x_says(b)}Do not write the post in this stage. When both files are written, end your turn with a
-three-line summary: the topic, the angle you lean towards, and anything the editor should
-know before you write."""
+{_x_says(b)}{_voice_ahead(b)}Do not write the post in this stage. When both files are
+written, end your turn with a three-line summary: the topic, the angle you lean towards,
+and anything the editor should know before you write."""
 
 
 # --- write ------------------------------------------------------------------------------
@@ -462,13 +465,40 @@ def _variety_block(b: Brief) -> str:
     return "(nothing recent to vary from)" if b.recent else "(no recent pieces)"
 
 
+def _voice_ahead(b: Brief) -> str:
+    """Research's note of the voice the piece will be written in, so the fact base holds
+    what that voice needs (the storyteller's turns of the story, the sceptic's footnotes)."""
+    if b.voice is None:
+        return ""
+    return (
+        "THE VOICE THIS PIECE WILL BE WRITTEN IN (the writing stage; gather what it needs)\n"
+        f"{b.voice.brief()}\n\n"
+    )
+
+
+def _voice_block(b: Brief) -> str:
+    """The piece's voice, as the write stage gives it; "" for a piece without one."""
+    if b.voice is None:
+        return ""
+    return (
+        "YOUR VOICE FOR THIS PIECE\n"
+        "The app gives each piece one of the account's voices, so the account does not "
+        "always sound the same; this is the one for this piece. Write all of it in this "
+        "voice, the hook, the sections and the bottom line, in the first person with your "
+        "own reactions as the voice guide asks. A voice changes how you sound, never what "
+        "is true, what is sourced or the lines that are never crossed; where the editor's "
+        "words above ask for something else, the editor wins.\n"
+        f"{b.voice.brief()}\n\n"
+    )
+
+
 def write_prompt(b: Brief, note: str = "") -> str:
     editor = f"THE EDITOR READ YOUR FACT BASE AND SAYS\n{note.strip()}\n\n" if note.strip() else ""
     return f"""STAGE 2 OF 3: WRITE
 
 {_paths_block(b)}
 
-{editor}CHOOSE
+{editor}{_voice_block(b)}CHOOSE
 - The angle: one from the list below, the one this story makes most interesting.
 - The shape: long_post (one post up to {b.long_post_max} characters), thread (two or more
   long posts, each up to {b.thread_post_max}; each post must stand on its own as a
@@ -597,16 +627,27 @@ def _hand_edits_block(edited_posts: Sequence[str], dropped_cards: Sequence[str])
 
 
 def revise_prompt(
-    note: str, *, edited_posts: Sequence[str] = (), dropped_cards: Sequence[str] = ()
+    note: str,
+    *,
+    edited_posts: Sequence[str] = (),
+    dropped_cards: Sequence[str] = (),
+    voice: Voice | None = None,
 ) -> str:
     """The editor's request, and the changes the editor made by hand in the queue (the app
-    has already put those into the session's files; see studio/session.py:write_back)."""
+    has already put those into the session's files; see studio/session.py:write_back).
+    `voice`: the piece's voice, said again (a revision may run in a session that no longer
+    holds the writing stage's instructions)."""
     asked = note.strip() or "(nothing beyond keeping the changes below)"
+    keep = (
+        f"\nTHE PIECE'S VOICE (keep it, unless the editor asks for another)\n{voice.brief()}\n"
+        if voice is not None
+        else ""
+    )
     return f"""REVISION
 
 The editor read the finished piece and asks for changes:
 {asked}
-{_hand_edits_block(edited_posts, dropped_cards)}
+{_hand_edits_block(edited_posts, dropped_cards)}{keep}
 Make them. Update the posts, the cards and {PIECE_FILE}; update {FACTBASE_FILE} if the
 facts change. Run the cold fact-check again (a fresh sub-agent in the foreground, as
 before) on everything new or changed, its instructions saying again: {CHECKER_RULES}

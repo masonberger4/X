@@ -25,13 +25,13 @@ follows goes into every new session's brief, and the playbook is rewritten from 
 below; typed-in numbers count as they are, so type them about {{ cfg.learn.horizon_hours }} hours after
 posting. &times; median is the piece's {{ cfg.learn.kpi }} against the account's median before it.</p>
 <table>
-  <tr><th>Posted</th><th>Piece</th><th>Angle · shape · hook · cards</th><th>Numbers</th><th>&times; median</th></tr>
+  <tr><th>Posted</th><th>Piece</th><th>Angle · shape · hook · voice · cards</th><th>Numbers</th><th>&times; median</th></tr>
   {% for r in rows %}
   <tr>
     <td class="meta">{{ r.posted_at|localtime }}{% if r.url %}<br><a href="{{ r.url }}">on X</a>{% endif %}</td>
     <td><a href="/studio/{{ r.piece_id }}">{{ r.label }}</a>
       {% if r.lean %}<br><span class="meta">lean offered: {{ r.lean.values()|join(", ") }}{% if r.followed %} (went with {{ r.followed|join(", ") }}){% endif %}</span>{% endif %}</td>
-    <td>{{ r.angle or "-" }} · {{ r.shape or "-" }} · {{ r.hook_style or "-" }}{% if r.cards is not none %} · {{ r.cards }} card{{ "s" if r.cards != 1 }}{% endif %}</td>
+    <td>{{ r.angle or "-" }} · {{ r.shape or "-" }} · {{ r.hook_style or "-" }} · {{ voice_names.get(r.voice, r.voice) if r.voice else "-" }}{% if r.cards is not none %} · {{ r.cards }} card{{ "s" if r.cards != 1 }}{% endif %}</td>
     <td>{% if r.counts %}<span class="meta">{% for name in metrics %}{{ name }} {{ r.counts[name] }}{{ ", " if not loop.last }}{% endfor %}</span><br>{{ cfg.learn.kpi }} {{ "%g"|format(r.value) }}{% if r.source == "manual" %} <span class="badge">typed in</span>{% endif %}{% endif %}
       {% if r.status %}<br><span class="meta">{{ r.status }}</span>{% endif %}
       <details><summary class="meta">type the numbers X shows</summary>
@@ -65,22 +65,45 @@ little evidence, so the sample grows evenly.</p>{% endif %}
 <p class="meta">"Suggested" is how often the lean offers it to a session (its chance of being the best on the
 evidence so far); an untried value starts at the account's median and keeps a real chance.</p>
 {% for t in arms %}
-<details {% if t.arm == "angle" %}open{% endif %}><summary><strong>{{ t.label }}</strong></summary>
+<details {% if t.arm in ("angle", "voice") %}open{% endif %}><summary><strong>{{ t.label }}</strong></summary>
+{% if t.note %}<p class="meta">{{ t.note }}</p>{% endif %}
 <table>
-  <tr><th>{{ t.label }}</th><th>Pieces</th><th>&times; median</th><th>Suggested</th></tr>
+  <tr><th>{{ t.label }}</th><th>Pieces</th><th>&times; median</th><th>{{ t.share_label }}</th></tr>
   {% for a in t.rows %}
-  <tr><td>{{ a.value }}</td><td>{{ a.n or "-" }}</td>
+  <tr><td>{% if t.arm == "voice" %}{{ voice_names.get(a.value, a.value) }} <span class="meta">{{ a.value }}{% if a.value not in voice_names %}, not in the playbook any more{% endif %}</span>{% else %}{{ a.value }}{% endif %}</td><td>{{ a.n or "-" }}</td>
       <td>{% if a.times is not none %}{{ "%.1f"|format(a.times) }}&times;{% else %}<span class="meta">untried</span>{% endif %}</td>
       <td>{% if a.share is not none %}{{ "%.0f"|format(a.share * 100) }}%{% else %}<span class="meta">-</span>{% endif %}</td></tr>
   {% endfor %}
 </table>
 </details>
 {% endfor %}
-<details><summary class="meta">the text every session reads</summary><pre class="log">{{ said }}</pre></details>
+<details><summary class="meta">the text every session reads (without the voices: a session is told only its own)</summary><pre class="log">{{ said }}</pre></details>
 {% else %}
 <p class="meta">Nothing scored yet. A piece is scored once it has numbers at {{ cfg.learn.horizon_hours }} hours and the
 account has {{ cfg.learn.min_baseline_posts }} posts before it to compare with. Until then the sessions get no
 "what X says" section and no lean.</p>
+{% endif %}
+
+<h2 id="voices">What you did with each voice</h2>
+<p class="meta">Every piece is written in one of <a href="/studio/playbook">the playbook's voices</a>, given at random. X
+takes months to tell the voices apart; what you do with their pieces in the queue says something from the first
+week. Counted once you approve, post or reject a piece: how many you changed by hand and how much of the words,
+the revisions you asked for, and the rejections. The voice you rewrite least comes first. The playbook rewrite
+reads this too, and any change it proposes to the voices waits for you.</p>
+{% if voice_edits %}
+<table>
+  <tr><th>Voice</th><th>Decided</th><th>Changed by hand</th><th>Words changed</th><th>Revisions asked</th><th>Rejected</th></tr>
+  {% for v in voice_edits %}
+  <tr><td>{{ v.name }} <span class="meta">{{ v.key }}{% if not v.in_playbook %}, not in the playbook any more{% endif %}</span></td>
+      <td>{{ v.decided or "-" }}</td>
+      <td>{% if v.kept %}{{ v.edited }} of {{ v.kept }}{% else %}-{% endif %}</td>
+      <td>{% if v.changed is not none %}{{ "%.0f"|format(v.changed * 100) }}%{% else %}-{% endif %}</td>
+      <td>{{ v.revisions if v.decided else "-" }}</td>
+      <td>{{ v.rejected if v.decided else "-" }}</td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No voices: the playbook lists none{% if not cfg.voices.enabled %}, and voices are off (<code>voices.enabled</code>){% endif %}.</p>
 {% endif %}
 
 <h2 id="playbook">The playbook</h2>

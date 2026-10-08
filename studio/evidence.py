@@ -1,7 +1,9 @@
 """What X says, read from the database: each posted studio piece measured on its first
-post, every posted head as the account's baseline, and from them the evidence block and
-the lean a brief carries. The arithmetic is studio/learn.py's (pure); this module only
-gathers the rows, through studio/store.py's read-only adapters and studio/ingest.py.
+post, every posted head as the account's baseline, and from them the evidence block, the
+lean a brief carries and the voice a new piece is given; and what the editor did with each
+voiced piece in the queue (`reviews`). The arithmetic is studio/learn.py's (pure); this
+module only gathers the rows, through studio/store.py's read-only adapters and
+studio/ingest.py.
 
 A piece's numbers come from step 4's snapshots of its first post or, when the account
 has no X API read access or the post was confirmed without its link, from what the
@@ -122,6 +124,7 @@ def measure(conn: sqlite3.Connection, cfg: dict[str, Any]) -> Evidence:
             shape=piece.shape,
             hook_style=piece.hook_style,
             cards=ingest.draft_cards(conn, head.draft_id),
+            voice=piece.voice,
             source="manual" if snap.get("manual") else "x",
             url=row.url,
         )
@@ -137,14 +140,17 @@ def measure(conn: sqlite3.Connection, cfg: dict[str, Any]) -> Evidence:
     return Evidence(measured=scored, heads=heads, posted=posted)
 
 
-def block(evidence: Evidence, cfg: dict[str, Any]) -> str:
-    """The "WHAT X SAYS" text for a session; "" while nothing is scored."""
+def block(evidence: Evidence, cfg: dict[str, Any], *, voices: bool = True) -> str:
+    """The "WHAT X SAYS" text; "" while nothing is scored. A session's brief leaves the
+    voices out (`voices=False`, see learn.evidence_block); the playbook rewrite and the
+    performance page keep them."""
     lcfg = cfg["learn"]
     return L.evidence_block(
         evidence.measured,
         kpi=str(lcfg["kpi"]),
         horizon_hours=float(lcfg["horizon_hours"]),
         baseline_days=float(lcfg["baseline_days"]),
+        voices=voices,
     )
 
 
@@ -170,6 +176,54 @@ def lean_for(
         default_sd=float(lcfg["post_sd"]),
         min_measured=int(lcfg["lean_min_measured"]),
     )
+
+
+def voice_for(
+    evidence: Evidence | None,
+    cfg: dict[str, Any],
+    voices: Sequence[str],
+    *,
+    previous: str,
+    seed: int,
+) -> L.VoiceDraw | None:
+    """The voice a new piece is given (learn.draw_voice), seeded by the piece so a brief
+    built twice draws the same one. With learning off there is no evidence and the draw
+    stays at random."""
+    lcfg, vcfg = cfg["learn"], cfg.get("voices") or {}
+    return L.draw_voice(
+        evidence.measured if evidence is not None else [],
+        voices,
+        previous=previous,
+        rng=random.Random(f"voice:{seed}"),
+        min_measured=int(vcfg.get("lean_min_measured") or 0),
+        prior_sd=float(lcfg["prior_sd"]),
+        default_sd=float(lcfg["post_sd"]),
+    )
+
+
+def reviews(conn: sqlite3.Connection) -> list[L.Reviewed]:
+    """Every studio piece with a voice whose queue draft the editor has decided on
+    (approved, posted or rejected; a pending one may still change), with how much of its
+    text the editor's hand edits changed and how many revisions were asked."""
+    from approval_queue import store as queue_store
+
+    voiced = {p.id: p.voice for p in S.list_pieces(conn, 1_000_000) if p.voice}
+    out: list[L.Reviewed] = []
+    for r in S.fetch_studio_reviews(conn):
+        voice = voiced.get(r.piece_id)
+        if not voice:
+            continue
+        if r.posted:
+            outcome = L.REVIEW_POSTED
+        elif r.status == queue_store.STATUS_APPROVED:
+            outcome = L.REVIEW_APPROVED
+        elif r.status == queue_store.STATUS_REJECTED:
+            outcome = L.REVIEW_REJECTED
+        else:
+            continue
+        changed = min(1.0, sum(L.edit_share(before, after) for before, after in r.edits))
+        out.append(L.Reviewed(r.piece_id, voice, outcome, changed, r.revisions))
+    return out
 
 
 def edits(conn: sqlite3.Connection, limit: int = 12) -> list[L.Edit]:

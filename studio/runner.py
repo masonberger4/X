@@ -28,10 +28,10 @@ from studio import repeats as RP
 from studio import session as SS
 from studio import store as S
 from studio import topics as T
+from studio import voices as V
 from studio.settings import (
     EXEMPLARS_DIR,
     load_studio_config,
-    playbook_path,
     read_brief,
     workspace_root,
 )
@@ -217,7 +217,10 @@ def build_brief(
     tzname: str,
     evidence: E.Evidence | None = None,
     handles: list[tuple[str, str]] | None = None,
+    voice: V.Voice | None = None,
 ) -> P.Brief:
+    """A stage's brief. `playbook` is the playbook as a session reads it (without the
+    Voices section: the session is told its own `voice`, studio/runner.py:assign_voice)."""
     # Variety (angles, hooks, shapes, openings) comes from the last written pieces, which
     # also bring their text (EARLIER_FILE); the topics to avoid from every piece of the
     # last `topics.avoid_days` days, written or not.
@@ -250,7 +253,7 @@ def build_brief(
         radar_repeats = {rid: lines for rid, lines in repeats.items() if lines}
     said, lean = "", None
     if evidence is not None:
-        said = E.block(evidence, cfg)
+        said = E.block(evidence, cfg, voices=False)
         # The lean draws only among what the variety rules leave on offer, so the two never
         # pull against each other.
         last_shapes = [p.shape for p in pieces[:3] if p.shape]
@@ -287,6 +290,7 @@ def build_brief(
         playbook=playbook,
         evidence=said,
         lean=lean,
+        voice=voice,
         handles=list(handles or []),
         # The limits the checker enforces (qa.check_text keeps `headroom` under X's own),
         # so a post written to the number it is given is never sent back as too long.
@@ -295,6 +299,44 @@ def build_brief(
         short_post_max=int(x["short_post_max"]),
         max_cards=int(x["max_cards_total"]),
     )
+
+
+def assign_voice(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    piece: S.Piece,
+    voices: list[V.Voice],
+    evidence: E.Evidence | None,
+) -> V.Voice | None:
+    """The voice the piece is written in. A piece keeps the voice it was given, worded as it
+    was then (`voice` in its meta), so every stage writes in the same voice even if the
+    playbook changed meanwhile. A piece without one is given one now (evidence.voice_for:
+    at random, never the voice of the piece before, until enough pieces are scored) and
+    it is recorded. None with voices off or none in the playbook."""
+    if piece.voice:
+        return V.given(piece.voice, piece.meta.get("voice")) or next(
+            (v for v in voices if v.key == piece.voice), None
+        )
+    if not (cfg.get("voices") or {}).get("enabled") or not voices:
+        return None
+    draw = E.voice_for(
+        evidence,
+        cfg,
+        [v.key for v in voices],
+        previous=S.last_voice(conn, exclude=piece.id),
+        seed=piece.id,
+    )
+    if draw is None:
+        return None
+    voice = next(v for v in voices if v.key == draw.key)
+    S.update_piece(
+        conn,
+        piece.id,
+        voice=voice.key,
+        meta={"voice": {**voice.as_dict(), "drawn": draw.how, "measured": draw.measured}},
+    )
+    log.info("piece %s: written in the voice %s (%s)", piece.id, voice.key, draw.how)
+    return voice
 
 
 def radar_for_brief(
@@ -373,17 +415,19 @@ def make_context(
         # did: one run acts on every request before it starts a piece, hours of sessions
         # that can cross midnight, and the editor may save the playbook meanwhile.
         today, tzname = _today()
-        playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
+        playbook = PB.current_text(_data_folder())
+        voice = assign_voice(conn, cfg, piece, V.parse(playbook), evidence)
         brief = build_brief(
             conn,
             cfg,
             piece,
             library=library,
-            playbook=playbook,
+            playbook=V.without(playbook),
             today=today,
             tzname=tzname,
             evidence=evidence,
             handles=handles,
+            voice=voice,
         )
         if brief.lean is not None and piece.meta.get("lean") != brief.lean.as_dict():
             # Kept with the piece, so the performance page can show what it was offered.
@@ -877,7 +921,7 @@ def _dry_run(
     conn: sqlite3.Connection, cfg: dict[str, Any], *, topic: str, story: int | None, angle: str
 ) -> int:
     library = A.load_angles()
-    playbook = playbook_path(_data_folder()).read_text(encoding="utf-8")
+    playbook = PB.current_text(_data_folder())
     today, tzname = _today()
     fake = S.Piece(
         id=0,
@@ -902,16 +946,22 @@ def _dry_run(
         request_note="",
         error="",
     )
+    evidence = measure_quietly(conn, cfg)
+    voices = V.parse(playbook) if (cfg.get("voices") or {}).get("enabled") else []
+    # The voice the next piece would most likely be given (its id is not known yet, so the
+    # random draw is the dry run's own); nothing is recorded.
+    draw = E.voice_for(evidence, cfg, [v.key for v in voices], previous=S.last_voice(conn), seed=0)
     brief = build_brief(
         conn,
         cfg,
         fake,
         library=library,
-        playbook=playbook,
+        playbook=V.without(playbook),
         today=today,
         tzname=tzname,
-        evidence=measure_quietly(conn, cfg),
+        evidence=evidence,
         handles=app_handles(_root_config()),
+        voice=next((v for v in voices if draw and v.key == draw.key), None),
     )
     print(P.research_prompt(brief))
     return 0
@@ -946,6 +996,7 @@ def learn(*, dry_run: bool = False, force: bool = False) -> int:
         said = E.block(ev, cfg)
         log.info("%s", _learn_summary(ev))
         edits = E.edits(conn)
+        by_voice = L.voice_edits(E.reviews(conn))
         if dry_run:
             print(said or "(no studio piece is scored yet)")
             if lcfg["playbook"] != "off":
@@ -955,6 +1006,7 @@ def learn(*, dry_run: bool = False, force: bool = False) -> int:
                     edits,
                     evidence=said,
                     max_words=int(lcfg["max_words"]),
+                    by_voice=by_voice,
                 )
                 print("\n--- the playbook rewrite's system prompt ---\n" + system)
                 print("\n--- and its user prompt ---\n" + user)
@@ -992,7 +1044,14 @@ def learn(*, dry_run: bool = False, force: bool = False) -> int:
             return 0
         try:
             outcome = PB.rewrite(
-                conn, cfg, data_dir, ev.measured, edits, evidence=said, root_cfg=_root_config()
+                conn,
+                cfg,
+                data_dir,
+                ev.measured,
+                edits,
+                evidence=said,
+                root_cfg=_root_config(),
+                by_voice=by_voice,
             )
         finally:
             held.release()

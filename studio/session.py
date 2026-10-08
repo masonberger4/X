@@ -29,6 +29,7 @@ from studio import ingest, qa
 from studio import prompt as P
 from studio import store as S
 from studio import topics as T
+from studio import voices as V
 from studio.settings import stage_max_turns, stage_timeout
 
 log = logging.getLogger(__name__)
@@ -468,6 +469,7 @@ def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
         note,
         edited_posts=hand.get("files") or [],
         dropped_cards=[_card_line(c) for c in (edits.dropped if edits else [])],
+        voice=V.given(piece.voice, piece.meta.get("voice")),
     )
     result = _run_stage(ctx, piece, "revise", text, first=False)
     if not result.ok:
@@ -556,6 +558,7 @@ def polish(ctx: Context, piece: S.Piece) -> Outcome:
         ctx.known_handles,
         ctx.renderer,
         requested_angle=piece.requested_angle,
+        voices=ctx.cfg.get("voices"),
     )
     if ctx.renderer is None and report.piece is not None and report.piece.cards:
         # This machine's problem, not the piece's: a round would ask the session to fix it,
@@ -591,6 +594,7 @@ def polish(ctx: Context, piece: S.Piece) -> Outcome:
             ctx.known_handles,
             ctx.renderer,
             requested_angle=piece.requested_angle,
+            voices=ctx.cfg.get("voices"),
         )
     if report.blocking:
         message = "still blocked after polishing: " + "; ".join(report.blocking[:5])

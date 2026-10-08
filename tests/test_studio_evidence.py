@@ -37,11 +37,18 @@ from studio import playbook as PB
 from studio import prompt as P
 from studio import runner
 from studio import store as S
+from studio import voices as V
 from studio import web as studio_web
 from studio.settings import DEFAULT_PLAYBOOK, PLAYBOOK_NAME, load_studio_config
 
 T0 = datetime(2026, 9, 10, 12, 0, tzinfo=UTC)
-GOOD_PLAYBOOK = "\n\n".join(["# Playbook"] + [f"{h}\n- learned line" for h in L.REQUIRED_SECTIONS])
+# The seed's own voices: a learned playbook that keeps them may be applied at once
+# (learn.playbook: auto); one that changes them always waits for the editor.
+VOICES = V.section(DEFAULT_PLAYBOOK.read_text(encoding="utf-8"))
+GOOD_PLAYBOOK = "\n\n".join(
+    ["# Playbook"]
+    + [VOICES if h == "## Voices" else f"{h}\n- learned line" for h in L.REQUIRED_SECTIONS]
+)
 
 
 # ---- fixtures and helpers ----------------------------------------------------------------
@@ -734,3 +741,61 @@ def test_the_seed_playbook_has_the_sections_a_rewrite_must_keep_but_cards():
     seed = DEFAULT_PLAYBOOK.read_text(encoding="utf-8")
     missing = [s for s in L.REQUIRED_SECTIONS if s not in seed]
     assert missing == ["## Cards"]
+
+
+# ---- voices --------------------------------------------------------------------------------
+
+
+def test_a_learned_playbook_that_changes_the_voices_waits_for_the_editor_even_on_auto(
+    lconn, rewriter, cfg, tmp_path, caplog
+):
+    """learn.playbook: auto applies a rewrite at once, but never one that changes the
+    voices: the account's voices change only when a human applies the change."""
+    assert cfg["learn"]["playbook"] == "auto"
+    scored_pieces(lconn)
+    changed = GOOD_PLAYBOOK.replace("### storyteller: The storyteller", "### narrator: Narrator")
+    rewriter.reply = json.dumps({"playbook": changed, "changelog": ["a narrator: 0.4x on 4"]})
+    with caplog.at_level("INFO"):
+        assert run_studio.main(["--learn"]) == 0
+    assert "proposed, since it changes the voices" in caplog.text
+    assert not (tmp_path / PLAYBOOK_NAME).exists()  # the sessions still read the seed
+    proposal = S.open_proposal(lconn)
+    assert proposal is not None and proposal.text == changed + "\n"
+    [(_, user, _)] = rewriter.calls
+    assert "WHAT THE EDITOR DID WITH EACH VOICE'S PIECES" in user
+    # applied by the editor, the new voices are what the next piece is given from
+    PB.apply_proposal(lconn, tmp_path, proposal.id)
+    keys = [v.key for v in V.parse(PB.current_text(tmp_path))]
+    assert "narrator" in keys and "storyteller" not in keys
+
+
+def test_the_performance_page_shows_each_voice_and_what_the_editor_did_with_it(client, lconn, cfg):
+    a, b = scored_pieces(lconn)
+    S.update_piece(lconn, a.id, voice="sceptic")
+    S.update_piece(lconn, b.id, voice="retired_voice")
+    body = client.get("/studio/performance").text
+    assert "<strong>Voices</strong>" in body and "<th>Drawn</th>" in body
+    assert "Each new piece gets a voice at random, never the one before, until 30" in body
+    assert "The sceptic" in body and "The storyteller" in body  # untried ones listed too
+    assert "retired_voice, not in the playbook any more" in body
+    assert "What you did with each voice" in body
+    assert "0 of 1" in body  # the sceptic's posted piece, as written
+    # the text a session reads leaves the voices out
+    said = E.block(E.measure(lconn, cfg), cfg, voices=False)
+    assert said and "Voices" not in said and "sceptic" not in said
+    cfg["voices"]["enabled"] = False
+    assert "Voices are off (voices.enabled)" in client.get("/studio/performance").text
+
+
+def test_the_playbook_page_shows_the_voices_and_refuses_a_malformed_one(client, lconn, tmp_path):
+    body = client.get("/studio/playbook").text
+    assert "### key: Name" in body and "The desk note" in body
+    broken = DEFAULT_PLAYBOOK.read_text(encoding="utf-8").replace(
+        "### sceptic: The sceptic", "### The Sceptic"
+    )
+    r = client.post("/studio/playbook", data={"text": broken})
+    assert flash_of(r).startswith('not saved: the voice "### The Sceptic": start the heading')
+    assert not (tmp_path / PLAYBOOK_NAME).exists()
+    fine = broken.replace("### The Sceptic", "### doubter: The doubter")
+    assert "saved as version" in flash_of(client.post("/studio/playbook", data={"text": fine}))
+    assert "doubter" in [v.key for v in V.parse(PB.current_text(tmp_path))]

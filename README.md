@@ -524,7 +524,24 @@ conversation is compacted);
 `studio/exemplars/` holds the three hand-made reference pieces (handoff docs and
 posted cards); the playbook (`studio/playbook.md`, or the editor's copy
 `studio_playbook.md` next to the database, edited on `/studio/playbook`) goes into
-every research and write prompt and wins over the voice guide. Both prompts also list
+every research and write prompt, without its Voices section, and wins over the voice
+guide. **Voices** (`studio/voices.py`, the playbook's `## Voices` section, `### key: Name`
+then how the voice sounds; `studio/config.yaml` `voices:`): every voice is the same person
+speaking in the first person with real reactions (voice.md's "Sound like a person"), and
+each new piece is given one by the app, never chosen by the session:
+`studio/runner.py:assign_voice` draws it when the piece's first brief is built (under the
+claim lock in research), at random and never the voice of the newest other piece
+(`store.last_voice`), until `voices.lean_min_measured` scored pieces carry a voice, then
+by Thompson draw (`learn.draw_voice`). It is recorded on the piece (`studio_pieces.voice`,
+guarded migration) with its words (`voice` in the meta, `voices.given`), so every stage
+and revision writes in the voice as it was worded then: research is told it, the write
+stage gets a YOUR VOICE block, a revision is reminded of it. A playbook copy with no
+Voices section reads the seed's (`voices.with_seed`, through `playbook.current_text`); a
+heading with no voice under it, or `voices.enabled: false`, gives none. The editor's save
+refuses a malformed section (`voices.problems`). `studio/qa.py:check_first_person` sends a
+piece back (fixable) with fewer first-person sentences ("I", "me", "my"; never the Roman
+numeral of a phase, type or class) than one per `voices.first_person_every_chars`
+characters, capped at `first_person_max`. Both prompts also list
 the X handles `config.yaml` gives (`studio/runner.py:app_handles`, the ones qa accepts
 without a page) for the session to use without verifying them, and before each of those
 stages the app writes `earlier_pieces.md` into the piece's folder: the whole text of the
@@ -611,8 +628,10 @@ catalyst with the piece; dropping it puts them back.
 editor typed in, as (value + smoothing) / (median of every head the account posted in
 the `baseline_days` before it + smoothing); a piece with fewer than
 `min_baseline_posts` before it is measured but not scored. Per angle, shape, hook style
-and card count the page and the prompts show the scored pieces and their mean
-log-relative as "x the median". Every brief then carries a WHAT X SAYS section (the
+and card count, and per voice, the page and the prompts show the scored pieces and their
+mean log-relative as "x the median" (a session's brief leaves the voices out, so a writer
+never drifts towards the voice that does well; the rewrite and the page keep them). Every
+brief then carries a WHAT X SAYS section (the
 counts, the best and worst values and openings, a small-sample caveat under twenty
 pieces) and a **lean**: one Thompson draw per arm (a normal posterior on the log scale,
 prior at the median, `prior_sd`, `post_sd` until ten pieces measure the spread) among the
@@ -622,18 +641,23 @@ tried. The **playbook rewrite** (`studio/playbook.py:rewrite`, the loop's one mo
 `call_rewriter` through `claude_cli.run_claude` with no tools, on `learn.model`/`effort`,
 blank = the writer's) runs once `rewrite_min_new` scored pieces are new to the last
 rewrite and `rewrite_min_hours` have passed; it gets the current playbook, the evidence,
-every measured piece and the editor's hand edits of studio drafts, and must answer with
-JSON whose playbook keeps the required sections and `max_words`. `learn.playbook:
+every measured piece with its voice, the editor's hand edits of studio drafts and, per
+voice, what the editor did with its pieces in the queue (`evidence.reviews` through the
+read-only `store.fetch_studio_reviews`: approved, posted or rejected, the share of words
+the hand edits changed, the revisions asked; `learn.voice_edits`), and must answer with
+JSON whose playbook keeps the required sections (Voices among them, 2 to 6 well-formed
+voices) and `max_words` (the Voices section aside). `learn.playbook:
 propose` (shipped) keeps it for the editor to apply, since the numbers mean little before
-20 to 30 pieces; `auto` applies it, `off` never rewrites; a failed call or a rejected reply
-changes nothing. Every playbook ever in use is a row of
+20 to 30 pieces; `auto` applies it, unless it changes the voices, which always wait for
+the editor; `off` never rewrites; a failed call or a rejected reply changes nothing. Every playbook ever in use is a row of
 `studio_playbook_versions` (seed, editor, learned, proposal, revert, with the changelog,
 the evidence and the pieces it learned from) and the file sessions read is replaced
 atomically. `run_studio.py --learn` (the automatic `studio_learn` step after `feedback`,
 its own lock) measures and rewrites when due, `--learn-now` (the manual
 `studio_learn_now` step) rewrites now, `--learn --dry-run` prints the evidence and the
 prompt. `/studio/performance` shows the posted pieces, the per-arm table with how often
-the lean suggests each value, the learning state and the playbook history (diff,
+the lean suggests each value (for voices, how often each is drawn), what the editor did
+with each voice's pieces, the learning state and the playbook history (diff,
 changelog, apply, put back), with forms for typed-in numbers and for the link of a post
 confirmed by hand without one (`publish/store.py:set_head_tweet`, through
 `panel/publishing.py:add_head_link`, replaces only post 1's `manual-` marker).

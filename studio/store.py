@@ -7,7 +7,8 @@ The studio owns these five tables and nothing else. It reads step 1 only through
 studio/topics.py and writes into the approval queue only through studio/ingest.py,
 which uses approval_queue/store.py's own functions. Its other reads of other steps'
 tables are the read-only adapters at the end of this module (`fetch_posted_heads`,
-`fetch_studio_edits`), which return nothing when a table is missing.
+`fetch_studio_edits`, `fetch_studio_reviews`), which return nothing when a table is
+missing.
 """
 
 from __future__ import annotations
@@ -201,9 +202,12 @@ MANUAL_METRICS = ("impressions", "likes", "reposts", "replies", "quotes", "bookm
 # story_item: one item (step 1's items.id) of the feed story beside cluster_id. Story
 # linking (filter/link.py) folds a cluster into another and deletes it, and the items move
 # with it, so the item finds the story again (runner.follow_merges).
+# voice: the key of the playbook voice the piece is written in (studio/voices.py), '' for
+# a piece from before voices or with voices off.
 _MIGRATIONS = (
     ("studio_pieces", "story_item", "TEXT NOT NULL DEFAULT ''"),
     ("studio_topics", "story_item", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_pieces", "voice", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -253,6 +257,7 @@ class Piece:
     request_note: str
     error: str
     story_item: str = ""  # one item of the story at cluster_id ('' when none is known)
+    voice: str = ""  # the playbook voice it is written in ('' when it has none)
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -291,6 +296,7 @@ def _row(r: sqlite3.Row) -> Piece:
         request_note=r["request_note"],
         error=r["error"],
         story_item=r["story_item"] or "",
+        voice=r["voice"] or "",
         meta=meta if isinstance(meta, dict) else {},
     )
 
@@ -361,6 +367,7 @@ _UPDATABLE = {
     "cluster_id",
     "story_item",
     "session_id",
+    "voice",
 }
 
 
@@ -458,6 +465,17 @@ def pieces_since(conn: sqlite3.Connection, since_iso: str, origin: str | None = 
         sql += " AND origin = ?"
         args.append(origin)
     return int(conn.execute(sql, args).fetchone()[0])
+
+
+def last_voice(conn: sqlite3.Connection, exclude: int | None = None) -> str:
+    """The voice of the newest piece that has one and was not discarded (`exclude`: the
+    piece asking), '' when there is none: the voice a new piece is not given."""
+    r = conn.execute(
+        "SELECT voice FROM studio_pieces WHERE voice != '' AND stage != ? AND id != ?"
+        " ORDER BY id DESC LIMIT 1",
+        (STAGE_DISCARDED, -1 if exclude is None else int(exclude)),
+    ).fetchone()
+    return str(r[0]) if r else ""
 
 
 def last_started(conn: sqlite3.Connection) -> str | None:
@@ -915,6 +933,66 @@ def fetch_studio_edits(conn: sqlite3.Connection, limit: int = 12) -> list[tuple[
         if tail.isdigit():
             out.append((int(tail), _decision_text(before), _decision_text(after)))
     return out
+
+
+@dataclass
+class StudioReview:
+    """What the editor did with one studio draft in the queue: where it stands, every hand
+    edit that changed its text (before, after) and how many times the studio replaced its
+    text on a request (`revise` decisions)."""
+
+    piece_id: int
+    draft_id: int
+    status: str  # the draft's status: pending, approved, rejected
+    posted: bool  # its first post is on X
+    edits: list[tuple[str, str]] = field(default_factory=list)
+    revisions: int = 0
+
+
+def fetch_studio_reviews(conn: sqlite3.Connection) -> list[StudioReview]:
+    """Every studio draft (item_id studio:<piece id>) with its decisions, oldest first.
+    Read-only on step 2's `drafts` and `decisions` and step 3's `posts`; [] when the queue's
+    tables are missing."""
+    have = _tables(conn)
+    if not {"drafts", "decisions"} <= have:
+        return []
+    posted: set[int] = set()
+    if "posts" in have:
+        posted = {
+            int(r[0])
+            for r in conn.execute(
+                "SELECT DISTINCT draft_id FROM posts WHERE position = 1 AND status = 'posted'"
+                " AND tweet_id IS NOT NULL"
+            )
+        }
+    out: dict[int, StudioReview] = {}
+    for draft_id, item_id, status in conn.execute(
+        "SELECT id, item_id, status FROM drafts WHERE item_id LIKE 'studio:%' ORDER BY id"
+    ):
+        tail = str(item_id).split(":", 1)[1]
+        if tail.isdigit():
+            out[int(draft_id)] = StudioReview(
+                piece_id=int(tail),
+                draft_id=int(draft_id),
+                status=str(status),
+                posted=int(draft_id) in posted,
+            )
+    if not out:
+        return []
+    for draft_id, action, before, after in conn.execute(
+        "SELECT draft_id, action, original_text, edited_text FROM decisions WHERE draft_id IN"
+        " (SELECT id FROM drafts WHERE item_id LIKE 'studio:%') ORDER BY id"
+    ):
+        review = out.get(int(draft_id))
+        if review is None:
+            continue
+        if action == "revise":
+            review.revisions += 1
+        elif action == "edit" and after is not None and after != before:
+            old, new = _decision_text(before), _decision_text(after)
+            if old != new:  # a dropped picture logs the same text twice
+                review.edits.append((old, new))
+    return list(out.values())
 
 
 # --- the radar: scans, their topics, the catalyst calendar (studio/radar.py) ---------------

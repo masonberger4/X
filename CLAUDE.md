@@ -493,7 +493,23 @@ carrying `--live`).
   each of them: the `Brief.recent` pieces' text as the queue holds it and whether it went
   out on X (`ingest.queued_text`), since `--restricted` keeps a session out of other
   pieces' folders and the scorecard angle grades against the account's own bar. Feed
-  stories are quoted between `prompt.FEED_TEXT_START` / `FEED_TEXT_END` as data. `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
+  stories are quoted between `prompt.FEED_TEXT_START` / `FEED_TEXT_END` as data.
+  **Voices are the app's to give, never the session's to choose**: `studio/voices.py` is
+  pure (the playbook's `## Voices` section, `### key: Name` then how the voice sounds;
+  `parse`, `problems`, `without` (what a session reads as the playbook: it is told its own
+  voice, never the others), `with_seed` (a copy with no Voices heading reads the seed's;
+  a heading with no voice turns voices off), `given`, `changed`). `runner.assign_voice`
+  (from `brief_for`, so under the claim lock in research) gives a piece without one a
+  voice through `evidence.voice_for` -> `learn.draw_voice` (at random, never
+  `store.last_voice`, the newest other piece's, until `voices.lean_min_measured` scored
+  pieces carry one, then a Thompson draw; seeded by the piece id) and records it
+  (`studio_pieces.voice`, guarded migration, and its words in the meta's `voice`), so every
+  stage writes in the voice as worded then: research gets `prompt._voice_ahead`, write
+  the YOUR VOICE block, `revise_prompt(voice=)` a reminder. Every voice speaks in the first
+  person (voice.md's "Sound like a person"), held to it by `qa.check_first_person`
+  (fixable: fewer sentences that `speaks_as_writer`, I/me/my and never a Roman numeral, than
+  one per `voices.first_person_every_chars`, capped at `first_person_max`). `voices.enabled:
+  false` gives no voice. `studio/runner.py` (run by `run_studio.py`) marks pieces left mid-stage as
   `interrupted`, acts on `request`s (continue, revise), then starts at most one piece:
   explicit `--topic`/`--story`, else the oldest queued topic, else with `--now` an
   automatic topic, else only when `auto.max_new_per_day` (automatic pieces per calendar
@@ -567,12 +583,18 @@ carrying `--live`).
   (no DB, network or clock): `pick_snapshot` (a typed-in snapshot as it is, else the
   first at `horizon_hours`), `score` (relative = (value + smoothing) / (median of the
   account's heads in the `baseline_days` before + smoothing), unscored under
-  `min_baseline_posts`), `arm_stats` per angle/shape/hook_style/cards bucket, `lean` (one
-  Thompson draw per arm, normal posterior on the log scale, prior at the median; an angle
-  the editor named is left out; None under `lean_min_measured`), `lean_shares` (the
-  dashboard's share of draws), `evidence_block` (WHAT X SAYS, with a small-sample caveat),
-  `rewrite_due` (new = scored pieces the last rewrite was not given, `unseen`), and
-  `rewrite_prompt`/`parse_rewrite` (JSON, `REQUIRED_SECTIONS`, `max_words`).
+  `min_baseline_posts`), `arm_stats` per angle/shape/hook_style/cards bucket/voice, `lean`
+  (one Thompson draw per arm, normal posterior on the log scale, prior at the median; an
+  angle the editor named is left out; None under `lean_min_measured`; the voice is not in
+  it, the app assigns the voice), `draw_voice`, `lean_shares` (the dashboard's share of
+  draws), `evidence_block` (WHAT X SAYS, with a small-sample caveat; `voices=False` for a
+  session's brief, so a writer never drifts towards the voice that does well),
+  `edit_share` / `voice_edits` (per voice, what the editor did with its decided pieces:
+  changed by hand and how much, revisions asked, rejected), `rewrite_due` (new = scored
+  pieces the last rewrite was not given, `unseen`), and `rewrite_prompt`/`parse_rewrite`
+  (JSON, `REQUIRED_SECTIONS` with `## Voices`, `max_words` without it, 2 to 6 well-formed
+  voices). `studio/evidence.py:reviews` reads the editor's decisions through the read-only
+  `store.fetch_studio_reviews` (drafts, decisions, posts).
   `studio/evidence.py:measure` is the reads: step 3's posted heads and step 4's snapshots
   through `studio/store.py:fetch_posted_heads` (read-only, empty when missing), the
   editor's numbers from `studio_manual_metrics`, a piece found by its draft's `studio:`
@@ -586,13 +608,17 @@ carrying `--live`).
   automatic `studio_learn` step after `feedback`; `--learn-now`, the manual
   `studio_learn_now`; both under the `studio_learn` lock and `.studio_learn.lock`, never
   the studio's) rewrites when due through `studio/playbook.py:rewrite` (`learn.playbook`:
-  `propose`, shipped, waits for the editor to apply it, `auto` applies, `off` never; a failed call or a rejected
-  reply changes nothing and exits 1). `studio/playbook.py:save` is the one writer of the
+  `propose`, shipped, waits for the editor to apply it, `auto` applies unless the rewrite
+  changes the voices (`voices.changed`), which always wait for the editor, `off` never; a
+  failed call or a rejected reply changes nothing and exits 1). `playbook.current_text` is
+  the playbook with the seed's voices when it has none; the editor's save is refused when
+  `voices.problems` finds the section malformed. `studio/playbook.py:save` is the one writer of the
   playbook file (atomic) and of `studio_playbook_versions` (`seed`/`editor`/`learned`/
   `proposal`/`revert`, changelog, evidence, `pieces` learned from; `ensure_seeded`
   records the playbook in use before the first change, `revert`, `apply_proposal`).
   `/studio/performance` (`studio/dashboard.py`, pure views) shows the posted pieces, the
-  per-arm table, the learning state and the version history, takes typed-in numbers and
+  per-arm table (a voice's share is how often it is drawn), what the editor did with each
+  voice (`voice_edit_rows`), the learning state and the version history, takes typed-in numbers and
   the link of a post confirmed by hand without one: `studio/web.py` calls the `add_link`
   hook the panel wires to `panel/publishing.py:add_head_link` ->
   `publish/store.py:set_head_tweet`, which replaces only post 1's `manual-` marker. The
@@ -657,7 +683,9 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           read-only adapters), radar.py (pure: the scan's prompt and answer, the
           calendar's dates), scan.py (the daily scan, the research harvest), learn.py
           (pure: scores, arms, the lean, the evidence text, the rewrite's prompt and
-          checks), repeats.py (pure: does a radar topic or catalyst repeat a piece),
+          checks, the voice draw, the editor's edits by voice), voices.py (pure: the
+          playbook's Voices section), repeats.py (pure: does a radar topic or catalyst
+          repeat a piece),
           evidence.py (what X says, from the DB), playbook.py (the file, its
           versions, the rewrite), dashboard.py (pure views of /studio/performance),
           web.py + templates/ (/studio pages, /studio/radar)

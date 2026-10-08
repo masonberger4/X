@@ -443,10 +443,11 @@ motion, that bar stands still too. Four pages:
   session reads. A piece's page shows its fact base, post, cards, fact-check log
   and live session log, with Continue (after research), Revise and Resume.
   **What X says** (`/studio/performance`) shows each posted piece's numbers
-  against the account's median, what each angle, shape, hook style and card
-  count has done and how often the lean suggests it, and the playbook's history,
-  with the forms to type numbers in, add a hand-posted post's link, apply a
-  proposed playbook or put an old one back.
+  against the account's median, what each angle, shape, hook style, card
+  count and voice has done and how often the lean suggests it (a voice: how often
+  it is drawn), what you did with each voice's pieces in the queue, and the
+  playbook's history, with the forms to type numbers in, add a hand-posted post's
+  link, apply a proposed playbook or put an old one back.
 - **Radar** (`/studio/radar`) — part 9: where topics come from. The day's scan
   topics, the feed's top stories and the catalyst calendar, each with **Write
   it**, and the **Scan now** button.
@@ -771,7 +772,8 @@ and long posts need X Premium.
    the shortlist.
 8. The playbook. **Studio → The playbook** is the short note every session
    reads when it researches and when it writes: what works on this account and
-   the mistakes the fact-checks keep catching. Edit and save it (the box under it
+   the mistakes the fact-checks keep catching, and, in its **Voices** section,
+   the voices the pieces are written in (below). Edit and save it (the box under it
    says what you changed, for the history); the next piece written reads your
    version, even one whose run is already going (it lives in `studio_playbook.md`
    next to `pipeline.db`, and every backup keeps a copy:
@@ -817,6 +819,33 @@ and long posts need X Premium.
    x.com; typed numbers count as they are. A piece you posted by hand without
    giving its link has **add the post's link**: paste it and the feedback step
    measures it from then on. Nothing on this page posts anything.
+   **Voices.** So the account does not always sound the same, every piece is
+   written in one of the voices listed under **## Voices** in the playbook. Four
+   ship: the desk note (terse, the number first), the explainer (warm, curious,
+   thinks out loud), the sceptic (reads the footnotes, says what doesn't add up)
+   and the storyteller (starts from a turn in the story). The app gives each new
+   piece one at random, never the voice of the piece before, and the session never
+   chooses: the voice is named in the writing stage's instructions (research is told
+   too, so it gathers what that voice needs), shown on the piece's page and kept
+   through every revision. Every voice is the same person speaking in the first
+   person, with real reactions ("I couldn't believe the data", "this deal doesn't
+   make any sense to me", "I wonder why they didn't include another dose"): the
+   voice guide asks for them, and the checker sends a piece back to the session
+   when too few of its sentences speak as "I", "me" or "my" for its length (at
+   least one per 1,200 characters, never more than six asked for; the
+   `first_person_` settings under `voices:` in `studio\config.yaml`). The
+   performance page shows, per voice, what X says and what you did with its pieces
+   in the queue: how many you changed by hand and how much of the words, the
+   revisions you asked for and the rejections. That second table says something
+   from the first week; X takes months to tell four voices apart. Until 30 scored
+   pieces carry a voice (`voices: lean_min_measured`) the draw stays even; after
+   that it follows the numbers, as the lean does. The playbook rewrite reads both
+   tables and may propose a new voice, a sharper one or the end of one; any such
+   change waits for you to apply it, even with `learn: playbook: auto`. To change
+   the voices yourself, edit the section: each voice is a heading
+   `### key: Name` and a few sentences, a new voice gets a new key (the numbers
+   are kept by key), and a heading with no voice under it turns voices off
+   (`voices: enabled: false` in `studio\config.yaml` does too).
 10. The radar. **Radar** in the top bar (`/studio/radar`) is where topics come
    from, and the same list is offered to every automatic piece:
    - **Topics from the scan.** Once a day, before the first automatic studio run,
@@ -930,6 +959,8 @@ reference pieces in `studio\exemplars\`.
 | The calendar shows one event twice with different dates | the date moved and both reports were kept. **Dismiss** the old one |
 | The studio's performance page says `no snapshot yet` under a posted piece | the feedback step fetches numbers only with the X API read tier (part 7). Open **type the numbers X shows** under the piece and copy them from the post on x.com, about 48 hours after posting |
 | The runs page shows `studio_learn` failed with `the rewritten playbook was not used` (or `the playbook rewrite call failed`) | nothing changed: the sessions keep the playbook they had, and the next run tries again. The log line says why (cut short, a section missing, Claude Code not logged in); **Rewrite the playbook now** on the performance page retries at once |
+| A piece's page lists `the post reads like a report, not a person` | the checker counted too few sentences in the first person for the post's length and sent it back to the session; if the polish rounds ran out first it rides along as a note. Revise the piece ("add your own reactions") or edit it in the queue. To ask for fewer, raise `first_person_every_chars` under `voices:` in `studio\config.yaml` (0 turns the check off) |
+| The playbook page says `not saved: the voice ...` | a heading in the Voices section is not `### key: Name` (a key is lower-case letters, digits and `_`), a key is listed twice, or a voice is empty or over 150 words. Nothing was saved; fix the line and save again |
 | A learned playbook made the pieces worse | on the performance page, **put this version back** under the version you want; it becomes the newest version and the next session reads it. `learn: playbook: propose` in `studio\config.yaml` makes every rewrite wait for you instead |
 | A studio piece says `interrupted` | the run stopped mid-stage (the Stop button, a stage time limit, the PC slept or restarted). Press Resume on its page; the session keeps everything it already read |
 | A studio piece says `interrupted: the CLI stopped 1 sub-agent(s) before they finished` | Claude Code ended the cold fact-check before it reported (an old Claude Code, or one started with background tasks on), so the stage did not finish. Press Resume: the session runs the stage again, fact-check included |
@@ -957,8 +988,10 @@ attaches or skips the cards; posting itself is manual only), `feedback\config.ya
 `studio\config.yaml` (part 9: the studio's model and effort, how many
 automatic pieces a day, whether they stop after research, stage time limits, the
 session's tools, the card browser, `radar:` for the daily scan and the catalyst
-calendar, and `learn:` for what X teaches the next session: the horizon, the
-baseline, when and how the playbook is rewritten) and `ops\config.yaml` (which steps the
+calendar, `learn:` for what X teaches the next session: the horizon, the
+baseline, when and how the playbook is rewritten, and `voices:` for the voices
+the pieces are written in and how many of their sentences must speak in the
+first person) and `ops\config.yaml` (which steps the
 scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
 

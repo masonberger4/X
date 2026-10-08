@@ -10,12 +10,14 @@
   POST /studio/{id}/revise     a finished piece: rewrite it with the editor's notes
   POST /studio/{id}/resume     a failed or interrupted piece: pick it up where it stopped
   POST /studio/{id}/discard    give up on a piece (its files stay on disk)
-  GET  /studio/playbook        the playbook every session reads
-  POST /studio/playbook        save the editor's edit of it as a new version
+  GET  /studio/playbook        the playbook every session reads (its Voices section too)
+  POST /studio/playbook        save the editor's edit of it as a new version (refused when
+                               the Voices section is malformed)
   POST /studio/playbook/reset  the shipped seed as a new version
   GET  /studio/performance     what X says: each posted piece's numbers, what each angle,
-                               shape, hook style and card count has done, the lean, and
-                               the playbook's history
+                               shape, hook style, card count and voice has done, the lean,
+                               what the editor did with each voice's pieces, and the
+                               playbook's history
   POST /studio/performance/{id}/metrics          a piece's numbers, typed in from X
   POST /studio/performance/{id}/link             the link of a piece posted by hand without it
   POST /studio/playbook/versions/{id}/revert     put an earlier version back (as a new one)
@@ -68,6 +70,7 @@ from studio import prompt as P
 from studio import radar as R
 from studio import store as S
 from studio import topics as T
+from studio import voices as V
 from studio.settings import DEFAULT_PLAYBOOK, PLAYBOOK_NAME, load_studio_config, playbook_path
 
 log = logging.getLogger(__name__)
@@ -353,7 +356,9 @@ def _seed_text() -> str:
 @router.get("/studio/playbook", response_class=HTMLResponse)
 def studio_playbook(request: Request, conn: Conn, flash: str = ""):
     path = playbook_path(_data_folder())
-    text = _read(path)
+    # As the sessions read it: a copy from before voices shows the seed's Voices section,
+    # which its next save keeps.
+    text = PB.current_text(_data_folder())
     return templates.TemplateResponse(
         request,
         "studio_playbook.html",
@@ -361,6 +366,8 @@ def studio_playbook(request: Request, conn: Conn, flash: str = ""):
             "text": text,
             "editable_copy": path.name == PLAYBOOK_NAME,
             "is_seed": text == _seed_text(),
+            "voices": V.parse(text),
+            "voices_on": bool((load_studio_config().get("voices") or {}).get("enabled")),
             "version": S.current_playbook_version(conn),
             "proposal": S.open_proposal(conn),
             "path": str(path),
@@ -375,6 +382,10 @@ async def studio_save_playbook(request: Request, conn: Conn):
     text = (form.get("text") or [""])[0].replace("\r\n", "\n")
     if not text.strip():
         return _redirect("/studio/playbook", "the playbook cannot be empty")
+    wrong = V.problems(text)
+    if wrong:
+        # Nothing is saved: a voice the app cannot read would silently drop out of the draw.
+        return _redirect("/studio/playbook", "not saved: " + "; ".join(wrong))
     note = _first(form, "note")
     version = PB.save(
         conn,
@@ -448,6 +459,12 @@ def studio_performance(request: Request, conn: Conn, flash: str = ""):
         log.exception("could not read what X says")
         error = f"could not read the numbers: {exc}"
     ev = ev or E.Evidence(measured=[], heads=[])
+    voices = V.parse(PB.current_text(_data_folder()))
+    reviews: list[L.Reviewed] = []
+    try:
+        reviews = E.reviews(conn)
+    except Exception:  # the rest of the page still shows
+        log.exception("could not read what the editor did with each voice")
     last = S.last_learned(conn)
     return templates.TemplateResponse(
         request,
@@ -457,10 +474,12 @@ def studio_performance(request: Request, conn: Conn, flash: str = ""):
             "kpi": L.describe_kpi(str(cfg["learn"]["kpi"])),
             "ev": ev,
             "rows": D.piece_rows(ev, cfg, now),
-            "arms": D.arm_tables(ev, cfg, angles=angle_keys),
+            "arms": D.arm_tables(ev, cfg, angles=angle_keys, voices=[v.key for v in voices]),
+            "voice_names": {v.key: v.name for v in voices},
+            "voice_edits": D.voice_edit_rows(reviews, voices),
             "state": D.learn_state(ev, cfg, last, now),
             "versions": D.version_rows(S.playbook_versions(conn, 200), S.open_proposal(conn)),
-            "said": E.block(ev, cfg),
+            "said": E.block(ev, cfg, voices=False),
             "metrics": S.MANUAL_METRICS,
             "small": len(ev.scored) < L.SMALL_SAMPLE,
             "error": error,
@@ -693,6 +712,7 @@ def studio_piece(request: Request, piece_id: int, conn: Conn, flash: str = ""):
             "running": piece.stage in S.RUNNING_STAGES,
             "warnings": piece.meta.get("warnings") or [],
             "problems": piece.meta.get("problems") or [],
+            "voice": V.given(piece.voice, piece.meta.get("voice")),
             "flash": flash,
             "S": S,
         },
