@@ -25,6 +25,10 @@ auto:
   # time that may start one does, whatever minute yesterday's started at.
   max_new_per_day: 1
   min_hours_between: 6          # since the last piece started, automatic or manual
+  # No new automatic piece while this many studio pieces wait unread in the approval
+  # queue (0 = no limit): news moves, and a piece written while the last ones wait is the
+  # one most likely to be rejected as stale. A button press ignores it too.
+  max_waiting: 2
   # Stop after the research stage so a human reads the fact base and says "continue"
   # (with notes) before the post is written. Off for automatic pieces: the finished
   # piece waits in the queue with its fact base and fact-check log, and "Revise" on the
@@ -52,6 +56,13 @@ max_turns:
   write: 0
   polish: 40
   revise: 0
+# The effort one stage runs at, when it should differ from `effort:` above (blank = the
+# same). The model stays the writer's: a session keeps one model from research to polish.
+stage_effort:
+  research: ""
+  write: ""
+  polish: ""
+  revise: ""
 # Rounds of "here is what the checker found, fix it" before the piece is handed over
 # with the remaining problems listed.
 max_polish_rounds: 3

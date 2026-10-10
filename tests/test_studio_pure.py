@@ -921,9 +921,15 @@ def test_a_feed_story_with_an_editor_note_and_a_shortlist_starts_from_the_story(
 
 
 PICK = (
+    "Pick one of these. The feeds already cover the last few days' news, so run a broad "
+    "news scan of your own (web search) only when none of them makes a strong piece, and "
+    "then pick something better. Say which and why in research.json."
+)
+PICK_CALENDAR = (
     "Pick one of these, or run your own news scan (web search) and pick something better; "
     "say which and why in research.json."
 )
+PICK_RADAR = PICK.replace("The feeds", "Today's radar scan and the feeds")
 
 
 def test_research_from_the_shortlist_lists_every_story_in_order():
@@ -935,6 +941,12 @@ def test_research_from_the_shortlist_lists_every_story_in_order():
         "(no piece and no drafted thread).\n" + _quoted(*shortlist) + "\n" + PICK
     )
     assert "THE RADAR" not in block and "COMING UP" not in block
+
+
+def test_research_with_only_the_calendar_may_scan_the_news():
+    soon = R.Catalyst(R.parse_when("2026-11-13"), "Summit", "SMMT", kind="pdufa")
+    block = _block(P.research_prompt(_brief(coming_up=[soon])), "THE TOPIC")
+    assert block.endswith(PICK_CALENDAR)
 
 
 def test_research_offers_the_radar_and_the_calendar_before_the_feed():
@@ -954,7 +966,7 @@ def test_research_offers_the_radar_and_the_calendar_before_the_feed():
     radar_at, coming_at, feeds_at = (
         block.index(h) for h in ("THE RADAR", "COMING UP", "THE FEEDS")
     )
-    assert radar_at < coming_at < feeds_at and block.endswith(PICK)
+    assert radar_at < coming_at < feeds_at and block.endswith(PICK_RADAR)
     assert (
         "- [radar 7] Iovance raises, then its first rival ships\n"
         "  Why now: Guidance up on Sep 29; Tudriqev launched Oct 1.\n"

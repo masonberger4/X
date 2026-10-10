@@ -368,6 +368,28 @@ def test_one_automatic_piece_a_day_whatever_minute_the_run_reaches_the_studio(sc
     assert started == [f"10-{5 + d:02d} 06:0{6 if d % 2 == 0 else 3}" for d in range(10)]
 
 
+def test_no_automatic_piece_while_the_editor_has_pieces_left_to_read(sconn, cfg):
+    """`auto.max_waiting`: a piece written while the last ones wait unread in the queue is
+    the one most likely to go stale, so the automatic run waits for the editor."""
+    cfg["auto"].update(max_waiting=2, min_hours_between=0, max_new_per_day=5)
+    first = make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+    studio_draft(sconn, first)
+    assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
+    second = make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+    studio_draft(sconn, second)
+    blocked = (False, "2 studio piece(s) wait in the queue (limit 2)")
+    assert runner.allowed_to_start(sconn, cfg, T0) == blocked
+    queue_store.reject(sconn, get(sconn, first.id).draft_id)
+    assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
+    cfg["auto"]["max_waiting"] = 0  # no limit
+    studio_draft(sconn, make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY))
+    assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
+
+
+def test_the_shipped_backlog_limit():
+    assert load_studio_config()["auto"]["max_waiting"] == 2
+
+
 def test_the_daily_cap_follows_the_display_zone(sconn, cfg, clock):
     """The same instant is another day in another zone: 01:00 UTC on 10-06 is still 10-05
     in Los Angeles, where a piece started at 08:00 UTC on 10-05 used up the day."""

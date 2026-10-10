@@ -582,6 +582,54 @@ def list_runs(conn: sqlite3.Connection, piece_id: int) -> list[RunRow]:
     ]
 
 
+@dataclass
+class RunUsage:
+    """One CLI run's usage, with where its piece stands, for the performance page's
+    "Where the usage goes" (studio/dashboard.py:usage)."""
+
+    piece_id: int
+    stage: str
+    turns: int
+    cost_usd: float
+    duration_ms: int
+    piece_stage: str
+    draft_id: int | None
+
+
+def runs_since(conn: sqlite3.Connection, since_iso: str) -> list[RunUsage]:
+    """Every finished run started since `since_iso`, with its piece's stage and draft."""
+    rows = conn.execute(
+        """SELECT r.piece_id, r.stage, r.turns, r.cost_usd, r.duration_ms,
+                  p.stage AS piece_stage, p.draft_id
+           FROM studio_runs r JOIN studio_pieces p ON p.id = r.piece_id
+           WHERE r.started_at >= ? AND r.finished_at IS NOT NULL ORDER BY r.id""",
+        (since_iso,),
+    ).fetchall()
+    return [
+        RunUsage(
+            piece_id=int(r["piece_id"]),
+            stage=str(r["stage"]),
+            turns=int(r["turns"]),
+            cost_usd=float(r["cost_usd"]),
+            duration_ms=int(r["duration_ms"]),
+            piece_stage=str(r["piece_stage"]),
+            draft_id=int(r["draft_id"]) if r["draft_id"] is not None else None,
+        )
+        for r in rows
+    ]
+
+
+def waiting_in_queue(conn: sqlite3.Connection) -> int:
+    """Studio drafts still pending in the approval queue (step 2's `drafts`, read-only;
+    0 when the table is missing): pieces the editor has not decided on yet."""
+    if "drafts" not in _tables(conn):
+        return 0
+    r = conn.execute(
+        "SELECT COUNT(*) FROM drafts WHERE item_id LIKE 'studio:%' AND status = 'pending'"
+    ).fetchone()
+    return int(r[0]) if r else 0
+
+
 def close_open_runs(conn: sqlite3.Connection, piece_id: int, detail: str) -> None:
     conn.execute(
         "UPDATE studio_runs SET finished_at = ?, outcome = 'interrupted', detail = ? "

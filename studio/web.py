@@ -16,8 +16,8 @@
   POST /studio/playbook/reset  the shipped seed as a new version
   GET  /studio/performance     what X says: each posted piece's numbers, what each angle,
                                shape, hook style, card count and voice has done, the lean,
-                               what the editor did with each voice's pieces, and the
-                               playbook's history
+                               what the editor did with each voice's pieces, the
+                               playbook's history and where the studio's usage goes
   POST /studio/performance/{id}/metrics          a piece's numbers, typed in from X
   POST /studio/performance/{id}/link             the link of a piece posted by hand without it
   POST /studio/playbook/versions/{id}/revert     put an earlier version back (as a new one)
@@ -466,6 +466,8 @@ def studio_performance(request: Request, conn: Conn, flash: str = ""):
     except Exception:  # the rest of the page still shows
         log.exception("could not read what the editor did with each voice")
     last = S.last_learned(conn)
+    since = (now - timedelta(days=D.USAGE_DAYS)).isoformat(timespec="seconds")
+    review_rows = S.fetch_studio_reviews(conn)
     return templates.TemplateResponse(
         request,
         "studio_performance.html",
@@ -486,6 +488,7 @@ def studio_performance(request: Request, conn: Conn, flash: str = ""):
             "flash": flash,
             "can_link": _starter["add_link"] is not None,
             "step_learn": STEP_LEARN,
+            "usage": D.usage(S.runs_since(conn, since), review_rows, D.USAGE_DAYS),
         },
     )
 

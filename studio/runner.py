@@ -639,6 +639,12 @@ def allowed_to_start(
     waiting = S.first_in_stage(conn, S.STAGE_RESEARCH_READY)
     if waiting is not None:
         return False, f"piece {waiting.id} is waiting at the research checkpoint"
+    # A piece the editor has not read yet goes stale in the queue while the next is written:
+    # news moves, and a session spent on a piece that is rejected for age is usage lost.
+    backlog = int(auto.get("max_waiting") or 0)
+    pending = S.waiting_in_queue(conn) if backlog > 0 else 0
+    if backlog > 0 and pending >= backlog:
+        return False, f"{pending} studio piece(s) wait in the queue (limit {backlog})"
     return True, ""
 
 

@@ -30,7 +30,7 @@ from studio import prompt as P
 from studio import store as S
 from studio import topics as T
 from studio import voices as V
-from studio.settings import stage_max_turns, stage_timeout
+from studio.settings import stage_effort, stage_max_turns, stage_timeout
 
 log = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ def _run_stage(
             # Every launch, resumes included: the CLI's record of the first launch's system
             # prompt lasts only until the conversation is compacted (claude_cli.run_session).
             system=ctx.system,
-            effort=piece.effort or None,
+            effort=stage_effort(ctx.cfg, stage, piece.effort or None),
             tools=ctx.cfg["tools"],
             allowed=ctx.cfg["tools"],
             # No --add-dir: under --restricted a folder added is one the file tools can

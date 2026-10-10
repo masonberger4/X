@@ -106,6 +106,34 @@ reads this too, and any change it proposes to the voices waits for you.</p>
 <p class="meta">No voices: the playbook lists none{% if not cfg.voices.enabled %}, and voices are off (<code>voices.enabled</code>){% endif %}.</p>
 {% endif %}
 
+<h2 id="usage">Where the usage goes</h2>
+<p class="meta">Every studio run of the last {{ usage.days }} days, added up. The amounts are what the Claude Code
+CLI reports for each run: on your Claude login nothing is billed, but it is what the same use would cost on the
+API, so it shows each part's share of the plan's limits. The daily radar scan and the playbook rewrite are not in it.</p>
+{% if usage.by_stage %}
+<div class="cards">
+  <div class="card"><div class="n">{{ usage.pieces }}</div>pieces worked on</div>
+  <div class="card"><div class="n">${{ "%.2f"|format(usage.total_usd) }}</div>API-equivalent in all</div>
+  <div class="card"><div class="n">${{ "%.2f"|format(usage.per_piece) }}</div>per piece</div>
+</div>
+<table>
+  <tr><th>By stage</th><th>Runs</th><th>Pieces</th><th>Turns</th><th>Hours</th><th>API-equivalent</th><th>Share</th></tr>
+  {% for r in usage.by_stage %}
+  <tr><td>{{ r.label }}</td><td>{{ r.runs }}</td><td>{{ r.pieces }}</td><td>{{ r.turns }}</td>
+      <td>{{ "%.1f"|format(r.minutes / 60) }}</td><td>${{ "%.2f"|format(r.usd) }}</td><td>{{ "%.0f"|format(r.share * 100) }}%</td></tr>
+  {% endfor %}
+</table>
+<table>
+  <tr><th>By where the piece ended up</th><th>Pieces</th><th>Runs</th><th>API-equivalent</th><th>Share</th></tr>
+  {% for r in usage.by_outcome %}
+  <tr><td>{{ r.label }}</td><td>{{ r.pieces }}</td><td>{{ r.runs }}</td>
+      <td>${{ "%.2f"|format(r.usd) }}</td><td>{{ "%.0f"|format(r.share * 100) }}%</td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No studio run finished in the last {{ usage.days }} days.</p>
+{% endif %}
+
 <h2 id="playbook">The playbook</h2>
 <p class="meta">Every session reads <a href="/studio/playbook">the playbook</a>. The learning loop rewrites it once
 {{ state.min_new }} scored pieces are new to it, at most every {{ "%g"|format(state.min_hours) }} hours:

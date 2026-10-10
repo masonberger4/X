@@ -416,7 +416,8 @@ carrying `--live`).
   the reference pieces as the piece's own copy, `<piece>/reference/`
   (`session.copy_reference`, made when a stage starts and none is there; never an
   `--add-dir`, which --restricted would make writable, so no session can change
-  `studio/exemplars`); `tools` and the isolation `cli_flags` (`--safe-mode
+  `studio/exemplars`); `stage_effort.<stage>` over the piece's effort
+  (`settings.stage_effort`; the model never changes within a session); `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
   `story_id`, an int or digit string, sets the piece's cluster only when it is in
@@ -513,8 +514,9 @@ carrying `--live`).
   `interrupted`, acts on `request`s (continue, revise), then starts at most one piece:
   explicit `--topic`/`--story`, else the oldest queued topic, else with `--now` an
   automatic topic, else only when `auto.max_new_per_day` (automatic pieces per calendar
-  day in the root `timezone:`), `auto.min_hours_between` (any piece) and no checkpoint
-  wait allow, and a card browser was found (`make_renderer`; without one the automatic run
+  day in the root `timezone:`), `auto.min_hours_between` (any piece), no checkpoint
+  wait and fewer than `auto.max_waiting` studio drafts pending in the queue
+  (`store.waiting_in_queue`, read-only) allow, and a card browser was found (`make_renderer`; without one the automatic run
   exits 1 rather than spend research and writing on a piece polish would stop); up to
   `max_parallel` runs at once (studio/config.yaml, 3), each holding a writing slot
   (`runner.slot_lock_path`: `<workspace_dir>/.studio.lock`, `.studio.lock.2`, ...; a run
@@ -616,7 +618,9 @@ carrying `--live`).
   playbook file (atomic) and of `studio_playbook_versions` (`seed`/`editor`/`learned`/
   `proposal`/`revert`, changelog, evidence, `pieces` learned from; `ensure_seeded`
   records the playbook in use before the first change, `revert`, `apply_proposal`).
-  `/studio/performance` (`studio/dashboard.py`, pure views) shows the posted pieces, the
+  `/studio/performance` (`studio/dashboard.py`, pure views) shows "Where the usage
+  goes" (`dashboard.usage` over `store.runs_since`: each run's `cost_usd` by stage and by
+  where its piece ended up, the last `USAGE_DAYS`), the posted pieces, the
   per-arm table (a voice's share is how often it is drawn), what the editor did with each
   voice (`voice_edit_rows`), the learning state and the version history, takes typed-in numbers and
   the link of a post confirmed by hand without one: `studio/web.py` calls the `add_link`

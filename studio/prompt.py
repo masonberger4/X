@@ -264,7 +264,17 @@ def _topic_block(b: Brief) -> str:
             "(no piece and no drafted thread)."
         )
         lines.append(_feed_text(b.shortlist))
-    if b.radar or b.coming_up or b.shortlist:
+    if b.radar or b.shortlist:
+        # The radar's daily scan and the feeds have read the last few days' news already: a
+        # broad scan of its own repeats that work, so the session runs one only to beat them.
+        lines.append(
+            "Pick one of these. "
+            + ("Today's radar scan and the feeds" if b.radar else "The feeds")
+            + " already cover the last few days' news, so run a broad news scan of your own "
+            "(web search) only when none of them makes a strong piece, and then pick "
+            "something better. Say which and why in research.json."
+        )
+    elif b.coming_up:
         lines.append(
             "Pick one of these, or run your own news scan (web search) and pick something "
             "better; say which and why in research.json."

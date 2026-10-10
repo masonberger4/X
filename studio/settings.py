@@ -29,12 +29,14 @@ DEFAULTS: dict[str, Any] = {
         "enabled": True,
         "max_new_per_day": 1,
         "min_hours_between": 6,
+        "max_waiting": 2,
         "checkpoint": False,
     },
     "manual": {"checkpoint": True},
     "workspace_dir": "studio_pieces",
     "timeouts": {"research": 150, "write": 180, "polish": 60, "revise": 120},
     "max_turns": {"research": 0, "write": 0, "polish": 40, "revise": 0},
+    "stage_effort": {"research": "", "write": "", "polish": "", "revise": ""},
     "max_polish_rounds": 3,
     "tools": ["Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch", "Agent"],
     "cli_flags": ["--safe-mode", "--restricted", "--permission-mode", "dontAsk"],
@@ -95,6 +97,7 @@ _SECTIONS = (
     "manual",
     "timeouts",
     "max_turns",
+    "stage_effort",
     "topics",
     "variety",
     "voices",
@@ -155,6 +158,13 @@ def stage_timeout(cfg: dict[str, Any], stage: str) -> float | None:
 def stage_max_turns(cfg: dict[str, Any], stage: str) -> int | None:
     turns = int((cfg.get("max_turns") or {}).get(stage) or 0)
     return turns if turns > 0 else None
+
+
+def stage_effort(cfg: dict[str, Any], stage: str, default: str | None) -> str | None:
+    """The effort one stage runs at: `stage_effort.<stage>` when set, else `default` (the
+    piece's own, the top-level `effort:` it was started with)."""
+    own = str((cfg.get("stage_effort") or {}).get(stage) or "").strip()
+    return own or default
 
 
 def workspace_root(data_dir: Path, cfg: dict[str, Any]) -> Path:
