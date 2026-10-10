@@ -6,6 +6,11 @@
 <h1>Studio piece {{ d.studio_piece }}</h1>
 <p class="banner ok">Written in the {% if HAS_PANEL %}<a href="/studio/{{ d.studio_piece }}">studio</a>{% else %}studio (open the control panel, run_app.py, for its page){% endif %} by one {{ d.model }} session: its fact base, fact-check log and session log are on the studio page, and so is Revise, which resumes that session.</p>
 {% if studio_hold %}<p class="banner warn">On hold: {{ studio_hold }}. Approve, edit, reject and dropping a picture wait until then.</p>{% endif %}
+{% elif d.reply_to %}
+<h1>Reply to @{{ d.reply_to.author }}{% if d.reply_to.author_name %} <span class="meta">({{ d.reply_to.author_name }})</span>{% endif %}</h1>
+<div class="post">{{ d.reply_to.text }}</div>
+<p class="meta">{% if d.reply_to.url %}<a href="{{ d.reply_to.url }}" target="_blank" rel="noopener noreferrer">open the post on X</a> · {% endif %}{% if d.reply_to.request_id %}<a href="/replies/{{ d.reply_to.request_id }}">its reply page</a> (screenshots){% endif %}</p>
+<p class="banner ok">Written by {{ d.model }} from screenshots and checked in code (no advice, no links, known @handles only). Replies are posted by hand and logged from their reply page.</p>
 {% else %}
 <h1>{{ d.title or d.item_id }}</h1>
 {% endif %}
@@ -26,7 +31,7 @@
 {% if d.rejection_reason %}<p class="flash over">Hard-rule failure: {{ d.rejection_reason }}</p>{% endif %}
 {% if d.rationale %}<p><strong>Scorer rationale:</strong> {{ d.rationale }}</p>{% endif %}
 {% if d.suggested_angle %}<p><strong>Suggested angle:</strong> {{ d.suggested_angle }}</p>{% endif %}
-<p><strong>Why it matters:</strong> {{ d.draft.why_it_matters }}</p>
+<p><strong>{{ "What it adds" if d.reply_to else "Why it matters" }}:</strong> {{ d.draft.why_it_matters }}</p>
 {% if d.draft.suggested_visual %}<p><strong>Suggested visual:</strong> {{ d.draft.suggested_visual }}</p>{% endif %}
 
 {% if d.draft.shape != 'thread' or d.draft.wanted_visuals == 0 or d.draft.wanted_visuals == 2 %}
@@ -63,7 +68,7 @@
 
 {% endif %}
 
-<h2>{{ 'Post' if d.draft.thread|length == 1 else 'Thread' }}</h2>
+<h2>{{ 'Reply' if d.reply_to else ('Post' if d.draft.thread|length == 1 else 'Thread') }}</h2>
 {% set limit = [MAX_POST_CHARS, d.draft.max_chars or MAX_POST_CHARS]|max %}
 {% for p in d.draft.thread %}
   {% set n = p|tweet_length %}

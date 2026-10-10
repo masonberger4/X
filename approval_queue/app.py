@@ -22,6 +22,9 @@ A studio draft (step 10) is held while the studio works on its piece or a run of
 (store.studio_hold): approve, edit, reject and the picture drops answer 409 with the reason,
 since the revision replaces the draft's text and cards when it lands.
 
+A reply draft (reply/web.py, item_id `reply:`) shows the post it answers and stays one
+post when edited; it is logged from the panel's reply page once posted by hand.
+
 Form bodies are parsed with urllib so no multipart dependency is needed.
 
 There is no login, so a request that changes anything must come from the app's own pages:
@@ -419,6 +422,8 @@ async def edit(draft_id: int, request: Request, conn: Conn):
     current = store.get_draft(conn, draft_id)
     limit = max(MAX_POST_CHARS, current.draft.max_chars) if current is not None else MAX_POST_CHARS
     problem = _edit_problem(thread, limit)
+    if problem is None and current is not None and current.reply_to and len(thread) > 1:
+        problem = "a reply is one post; remove the --- lines"
     if problem is None:
         try:
             category = store.validate_category(form.get("category"))

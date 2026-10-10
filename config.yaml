@@ -35,6 +35,10 @@ models:
   # Story linking (run_score.py, see `linking:` below): groups clusters that
   # report the same event. Headline matching, so a small model is enough.
   linker: claude-haiku-4-5-20251001
+  # Replies (the panel's /replies page, see `replies:` below): reads your screenshots of
+  # a post and writes one reply. It has to be right in 280 characters, so it runs on Opus.
+  replier: claude-opus-5-5
+  replier_effort: medium          # low | medium | high | xhigh | max
 
 claude_code:                      # how every model call reaches Claude (claude_cli.py)
   binary: claude                  # CLI on PATH; it must be logged in (`claude login`)
@@ -578,3 +582,17 @@ kol:
     - {handle: bradloncar,        name: Brad Loncar,            focus: cancer immunotherapy investing}
     - {handle: JacobPlieth,       name: Jacob Plieth,           focus: oncology drug development analysis}
     - {handle: AndyBiotech,       name: Andy Biotech,           focus: biotech analysis}
+
+# ---------------------------------------------------------------------------
+# Replies (the control panel's /replies page): paste screenshots of a post you found on
+# X and the app writes one reply (models.replier), checked in code (no advice, no links,
+# known @handles only, X's character limit). You post it by hand and log its link there.
+# Nothing is read from X for this, and nothing posts from it.
+# ---------------------------------------------------------------------------
+replies:
+  max_chars: 270                  # X-weighted target, under 280 for headroom
+  max_attempts: 2                 # a reply that fails the checks goes back once with them
+  max_shots: 4                    # screenshots per reply
+  max_shot_mb: 8                  # per screenshot
+  tools: [WebSearch, WebFetch]    # beside Read (always on, for the screenshots); [] for none
+  timeout_seconds: 300            # per call, in place of claude_code.timeout_seconds

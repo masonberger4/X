@@ -188,7 +188,8 @@ def fetch_posted(
 
 _CONTEXT_SQL = """
 SELECT d.id AS draft_id, d.item_id, d.cluster_id,
-       COALESCE(i.source, CASE WHEN d.item_id LIKE 'studio:%' THEN 'studio' END) AS source,
+       COALESCE(i.source, CASE WHEN d.item_id LIKE 'studio:%' THEN 'studio'
+                        WHEN d.item_id LIKE 'reply:%' THEN 'reply' END) AS source,
        i.url, i.title,
        s.novelty, s.clinical_significance, s.audience_interest, s.expertise_fit, s.timeliness,
        s.hype_risk, s.total, s.evidence_level, s.suggested_angle,
@@ -207,7 +208,8 @@ WHERE d.id IN ({placeholders})
 
 _CONTEXT_SQL_NO_STEP1 = """
 SELECT d.id AS draft_id, d.item_id, d.cluster_id,
-       CASE WHEN d.item_id LIKE 'studio:%' THEN 'studio' END AS source,
+       CASE WHEN d.item_id LIKE 'studio:%' THEN 'studio'
+            WHEN d.item_id LIKE 'reply:%' THEN 'reply' END AS source,
        NULL AS url, NULL AS title,
        NULL AS novelty, NULL AS clinical_significance, NULL AS audience_interest,
        NULL AS expertise_fit, NULL AS timeliness, NULL AS hype_risk, NULL AS total,
@@ -224,7 +226,8 @@ def fetch_post_context(
 ) -> dict[int, PostContext]:
     """Story metadata for each draft id, joined from steps 1 and 2. A studio piece
     (step 10, item_id `studio:<id>`) has no item of its own: its source reads `studio`, so
-    the weekly report compares studio posts with the drafter's.
+    the weekly report compares studio posts with the drafter's; a reply (the panel's
+    /replies page, `reply:req<id>`) reads `reply`, so replies are their own group.
 
     This is the ONLY place step 4 reads drafts/decisions/items/scores/ratings. Drafts that
     do not exist are simply absent from the result.

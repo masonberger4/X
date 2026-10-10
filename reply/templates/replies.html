@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Replies{% endblock %}
+{% block content %}
+<style>
+  .drop { border: 2px dashed var(--border, #ccc); border-radius: 8px; padding: 1rem; margin: .5rem 0; text-align: center; }
+  .drop.over { border-color: var(--ok, #1b5e20); }
+  .thumbs img { max-height: 160px; margin: .3rem; border: 1px solid var(--border, #ddd); border-radius: 4px; }
+  .rq { border-top: 1px solid var(--border, #ddd); padding: .5rem 0; }
+</style>
+<h1>Replies</h1>
+{% if error %}<p class="flash over">{{ error }}</p>{% endif %}
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+<p class="meta">Found a post worth answering? Paste a screenshot of it here (up to {{ s.max_shots }}: the post, and the thread under it if it matters). {{ s.model }} reads it and writes one reply, checked for advice, links, unknown @handles and length. You post it yourself, then log its link here so the feedback report tracks it. Nothing is read from X and nothing posts from here.</p>
+
+<form method="post" action="/replies" id="new-reply">
+  <div class="drop" id="drop" tabindex="0">Paste a screenshot here (Ctrl+V), drop it here, or
+    <label><input type="file" id="pick" accept="image/png,image/jpeg,image/webp,image/gif" multiple> choose files</label>
+    <div class="thumbs" id="thumbs"></div>
+  </div>
+  <p><label>The post's link (optional)
+    <input name="post_url" size="50" placeholder="https://x.com/someone/status/123..."></label></p>
+  <p><label>What you want to say (optional)<br>
+    <textarea name="note" rows="2" cols="70" placeholder="e.g. push back on the control arm; mention the ASH data"></textarea></label></p>
+  <p><button type="submit" id="go" disabled>Write the reply</button>
+    <button type="button" class="link" onclick="clearShots()">clear</button></p>
+</form>
+
+<h2>Recent</h2>
+{% if not requests %}<p class="meta">Nothing yet.</p>{% endif %}
+{% for r in requests %}
+<div class="rq">
+  <a href="/replies/{{ r.id }}"><strong>Reply {{ r.id }}</strong></a>
+  {% if r.author %}to @{{ r.author }}{% endif %}
+  <span class="pill {{ {'ready': 'ok', 'posted': 'ok', 'writing': 'warn', 'skipped': 'skip', 'discarded': 'skip'}.get(r.status, 'fail') }}">{{ r.status }}</span>
+  <span class="meta">{{ r.created_at|localtime }}</span>
+  {% if r.reply %}<div class="meta">{{ r.reply[:200] }}{% if r.reply|length > 200 %}…{% endif %}</div>{% endif %}
+</div>
+{% endfor %}
+
+<script>
+const form = document.getElementById("new-reply"), drop = document.getElementById("drop");
+const thumbs = document.getElementById("thumbs"), go = document.getElementById("go");
+const MAX = {{ s.max_shots }};
+function addFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  if (form.querySelectorAll("input[name=shot]").length >= MAX) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const hidden = document.createElement("input");
+    hidden.type = "hidden"; hidden.name = "shot"; hidden.value = reader.result;
+    form.appendChild(hidden);
+    const img = document.createElement("img"); img.src = reader.result; img.alt = "screenshot";
+    thumbs.appendChild(img);
+    go.disabled = false;
+  };
+  reader.readAsDataURL(file);
+}
+function clearShots() {
+  form.querySelectorAll("input[name=shot]").forEach(e => e.remove());
+  thumbs.innerHTML = ""; go.disabled = true;
+}
+document.addEventListener("paste", e => {
+  for (const item of (e.clipboardData || {}).items || []) {
+    if (item.kind === "file") addFile(item.getAsFile());
+  }
+});
+document.getElementById("pick").addEventListener("change", e => {
+  for (const f of e.target.files) addFile(f);
+  e.target.value = "";
+});
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("over");
+  for (const f of e.dataTransfer.files) addFile(f);
+});
+form.addEventListener("submit", () => { go.disabled = true; go.textContent = "Sending…"; });
+</script>
+{% endblock %}

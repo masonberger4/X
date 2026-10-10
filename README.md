@@ -24,6 +24,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | 8 | Control panel: one web app over the whole workflow | `panel/`, `run_app.py` |
 | 9 | Swarm drafting (retired) | |
 | 10 | The studio: one Opus 5.5 session per post (research, post, cards, fact-check) | `studio/`, `run_studio.py` |
+| | Replies from your screenshots of a post, posted by hand and logged | `reply/`, `/replies` |
 
 ## Control panel (step 8)
 
@@ -35,6 +36,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/sources` | every configured ingest source with its freshness, last error and item counts |
 | `/feed` | the scored clusters `digest.py` prints, with its yes/no editor prompt and reason-category box inline; one "Ingest and score" button |
 | `/publishing` | approved and waiting, what has posted, any partial thread needing a human, a form for `max_posts_per_day` / `min_gap_minutes` (written into `publish/config.yaml` by `publish/scheduler.py:save_caps`, comments kept); no post button and no automatic publishing: posting is manual only, from the approved page's "Publish now" |
+| `/replies` | paste screenshots of a post you found on X, get one checked reply, copy it, post it by hand and log its link ("I posted it") so feedback tracks it |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | the automatic runs (switch and times of day, next run, what happened at each time), every run's log (whichever page started it) and the checkboxes to run any enabled step; stop any run in progress |
 | `/queue`, `/drafts/{id}` | the step 2 approval queue: approve, edit, reject, drop pictures (a studio piece is revised on its `/studio` page) |
@@ -419,6 +421,20 @@ skipped, t.co links are replaced by their expanded URLs, and a post that links
 a DOI joins that paper's cluster. `lookback_hours` must exceed
 `cadence_minutes` so consecutive runs overlap; the dedup hash makes the
 overlap harmless. The token is never logged.
+
+**Replies (`/replies`, `reply/`).** The account's replies come from posts the editor
+finds, not from this list: the control panel's `/replies` page takes pasted screenshots
+of a post (its link and a note optional), and `reply/writer.py:call_replier` runs the
+Claude Code CLI (`models.replier`) with the screenshots in its private folder and the
+Read tool beside `replies.tools`. It answers who wrote the post, its text and one reply
+(or why to skip it); `reply/checks.py` holds the reply to the studio's lines
+(`studio/safety.py`: no advice, no link or bare domain), X's weighted length and the
+known @handles (`config.yaml`, `kol.handles`, the author), with one retry. The request
+lives in `reply_requests`, its screenshots in `reply_shots/` beside the database. When
+the editor says it is posted, the reply (as edited) becomes an approved single-post draft,
+item_id `reply:req<id>`, logged through `panel/publishing.py:confirm_manual` like the
+copy-paste page, so step 4 tracks it as the `reply` group; a link can be added later.
+`publish/store.py:fetch_approved` never hands a reply to a publish run.
 
 ## Retired steps (2, 2b, 7 and 9)
 
