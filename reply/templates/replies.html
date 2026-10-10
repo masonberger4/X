@@ -33,7 +33,8 @@
   {% if r.author %}to @{{ r.author }}{% endif %}
   <span class="pill {{ {'ready': 'ok', 'posted': 'ok', 'writing': 'warn', 'skipped': 'skip', 'discarded': 'skip'}.get(r.status, 'fail') }}">{{ r.status }}</span>
   <span class="meta">{{ r.created_at|localtime }}</span>
-  {% if r.reply %}<div class="meta">{{ r.reply[:200] }}{% if r.reply|length > 200 %}…{% endif %}</div>{% endif %}
+  {% if r.post_text %}<div class="meta">Post: {{ r.post_text[:160] }}{% if r.post_text|length > 160 %}…{% endif %}{% if r.post_url %} <a href="{{ r.post_url }}" target="_blank" rel="noopener noreferrer">open</a>{% endif %}</div>{% endif %}
+  {% if r.reply %}<div class="meta">Reply: {{ r.reply[:200] }}{% if r.reply|length > 200 %}…{% endif %}</div>{% endif %}
 </div>
 {% endfor %}
 
