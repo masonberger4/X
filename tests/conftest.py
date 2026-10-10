@@ -12,6 +12,7 @@ import config
 import run_app
 import run_desktop
 import run_feedback
+import run_movers
 import run_ops
 import run_publish
 import run_queue
@@ -26,6 +27,7 @@ _DOTENV_USERS = (
     run_app,
     run_desktop,
     run_feedback,
+    run_movers,
     run_ops,
     run_publish,
     run_queue,

@@ -26,6 +26,29 @@ steps:
     # No time limit (0): a large backlog is ~25s per batch of 10 and can run past an hour.
     # Scores are stored per batch, so the Stop button loses only the batch in flight.
     timeout_seconds: 0
+  # Market movers (movers/config.yaml): biotech stocks that moved threshold_pct (5%) or
+  # more in the last session, after the close or in this morning's pre-market. The screen
+  # is plain code on free price data; only new movers go to one Claude call (web search,
+  # a cheaper model) that says whether a story is behind each. Those worth a piece go on
+  # the studio's radar and the best is queued for the studio, which writes it. It screens
+  # when due (every_hours, not before not_before New York time), so of the shipped run
+  # times only the 06:00 one screens. Right before the radar's scan and the studio, so a
+  # mover queued this morning is written in the same run. Its own lock.
+  - name: movers
+    lock: movers
+    argv: ["python", "run_movers.py"]
+    enabled: true
+    required: false
+    timeout_seconds: 0
+  # Manual only (the radar page's "Check market movers now", or the runs page): the same,
+  # whatever the time.
+  - name: movers_now
+    lock: movers
+    argv: ["python", "run_movers.py", "--now"]
+    enabled: true
+    required: false
+    manual: true
+    timeout_seconds: 0
   # Step 10's radar (studio/config.yaml `radar`): at most once a day (scan_every_hours),
   # one call on the writer's model with web search proposes the next topics and reports
   # dated catalysts for the calendar on /studio/radar. Right before the studio step, so
@@ -131,7 +154,7 @@ run_log_tail_chars: 4000         # stdout/stderr kept per step per run
 # Automatic runs: while the control panel (run_app.py) or the desktop window
 # (run_desktop.py) is open, it runs the steps below on its own at each time of day,
 # local time in the root config.yaml `timezone:`. Everything but publishing: only
-# ingest, score, feedback and studio can ever start this way (checked by
+# ingest, score, movers, feedback and studio can ever start this way (checked by
 # the script a step runs, not its name, in ops/autorun.py), those runs cannot post
 # whatever .env says, and posting stays the approved page's "Publish now".
 # The runs page's switch and time field edit auto_run_enabled and auto_run_times (the
@@ -143,7 +166,7 @@ run_log_tail_chars: 4000         # stdout/stderr kept per step per run
 # pipeline-run (HOWTO Part 6) together is safe but wasteful: pick one.
 auto_run_enabled: true
 auto_run_times: ["01:00", "03:00", "06:00", "09:32", "12:00", "15:00"]
-auto_run_steps: [ingest, score, studio_scan, studio, feedback, studio_learn]
+auto_run_steps: [ingest, score, movers, studio_scan, studio, feedback, studio_learn]
 auto_run_grace_minutes: 60
 # Daily backup: an automatic run that starts when the newest backup in backups.dir is
 # older than this many hours also takes one, beside the run (the same verified backup as

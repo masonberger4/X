@@ -1,0 +1,121 @@
+# Market movers (movers/settings.py): biotech stocks that moved 5% or more, up or down,
+# in the last trading session, after the close or in today's pre-market, and whether a
+# story is behind each one. Not the root config.yaml.
+#
+# `python run_movers.py` (the `movers` step in ops/config.yaml, right before the radar's
+# scan in the automatic runs) does two things:
+#   1. the screen, plain code and no Claude: daily and intraday prices for every ticker in
+#      the universe below, from Yahoo Finance's free chart API (no key, no account),
+#      compared with the session before. A move of `threshold_pct` or more passes.
+#   2. the story check, ONE Claude call with web search for every new mover at once
+#      (`max_checked` at most, the biggest first): is there a story, what is it, is it
+#      worth a piece. Nothing new, no call.
+# Movers worth a piece go onto the radar (/studio/radar, and the brief of the next
+# automatic piece), and the best `auto_queue` of them are queued for the studio, which
+# picks the angle and the voice and writes the piece as it writes any other. Nothing posts.
+
+enabled: true
+
+# When the automatic run screens: once every `every_hours`, and not before `not_before`
+# market time (America/New_York), so pre-market prices have had time to form. The shipped
+# automatic run times (ops/config.yaml, Pacific) put the day's screen at 06:00, which is
+# 09:00 in New York: yesterday's session, its after-hours and this morning's pre-market.
+# `python run_movers.py --now` (the runs page's movers_now, or the radar page's button)
+# screens whatever the time.
+every_hours: 20
+not_before: "08:00"
+
+# The screen.
+threshold_pct: 5.0            # a move this size or bigger, up or down
+min_price: 1.0                # the session's close must be at least this (no penny stocks)
+min_dollar_volume: 2000000    # close x shares traded in the session (no illiquid names)
+min_extended_volume: 20000    # shares traded after hours or pre-market for those moves
+                              # to count; a few thin quotes can show any move
+benchmark: XBI                # shown beside each move for context (blank = none)
+
+# The universe: every ticker of `companies.feeds` and `branding.companies` in the root
+# config.yaml, plus these. Tickers as of Oct 2026; one that no longer trades (acquired,
+# delisted) returns no prices and is logged and skipped. Add any biotech you want watched.
+extra_tickers:
+  - VRTX
+  - BIIB
+  - ALNY
+  - MRNA
+  - BMRN
+  - NBIX
+  - SRPT
+  - UTHR
+  - INSM
+  - IONS
+  - ARGX
+  - EXAS
+  - HALO
+  - ACLX
+  - JANX
+  - CGEM
+  - SMMT
+  - IDYA
+  - NUVL
+  - CELC
+  - ADCT
+  - PCVX
+  - IMVT
+  - MDGL
+  - VKTX
+  - CYTK
+  - KYMR
+  - DNLI
+  - ARWR
+  - APLS
+  - KRYS
+  - RARE
+  - PTCT
+  - ROIV
+  - TERN
+  - VERA
+  - RCKT
+  - PRAX
+  - ACAD
+  - ALKS
+  - AXSM
+  - BBIO
+  - SNDX
+  - GERN
+  - CRNX
+  - TVTX
+  - DAWN
+  - ERAS
+  - ORIC
+  - ANAB
+exclude_tickers: []           # left out of the universe (e.g. a name you never write on)
+
+# Prices: Yahoo Finance's public chart endpoint. Unofficial: it can change or throttle, in
+# which case the run logs the tickers it could not read and screens the rest.
+prices:
+  chart_url: https://query1.finance.yahoo.com/v8/finance/chart/{symbol}
+  daily_range: 10d
+  intraday_range: 5d
+  intraday_interval: 15m
+  # The endpoint answers 429 to clients that do not look like a browser.
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"
+  pause_seconds: 0.25         # between requests, to stay polite (two per ticker)
+  timeout_seconds: 20
+
+# The story check: one call, web search and fetch only. A cheaper model than the writer's
+# is plenty to find out why a stock moved; the studio's Opus session does the thinking
+# when the piece is written.
+check:
+  model: claude-sonnet-5-5
+  effort: medium              # low | medium | high | xhigh | max
+  timeout_minutes: 20
+  max_checked: 12             # new movers per call, biggest moves first; the rest are
+                              # recorded as not checked and never asked about
+  recent_days: 5              # earlier movers of the same ticker shown, so the same story
+                              # is not proposed twice (an after-hours move, then the next
+                              # day's session)
+
+# Into the studio.
+auto_queue: 1                 # the best movers worth a piece queued for the studio per
+                              # screen (0 = radar only: they wait for "Write it")
+checkpoint: false             # a queued mover piece stops after research for you (true)
+                              # or writes straight through (false)

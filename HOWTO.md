@@ -254,7 +254,7 @@ Set `posting: api` to go back to posting through the X API (the steps below).
 ## Part 6. Running it on a schedule (Windows Task Scheduler)
 
 You may not need this part. While the control panel or desktop window is open it
-already runs ingest, score, studio_scan, studio, feedback and studio_learn on
+already runs ingest, score, movers, studio_scan, studio, feedback and studio_learn on
 its own at 01:00, 03:00, 06:00, 09:32, 12:00 and 15:00 (part 8, "Automatic runs"), and it never publishes. Task
 Scheduler is the other way: it runs even with the app closed and can wake the
 PC, but it needs the tasks below. Pick one for `pipeline-run` and
@@ -268,7 +268,7 @@ task from step 2 if you want that. `pipeline-backup` is not needed with them. Th
 30 minutes, set `max_hours_since_ingest` back to 3, `max_hours_since_score` to 6
 and `source_stale_min_hours` to 0 for earlier warnings.
 
-1. Try the orchestrator by hand first. It runs ingest, score, studio_scan,
+1. Try the orchestrator by hand first. It runs ingest, score, movers, studio_scan,
    publish (a dry run), feedback and studio_learn in order and records each step. It leaves the `studio` step out:
    one studio session runs for an hour or more, and the whole run (and every
    `pipeline-run` after it, which Task Scheduler does not start while one is
@@ -474,7 +474,7 @@ motion, that bar stands still too. Four pages:
   current step (and anything it started, such as the Claude window) and
   skips the rest. Nothing is lost; the next run picks up where it left off.
 - **Automatic runs** (top of `/runs`) — while the panel or the desktop window
-  is open it runs ingest, score, studio_scan, studio, feedback and studio_learn on its own,
+  is open it runs ingest, score, movers, studio_scan, studio, feedback and studio_learn on its own,
   at 01:00, 03:00, 06:00, 09:32, 12:00 and 15:00 local time as shipped. Publishing is never one of
   them: posting stays the approved page's "Publish now", and an automatic run
   cannot post even if `.env` allows posting. The box says whether it is on,
@@ -926,6 +926,55 @@ avoid, so the account does not repeat itself. The card style (dark, 4:5, Inter)
 is in `studio\brief\cards.md`, the voice in `studio\brief\voice.md`, and the three
 reference pieces in `studio\exemplars\`.
 
+### Market movers: a story behind every big move
+
+Every morning the app looks for biotech stocks that moved 5% or more, up or
+down, and asks whether there is a story behind the move. It looks at three
+moves, each against the last completed session's close: that session itself
+(yesterday's trading), the after-hours trading that evening, and this morning's
+pre-market. Settings are in `movers\config.yaml`.
+
+1. The screen is plain code and costs no Claude usage. Prices come from Yahoo
+   Finance's public chart API: free, no key, no account, with pre-market and
+   after-hours prices. It is unofficial, so if it ever changes or throttles,
+   the run logs the tickers it could not read and screens the rest. The
+   universe is every company in `config.yaml` with a ticker (the feeds and
+   `branding.companies`) plus `extra_tickers` in `movers\config.yaml`; add any
+   ticker you want watched there. Penny stocks and illiquid names are left out
+   (`min_price`, `min_dollar_volume`), and an after-hours or pre-market move
+   needs `min_extended_volume` shares behind it, so a few thin quotes do not
+   count.
+2. Only moves no earlier screen recorded go further, so running it twice in a
+   morning asks nothing twice. The new movers (the biggest 12 at most) go to
+   ONE Claude call with web search, on Sonnet at medium effort (`check:`),
+   which says for each: why it moved, whether that is worth a piece, a working
+   title, the angle that may fit and its sources. No new movers, no call.
+3. A mover worth a piece goes on the radar page (`/studio/radar`) with a
+   "Write it" button, and the next automatic piece is offered it with the scan's
+   topics. The best one (`auto_queue: 1`) is also queued for the studio, which
+   writes it in the same automatic run: the studio's session picks the angle
+   and the app gives it its voice, as for every other piece. A mover that looks
+   like a piece you wrote lately is left on the radar instead, flagged "may
+   repeat". Set `auto_queue: 0` to have movers only wait on the radar for you;
+   with the studio's automatic pieces off (`auto.enabled: false` in
+   `studio\config.yaml`) nothing is queued either. A queued mover piece is one
+   more Opus session that day on top of the automatic piece.
+
+When it runs: the `movers` step sits in the automatic runs right before the
+radar's scan and the studio, and screens once a day (`every_hours: 20`), not
+before 08:00 New York time (`not_before`), so of the shipped run times the
+06:00 one (09:00 in New York, before the open) does it. The radar page's
+"Check market movers now" button, or the `movers_now` step on the runs page,
+screens whatever the time. By hand:
+```
+python run_movers.py --dry-run
+python run_movers.py --now
+python run_movers.py
+```
+`--dry-run` screens and prints the movers and the story check's prompt, with no
+call and nothing recorded; `--now` screens now; plain `run_movers.py` screens
+when it is due. Nothing here posts.
+
 ---
 
 ## Fixing things
@@ -991,7 +1040,10 @@ session's tools, the card browser, `radar:` for the daily scan and the catalyst
 calendar, `learn:` for what X teaches the next session: the horizon, the
 baseline, when and how the playbook is rewritten, and `voices:` for the voices
 the pieces are written in and how many of their sentences must speak in the
-first person) and `ops\config.yaml` (which steps the
+first person), `movers\config.yaml` (market movers, part 9: the 5% threshold,
+the liquidity filters, the extra tickers watched, the price source, the story
+check's model and how many movers are queued for the studio) and
+`ops\config.yaml` (which steps the
 scheduler runs). Ask me to commit a change rather than editing by
 hand, so your copy and GitHub stay in step.
 

@@ -123,12 +123,13 @@ def test_the_studio_runs_automatically_but_its_buttons_never_do():
         button = Step("studio_x", ["python", "run_studio.py", flag], manual=True)
         assert "manual" in autorun.ineligible(button)
     refused = autorun.ineligible(Step("x", ["python", "run_ops.py", "run"]))
-    assert refused == "only ingest, score, feedback and studio run automatically"
+    assert refused == "only ingest, score, movers, feedback and studio run automatically"
 
 
 SHIPPED_AUTO_STEPS = [
     "ingest",
     "score",
+    "movers",
     "studio_scan",
     "studio",
     "feedback",
@@ -464,7 +465,7 @@ def test_a_time_waits_for_a_busy_step_then_gives_up_after_the_grace(tmp_path):
 
 # The three studio steps share one lock, so a session in flight makes all three busy.
 STUDIO_BUSY = {"studio", "studio_now", "studio_resume"}
-REST = ["ingest", "score", "studio_scan", "feedback", "studio_learn"]
+REST = ["ingest", "score", "movers", "studio_scan", "feedback", "studio_learn"]
 
 
 def test_a_busy_studio_sits_the_run_time_out_while_the_other_steps_start(tmp_path):
@@ -550,7 +551,7 @@ def test_steps_waiting_behind_a_busy_studio_in_an_earlier_run_sit_the_time_out_t
     r = _runner(tmp_path, jobs, _settings(auto_run_steps=SHIPPED_AUTO_STEPS))
     r.tick(la(2026, 10, 1, 11, 59))
     assert r.tick(la(2026, 10, 1, 12, 0)) == "started run job1"
-    assert jobs.started == [(["ingest", "score", "studio_scan"], True)]
+    assert jobs.started == [(["ingest", "score", "movers", "studio_scan"], True)]
     (note,) = jobs.notes
     assert "left out studio: still running from an earlier run" in note
     for name in later:

@@ -24,6 +24,7 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | 8 | Control panel: one web app over the whole workflow | `panel/`, `run_app.py` |
 | 9 | Swarm drafting (retired) | |
 | 10 | The studio: one Opus 5.5 session per post (research, post, cards, fact-check) | `studio/`, `run_studio.py` |
+| 11 | Market movers: biotech stocks that moved 5%+ and the story behind each, into the studio | `movers/`, `run_movers.py` |
 
 ## Control panel (step 8)
 
@@ -46,9 +47,9 @@ step 1's own `db.Database` API — the same one `digest.py` uses, and the run bu
 `ops/config.yaml`'s steps through `ops/runner.py` under the same per-step `ops/lock.py`
 locks cron takes, so a run started in the browser is the run cron would have started. While
 it is open the panel also runs everything but publishing on its own: `auto_run_steps`
-(ingest, score, studio_scan, studio, feedback, studio_learn) at each of `auto_run_times` (01:00, 03:00,
+(ingest, score, movers, studio_scan, studio, feedback, studio_learn) at each of `auto_run_times` (01:00, 03:00,
 06:00, 09:32, 12:00 and 15:00 shipped, in the root `timezone:`), switched and timed from `/runs`, which writes
-`auto_run_enabled` / `auto_run_times` in `ops/config.yaml`. Only `run_ingest.py`, `run_score.py`, `run_feedback.py` and `run_studio.py` can
+`auto_run_enabled` / `auto_run_times` in `ops/config.yaml`. Only `run_ingest.py`, `run_score.py`, `run_feedback.py`, `run_studio.py` and `run_movers.py` can
 ever start that way, and those runs cannot post whatever `.env` says. A step
 disabled in `ops/config.yaml` is skipped, never run; the shipped `publish` step runs
 `run_publish.py` as a dry run (no `--live`), and posting is manual only: nothing posts on a
@@ -165,6 +166,8 @@ python run_studio.py --scan      # the radar's daily news scan (topics and catal
 python run_studio.py --scan-now  # the scan now
 python run_studio.py --learn     # score posted pieces against X; rewrite the playbook when due
 python run_studio.py --learn-now # the same, rewriting the playbook now
+python run_movers.py             # market movers: screen for 5%+ biotech moves when due, check the new ones
+python run_movers.py --now       # the same now; --dry-run screens and prints the check's prompt only
 python run_queue.py             # approval UI alone on localhost:8000
 python run_queue.py --host 0.0.0.0 --port 8080   # bind elsewhere (--reload for development)
 python run_app.py               # control panel: dashboard + sources + runs + the queue
@@ -620,6 +623,26 @@ selected angle), **Write the preview** / **Write the reaction** (a catalyst, wit
 `radar.PREVIEW_ANGLES` / `REACTION_ANGLES` selected) and **Dismiss**, plus **Scan now**
 (the manual `studio_scan_now` step). Claiming a queued topic marks its radar topic or
 catalyst with the piece; dropping it puts them back.
+
+**Market movers** (`movers/`, `run_movers.py`, `movers/config.yaml`) is a second source of
+radar topics: biotech stocks that moved `threshold_pct` (5%) or more, up or down. The
+screen is plain code (`movers/screen.py`, pure): daily and intraday bars with extended
+hours from Yahoo Finance's free chart API (`movers/prices.py:fetch_chart`, the module's one
+network method, through `ingest/http.py:get_json`; no key) for the universe (the root
+config's companies with a ticker plus `extra_tickers`), each measured against the last
+completed session's close: that session, its after-hours, the next morning's pre-market.
+`min_price`, `min_dollar_volume` and `min_extended_volume` drop illiquid moves. A move is
+recorded once per ticker, session and day (`movers_moves`, beside `movers_runs`), so only
+new moves go on to ONE call (`movers/check.py:call_checker`, `claude_cli.run_claude` with
+WebSearch and WebFetch, the `check:` model and effort, Sonnet at medium as shipped; at most
+`max_checked` movers, the biggest first) that answers in JSON whether a story is behind each
+move and whether it is worth a piece. Those worth one become radar topics (`scan_id` 0,
+through `studio/store.py:add_radar_topics`) and the best `auto_queue` a queued studio topic
+with no angle named, so the studio picks the angle and gives the voice; one that
+`studio/repeats.py` flags as a possible repeat stays on the radar. A failed call records
+no move, so the next screen asks again. The automatic `movers` step (before `studio_scan`,
+its own lock) screens when `every_hours` have passed and it is past `not_before` in New
+York; the manual `movers_now` (the radar page's "Check market movers now") screens at once.
 
 **Learning from X** (`studio/learn.py`, pure; `studio/evidence.py`, the reads;
 `studio/config.yaml` `learn:`): each posted piece is scored on its first post at

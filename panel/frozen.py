@@ -40,6 +40,7 @@ CLIS = (
     "run_feedback",
     "run_ops",
     "run_studio",
+    "run_movers",
 )
 
 

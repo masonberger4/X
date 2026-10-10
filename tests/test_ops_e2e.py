@@ -371,6 +371,8 @@ def test_default_ops_config_never_contains_live():
     assert [s["name"] for s in cfg["steps"]] == [
         "ingest",
         "score",
+        "movers",
+        "movers_now",
         "studio_scan",
         "studio_scan_now",
         "studio",
@@ -389,6 +391,21 @@ def test_default_ops_config_never_contains_live():
         assert steps[name]["enabled"] and steps[name]["required"]
     for step in cfg["steps"]:
         assert "--live" not in step["argv"]
+
+
+def test_market_movers_screen_before_the_radar_and_the_studio_under_their_own_lock():
+    cfg = load_ops_config()
+    steps = {s["name"]: s for s in cfg["steps"]}
+    assert steps["movers"]["argv"] == ["python", "run_movers.py"]
+    assert steps["movers_now"]["manual"] is True and not steps["movers"].get("manual")
+    for name in ("movers", "movers_now"):
+        assert steps[name]["lock"] == "movers" and steps[name]["required"] is False
+    autos = cfg["auto_run_steps"]
+    assert autos.index("score") < autos.index("movers") < autos.index("studio")
+    import run_movers
+
+    assert run_movers._parse_args(steps["movers_now"]["argv"][2:]).now is True
+    assert run_movers._parse_args(steps["movers"]["argv"][2:]).now is False
 
 
 def test_the_studio_steps_share_one_lock_and_only_the_plain_one_runs_on_its_own():

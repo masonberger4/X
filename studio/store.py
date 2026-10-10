@@ -1166,11 +1166,12 @@ def get_radar_topic(conn: sqlite3.Connection, radar_id: int) -> RadarTopic | Non
 def radar_topics(
     conn: sqlite3.Connection, *, since_iso: str, statuses: tuple[str, ...] = (RADAR_NEW,)
 ) -> list[RadarTopic]:
-    """Topics from scans since `since_iso`, newest scan first, best first within a scan."""
+    """Topics from scans (and market movers, scan_id 0) since `since_iso`, newest first,
+    best first within a scan."""
     marks = ", ".join("?" for _ in statuses)
     rows = conn.execute(
         f"SELECT * FROM studio_radar_topics WHERE created_at >= ? AND status IN ({marks})"
-        " ORDER BY scan_id DESC, rank, id",
+        " ORDER BY created_at DESC, scan_id DESC, rank, id",
         (since_iso, *statuses),
     ).fetchall()
     return [_radar_topic(r) for r in rows]

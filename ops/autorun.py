@@ -33,6 +33,7 @@ AUTO_SCRIPTS = frozenset(
         "run_score.py",
         "run_feedback.py",
         "run_studio.py",
+        "run_movers.py",
     }
 )
 # Belt and braces beside the allowlist: any argv element that starts like the publisher's
@@ -131,7 +132,7 @@ def ineligible(step: Any) -> str | None:
     if getattr(step, "manual", False):
         return "it is a manual step (a button on its page)"
     if len(argv) < 2 or argv[0] != "python" or argv[1] not in AUTO_SCRIPTS:
-        return "only ingest, score, feedback and studio run automatically"
+        return "only ingest, score, movers, feedback and studio run automatically"
     return None
 
 

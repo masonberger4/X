@@ -17,7 +17,9 @@ Built steps: 1 ingest + dedup + prefilter + score + digest, 2 the human approval
 6 conference abstracts + KOL X list + HTTP retry, 8 control panel (one web app over the
 whole workflow), 10 the studio (one long Claude Code session per post on Opus 5.5 at max
 effort: research, fact base, long post, cards, its own cold fact-check; the app checks it
-and queues it; `run_studio.py`, `/studio`). The studio is the only writer: step 2's single
+and queues it; `run_studio.py`, `/studio`), 11 market movers (biotech stocks that moved 5%+,
+screened in plain code on free prices, one Claude call for the story behind the new ones,
+into the studio's radar and queue; `run_movers.py`, `movers/`). The studio is the only writer: step 2's single
 drafter (`run_draft.py`), step 2b's claim checker (`run_verify.py`), step 7's voice
 learning loop and step 9's swarm (`swarm/`, `run_evolve.py`, the A/B pick pages, `/swarm`)
 were retired and their code removed. Their old tables (`draft_examples`, `image_grades`,
@@ -57,6 +59,8 @@ carrying `--live`).
   [--dry-run]` (step 10's radar: the daily news scan, when due or now),
   `python run_studio.py --learn|--learn-now [--dry-run]` (step 10's learning loop: score
   the posted pieces against X, rewrite the playbook when due or now),
+  `python run_movers.py [--now] [--dry-run]` (step 11: screen for 5%+ moves when due or now,
+  check the new ones for a story; see `movers/config.yaml`),
   `python run_ops.py run|health|backup|status|prune` (cron orchestrator; see
   `ops/config.yaml` and `deploy/`)
 
@@ -80,7 +84,8 @@ carrying `--live`).
   `filter/link.py` story linking), `studio/scan.py:call_scanner`
   (the radar's daily scan: the CLI with `tools=["WebSearch","WebFetch"]`, its own time
   limit), `studio/playbook.py:call_rewriter` (the studio's learning loop: one playbook
-  rewrite, no tools, its own time limit), `claude_cli.run_claude` (the only place that
+  rewrite, no tools, its own time limit), `movers/check.py:call_checker` (market movers'
+  story check: the CLI with `tools=["WebSearch","WebFetch"]`, its own time limit), `claude_cli.run_claude` (the only place that
   spawns the Claude Code CLI and the
   app's only way to reach Claude beside `claude_cli.run_session`, the studio's sessions:
   every Claude call site above routes through it; there is no Anthropic API
@@ -97,7 +102,9 @@ carrying `--live`).
   (`post_tweet`, `verify_credentials`; the only place tweepy is imported, inside
   the functions). Tests monkeypatch those and never hit the network.
   `CrossrefSource.fetch_page` and `XListSource.fetch_page` are the single
-  network methods of the step 6 sources (both call `http.get_json`).
+  network methods of the step 6 sources (both call `http.get_json`), and
+  `movers/prices.py:fetch_chart` is market movers' (Yahoo Finance's chart API, the URL in
+  `movers/config.yaml`, through `http.get_json`).
 - **Meeting windows:** `Source.is_due` honours `windows: [{start, end,
   cadence_minutes}]` (inclusive UTC dates); conference sources run hourly in a
   window and daily outside. Window dates in `config.yaml` are updated yearly.
@@ -303,7 +310,7 @@ carrying `--live`).
   apart round the clock, YAML's base-60 ints read back), `slots_between` / `next_slot`
   (wall-clock times in a zone that is a parameter), `settings_of` and `plan` /
   `ineligible`, the allowlist: a step may run automatically only as
-  `python <AUTO_SCRIPTS>` (ingest, score, studio, feedback) with nothing
+  `python <AUTO_SCRIPTS>` (ingest, score, movers, studio, feedback) with nothing
   starting like the live flag (`posts_live`, which `run_ops.py` now uses too, so an
   abbreviated flag is refused; `run_publish.py` parses with `allow_abbrev=False`).
   `ops/config.py:save_auto_run` writes only `auto_run_enabled` / `auto_run_times` (top-level
@@ -623,6 +630,24 @@ carrying `--live`).
   hook the panel wires to `panel/publishing.py:add_head_link` ->
   `publish/store.py:set_head_tweet`, which replaces only post 1's `manual-` marker. The
   playbook editor and its reset save versions through `playbook.save`.
+- **Step 11 (`movers/`) finds stories in big moves and hands them to the studio.** The
+  screen is code, the judgement one cheap call: `movers/screen.py` is pure (`parse_chart`,
+  `measure` against the last COMPLETED session, a daily bar of today only after
+  `SETTLED`, New York time: that session, its after-hours, the next pre-market;
+  `screen` with `threshold_pct`, `min_price`, `min_dollar_volume`,
+  `min_extended_volume`; `universe` = the root config's companies with a ticker plus
+  `extra_tickers` less `exclude_tickers`); `movers/check.py` is the prompt, the JSON
+  answer's checks (`parse_check`: asked tickers only, a piece needs a title, unknown angle
+  blanked) and `topic_text`. `movers/store.py` owns `movers_runs` and `movers_moves`
+  (unique ticker, session, day: a move is checked once; a failed call records none). It
+  writes the studio only through `studio/store.py`'s functions: a radar topic with
+  `scan_id` 0 (`runner.RADAR_SCAN_ID`; `studio/store.py:radar_topics` orders by
+  `created_at` so these are not buried under scans) and, for the best `auto_queue`, a queued
+  topic with NO angle (the studio picks the angle, the app the voice), never when
+  `studio/repeats.py` flags it or the studio's `auto.enabled` is off. The automatic
+  `movers` step (before `studio_scan`, lock `movers`, `<data folder>/.movers.lock`) screens
+  only when due (`runner.due`: `every_hours`, `not_before` in New York); `movers_now`
+  (`--now`, the radar page's button) screens at once.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -689,7 +714,10 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           evidence.py (what X says, from the DB), playbook.py (the file, its
           versions, the rewrite), dashboard.py (pure views of /studio/performance),
           web.py + templates/ (/studio pages, /studio/radar)
+movers/   config.yaml, settings.py, screen.py (pure: prices -> moves), prices.py (fetch_chart),
+          check.py (the story check's prompt, answer and call), store.py (movers_runs,
+          movers_moves), runner.py (one screen, into the studio's radar and queue)
 run_ingest.py  run_score.py  digest.py  run_queue.py
 run_app.py  run_desktop.py  pipeline_cli.py  run_publish.py  run_feedback.py  run_ops.py
-run_studio.py   (CLIs)
+run_studio.py  run_movers.py   (CLIs)
 ```

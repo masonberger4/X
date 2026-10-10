@@ -12,7 +12,7 @@ list and picks one itself. {% if not cfg.radar.enabled %}<strong>The radar is of
 feed.{% endif %}</p>
 
 {% if cfg.radar.enabled %}
-{% with buttons=[{"label": "Scan now", "steps": [step_scan], "title": "one call on " ~ cfg.radar.model ~ " at " ~ cfg.radar.effort ~ " effort with web search: today's topics and the catalysts coming up"}], back="/studio/radar" %}
+{% with buttons=[{"label": "Scan now", "steps": [step_scan], "title": "one call on " ~ cfg.radar.model ~ " at " ~ cfg.radar.effort ~ " effort with web search: today's topics and the catalysts coming up"}, {"label": "Check market movers now", "steps": ["movers_now"], "title": "the biotech stocks that moved 5% or more (plain code on free prices), then one call with web search for the story behind each new one (movers/config.yaml)"}], back="/studio/radar" %}
 {% include "_run.html" %}
 {% endwith %}
 {% endif %}
