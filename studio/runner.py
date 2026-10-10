@@ -31,6 +31,8 @@ from studio import topics as T
 from studio import voices as V
 from studio.settings import (
     EXEMPLARS_DIR,
+    TRIALS,
+    for_piece,
     load_studio_config,
     read_brief,
     workspace_root,
@@ -267,6 +269,7 @@ def build_brief(
             seed=piece.id,
         )
     x = cfg["x"]
+    own = for_piece(cfg, piece.meta)
     return P.Brief(
         piece_id=piece.id,
         today=today,
@@ -298,6 +301,7 @@ def build_brief(
         thread_post_max=int(x["thread_post_max"]) - int(x.get("headroom") or 0),
         short_post_max=int(x["short_post_max"]),
         max_cards=int(x["max_cards_total"]),
+        reference_stage=str(own.get("reference_stage") or "research"),
     )
 
 
@@ -639,6 +643,12 @@ def allowed_to_start(
     waiting = S.first_in_stage(conn, S.STAGE_RESEARCH_READY)
     if waiting is not None:
         return False, f"piece {waiting.id} is waiting at the research checkpoint"
+    # A piece the editor has not read yet goes stale in the queue while the next is written:
+    # news moves, and a session spent on a piece that is rejected for age is usage lost.
+    backlog = int(auto.get("max_waiting") or 0)
+    pending = S.waiting_in_queue(conn) if backlog > 0 else 0
+    if backlog > 0 and pending >= backlog:
+        return False, f"{pending} studio piece(s) wait in the queue (limit {backlog})"
     return True, ""
 
 
@@ -761,8 +771,15 @@ def run(
     angle: str = "",
     checkpoint: bool | None = None,
     dry_run: bool = False,
+    trial: str = "",
 ) -> int:
     cfg = load_studio_config()
+    if trial and trial not in TRIALS:
+        log.error("unknown trial %r; one of %s", trial, ", ".join(TRIALS))
+        return 2
+    if trial and not (topic or story is not None):
+        log.error("--trial needs --topic or --story, so each trial writes the same story")
+        return 2
     if dry_run:  # read-only: no lock, no stale marking, the piece the next run would start
         conn = _db_conn()
         try:
@@ -810,6 +827,7 @@ def run(
                 story=story,
                 angle=angle,
                 checkpoint=checkpoint,
+                trial=trial,
             )
         if isinstance(started, int):
             return started
@@ -834,6 +852,7 @@ def _start_piece(
     story: int | None,
     angle: str,
     checkpoint: bool | None,
+    trial: str = "",
 ) -> S.Piece | int:
     """The piece this run starts, already in its slot, or the run's exit code when it
     starts none. The caller holds the claim lock, so a queued topic goes to one run only."""
@@ -911,7 +930,7 @@ def _start_piece(
     piece = new_piece(conn, cfg, **plan)
     # In this run's slot before the claim lock is let go: another run would otherwise
     # take the new (researching) piece for one a stopped run left in slot 1.
-    S.update_piece(conn, piece.id, meta={"slot": slot})
+    S.update_piece(conn, piece.id, meta={"slot": slot, **({"trial": trial} if trial else {})})
     if queued is not None:
         S.claim_topic(conn, queued.id, piece.id)
     return S.get_piece(conn, piece.id) or piece

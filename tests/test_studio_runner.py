@@ -45,7 +45,7 @@ from studio import session as SS
 from studio import store as S
 from studio import topics as T
 from studio import voices as V
-from studio.settings import DEFAULT_PLAYBOOK, EXEMPLARS_DIR, load_studio_config
+from studio.settings import DEFAULT_PLAYBOOK, EXEMPLARS_DIR, for_piece, load_studio_config
 from tests.conftest import ABSTRACT, URL, seed_item
 
 T0 = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
@@ -366,6 +366,28 @@ def test_one_automatic_piece_a_day_whatever_minute_the_run_reaches_the_studio(sc
                 make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
                 started.append(when.astimezone(zone).strftime("%m-%d %H:%M"))
     assert started == [f"10-{5 + d:02d} 06:0{6 if d % 2 == 0 else 3}" for d in range(10)]
+
+
+def test_no_automatic_piece_while_the_editor_has_pieces_left_to_read(sconn, cfg):
+    """`auto.max_waiting`: a piece written while the last ones wait unread in the queue is
+    the one most likely to go stale, so the automatic run waits for the editor."""
+    cfg["auto"].update(max_waiting=2, min_hours_between=0, max_new_per_day=5)
+    first = make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+    studio_draft(sconn, first)
+    assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
+    second = make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY)
+    studio_draft(sconn, second)
+    blocked = (False, "2 studio piece(s) wait in the queue (limit 2)")
+    assert runner.allowed_to_start(sconn, cfg, T0) == blocked
+    queue_store.reject(sconn, get(sconn, first.id).draft_id)
+    assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
+    cfg["auto"]["max_waiting"] = 0  # no limit
+    studio_draft(sconn, make_piece(sconn, origin=S.ORIGIN_AUTO, stage=S.STAGE_READY))
+    assert runner.allowed_to_start(sconn, cfg, T0) == (True, "")
+
+
+def test_the_shipped_backlog_limit():
+    assert load_studio_config()["auto"]["max_waiting"] == 2
 
 
 def test_the_daily_cap_follows_the_display_zone(sconn, cfg, clock):
@@ -1835,6 +1857,7 @@ RUN_DEFAULTS = dict(
     angle="",
     checkpoint=None,
     dry_run=False,
+    trial="",
 )
 
 
@@ -1850,6 +1873,7 @@ RUN_DEFAULTS = dict(
         (["--checkpoint"], {"checkpoint": True}),
         (["--no-checkpoint"], {"checkpoint": False}),
         (["--dry-run"], {"dry_run": True}),
+        (["--topic", TOPIC, "--trial", "all"], {"now": True, "topic": TOPIC, "trial": "all"}),
         (
             ["--dry-run", "--topic", TOPIC, "--angle", "deal_decoder", "--no-checkpoint", "-v"],
             {
@@ -2155,3 +2179,30 @@ def test_a_dry_run_shows_the_voice_the_next_piece_may_get_and_records_none(rig, 
     out = capsys.readouterr().out
     assert "THE VOICE THIS PIECE WILL BE WRITTEN IN" in out
     assert rig.pieces() == []
+
+
+# ---- usage trials ----------------------------------------------------------------------
+
+
+def test_a_trial_needs_a_topic_and_a_known_name(rig):
+    assert runner.run(trial="all") == 2
+    assert runner.run(topic=TOPIC, trial="cheapest") == 2
+    assert rig.cli.stages() == []
+
+
+def test_a_trial_piece_records_its_trial_and_runs_with_its_settings(rig):
+    assert runner.run(topic=TOPIC, trial="all", checkpoint=False) == 0
+    piece = S.list_pieces(rig.conn)[0]
+    assert piece.meta["trial"] == "all"
+    assert rig.cli.kw("research")["effort"] == rig.cli.kw("write")["effort"] == "max"
+    own = for_piece(load_studio_config(), piece.meta)  # what polish runs at (session tests)
+    assert own["stage_effort"]["polish"] == "high" and own["reference_stage"] == "write"
+    assert "Leave the reference pieces for the writing stage" in rig.cli.prompt("research")
+    write = rig.cli.prompt("write")
+    assert "Read the reference pieces' handoff docs and look at their cards" in write
+
+
+def test_a_piece_without_a_trial_reads_the_references_in_research(rig):
+    assert runner.run(topic=TOPIC, checkpoint=False) == 0
+    assert "Read the reference pieces' handoff docs first" in rig.cli.prompt("research")
+    assert "Read the reference pieces' handoff docs and look" not in rig.cli.prompt("write")

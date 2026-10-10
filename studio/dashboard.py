@@ -357,3 +357,89 @@ def learn_state(
         ),
         next_after=last_at + timedelta(hours=min_hours) if last_at else None,
     )
+
+
+# --- where the usage goes ---------------------------------------------------------------
+
+# Where a piece ended up, in the order the page lists them. A piece's runs all count under
+# its present outcome, so the usage of pieces the editor never takes shows on its own line.
+OUTCOMES = (
+    ("posted", "posted on X"),
+    ("approved", "approved, not posted yet"),
+    ("waiting", "waiting in the queue"),
+    ("rejected", "rejected in the queue"),
+    ("stopped", "failed, stopped or discarded before the queue"),
+    ("running", "still being made"),
+)
+USAGE_DAYS = 30  # the period "Where the usage goes" adds up
+_NOT_REACHED = (S.STAGE_FAILED, S.STAGE_INTERRUPTED, S.STAGE_DISCARDED)
+
+
+@dataclass
+class UsageRow:
+    key: str
+    label: str
+    runs: int = 0
+    pieces: int = 0
+    turns: int = 0
+    minutes: float = 0.0
+    usd: float = 0.0
+    share: float = 0.0  # of the period's usage, 0-1
+
+
+@dataclass
+class Usage:
+    days: int
+    by_stage: list[UsageRow]
+    by_outcome: list[UsageRow]
+    total_usd: float
+    pieces: int
+
+    @property
+    def per_piece(self) -> float:
+        return self.total_usd / self.pieces if self.pieces else 0.0
+
+
+def _outcome(run: S.RunUsage, reviews: dict[int, S.StudioReview]) -> str:
+    review = reviews.get(run.draft_id) if run.draft_id is not None else None
+    if review is not None:
+        if review.posted:
+            return "posted"
+        return {"approved": "approved", "rejected": "rejected"}.get(review.status, "waiting")
+    if run.piece_stage in _NOT_REACHED:
+        return "stopped"
+    # ready with no draft the queue can show (no queue tables, or a draft gone since)
+    return "waiting" if run.piece_stage == S.STAGE_READY else "running"
+
+
+def usage(runs: Sequence[S.RunUsage], reviews: Sequence[S.StudioReview], days: int) -> Usage:
+    """The period's CLI runs added up by stage and by where their piece ended up. The
+    amounts are the CLI's own `total_cost_usd`: on a Claude login that is what the same use
+    would cost on the API, a fair measure of each part's share of the plan's limits."""
+    by_draft = {r.draft_id: r for r in reviews}
+    stages: dict[str, UsageRow] = {}
+    outcomes = {key: UsageRow(key, label) for key, label in OUTCOMES}
+    stage_pieces: dict[str, set[int]] = {}
+    outcome_pieces: dict[str, set[int]] = {}
+    for run in runs:
+        row = stages.setdefault(run.stage, UsageRow(run.stage, run.stage))
+        out = outcomes[_outcome(run, by_draft)]
+        for r, seen in ((row, stage_pieces), (out, outcome_pieces)):
+            r.runs += 1
+            r.turns += run.turns
+            r.minutes += run.duration_ms / 60000
+            r.usd += run.cost_usd
+            seen.setdefault(r.key, set()).add(run.piece_id)
+    total = sum(r.cost_usd for r in runs)
+    for rows, seen in ((stages.values(), stage_pieces), (outcomes.values(), outcome_pieces)):
+        for r in rows:
+            r.pieces = len(seen.get(r.key, ()))
+            r.share = r.usd / total if total > 0 else 0.0
+    order = {s: i for i, s in enumerate(("research", "write", "polish", "revise"))}
+    return Usage(
+        days=days,
+        by_stage=sorted(stages.values(), key=lambda r: (order.get(r.key, 99), r.key)),
+        by_outcome=[r for r in outcomes.values() if r.runs],
+        total_usd=total,
+        pieces=len({r.piece_id for r in runs}),
+    )

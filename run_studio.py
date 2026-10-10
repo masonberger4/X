@@ -9,6 +9,9 @@ Usage:
   python run_studio.py --topic "next-gen CTLA-4"   # a piece on this topic, now
   python run_studio.py --story 123         # a piece from feed story (cluster) 123, now
   python run_studio.py --angle deal_decoder        # with --topic/--story/--now: this angle
+  python run_studio.py --topic T --trial polish    # with --topic/--story: a side-by-side
+                                           # trial of the usage savings (current |
+                                           # polish | all; studio/settings.py TRIALS)
   python run_studio.py --checkpoint        # stop after research for the editor to read
   python run_studio.py --no-checkpoint     # write straight through after research
   python run_studio.py --list              # show recent pieces and queued topics
@@ -70,6 +73,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--topic", default="", help="start a piece on this topic now")
     ap.add_argument("--story", type=int, default=None, help="start a piece from this feed story id")
     ap.add_argument("--angle", default="", help="the angle for the new piece (studio/angles.yaml)")
+    ap.add_argument(
+        "--trial",
+        default="",
+        help="with --topic/--story: run the piece as a usage trial (current, polish, all)",
+    )
     ap.add_argument(
         "--checkpoint",
         dest="checkpoint",
@@ -134,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         angle=args.angle,
         checkpoint=args.checkpoint,
         dry_run=args.dry_run,
+        trial=args.trial,
     )
 
 

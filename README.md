@@ -573,8 +573,9 @@ the others back, along with the steps its own run still has to come behind it,
 Scheduler and systemd run it from an entry of its own, `run_ops.py run --only studio`)
 acts on the editor's requests and starts a new piece when
 `auto.max_new_per_day` (per calendar day in the root `timezone:`, the clock the run
-times are set in) and `auto.min_hours_between` allow, no piece waits at the checkpoint
-and a card browser was found (without one the step fails rather than start a piece
+times are set in) and `auto.min_hours_between` allow, no piece waits at the checkpoint,
+fewer than `auto.max_waiting` studio drafts wait pending in the queue
+(`store.waiting_in_queue`) and a card browser was found (without one the step fails rather than start a piece
 whose cards cannot be drawn); `studio_now` and `studio_resume` are the studio page's
 manual buttons. Up to `max_parallel` (3) studio runs at once, each in a writing slot of
 its own (`studio_pieces/.studio.lock`, `.studio.lock.2`, ...; the studio steps carry

@@ -677,13 +677,16 @@ and long posts need X Premium.
    task of part 6), so each run first acts on anything you asked for on the
    studio page, then starts a new piece if `studio\config.yaml` allows one: at
    most `max_new_per_day` (1) a day, `min_hours_between` (6) hours after the last
-   piece, and never while a piece waits for you at the research checkpoint. A day
+   piece, never while a piece waits for you at the research checkpoint, and never
+   while `max_waiting` (2) studio pieces wait unread in the queue (a piece written
+   while the last ones wait goes stale; 0 turns the limit off). A day
    is the calendar date in the `timezone:` of the root `config.yaml`, the clock the
    run times are set in, so the day's first run that may start a piece does,
    whatever minute yesterday's started at. An automatic piece picks its own story
    from the top scored stories of the last two days that the account has not
    written about (no studio piece on it and no draft that did not fail), or finds a
-   better one with its own news scan, and writes straight through (`auto:
+   better one with its own news scan (only when nothing on offer makes a strong
+   piece: the radar and the feeds have read the news already), and writes straight through (`auto:
    checkpoint: false`). It is also offered the radar (item 10): the day's scan
    topics and the catalysts coming up or just passed. It is told every piece of
    the last 10 days (`topics: avoid_days` in `studio\config.yaml`), finished or
@@ -785,6 +788,20 @@ and long posts need X Premium.
    account's recent pieces as they stand in the queue (`earlier_pieces.md` in the
    piece's folder, each marked posted or not), so a follow-up or a scorecard
    quotes what the account actually wrote.
+   **Where the usage goes**, at the foot of the performance page, adds up every
+   studio run of the last 30 days by stage (research, write, polish, revise) and by
+   where the piece ended up (posted, approved, waiting, rejected, stopped before
+   the queue), in what the CLI reports each run would cost on the API: nothing is
+   billed on your Claude login, but it shows which part uses the plan's limits.
+   To run a stage at a lower effort than the writer's (`effort: max`), set it
+   under `stage_effort:` in `studio\config.yaml` (blank, as shipped, keeps max);
+   `reference_stage: write` has the session read the reference pieces when it
+   writes rather than through all of research. To compare before you change
+   either, write one topic each way and judge the drafts blind:
+   `python run_studio.py --topic "..." --no-checkpoint --trial current`, then the
+   same with `--trial polish` (polish at high effort) and `--trial all` (that plus
+   the references at the write stage). A piece's studio page says which trial it
+   was under "usage trial: reveal its setup".
 9. What X says. **Studio → what X says** (`/studio/performance`) is the
    dashboard for the posted pieces, and what it shows is fed back into the next
    session. Each piece is measured on its first post 48 hours after it went out

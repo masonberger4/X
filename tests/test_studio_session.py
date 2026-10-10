@@ -686,6 +686,33 @@ def test_a_piece_without_an_effort_leaves_the_cli_default(rig):
     assert [c.kw["effort"] for c in rig.cli.calls] == [None, None, None]
 
 
+def test_a_stage_may_run_at_its_own_effort(rig):
+    rig.ctx.cfg["stage_effort"] = {"research": "", "write": "", "polish": "high", "revise": ""}
+    SS.research(rig.ctx, rig.new_piece(effort="max"))
+    assert [(c.stage, c.kw["effort"]) for c in rig.cli.calls] == [
+        ("research", "max"),
+        ("write", "max"),
+        ("polish", "high"),
+    ]
+
+
+def test_a_trial_piece_polishes_at_its_trials_effort(rig):
+    piece = rig.new_piece(effort="max")
+    S.update_piece(rig.conn, piece.id, meta={"trial": "polish"})
+    SS.research(rig.ctx, rig.get(piece.id))
+    assert [(c.stage, c.kw["effort"]) for c in rig.cli.calls] == [
+        ("research", "max"),
+        ("write", "max"),
+        ("polish", "high"),
+    ]
+
+
+def test_every_stage_ships_at_the_writers_effort():
+    cfg = load_studio_config()
+    assert cfg["effort"] == "max"
+    assert all(not v for v in cfg["stage_effort"].values())
+
+
 def test_the_piece_records_its_stage_and_an_open_run_before_each_launch(rig):
     piece = rig.new_piece()
     SS.research(rig.ctx, piece)

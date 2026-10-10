@@ -799,3 +799,68 @@ def test_the_playbook_page_shows_the_voices_and_refuses_a_malformed_one(client, 
     fine = broken.replace("### The Sceptic", "### doubter: The doubter")
     assert "saved as version" in flash_of(client.post("/studio/playbook", data={"text": fine}))
     assert "doubter" in [v.key for v in V.parse(PB.current_text(tmp_path))]
+
+
+# ---- where the usage goes --------------------------------------------------------------
+
+
+def _run(piece_id, stage, usd, *, piece_stage=S.STAGE_READY, draft_id=None, turns=10):
+    return S.RunUsage(piece_id, stage, turns, usd, 60000, piece_stage, draft_id)
+
+
+def _review(piece_id, draft_id, status, posted=False):
+    return S.StudioReview(piece_id=piece_id, draft_id=draft_id, status=status, posted=posted)
+
+
+def test_usage_adds_up_by_stage_and_by_where_the_piece_ended_up():
+    runs = [
+        _run(1, "research", 4.0, draft_id=11),
+        _run(1, "write", 3.0, draft_id=11),
+        _run(1, "polish", 1.0, draft_id=11),
+        _run(2, "research", 5.0, draft_id=12),
+        _run(2, "write", 3.0, draft_id=12),
+        _run(3, "research", 2.0, piece_stage=S.STAGE_DISCARDED),
+        _run(4, "research", 1.0, piece_stage=S.STAGE_WRITING),
+        _run(5, "polish", 1.0, draft_id=15),
+    ]
+    reviews = [
+        _review(1, 11, "approved", posted=True),
+        _review(2, 12, "rejected"),
+        _review(5, 15, "pending"),
+    ]
+    u = D.usage(runs, reviews, 30)
+    assert u.total_usd == 20.0 and u.pieces == 5 and u.per_piece == 4.0
+    assert [(r.key, r.runs, r.pieces, r.usd) for r in u.by_stage] == [
+        ("research", 4, 4, 12.0),
+        ("write", 2, 2, 6.0),
+        ("polish", 2, 2, 2.0),
+    ]
+    assert u.by_stage[0].share == 0.6 and u.by_stage[0].turns == 40
+    assert [(r.key, r.pieces, r.usd) for r in u.by_outcome] == [
+        ("posted", 1, 8.0),
+        ("waiting", 1, 1.0),
+        ("rejected", 1, 8.0),
+        ("stopped", 1, 2.0),
+        ("running", 1, 1.0),
+    ]
+
+
+def test_usage_of_nothing():
+    u = D.usage([], [], 30)
+    assert u.by_stage == [] and u.by_outcome == [] and u.per_piece == 0.0
+
+
+def test_the_performance_page_shows_where_the_usage_goes(client, lconn):
+    body = client.get("/studio/performance").text
+    assert "Where the usage goes" in body and "No studio run finished" in body
+
+    p = piece(lconn)
+    for stage, usd in (("research", 6.5), ("write", 3.25)):
+        run = S.start_run(lconn, p.id, stage)
+        S.finish_run(lconn, run, outcome="ok", turns=12, cost_usd=usd, duration_ms=3_600_000)
+    S.start_run(lconn, p.id, "polish")  # still running: not counted yet
+
+    body = client.get("/studio/performance").text
+    assert "$9.75" in body and "67%" in body
+    assert "waiting in the queue" in body  # ready, its draft not found: counted as waiting
+    assert "failed, stopped or discarded" not in body and "still being made" not in body
