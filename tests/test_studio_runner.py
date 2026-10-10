@@ -45,7 +45,7 @@ from studio import session as SS
 from studio import store as S
 from studio import topics as T
 from studio import voices as V
-from studio.settings import DEFAULT_PLAYBOOK, EXEMPLARS_DIR, load_studio_config
+from studio.settings import DEFAULT_PLAYBOOK, EXEMPLARS_DIR, for_piece, load_studio_config
 from tests.conftest import ABSTRACT, URL, seed_item
 
 T0 = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
@@ -1857,6 +1857,7 @@ RUN_DEFAULTS = dict(
     angle="",
     checkpoint=None,
     dry_run=False,
+    trial="",
 )
 
 
@@ -1872,6 +1873,7 @@ RUN_DEFAULTS = dict(
         (["--checkpoint"], {"checkpoint": True}),
         (["--no-checkpoint"], {"checkpoint": False}),
         (["--dry-run"], {"dry_run": True}),
+        (["--topic", TOPIC, "--trial", "all"], {"now": True, "topic": TOPIC, "trial": "all"}),
         (
             ["--dry-run", "--topic", TOPIC, "--angle", "deal_decoder", "--no-checkpoint", "-v"],
             {
@@ -2177,3 +2179,30 @@ def test_a_dry_run_shows_the_voice_the_next_piece_may_get_and_records_none(rig, 
     out = capsys.readouterr().out
     assert "THE VOICE THIS PIECE WILL BE WRITTEN IN" in out
     assert rig.pieces() == []
+
+
+# ---- usage trials ----------------------------------------------------------------------
+
+
+def test_a_trial_needs_a_topic_and_a_known_name(rig):
+    assert runner.run(trial="all") == 2
+    assert runner.run(topic=TOPIC, trial="cheapest") == 2
+    assert rig.cli.stages() == []
+
+
+def test_a_trial_piece_records_its_trial_and_runs_with_its_settings(rig):
+    assert runner.run(topic=TOPIC, trial="all", checkpoint=False) == 0
+    piece = S.list_pieces(rig.conn)[0]
+    assert piece.meta["trial"] == "all"
+    assert rig.cli.kw("research")["effort"] == rig.cli.kw("write")["effort"] == "max"
+    own = for_piece(load_studio_config(), piece.meta)  # what polish runs at (session tests)
+    assert own["stage_effort"]["polish"] == "high" and own["reference_stage"] == "write"
+    assert "Leave the reference pieces for the writing stage" in rig.cli.prompt("research")
+    write = rig.cli.prompt("write")
+    assert "Read the reference pieces' handoff docs and look at their cards" in write
+
+
+def test_a_piece_without_a_trial_reads_the_references_in_research(rig):
+    assert runner.run(topic=TOPIC, checkpoint=False) == 0
+    assert "Read the reference pieces' handoff docs first" in rig.cli.prompt("research")
+    assert "Read the reference pieces' handoff docs and look" not in rig.cli.prompt("write")

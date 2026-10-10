@@ -8,6 +8,7 @@
 <p class="meta">Piece {{ piece.id }} · {{ piece.origin }} · started {{ piece.created_at|localtime }} ·
   {{ piece.model }} at {{ piece.effort or "default" }} effort · session <code>{{ piece.session_id }}</code>
   {% if voice %}· voice <strong>{{ voice.name }}</strong>{% elif piece.voice %}· voice <strong>{{ piece.voice }}</strong>{% endif %}</p>
+{% if piece.meta.get("trial") %}<details><summary class="meta">usage trial: reveal its setup</summary><p class="meta">Started with <code>--trial {{ piece.meta.trial }}</code>{% if trial_setup %}: {% for k, v in trial_setup.items() %}{{ k }} {{ v }}{{ "; " if not loop.last }}{% endfor %}{% else %}: the settings in studio/config.yaml{% endif %}.</p></details>{% endif %}
 {% if voice %}<details><summary class="meta">how {{ voice.name }} sounds (given at random when the piece started)</summary><p class="meta">{{ voice.text }}</p></details>{% endif %}
 <p>
   {% if piece.stage == "ready" %}<span class="pill ok">ready</span> in the queue as <a href="/drafts/{{ piece.draft_id }}">draft {{ piece.draft_id }}</a>

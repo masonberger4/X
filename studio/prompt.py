@@ -157,6 +157,8 @@ class Brief:
     thread_post_max: int = 25000
     short_post_max: int = 1000
     max_cards: int = 4
+    # When the session first reads the reference pieces (settings.REFERENCE_STAGES).
+    reference_stage: str = "research"
 
 
 def system_prompt(session: str, voice: str, cards: str) -> str:
@@ -346,6 +348,30 @@ def _paths_block(b: Brief) -> str:
     )
 
 
+def _research_reference(b: Brief) -> str:
+    if b.reference_stage == "write":
+        return "Leave the reference pieces for the writing stage: it reads them. Now\n"
+    return (
+        "Read the reference pieces' handoff docs first if you have not yet in this session. Then\n"
+    )
+
+
+def _factbase_model(b: Brief) -> str:
+    if b.reference_stage == "write":
+        return "laid out like this"
+    return "in the spirit of the reference handoff docs"
+
+
+def _write_reference(b: Brief) -> str:
+    if b.reference_stage != "write":
+        return ""
+    return (
+        "FIRST\nRead the reference pieces' handoff docs and look at their cards in the "
+        "reference folder, if you have not yet in this session: they are the bar for depth, "
+        "voice and design.\n\n"
+    )
+
+
 def research_prompt(b: Brief) -> str:
     return f"""STAGE 1 OF 3: RESEARCH
 
@@ -355,13 +381,12 @@ THE TOPIC
 {_topic_block(b)}
 
 WHAT TO DO
-Read the reference pieces' handoff docs first if you have not yet in this session. Then
-research the topic properly: primary sources first, then trade press and analysts, then
-market forecasts (sceptically). Keep going until you could defend every number in the
-piece to a sceptical buy-side analyst.
+{_research_reference(b)}research the topic properly: primary sources first, then trade press
+and analysts, then market forecasts (sceptically). Keep going until you could defend every
+number in the piece to a sceptical buy-side analyst.
 
 WHAT TO WRITE IN YOUR WORKING FOLDER
-1. {FACTBASE_FILE}: the fact base, in the spirit of the reference handoff docs:
+1. {FACTBASE_FILE}: the fact base, {_factbase_model(b)}:
    - a short summary of the story and why it matters now, "as of {b.today}";
    - sections with tables for what the piece will need (the event, the data, the
      competitors and their stage, the market, deals and financings, catalysts with
@@ -508,7 +533,7 @@ def write_prompt(b: Brief, note: str = "") -> str:
 
 {_paths_block(b)}
 
-{editor}{_voice_block(b)}CHOOSE
+{editor}{_write_reference(b)}{_voice_block(b)}CHOOSE
 - The angle: one from the list below, the one this story makes most interesting.
 - The shape: long_post (one post up to {b.long_post_max} characters), thread (two or more
   long posts, each up to {b.thread_post_max}; each post must stand on its own as a

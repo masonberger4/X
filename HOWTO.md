@@ -794,7 +794,14 @@ and long posts need X Premium.
    the queue), in what the CLI reports each run would cost on the API: nothing is
    billed on your Claude login, but it shows which part uses the plan's limits.
    To run a stage at a lower effort than the writer's (`effort: max`), set it
-   under `stage_effort:` in `studio\config.yaml` (blank, as shipped, keeps max).
+   under `stage_effort:` in `studio\config.yaml` (blank, as shipped, keeps max);
+   `reference_stage: write` has the session read the reference pieces when it
+   writes rather than through all of research. To compare before you change
+   either, write one topic each way and judge the drafts blind:
+   `python run_studio.py --topic "..." --no-checkpoint --trial current`, then the
+   same with `--trial polish` (polish at high effort) and `--trial all` (that plus
+   the references at the write stage). A piece's studio page says which trial it
+   was under "usage trial: reveal its setup".
 9. What X says. **Studio → what X says** (`/studio/performance`) is the
    dashboard for the posted pieces, and what it shows is fed back into the next
    session. Each piece is measured on its first post 48 hours after it went out

@@ -63,6 +63,10 @@ stage_effort:
   write: ""
   polish: ""
   revise: ""
+# When the session first reads the reference pieces (studio/exemplars, about 150 KB of
+# handoff docs and their cards): research (the fact base follows them) or write (research's
+# many turns do not carry them, so it uses less of the plan's limits).
+reference_stage: research
 # Rounds of "here is what the checker found, fix it" before the piece is handed over
 # with the remaining problems listed.
 max_polish_rounds: 3

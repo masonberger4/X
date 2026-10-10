@@ -71,7 +71,13 @@ from studio import radar as R
 from studio import store as S
 from studio import topics as T
 from studio import voices as V
-from studio.settings import DEFAULT_PLAYBOOK, PLAYBOOK_NAME, load_studio_config, playbook_path
+from studio.settings import (
+    DEFAULT_PLAYBOOK,
+    PLAYBOOK_NAME,
+    TRIALS,
+    load_studio_config,
+    playbook_path,
+)
 
 log = logging.getLogger(__name__)
 
@@ -703,6 +709,7 @@ def studio_piece(request: Request, piece_id: int, conn: Conn, flash: str = ""):
         {
             "piece": piece,
             "runs": S.list_runs(conn, piece.id),
+            "trial_setup": TRIALS.get(str(piece.meta.get("trial") or ""), {}),
             "research": _research(piece.meta.get("research")),
             "factbase": _read(ws / P.FACTBASE_FILE),
             "factcheck": _read(ws / P.FACTCHECK_FILE),

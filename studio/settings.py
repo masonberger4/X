@@ -37,6 +37,7 @@ DEFAULTS: dict[str, Any] = {
     "timeouts": {"research": 150, "write": 180, "polish": 60, "revise": 120},
     "max_turns": {"research": 0, "write": 0, "polish": 40, "revise": 0},
     "stage_effort": {"research": "", "write": "", "polish": "", "revise": ""},
+    "reference_stage": "research",
     "max_polish_rounds": 3,
     "tools": ["Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch", "Agent"],
     "cli_flags": ["--safe-mode", "--restricted", "--permission-mode", "dontAsk"],
@@ -110,6 +111,18 @@ _SECTIONS = (
 # performance page for the editor to apply; auto: the sessions read it at once; off: the
 # playbook is never rewritten (the evidence and the lean still reach the prompts).
 PLAYBOOK_MODES = ("auto", "propose", "off")
+# When the session first reads the reference pieces: research (shipped), so the fact base
+# follows their handoff docs, or write, so research's many turns do not carry them.
+REFERENCE_STAGES = ("research", "write")
+
+# Side-by-side trials of the usage savings (`run_studio.py --topic T --trial NAME`): a
+# piece started as one runs with these settings over studio/config.yaml's, recorded in its
+# meta (`trial`), so the editor can write the same topic each way and compare blind.
+TRIALS: dict[str, dict[str, Any]] = {
+    "current": {},
+    "polish": {"stage_effort": {"polish": "high"}},
+    "all": {"stage_effort": {"polish": "high"}, "reference_stage": "write"},
+}
 
 
 def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
@@ -128,6 +141,9 @@ def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
     if not cfg["model"]:
         raise ValueError("studio/config.yaml must name the writer's model (model: ...)")
     cfg["max_parallel"] = max(1, int(cfg.get("max_parallel") or 1))
+    cfg["reference_stage"] = str(cfg.get("reference_stage") or "research").strip().lower()
+    if cfg["reference_stage"] not in REFERENCE_STAGES:
+        raise ValueError(f"studio/config.yaml reference_stage must be one of {REFERENCE_STAGES}")
     cfg["tools"] = [str(t) for t in (cfg.get("tools") or [])]
     cfg["cli_flags"] = [str(f) for f in (cfg.get("cli_flags") or [])]
     radar = cfg["radar"]
@@ -158,6 +174,18 @@ def stage_timeout(cfg: dict[str, Any], stage: str) -> float | None:
 def stage_max_turns(cfg: dict[str, Any], stage: str) -> int | None:
     turns = int((cfg.get("max_turns") or {}).get(stage) or 0)
     return turns if turns > 0 else None
+
+
+def for_piece(cfg: dict[str, Any], meta: dict[str, Any] | None) -> dict[str, Any]:
+    """The settings one piece runs with: studio/config.yaml's, with its trial's on top
+    (`meta["trial"]`, a key of TRIALS; an unknown or missing one changes nothing)."""
+    trial = TRIALS.get(str((meta or {}).get("trial") or ""))
+    if not trial:
+        return cfg
+    out = dict(cfg)
+    for key, value in trial.items():
+        out[key] = {**(cfg.get(key) or {}), **value} if isinstance(value, dict) else value
+    return out
 
 
 def stage_effort(cfg: dict[str, Any], stage: str, default: str | None) -> str | None:

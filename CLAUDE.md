@@ -416,7 +416,10 @@ carrying `--live`).
   the reference pieces as the piece's own copy, `<piece>/reference/`
   (`session.copy_reference`, made when a stage starts and none is there; never an
   `--add-dir`, which --restricted would make writable, so no session can change
-  `studio/exemplars`); `stage_effort.<stage>` over the piece's effort
+  `studio/exemplars`); `stage_effort.<stage>` over the piece's effort and
+  `reference_stage` (research | write: when the prompts send the session to the reference pieces), both overridable per piece by a
+  usage trial (`run_studio.py --trial`, `settings.TRIALS`, recorded as the meta's `trial`,
+  applied through `settings.for_piece`)
   (`settings.stage_effort`; the model never changes within a session); `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
