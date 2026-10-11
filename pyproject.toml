@@ -39,7 +39,7 @@ build-backend = "setuptools.build_meta"
 py-modules = ["config", "claude_cli", "db", "digest", "run_ingest", "run_score", "run_queue", "run_app", "run_desktop", "pipeline_cli", "run_publish", "run_feedback", "run_ops", "run_studio"]
 
 [tool.setuptools.packages.find]
-include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "panel*", "publish*", "feedback*", "ops*", "studio*"]
+include = ["ingest*", "filter*", "score*", "draft*", "approval_queue*", "panel*", "publish*", "feedback*", "ops*", "studio*", "reply*"]
 
 [tool.ruff]
 line-length = 100
@@ -59,6 +59,7 @@ select = ["E", "F", "I", "B", "UP"]
 "studio/safety.py" = ["E501"]  # the advice patterns read best one per line
 "studio/learn.py" = ["E501"]  # the playbook rewrite prompt text
 "studio/radar.py" = ["E501"]  # the scan's prompt reads best one paragraph per line
+"reply/prompt.py" = ["E501"]  # the reply writer's prompt reads best one paragraph per line
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

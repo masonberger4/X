@@ -170,6 +170,10 @@ class Draft:
     # How many visuals the format asked for when the draft was written (a reviewer may drop
     # one later); None for a draft from before phase four, which means the default physics.
     wanted_visuals: int | None = None
+    # A reply draft (reply/web.py): the X post it answers, {url, author, text, request_id}
+    # as read off the editor's screenshots; None for every other draft. Stored in
+    # drafts.format_json.
+    reply_to: dict[str, Any] | None = None
 
     @property
     def visual(self) -> Chart | Table | None:
@@ -181,13 +185,16 @@ class Draft:
         return first + list(self.extra_visuals)
 
     def format_dict(self) -> dict[str, Any]:
-        """What drafts.format_json stores (phase four)."""
-        return {
+        """What drafts.format_json stores (phase four), plus the post a reply answers."""
+        d: dict[str, Any] = {
             "shape": self.shape,
             "anchors": list(self.anchors),
             "max_chars": self.max_chars,
             "wanted_visuals": self.wanted_visuals,
         }
+        if self.reply_to:
+            d["reply_to"] = dict(self.reply_to)
+        return d
 
     def apply_format_dict(self, d: dict[str, Any] | None) -> None:
         """Restore the fields format_dict stored; a missing or empty dict leaves the
@@ -201,6 +208,8 @@ class Draft:
         self.max_chars = int(d.get("max_chars") or MAX_POST_CHARS)
         wv = d.get("wanted_visuals")
         self.wanted_visuals = int(wv) if wv is not None else None
+        reply_to = d.get("reply_to")
+        self.reply_to = dict(reply_to) if isinstance(reply_to, dict) and reply_to else None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
