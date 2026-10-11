@@ -2436,10 +2436,8 @@ def _claims(call: Call) -> str:
 
 def _checks(*wrong: int) -> Callable[[Call], str]:
     def answer(call: Call) -> str:
-        ids = [
-            int(line.split(".", 1)[0])
-            for line in call.prompt.split("CLAIMS\n", 1)[1].split("\n\nANSWER", 1)[0].splitlines()
-        ]
+        listed = call.prompt.split("CLAIMS\n", 1)[1].split("\n\n", 1)[0]
+        ids = [int(line.split(".", 1)[0]) for line in listed.splitlines()]
         return json.dumps(
             {
                 "results": [
@@ -2583,3 +2581,21 @@ def test_a_piece_without_step_settings_is_one_session(rig):
     piece = rig.new_piece()
     assert SS.research(rig.ctx, piece).stage == S.STAGE_READY
     assert rig.cli.stages()[:2] == ["research", "write"]
+
+
+def test_a_checker_that_renumbers_its_answers_is_read_in_order(steps_rig, cfg):
+    """A checker that answers 1, 2 for the batch's claims 3 and 4 still settles them."""
+    rig = steps_rig
+
+    def renumbered(call: Call) -> str:
+        n = call.prompt.split("CLAIMS\n", 1)[1].split("\n\n", 1)[0].count("\n") + 1
+        return json.dumps({"results": [{"id": i, "verdict": "confirmed"} for i in range(1, n + 1)]})
+
+    rig.cli.texts["claim_check"] = renumbered
+    piece = _steps_piece(rig, cfg)
+    assert SS.research(rig.ctx, piece).stage == S.STAGE_READY
+    from studio import steps as ST
+
+    results = ST.load_checks(Path(piece.workspace))
+    assert [r["verdict"] for r in results] == ["confirmed"] * 3
+    assert "settle" not in rig.cli.stages()

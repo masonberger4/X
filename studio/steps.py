@@ -427,8 +427,10 @@ def claim_check(
     workspace = Path(piece.workspace)
     size = max(1, int(settings["claim_check"].get("batch") or 10))
     batches = [claims[i : i + size] for i in range(0, len(claims), size)]
+    # The finished text goes with every batch, so a checker reads each claim in its place.
+    posts = post_texts(workspace)
     calls = [
-        Call("claim_check", f"batch_{n:02d}", P.claim_check_prompt(b, today=today))
+        Call("claim_check", f"batch_{n:02d}", P.claim_check_prompt(b, today=today, posts=posts))
         for n, b in enumerate(batches, 1)
     ]
     verdicts: dict[int, dict[str, Any]] = {}
@@ -438,13 +440,20 @@ def claim_check(
             {"claims": batch, "ok": a.ok, "answer": a.data, "detail": a.detail},
         )
         results = (a.data or {}).get("results") if a.ok else None
-        for r in results if isinstance(results, list) else []:
+        ids = [int(c["id"]) for c in batch]
+        for k, r in enumerate(results if isinstance(results, list) else []):
             if not isinstance(r, dict):
                 continue
             try:
                 cid = int(r.get("id"))
             except (TypeError, ValueError):
-                continue
+                cid = -1
+            if cid not in ids:
+                # A checker that numbered its answers 1, 2, ... (or not at all) answered in
+                # the order it was asked: the k-th answer is the batch's k-th claim.
+                if k >= len(ids):
+                    continue
+                cid = ids[k]
             verdict = str(r.get("verdict") or "").strip().lower()
             verdicts[cid] = {**r, "verdict": verdict if verdict in VERDICTS else "unconfirmed"}
     merged = []

@@ -1580,3 +1580,12 @@ def test_the_step_prompts_tell_each_call_pages_are_data():
     write = P.write_prompt(_brief(), by_app=True)
     assert "No fact-check of your own" in write and "Start a fresh sub-agent" not in write
     assert "No fact-check of your own" in P.revise_prompt("Shorter.", by_app=True)
+
+
+def test_a_claim_check_gets_the_post_for_context_and_asks_for_whole_statements():
+    check = P.claim_check_prompt(
+        [{"id": 7, "where": "post 1", "claim": "HR 0.40"}], today="x", posts=["the post"]
+    )
+    assert "7. (post 1) HR 0.40" in check
+    assert "THE POST THEY COME FROM" in check and "the post" in check
+    assert "never a bare figure" in P.claim_list_prompt(["p"], [])
