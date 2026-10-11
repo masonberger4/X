@@ -352,6 +352,7 @@ class Scanner:
 @pytest.fixture
 def cfg(monkeypatch) -> dict[str, Any]:
     c = load_studio_config()
+    c["steps"]["enabled"] = False  # one session per piece (the steps: test_studio_session.py)
     c["model"], c["effort"] = "writer-model", "max"
     c["radar"].update(enabled=True, model="writer-model", effort="max", scan_every_hours=20)
     monkeypatch.setattr(runner, "load_studio_config", lambda *a, **k: c)

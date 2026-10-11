@@ -78,14 +78,29 @@
 <h2>Session log</h2>
 <pre class="log">{{ log or "(nothing yet)" }}</pre>
 
+{% set steps = piece.meta.get("steps") %}
+{% if steps and steps.get("enabled") %}
+<h2>Step settings</h2>
+<p class="meta">What each step of this piece runs on, as studio/config.yaml said when the piece started (<code>steps:</code>). To find a step that hurts quality, put it back on the writer's model there, one at a time.</p>
+<table>
+  <tr><th>Step</th><th>Model</th><th>Effort</th><th>Turn cap</th></tr>
+  {% for name in ("plan", "gather_light", "gather_deep", "factbase", "post", "claim_list", "claim_check", "settle", "polish", "revise") %}{% set st = steps.get(name) or {} %}
+  <tr><td>{{ name }}</td><td>{{ st.get("model", "") }}</td><td>{{ st.get("effort") or "default" }}</td><td>{{ st.get("max_turns") or "" }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 <h2>Runs</h2>
 <table>
-  <tr><th>Stage</th><th>Started</th><th>Outcome</th><th>Turns</th><th>Minutes</th></tr>
+  <tr><th>Stage</th><th>Model</th><th>Effort</th><th>Started</th><th>Outcome</th><th>Turns</th><th>Minutes</th><th>Cost</th></tr>
   {% for r in runs %}
-  <tr><td>{{ r.stage }}</td><td class="meta">{{ r.started_at|localtime }}</td>
+  <tr><td>{{ r.stage }}</td><td class="meta">{{ r.model }}</td><td class="meta">{{ r.effort }}</td><td class="meta">{{ r.started_at|localtime }}</td>
       <td>{{ r.outcome or "running" }}{% if r.detail and r.outcome != "ok" %}<br><span class="meta">{{ r.detail[:300] }}</span>{% endif %}</td>
-      <td>{{ r.turns or "" }}</td><td>{% if r.duration_ms %}{{ (r.duration_ms / 60000)|round(1) }}{% endif %}</td></tr>
+      <td>{{ r.turns or "" }}</td><td>{% if r.duration_ms %}{{ (r.duration_ms / 60000)|round(1) }}{% endif %}</td>
+      <td>{% if r.cost_usd %}${{ "%.2f"|format(r.cost_usd) }}{% endif %}</td></tr>
   {% endfor %}
+  {% set total = runs|sum(attribute="cost_usd") %}
+  {% if total %}<tr><td colspan="7"><strong>Total</strong> <span class="meta">(API-equivalent; a run cut off before it reported counts nothing)</span></td><td><strong>${{ "%.2f"|format(total) }}</strong></td></tr>{% endif %}
 </table>
 <p class="meta">Files: <code>{{ piece.workspace }}</code></p>
 {% endblock %}

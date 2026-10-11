@@ -85,6 +85,7 @@ def sconn(conn):
 @pytest.fixture
 def cfg() -> dict[str, Any]:
     c = load_studio_config()
+    c["steps"]["enabled"] = False  # one session per piece; the steps are tested on their own
     c["auto"] = {"enabled": True, "max_new_per_day": 1, "min_hours_between": 6, "checkpoint": False}
     c["manual"] = {"checkpoint": True}
     c["variety"] = {"avoid_recent_angles": 3, "avoid_recent_hooks": 2, "recent_pieces_shown": 8}
@@ -800,15 +801,6 @@ def test_a_new_piece_keeps_a_named_voice_and_refuses_an_unknown_one(sconn, cfg, 
             sconn, cfg, origin=S.ORIGIN_MANUAL, topic="x", voice="no_such_voice", checkpoint=True
         )
     assert [p.id for p in S.list_pieces(sconn)] == [piece.id]
-
-
-def test_the_brief_carries_the_helpers_from_the_config(sconn, cfg):
-    piece = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, checkpoint=True)
-    cfg["helpers"] = {"enabled": True, "sonnet": "s-model", "haiku": "h-model", "max_fetches": 30}
-    brief = brief_for(sconn, cfg, piece)
-    assert brief.helpers is True and brief.helper_fetches == 30
-    cfg["helpers"]["haiku"] = ""
-    assert brief_for(sconn, cfg, piece).helpers is False
 
 
 # ---- build_brief ---------------------------------------------------------------------
@@ -2185,3 +2177,13 @@ def test_a_dry_run_shows_the_voice_the_next_piece_may_get_and_records_none(rig, 
     out = capsys.readouterr().out
     assert "THE VOICE THIS PIECE WILL BE WRITTEN IN" in out
     assert rig.pieces() == []
+
+
+def test_a_new_piece_keeps_the_step_settings_it_started_with(sconn, cfg):
+    from studio.settings import piece_steps
+
+    cfg["steps"]["enabled"] = True
+    piece = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, checkpoint=True)
+    assert piece.meta["steps"] == piece_steps(cfg)
+    cfg["steps"]["claim_check"]["model"] = "changed-later"
+    assert S.get_piece(sconn, piece.id).meta["steps"]["claim_check"]["model"] != "changed-later"

@@ -81,14 +81,11 @@ _BACKGROUND_ENV = ("CLAUDE_AUTO_BACKGROUND_TASKS",)
 _CHILD_ENV = {"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
 
 
-def cli_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+def cli_env() -> dict[str, str]:
     """The environment a CLI child runs with: ours, minus any API credentials and the
-    switch that moves long tools to the background, with background tasks disabled.
-    `extra` is added on top (the studio's helper models), never an API credential and
-    never the background switch."""
+    switch that moves long tools to the background, with background tasks disabled."""
     drop = (*_API_KEY_ENV, *_BACKGROUND_ENV)
-    added = {k: str(v) for k, v in (extra or {}).items() if k not in drop}
-    return {**{k: v for k, v in os.environ.items() if k not in drop}, **added, **_CHILD_ENV}
+    return {**{k: v for k, v in os.environ.items() if k not in drop}, **_CHILD_ENV}
 
 
 def cli_settings(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -502,7 +499,6 @@ def run_session(
     transcript: str | os.PathLike[str] | None = None,
     on_event: Callable[[dict[str, Any]], None] | None = None,
     cfg: dict[str, Any] | None = None,
-    env: dict[str, str] | None = None,
 ) -> SessionResult:
     """One long agentic invocation of the CLI (a studio stage), run from `cwd` so the
     session's files and its stored conversation stay together. `system` is appended to
@@ -514,9 +510,7 @@ def run_session(
     no record would lose them from the first resume). Every stream-json line is appended
     to `transcript` as it arrives and handed to `on_event`. `timeout` None or <= 0 means
     no limit; on expiry the CLI and what it started are killed and the result says so (the
-    session can still be resumed). `env` is added to the child's environment
-    (`cli_env(extra=)`): the studio maps the Agent tool's `sonnet` and `haiku` aliases to the
-    models its config names that way.
+    session can still be resumed).
     Raises ClaudeCliUnavailable when the CLI cannot start, and OSError when `transcript`
     cannot be opened (before anything starts); any other failure is returned."""
     settings = cli_settings(cfg)
@@ -543,9 +537,7 @@ def run_session(
     )
     log.debug("starting session %s in %s", session_id, cwd)
     try:
-        return _stream_session(
-            argv, prompt, cwd, session_id, timeout, transcript, on_event, env=env
-        )
+        return _stream_session(argv, prompt, cwd, session_id, timeout, transcript, on_event)
     finally:
         if system_file:
             try:
@@ -562,8 +554,6 @@ def _stream_session(
     timeout: float | None,
     transcript: str | os.PathLike[str] | None,
     on_event: Callable[[dict[str, Any]], None] | None,
-    *,
-    env: dict[str, str] | None = None,
 ) -> SessionResult:
     # Opened before the CLI starts: a transcript that cannot be written (its folder gone)
     # raises here, before there is a session left running with nobody reading it.
@@ -578,7 +568,7 @@ def _stream_session(
             encoding="utf-8",
             errors="replace",
             cwd=str(cwd),
-            env=cli_env(env),
+            env=cli_env(),
             **no_window_kwargs(),
         )
     except OSError as exc:

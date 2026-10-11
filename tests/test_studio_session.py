@@ -159,6 +159,13 @@ def write_piece(
 # ---- the fake CLI ------------------------------------------------------------------
 
 STAGE_HEADS = (
+    # the step-by-step piece's own steps first: their heads start like the stages'
+    ("STAGE 1 OF 3: RESEARCH, STEP 1 OF 2: PLAN", "plan"),
+    ("STAGE 1 OF 3: RESEARCH, STEP 2 OF 2: FACT BASE", "factbase"),
+    ("STAGE 2 OF 3: WRITE, THE COLD FACT-CHECK", "settle"),
+    ("STEP: GATHER", "gather"),
+    ("STEP: CLAIM LIST", "claim_list"),
+    ("STEP: CLAIM CHECK", "claim_check"),
     ("STAGE 1 OF 3: RESEARCH", "research"),
     ("STAGE 2 OF 3: WRITE", "write"),
     ("STAGE 3 OF 3: POLISH", "polish"),
@@ -235,6 +242,8 @@ class FakeCLI:
             "write": lambda ws, call: write_piece(ws),
         }
         self.outcomes: dict[str, list[Any]] = {}  # stage -> results/exceptions, in turn
+        # What a stage answers with (an app step's JSON), from its call; default "<stage> done".
+        self.texts: dict[str, Callable[[Call], str]] = {}
         # What each session has cost so far: the CLI reports the session's running total
         # (a resumed session carries on from its last), each finished run adding COST.
         self.spent: dict[str, float] = {}
@@ -256,8 +265,10 @@ class FakeCLI:
     def __call__(self, prompt: str, **kw: Any) -> claude_cli.SessionResult:
         stage, resumed = stage_of(prompt)
         ws = Path(kw["cwd"])
+        # an app step runs from its folder under the piece (steps/<step>/)
+        piece_ws = ws.parent.parent if ws.parent.name == P.STEPS_DIR else ws
         row = self.conn.execute(
-            "SELECT id, stage FROM studio_pieces WHERE workspace = ?", (str(ws),)
+            "SELECT id, stage FROM studio_pieces WHERE workspace = ?", (str(piece_ws),)
         ).fetchone()
         open_runs = self.conn.execute(
             "SELECT COUNT(*) FROM studio_runs WHERE piece_id = ? AND finished_at IS NULL",
@@ -319,7 +330,7 @@ class FakeCLI:
             session_id=kw["session_id"],
             ok=True,
             subtype="success",
-            text=f"{stage} done",
+            text=self.texts[stage](call) if stage in self.texts else f"{stage} done",
             num_turns=TURNS,
             cost_usd=self.spent[kw["session_id"]],
             duration_ms=DURATION,
@@ -2391,16 +2402,183 @@ def test_a_piece_whose_cold_fact_check_never_reported_never_reaches_the_queue(ri
     assert all(f"- {qa.NO_FACTCHECK}" in c.prompt for c in polish)
 
 
-# ---- helpers -----------------------------------------------------------------------
+# ---- the step-by-step piece (studio/steps.py) ---------------------------------------
+
+QUESTIONS = [
+    {"id": "q01", "kind": "numbers", "question": "Q2 sales", "where": "the release"},
+    {"id": "q02", "kind": "trial", "question": "Phase 3 HR and CI", "where": "the paper"},
+    {"id": "q03", "kind": "catalyst", "question": "PDUFA date", "where": ""},
+]
 
 
-def test_every_stage_starts_the_cli_with_the_helper_models(rig, cfg):
-    """The Agent tool's "sonnet" and "haiku" resolve through the child's environment, so
-    each launch carries the models studio/config.yaml names; none with the helpers off."""
-    cfg["helpers"] = {"enabled": True, "sonnet": "s-model", "haiku": "h-model", "max_fetches": 40}
-    SS.research(rig.ctx, rig.new_piece())
-    want = {"ANTHROPIC_DEFAULT_SONNET_MODEL": "s-model", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "h-model"}
-    assert [c.kw["env"] for c in rig.cli.calls] == [want] * len(rig.cli.calls)
-    cfg["helpers"]["enabled"] = False
-    SS.research(rig.ctx, rig.new_piece())
-    assert rig.cli.calls[-1].kw["env"] == {}
+def _answer(call: Call) -> str:
+    qid = call.prompt.split('{"id": "', 1)[1].split('"', 1)[0]
+    return json.dumps(
+        {
+            "id": qid,
+            "answer": f"answer to {qid}",
+            "facts": [{"fact": "f", "quote": "q", "url": "https://x.example/", "opened": True}],
+        }
+    )
+
+
+def _claims(call: Call) -> str:
+    return json.dumps(
+        {
+            "claims": [
+                {"id": 1, "where": "post 1", "claim": "ORR 74%", "kind": "number"},
+                {"id": 2, "where": "post 1", "claim": "HR 0.40", "kind": "number"},
+                {"id": 3, "where": "card card_1.html", "claim": "Dec 23", "kind": "date"},
+            ]
+        }
+    )
+
+
+def _checks(*wrong: int) -> Callable[[Call], str]:
+    def answer(call: Call) -> str:
+        ids = [
+            int(line.split(".", 1)[0])
+            for line in call.prompt.split("CLAIMS\n", 1)[1].split("\n\nANSWER", 1)[0].splitlines()
+        ]
+        return json.dumps(
+            {
+                "results": [
+                    {
+                        "id": i,
+                        "verdict": "wrong" if i in wrong else "confirmed",
+                        "source": "https://src.example/",
+                        "correct": "ORR 70%" if i in wrong else "",
+                    }
+                    for i in ids
+                ]
+            }
+        )
+
+    return answer
+
+
+@pytest.fixture
+def steps_rig(rig, cfg) -> Rig:
+    """The rig with the shipped step settings, one call at a time (the fake reads the DB)."""
+    cfg["steps"]["enabled"] = True
+    cfg["steps"]["parallel"] = 1
+    cfg["steps"]["claim_check"]["batch"] = 2
+    rig.cli.work["plan"] = lambda ws, call: (ws / P.PLAN_FILE).write_text(
+        json.dumps({"topic": "t", "questions": QUESTIONS}), encoding="utf-8"
+    )
+    rig.cli.work["factbase"] = lambda ws, call: write_research(ws)
+    rig.cli.texts.update(gather=_answer, claim_list=_claims, claim_check=_checks(1))
+    return rig
+
+
+def _steps_piece(rig: Rig, cfg: dict[str, Any]) -> S.Piece:
+    from studio.settings import piece_steps
+
+    piece = rig.new_piece()
+    S.update_piece(rig.conn, piece.id, meta={"steps": piece_steps(cfg)})
+    return rig.get(piece.id)
+
+
+def test_a_step_by_step_piece_runs_each_step_on_its_own_model_and_effort(steps_rig, cfg):
+    rig = steps_rig
+    piece = _steps_piece(rig, cfg)
+    out = SS.research(rig.ctx, piece)
+    assert out.stage == S.STAGE_READY, out.message
+    assert rig.cli.stages() == [
+        "plan",
+        "gather",
+        "gather",
+        "gather",
+        "factbase",
+        "write",
+        "claim_list",
+        "claim_check",
+        "claim_check",
+        "settle",
+        "polish",
+    ]
+    by_step = {c.stage: c.kw for c in rig.cli.calls}
+    steps = cfg["steps"]
+    # the writer's steps: its own model, each step's effort, never the Agent tool
+    for stage, key in (
+        ("plan", "plan"),
+        ("factbase", "factbase"),
+        ("write", "post"),
+        ("settle", "settle"),
+        ("polish", "polish"),
+    ):
+        assert by_step[stage]["model"] == MODEL
+        assert by_step[stage]["effort"] == steps[key]["effort"]
+        assert "Agent" not in by_step[stage]["tools"]
+    assert "WebFetch" not in by_step["plan"]["tools"]
+    # the app's steps: the configured model, fresh sessions run from the step's folder
+    gathers = rig.cli.of("gather")
+    assert [c.kw["model"] for c in gathers] == [
+        steps["gather_light"]["model"],
+        steps["gather_deep"]["model"],
+        steps["gather_light"]["model"],
+    ]
+    assert gathers[1].kw["effort"] == "medium" and gathers[0].kw["effort"] is None
+    assert gathers[0].kw["max_turns"] == steps["gather_light"]["max_turns"]
+    assert by_step["claim_list"]["model"] == steps["claim_list"]["model"]
+    assert by_step["claim_list"]["tools"] == []
+    assert by_step["claim_check"]["model"] == steps["claim_check"]["model"]
+    assert Path(by_step["claim_check"]["cwd"]).name == "claim_check"
+    assert by_step["claim_check"]["system"] == ""
+    # what came back is kept, and the writer is handed only what was flagged
+    ws = Path(piece.workspace)
+    assert "answer to q02" in (ws / P.GATHER_FILE).read_text(encoding="utf-8")
+    assert (ws / P.STEPS_DIR / "gather" / "q02.json").is_file()
+    assert "| 1 | post 1 | ORR 74% | wrong |" in (ws / P.CHECKS_FILE).read_text(encoding="utf-8")
+    settle = rig.cli.of("settle")[0].prompt
+    assert '"ORR 74%"' in settle and "says instead: ORR 70%" in settle
+    assert '"HR 0.40"' not in settle
+    # every run records the model and effort it ran on
+    runs = S.list_runs(rig.conn, piece.id)
+    assert {(r.stage, r.model) for r in runs} >= {
+        ("plan", MODEL),
+        ("gather_deep", steps["gather_deep"]["model"]),
+        ("claim_check", steps["claim_check"]["model"]),
+    }
+
+
+def test_with_every_claim_confirmed_the_app_writes_the_fact_check_log(steps_rig, cfg):
+    rig = steps_rig
+    rig.cli.texts["claim_check"] = _checks()
+    piece = _steps_piece(rig, cfg)
+    assert SS.research(rig.ctx, piece).stage == S.STAGE_READY
+    assert "settle" not in rig.cli.stages()
+    log = (Path(piece.workspace) / P.FACTCHECK_FILE).read_text(encoding="utf-8")
+    assert "confirmed every one" in log
+
+
+def test_a_failed_claim_list_stops_the_piece_and_resume_carries_on_from_it(steps_rig, cfg):
+    rig = steps_rig
+    rig.cli.texts["claim_list"] = lambda call: "not json"
+    piece = _steps_piece(rig, cfg)
+    out = SS.research(rig.ctx, piece)
+    assert out.stage == S.STAGE_INTERRUPTED and "claim list" in out.message
+    rig.cli.texts["claim_list"] = _claims
+    before = len(rig.cli.calls)
+    out = SS.resume_interrupted(rig.ctx, rig.get(piece.id))
+    assert out.stage == S.STAGE_READY, out.message
+    # the post is not written again: the steps after it run
+    assert rig.cli.stages()[before:][:2] == ["claim_list", "claim_check"]
+    assert "write" not in rig.cli.stages()[before:]
+
+
+def test_a_resumed_research_asks_only_the_questions_still_open(steps_rig, cfg):
+    rig = steps_rig
+    rig.cli.fail("factbase", stopped("killed"))
+    piece = _steps_piece(rig, cfg)
+    assert SS.research(rig.ctx, piece).stage == S.STAGE_INTERRUPTED
+    before = len(rig.cli.calls)
+    assert SS.resume_interrupted(rig.ctx, rig.get(piece.id)).stage == S.STAGE_READY
+    assert rig.cli.stages()[before] == "factbase"  # no plan, no gather again
+    assert rig.cli.calls[before].resumed
+
+
+def test_a_piece_without_step_settings_is_one_session(rig):
+    piece = rig.new_piece()
+    assert SS.research(rig.ctx, piece).stage == S.STAGE_READY
+    assert rig.cli.stages()[:2] == ["research", "write"]

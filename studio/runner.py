@@ -31,9 +31,8 @@ from studio import topics as T
 from studio import voices as V
 from studio.settings import (
     EXEMPLARS_DIR,
-    helper_fetches,
-    helpers_on,
     load_studio_config,
+    piece_steps,
     read_brief,
     workspace_root,
 )
@@ -294,8 +293,6 @@ def build_brief(
         lean=lean,
         voice=voice,
         handles=list(handles or []),
-        helpers=helpers_on(cfg),
-        helper_fetches=helper_fetches(cfg),
         # The limits the checker enforces (qa.check_text keeps `headroom` under X's own),
         # so a post written to the number it is given is never sent back as too long.
         long_post_max=int(x["long_post_max"]) - int(x.get("headroom") or 0),
@@ -693,6 +690,10 @@ def new_piece(
         effort=str(cfg.get("effort") or ""),
         story_item=T.story_item(cluster_id) if cluster_id is not None else "",
     )
+    # The step settings it is written with, kept with the piece (studio/steps.py): a later
+    # change to studio/config.yaml never changes a piece already started, and its page
+    # shows which model and effort made each step.
+    S.update_piece(conn, piece_id, meta={"steps": piece_steps(cfg)})
     if named is not None:
         S.update_piece(
             conn, piece_id, voice=named.key, meta={"voice": {**named.as_dict(), "drawn": "named"}}

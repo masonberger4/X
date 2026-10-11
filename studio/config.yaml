@@ -61,20 +61,50 @@ max_polish_rounds: 3
 # it writes can change what later pieces read); there is no shell. WebSearch/WebFetch are
 # the research; Agent runs the cold fact-check as a fresh sub-agent.
 tools: [Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent]
-# Helpers: the session (the writer above) stays the analyst, the writer and the editor, and
-# hands the legwork to sub-agents on cheaper models, then checks their work. Haiku looks
-# things up (one question -> the exact quote, the URL, the date), pulls numbers out of
-# filings into tables, finds dated catalysts and lists the claims of a finished post;
-# Sonnet reads trial data and deal terms, drafts the card HTML from the writer's spec and
-# runs the cold fact-check, claim by claim, several side by side; the writer adjudicates
-# only what they flag. Most of a piece's usage was Opus sub-agents doing that legwork.
-# Blank models or enabled: false: the session does everything on the writer's model, with
-# one cold fact-checker, as before.
-helpers:
+# The steps of a piece, each with the model and effort you choose (`enabled: false`: the
+# whole piece is one session on the writer's model, as before). The writer's session
+# (Opus) keeps the judgement: it plans the research, writes the fact base from what comes
+# back, writes the post and cards, and settles what the checks flag. Between those the app
+# runs the legwork as calls of their own, several side by side:
+#   gather_light  one research question each: a lookup, figures from a filing, a date
+#   gather_deep   one research question each: a trial's data, a deal's terms
+#   claim_list    every checkable claim of the finished post and cards, no web
+#   claim_check   `batch` claims each, checked against sources on the web
+# A blank model is the writer's model, a blank effort the writer's effort (an app step's
+# blank effort is the model's own default). Each piece records the settings it started
+# with, and its page shows every step's model, effort, cost and time, so a step that hurts
+# quality can be found and put back on the writer's model here, one at a time.
+# Haiku 4.5 runs with no effort setting (blank).
+steps:
   enabled: true
-  sonnet: claude-sonnet-5-5
-  haiku: claude-haiku-5-5
-  max_fetches: 40               # pages + searches one helper may use before it reports back
+  parallel: 6                   # app calls at once
+  plan:     {effort: high}      # the writer: the research questions
+  factbase: {effort: max}       # the writer: the fact base from the answers
+  post:     {effort: max}       # the writer: the post, the cards, piece.json
+  settle:   {effort: high}      # the writer: what the claim checks flagged
+  polish:   {effort: high}      # the writer: the app's checks and the card review
+  revise:   {effort: max}       # the writer: the editor's revision
+  gather_light:
+    model: claude-haiku-4-5-20251001
+    effort: ''
+    max_turns: 8
+    timeout_minutes: 15
+  gather_deep:
+    model: claude-sonnet-5-5
+    effort: medium
+    max_turns: 12
+    timeout_minutes: 20
+  claim_list:
+    model: claude-haiku-4-5-20251001
+    effort: ''
+    max_turns: 3
+    timeout_minutes: 10
+  claim_check:
+    model: claude-sonnet-5-5
+    effort: medium
+    batch: 10
+    max_turns: 15
+    timeout_minutes: 20
 
 # CLI switches that isolate the session from this machine: no CLAUDE.md, plugins, hooks
 # or MCP servers (--safe-mode), file tools confined to the working folders and no
