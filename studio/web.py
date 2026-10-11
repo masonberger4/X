@@ -66,6 +66,7 @@ from studio import evidence as E
 from studio import ingest
 from studio import learn as L
 from studio import playbook as PB
+from studio import progress as PR
 from studio import prompt as P
 from studio import radar as R
 from studio import store as S
@@ -217,6 +218,9 @@ def _read(path: Path, limit: int = 400_000) -> str:
         return ""
 
 
+LOG_NAME = "session.log"
+
+
 def _tail(path: Path, lines: int = LOG_TAIL_LINES) -> str:
     """The log's last `lines` lines, read from its last LOG_TAIL_BYTES (the newest end,
     however long a piece's log has grown)."""
@@ -301,6 +305,15 @@ def studio_index(request: Request, conn: Conn, flash: str = ""):
     pieces = S.list_pieces(conn, 40)
     if any(p.stage in S.RUNNING_STAGES for p in pieces) and _settle(conn):
         pieces = S.list_pieces(conn, 40)
+    now = datetime.now(UTC)
+    typical = PR.typical_minutes(S.recent_runs(conn))
+    progress = {
+        p.id: PR.progress(
+            p.stage, S.list_runs(conn, p.id), typical, now, _tail(Path(p.workspace) / LOG_NAME, 3)
+        )
+        for p in pieces
+        if p.stage in S.RUNNING_STAGES
+    }
     return templates.TemplateResponse(
         request,
         "studio_index.html",
@@ -311,6 +324,7 @@ def studio_index(request: Request, conn: Conn, flash: str = ""):
             "cfg": cfg,
             "flash": flash,
             "running": [p for p in pieces if p.stage in S.RUNNING_STAGES],
+            "progress": progress,
             "step_new": STEP_NEW,
             "step_resume": STEP_RESUME,
         },
@@ -703,12 +717,21 @@ def studio_piece(request: Request, piece_id: int, conn: Conn, flash: str = ""):
     # after a hand edit in the queue, or while a revision has not reached the queue yet.
     draft = _queue_draft(piece)
     queue_posts = list(draft.draft.thread) if draft is not None else []
+    runs = S.list_runs(conn, piece.id)
+    log_tail = _tail(ws / "session.log")
     return templates.TemplateResponse(
         request,
         "studio_piece.html",
         {
             "piece": piece,
-            "runs": S.list_runs(conn, piece.id),
+            "runs": runs,
+            "progress": PR.progress(
+                piece.stage,
+                runs,
+                PR.typical_minutes(S.recent_runs(conn)),
+                datetime.now(UTC),
+                log_tail,
+            ),
             "trial_setup": TRIALS.get(str(piece.meta.get("trial") or ""), {}),
             "research": _research(piece.meta.get("research")),
             "factbase": _read(ws / P.FACTBASE_FILE),
@@ -718,7 +741,7 @@ def studio_piece(request: Request, piece_id: int, conn: Conn, flash: str = ""):
             "queue_draft": draft.id if draft is not None else None,
             "queue_posts": queue_posts if queue_posts != posts else [],
             "queue_pictures": len(draft.images) if draft is not None else None,
-            "log": _tail(ws / "session.log"),
+            "log": log_tail,
             "running": piece.stage in S.RUNNING_STAGES,
             "warnings": piece.meta.get("warnings") or [],
             "problems": piece.meta.get("problems") or [],

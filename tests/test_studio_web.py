@@ -1110,3 +1110,22 @@ def test_a_piece_page_names_the_voice_it_was_given(client, sconn):
     assert "Reads the footnotes first." in body
     plain = make_piece(sconn, stage=S.STAGE_READY)
     assert "voice <strong>" not in client.get(f"/studio/{plain.id}").text
+
+
+def test_a_piece_being_written_shows_its_progress_bar(client, sconn, live_run, tmp_path):
+    ws = tmp_path / "piece"
+    ws.mkdir()
+    (ws / "session.log").write_text("=== research ===\nreading the FDA label\n", encoding="utf-8")
+    piece = make_piece(sconn, stage=S.STAGE_RESEARCHING, workspace=ws)
+    S.start_run(sconn, piece.id, "research")
+    for path in ("/studio", f"/studio/{piece.id}"):
+        body = client.get(path).text
+        assert 'role="progressbar"' in body, path
+        assert "Now: reading the FDA label" in body and "usually about 45 min" in body
+    assert "Writing now:" in client.get("/studio").text
+
+
+def test_a_finished_piece_has_no_progress_bar(client, sconn):
+    piece = make_piece(sconn, stage=S.STAGE_FAILED)
+    assert 'role="progressbar"' not in client.get(f"/studio/{piece.id}").text
+    assert "Writing now:" not in client.get("/studio").text

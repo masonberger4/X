@@ -1,0 +1,11 @@
+{# One piece's progress bar (studio/progress.py): `pg` is a Progress. #}
+<div class="studio-progress" style="margin:.5rem 0 1rem">
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.35rem">
+    {% for s in pg.steps %}<span class="pill {{ 'ok' if s.state == 'done' else ('warn' if s.state == 'now' else 'skip') }}">{{ '✓ ' if s.state == 'done' }}{{ s.label }}</span>{% endfor %}
+  </div>
+  <div role="progressbar" aria-valuenow="{{ pg.percent }}" aria-valuemin="0" aria-valuemax="100" aria-label="piece progress"
+       style="height:.6rem;border-radius:.3rem;background:var(--surface-2, #eee);overflow:hidden">
+    <div style="height:100%;width:{{ pg.percent }}%;background:var(--ok, #3a3)"></div>
+  </div>
+  <p class="meta" style="margin:.35rem 0 0">About {{ pg.percent }}% done{% if pg.typical %} · {{ pg.stage_label }} for {{ pg.minutes|round|int }} min, usually about {{ pg.typical|round|int }} min{% elif pg.stage_label %} · {{ pg.stage_label }}{% endif %}{% if pg.doing %}<br>Now: {{ pg.doing }}{% endif %}</p>
+</div>

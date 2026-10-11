@@ -693,7 +693,11 @@ and long posts need X Premium.
    still waiting for you, so it does not repeat a topic. The piece is tied to a
    feed story only when it is one the app offered it; a number it made up ties
    it to nothing. Expect
-   it in the queue 30 to 90 minutes after the run starts. A
+   it in the queue 30 to 90 minutes after the run starts. While it is written, the
+   studio page (and the piece's own page) shows a progress bar: research, write +
+   fact-check, polish, in the queue, with the minutes spent in the current stage
+   against how long that stage usually takes here and the session's latest step;
+   the page refreshes itself. The percentage is an estimate. A
    session still running at the next run time sits that run out
    (`skip_when_busy`) instead of holding the other steps back, and so do the
    steps still waiting behind it in its own run

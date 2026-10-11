@@ -565,6 +565,20 @@ def list_runs(conn: sqlite3.Connection, piece_id: int) -> list[RunRow]:
     rows = conn.execute(
         "SELECT * FROM studio_runs WHERE piece_id = ? ORDER BY id", (piece_id,)
     ).fetchall()
+    return _run_rows(rows)
+
+
+def recent_runs(conn: sqlite3.Connection, limit: int = 400) -> list[RunRow]:
+    """The latest finished runs of every piece, oldest first: how long each stage usually
+    takes (studio/progress.py:typical_minutes)."""
+    rows = conn.execute(
+        "SELECT * FROM studio_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    return _run_rows(list(reversed(rows)))
+
+
+def _run_rows(rows: list[sqlite3.Row]) -> list[RunRow]:
     return [
         RunRow(
             id=int(r["id"]),

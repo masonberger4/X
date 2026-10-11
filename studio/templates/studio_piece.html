@@ -17,6 +17,7 @@
   {% else %}<span class="pill warn">{{ piece.stage }}</span>{% if running %} <span class="meta">this page refreshes every 20 seconds; the run's controls are on <a href="/runs">the runs page</a></span>{% endif %}{% endif %}
   {% if piece.request %}<span class="meta">· {{ piece.request }} requested, waiting for a studio run</span>{% endif %}
 </p>
+{% if progress and piece.stage != "ready" %}{% with pg=progress %}{% include "_studio_progress.html" %}{% endwith %}{% endif %}
 {% if piece.error %}<p class="banner fail">{{ piece.error }}</p>{% endif %}
 {% if problems %}<p><strong>Problems the checker still found:</strong></p><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
 {% if warnings %}<p><strong>For the editor:</strong></p><ul>{% for w in warnings %}<li class="meta">{{ w }}</li>{% endfor %}</ul>{% endif %}

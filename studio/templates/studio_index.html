@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Studio{% endblock %}
 {% block content %}
+{% if running %}<meta http-equiv="refresh" content="30">{% endif %}
 <h1>Studio</h1>
 {% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
 <p class="meta">Each piece is one {{ cfg.model }} session at {{ cfg.effort }} effort: it researches
@@ -46,6 +47,11 @@ pieces already posted: their numbers, what has done well, and the playbook's his
   {% endfor %}
 </table>
 {% endif %}
+
+{% for p in running %}{% if progress.get(p.id) %}
+<h2>Writing now: <a href="/studio/{{ p.id }}">{{ p.label }}</a></h2>
+{% with pg=progress[p.id] %}{% include "_studio_progress.html" %}{% endwith %}
+{% endif %}{% endfor %}
 
 <h2>Pieces</h2>
 <p class="meta">Automatic pieces: {% if cfg.auto.enabled %}on, at most {{ cfg.auto.max_new_per_day }} a day and {{ cfg.auto.min_hours_between }}h apart, {% if cfg.auto.checkpoint %}stopping{% else %}not stopping{% endif %} after research{% else %}off{% endif %} (studio/config.yaml).</p>

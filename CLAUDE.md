@@ -717,7 +717,8 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           (seed), exemplars/ (reference pieces), fonts/, prompt.py (pure stage prompts),
           session.py (stages), runner.py (one run: stale pieces, requests, new piece),
           qa.py + xcount.py + safety.py (the checks), render.py (cards via headless browser),
-          ingest.py (into the queue), topics.py (feed stories), store.py (studio_pieces,
+          ingest.py (into the queue), topics.py (feed stories), progress.py (pure: the
+          progress bar of a piece being written, typical stage minutes from studio_runs), store.py (studio_pieces,
           studio_runs, studio_topics, studio_scans, studio_radar_topics,
           studio_catalysts, studio_playbook_versions, studio_manual_metrics, the
           read-only adapters), radar.py (pure: the scan's prompt and answer, the
