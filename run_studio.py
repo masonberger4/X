@@ -9,6 +9,8 @@ Usage:
   python run_studio.py --topic "next-gen CTLA-4"   # a piece on this topic, now
   python run_studio.py --story 123         # a piece from feed story (cluster) 123, now
   python run_studio.py --angle deal_decoder        # with --topic/--story/--now: this angle
+  python run_studio.py --voice desk_note           # with --topic/--story/--now: this voice
+                                           # (a key of the playbook's Voices section)
   python run_studio.py --checkpoint        # stop after research for the editor to read
   python run_studio.py --no-checkpoint     # write straight through after research
   python run_studio.py --list              # show recent pieces and queued topics
@@ -71,6 +73,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--story", type=int, default=None, help="start a piece from this feed story id")
     ap.add_argument("--angle", default="", help="the angle for the new piece (studio/angles.yaml)")
     ap.add_argument(
+        "--voice", default="", help="the voice for the new piece (a key of the playbook's Voices)"
+    )
+    ap.add_argument(
         "--checkpoint",
         dest="checkpoint",
         action="store_true",
@@ -132,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         topic=args.topic,
         story=args.story,
         angle=args.angle,
+        voice=args.voice,
         checkpoint=args.checkpoint,
         dry_run=args.dry_run,
     )

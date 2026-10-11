@@ -600,3 +600,18 @@ def test_empty_result_recovers_a_failed_tool_call_input():
 
     out = _transcript([{"type": "tool_use", "name": "score", "input": {"scores": [1]}}])
     assert json.loads(parse_envelope(out)) == {"scores": [1]}
+
+
+def test_extra_child_env_never_brings_back_a_key_or_the_background_switch(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-parent")
+    env = claude_cli.cli_env(
+        {
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "h-model",
+            "ANTHROPIC_API_KEY": "sk-extra",
+            "CLAUDE_AUTO_BACKGROUND_TASKS": "1",
+            "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "0",
+        }
+    )
+    assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "h-model"
+    assert "ANTHROPIC_API_KEY" not in env and "CLAUDE_AUTO_BACKGROUND_TASKS" not in env
+    assert env["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] == "1"

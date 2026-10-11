@@ -666,7 +666,13 @@ Code session on Opus 5.5 at max effort, the same way the Merck SPR2015, Summit
 catalyst map and next-gen CTLA-4 posts were made by hand in a chat. The session
 researches the topic and writes a fact base with every source. It then writes a
 long post (or a thread of long posts), designs the cards, and runs its own cold
-fact-check through a fresh sub-agent. The app draws the cards, counts characters
+fact-check through fresh sub-agents. The legwork goes to helpers on cheaper models
+(`helpers:` in `studio\config.yaml`): Haiku 5.5 looks things up, pulls numbers out
+of filings, finds catalyst dates and lists a finished post's claims; Sonnet 5.5
+reads trial data and deal terms and checks the claims, several side by side. Opus
+checks their work, settles what they flag and does all the writing. Each helper
+stops after `max_fetches` searches and pages. `enabled: false` (or a blank model)
+puts everything back on Opus with one fact-checker. The app draws the cards, counts characters
 the way X does, checks the few lines that are never crossed (no investment or
 medical advice, no links) and hands any problem back to the same session. The
 finished piece waits in the pending queue as "Studio piece N" with its cards
@@ -901,6 +907,7 @@ and long posts need X Premium.
    python run_studio.py --list
    python run_studio.py --topic "next-gen CTLA-4" --checkpoint
    python run_studio.py --story 123 --angle readout_reaction
+   python run_studio.py --topic "BCMA's next round" --angle contrarian_take --voice desk_note
    python run_studio.py --now --no-checkpoint
    python run_studio.py --resume-only
    python run_studio.py --dry-run
@@ -912,7 +919,9 @@ and long posts need X Premium.
    python run_studio.py --learn-now
    python run_studio.py --learn --dry-run
    ```
-   `--list` shows recent pieces and queued topics; `--dry-run` prints the
+   `--angle` and `--voice` (a key from the playbook's Voices section, such as
+   `desk_note`) fix the angle and the voice instead of leaving them to the session
+   and the draw. `--list` shows recent pieces and queued topics; `--dry-run` prints the
    research prompt the next piece would get and starts nothing; plain
    `run_studio.py` is the automatic run. `--scan` runs the radar's scan when one
    is due (once a day), `--scan-now` runs it now, and `--scan --dry-run` prints

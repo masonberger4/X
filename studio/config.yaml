@@ -61,6 +61,21 @@ max_polish_rounds: 3
 # it writes can change what later pieces read); there is no shell. WebSearch/WebFetch are
 # the research; Agent runs the cold fact-check as a fresh sub-agent.
 tools: [Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent]
+# Helpers: the session (the writer above) stays the analyst, the writer and the editor, and
+# hands the legwork to sub-agents on cheaper models, then checks their work. Haiku looks
+# things up (one question -> the exact quote, the URL, the date), pulls numbers out of
+# filings into tables, finds dated catalysts and lists the claims of a finished post;
+# Sonnet reads trial data and deal terms, drafts the card HTML from the writer's spec and
+# runs the cold fact-check, claim by claim, several side by side; the writer adjudicates
+# only what they flag. Most of a piece's usage was Opus sub-agents doing that legwork.
+# Blank models or enabled: false: the session does everything on the writer's model, with
+# one cold fact-checker, as before.
+helpers:
+  enabled: true
+  sonnet: claude-sonnet-5-5
+  haiku: claude-haiku-5-5
+  max_fetches: 40               # pages + searches one helper may use before it reports back
+
 # CLI switches that isolate the session from this machine: no CLAUDE.md, plugins, hooks
 # or MCP servers (--safe-mode), file tools confined to the working folders and no
 # command-running tools (--restricted), and anything not pre-approved is denied rather

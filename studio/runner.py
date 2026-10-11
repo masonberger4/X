@@ -31,6 +31,8 @@ from studio import topics as T
 from studio import voices as V
 from studio.settings import (
     EXEMPLARS_DIR,
+    helper_fetches,
+    helpers_on,
     load_studio_config,
     read_brief,
     workspace_root,
@@ -292,6 +294,8 @@ def build_brief(
         lean=lean,
         voice=voice,
         handles=list(handles or []),
+        helpers=helpers_on(cfg),
+        helper_fetches=helper_fetches(cfg),
         # The limits the checker enforces (qa.check_text keeps `headroom` under X's own),
         # so a post written to the number it is given is never sent back as too long.
         long_post_max=int(x["long_post_max"]) - int(x.get("headroom") or 0),
@@ -650,12 +654,20 @@ def new_piece(
     topic: str = "",
     cluster_id: int | None = None,
     angle: str = "",
+    voice: str = "",
     checkpoint: bool,
 ) -> S.Piece:
+    """A new piece in a folder of its own. `voice`: a playbook voice the editor named (the
+    --voice of a piece started by hand), given instead of drawing one (assign_voice)."""
     if angle:
         library = A.load_angles()
         if angle not in library:
             raise ValueError(f"unknown angle {angle!r}; see studio/angles.yaml")
+    named = None
+    if voice:
+        named = next((v for v in V.parse(PB.current_text(_data_folder())) if v.key == voice), None)
+        if named is None:
+            raise ValueError(f"unknown voice {voice!r}; see the playbook's Voices section")
     session_id = str(uuid.uuid4())
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     name = f"{stamp}-{_slug(topic or (f'story-{cluster_id}' if cluster_id else 'auto'))}"
@@ -681,6 +693,11 @@ def new_piece(
         effort=str(cfg.get("effort") or ""),
         story_item=T.story_item(cluster_id) if cluster_id is not None else "",
     )
+    if named is not None:
+        S.update_piece(
+            conn, piece_id, voice=named.key, meta={"voice": {**named.as_dict(), "drawn": "named"}}
+        )
+        log.info("piece %s: written in the voice %s (named)", piece_id, named.key)
     piece = S.get_piece(conn, piece_id)
     assert piece is not None
     return piece
@@ -759,6 +776,7 @@ def run(
     topic: str = "",
     story: int | None = None,
     angle: str = "",
+    voice: str = "",
     checkpoint: bool | None = None,
     dry_run: bool = False,
 ) -> int:
@@ -809,6 +827,7 @@ def run(
                 topic=topic,
                 story=story,
                 angle=angle,
+                voice=voice,
                 checkpoint=checkpoint,
             )
         if isinstance(started, int):
@@ -834,6 +853,7 @@ def _start_piece(
     story: int | None,
     angle: str,
     checkpoint: bool | None,
+    voice: str = "",
 ) -> S.Piece | int:
     """The piece this run starts, already in its slot, or the run's exit code when it
     starts none. The caller holds the claim lock, so a queued topic goes to one run only."""
@@ -845,6 +865,7 @@ def _start_piece(
             topic=topic,
             cluster_id=story,
             angle=angle,
+            voice=voice,
             checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint,
         )
     elif queued is not None:
@@ -876,6 +897,7 @@ def _start_piece(
             topic="",
             cluster_id=None,
             angle=angle,
+            voice=voice,
             checkpoint=cfg["manual"]["checkpoint"] if checkpoint is None else checkpoint,
         )
     else:

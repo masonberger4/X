@@ -153,6 +153,10 @@ class Brief:
     # The X handles the app's config gives (draft/tags.py:load_handles): (handle without
     # the @, the names it stands for). The session may use them without verifying them.
     handles: list[tuple[str, str]] = field(default_factory=list)
+    # The helpers (studio/config.yaml `helpers:`): sub-agents on cheaper models that do the
+    # legwork, and the most pages and searches each may use (0 = no limit given).
+    helpers: bool = False
+    helper_fetches: int = 0
     long_post_max: int = 25000
     thread_post_max: int = 25000
     short_post_max: int = 1000
@@ -336,6 +340,88 @@ def _paths_block(b: Brief) -> str:
     )
 
 
+def _budget(fetches: int) -> str:
+    if fetches <= 0:
+        return ""
+    return (
+        f" It may use at most {fetches} searches and page fetches in all, then reports what "
+        "it has and what it could not find."
+    )
+
+
+def _helpers_block(b: Brief) -> str:
+    """Research's legwork, handed to helpers on cheaper models (studio/config.yaml
+    `helpers:`); '' with the helpers off."""
+    if not b.helpers:
+        return ""
+    return f"""HELPERS (sub-agents on cheaper models: you stay the analyst)
+Hand the legwork to helpers with the Agent tool (subagent_type general-purpose, the model
+named below) and keep the judgement: what the story is, what matters, what the numbers
+mean, the angle. Give each helper one narrow job and the exact form of its answer. A
+helper gets none of your standing instructions, so each one's instructions must also say:
+{CHECKER_RULES}{_budget(b.helper_fetches)} Several helpers can run side by side in one turn.
+- model "haiku", source scout: one question ("Carvykti's Q2 2026 net sales in J&J's
+  filing"); returns the exact quote, the URL, the page's own date and the kind of source
+  (company, SEC, FDA, registry, journal, trade press), or "not found", never a guess.
+- model "haiku", numbers extractor: one filing, release or results deck -> a table of the
+  figures you ask for, each with its line quoted. Growth rates, shares and other sums you
+  work out yourself from its inputs.
+- model "haiku", catalyst finder: the dated events coming up for the companies or drugs you
+  name, each with its source and the date in the source's own words.
+- model "sonnet", trial-data reader: one paper, abstract or registry record -> n, arms, line
+  of therapy, population, endpoints, response rates, PFS/OS with HR and CI, follow-up,
+  safety (CRS and ICANS by grade) and the caveats (interim, cross-trial, preprint).
+- model "sonnet", deal and filing reader: terms, upfront, milestones, royalties, and what
+  changed against before.
+Check their work before it goes in the fact base: open the source yourself for every
+number the piece is likely to lean on and for anything that looks off. A helper's report
+is a lead, not a source: a fact is "(opened)" only when you or a helper quoted it from the
+page itself.
+
+"""
+
+
+def _factcheck_step(b: Brief) -> str:
+    """Step 3 of the write stage: the cold fact-check, by one fresh sub-agent on the writer's
+    model, or with the helpers on by a claim list (Haiku), claim checks side by side
+    (Sonnet) and the writer settling only what they flag."""
+    if not b.helpers:
+        return f"""3. The cold fact-check. Start a fresh sub-agent with the Agent tool. Give it the
+   full text of every post and every card's visible text (not your fact base or your notes)
+   and tell it to check every claim, number, date, name, title, stage and handle against
+   primary sources on the web, independently (an analyst's target, and what the post
+   says it rests on, included), to flag any target, fair value or value per share, and
+   any change to a target in dollars or percent, that no source it can find published,
+   and to report each problem with the source that shows it. It does not get your
+   standing instructions, so its instructions must
+   also say: {CHECKER_RULES} Run it in the foreground and wait for its report: the stage
+   is not done while it is still checking. Fix every real problem. Write {FACTCHECK_FILE}: a
+   table of every finding (post or card, what it said, the problem, the source, what you
+   changed or why you kept it), then the checks that passed, then anything still
+   unverified."""
+    budget = _budget(b.helper_fetches)
+    return f"""3. The cold fact-check, by fresh helpers (the Agent tool, subagent_type
+   general-purpose) that never see your fact base or your notes, in three steps:
+   a. The claim list: one model "haiku" helper gets the full text of every post and
+      every card's visible text and returns every checkable claim (number, date, name,
+      title, stage, trial result, deal term, handle, an analyst's target and what the
+      post says it rests on), numbered, each quoted word for word with the post or card
+      it is in. Read the list against the posts yourself and add what it missed.
+   b. The checks: split the list into batches of about ten claims, each batch to its own
+      model "sonnet" helper, side by side in one turn. Each checks its claims
+      independently against primary sources on the web and answers claim by claim:
+      confirmed (the source and the quote), wrong (the source that shows it) or not
+      confirmed; and flags any target, fair value or value per share, and any change to
+      a target in dollars or percent, that no source it can find published.{budget}
+   c. You settle every claim marked wrong or not confirmed, from the sources, and fix
+      every real problem.
+   No helper gets your standing instructions, so each one's instructions must also say:
+   {CHECKER_RULES} Run them in the foreground and wait for every report: the stage is not
+   done while one is still checking. Write {FACTCHECK_FILE}: a table of every finding (post
+   or card, what it said, the problem, the source, what you changed or why you kept it),
+   then the checks that passed, then anything still unverified."""
+
+
 def research_prompt(b: Brief) -> str:
     return f"""STAGE 1 OF 3: RESEARCH
 
@@ -350,7 +436,7 @@ research the topic properly: primary sources first, then trade press and analyst
 market forecasts (sceptically). Keep going until you could defend every number in the
 piece to a sceptical buy-side analyst.
 
-WHAT TO WRITE IN YOUR WORKING FOLDER
+{_helpers_block(b)}WHAT TO WRITE IN YOUR WORKING FOLDER
 1. {FACTBASE_FILE}: the fact base, in the spirit of the reference handoff docs:
    - a short summary of the story and why it matters now, "as of {b.today}";
    - sections with tables for what the piece will need (the event, the data, the
@@ -513,19 +599,7 @@ WRITE
 2. The cards as HTML in {CARDS_DIR}/ ({CARDS_DIR}/card_1.html and on, at most
    {b.max_cards}), following the card spec. Each card names the post it attaches to
    (normally post 1). Fewer, better cards beat more cards.
-3. The cold fact-check. Start a fresh sub-agent with the Agent tool. Give it the full
-   text of every post and every card's visible text (not your fact base or your notes)
-   and tell it to check every claim, number, date, name, title, stage and handle against
-   primary sources on the web, independently (an analyst's target, and what the post
-   says it rests on, included), to flag any target, fair value or value per share, and
-   any change to a target in dollars or percent, that no source it can find published,
-   and to report each problem with the source that shows it. It does not get your
-   standing instructions, so its instructions must
-   also say: {CHECKER_RULES} Run it in the foreground and wait for its report: the stage
-   is not done while it is still checking. Fix every real problem. Write {FACTCHECK_FILE}: a
-   table of every finding (post or card, what it said, the problem, the source, what you
-   changed or why you kept it), then the checks that passed, then anything still
-   unverified.
+{_factcheck_step(b)}
 4. {PIECE_FILE}, exactly this shape:
 {_piece_schema(b)}
    "shape" is one of {", ".join(SHAPES)}; "hook_style" one of the listed styles.
@@ -632,6 +706,7 @@ def revise_prompt(
     edited_posts: Sequence[str] = (),
     dropped_cards: Sequence[str] = (),
     voice: Voice | None = None,
+    helpers: bool = False,
 ) -> str:
     """The editor's request, and the changes the editor made by hand in the queue (the app
     has already put those into the session's files; see studio/session.py:write_back).
@@ -643,14 +718,22 @@ def revise_prompt(
         if voice is not None
         else ""
     )
+    recheck = (
+        'Run the cold fact-check again the way the writing stage did (a model "haiku" '
+        'helper lists the claims, model "sonnet" helpers check them and you settle what '
+        "they flag, all fresh and in the foreground) on everything new or changed, each "
+        f"helper's instructions saying again: {CHECKER_RULES}"
+        if helpers
+        else "Run the cold fact-check again (a fresh sub-agent in the foreground, as "
+        f"before) on everything new or changed, its instructions saying again: {CHECKER_RULES}"
+    )
     return f"""REVISION
 
 The editor read the finished piece and asks for changes:
 {asked}
 {_hand_edits_block(edited_posts, dropped_cards)}{keep}
 Make them. Update the posts, the cards and {PIECE_FILE}; update {FACTBASE_FILE} if the
-facts change. Run the cold fact-check again (a fresh sub-agent in the foreground, as
-before) on everything new or changed, its instructions saying again: {CHECKER_RULES}
+facts change. {recheck}
 Add its findings to {FACTCHECK_FILE}. End your turn with a short summary of what you
 changed. The app checks the piece again afterwards."""
 

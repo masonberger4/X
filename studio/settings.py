@@ -54,6 +54,8 @@ DEFAULTS: dict[str, Any] = {
         "max_cards_total": 4,
     },
     "render": {"browser": "", "timeout_seconds": 60},
+    # Blank models: no helpers (the model IDs live only in studio/config.yaml).
+    "helpers": {"enabled": True, "sonnet": "", "haiku": "", "max_fetches": 40},
     "radar": {
         "enabled": True,
         "scan_every_hours": 20,
@@ -100,6 +102,7 @@ _SECTIONS = (
     "voices",
     "x",
     "render",
+    "helpers",
     "radar",
     "learn",
 )
@@ -144,6 +147,34 @@ def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
     learn["model"] = str(learn.get("model") or "").strip() or cfg["model"]
     learn["effort"] = str(learn.get("effort") or "").strip() or str(cfg.get("effort") or "")
     return cfg
+
+
+# The Agent tool takes a model alias ("sonnet", "haiku"); the CLI resolves each alias
+# through these variables, so the helpers run on exactly the models studio/config.yaml names
+# (left to itself, this CLI version resolved "haiku" to Haiku 4.5).
+HELPER_ENV = {"sonnet": "ANTHROPIC_DEFAULT_SONNET_MODEL", "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL"}
+
+
+def helpers_on(cfg: dict[str, Any]) -> bool:
+    """Whether the sessions hand the legwork to the helper models: switched on and both
+    models named. Off, the session does it all itself on the writer's model, with one cold
+    fact-checker as before."""
+    h = cfg.get("helpers") or {}
+    return bool(h.get("enabled")) and all(str(h.get(k) or "").strip() for k in HELPER_ENV)
+
+
+def helper_env(cfg: dict[str, Any]) -> dict[str, str]:
+    """What a session's CLI is started with so its helpers run on the configured models;
+    empty with the helpers off."""
+    if not helpers_on(cfg):
+        return {}
+    h = cfg["helpers"]
+    return {var: str(h[alias]).strip() for alias, var in HELPER_ENV.items()}
+
+
+def helper_fetches(cfg: dict[str, Any]) -> int:
+    """Most pages and searches one helper may use (0 = no limit given)."""
+    return max(0, int((cfg.get("helpers") or {}).get("max_fetches") or 0))
 
 
 def stage_timeout(cfg: dict[str, Any], stage: str) -> float | None:

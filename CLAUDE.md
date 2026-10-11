@@ -421,7 +421,18 @@ hand under the post it answers.
   the reference pieces as the piece's own copy, `<piece>/reference/`
   (`session.copy_reference`, made when a stage starts and none is there; never an
   `--add-dir`, which --restricted would make writable, so no session can change
-  `studio/exemplars`); `tools` and the isolation `cli_flags` (`--safe-mode
+  `studio/exemplars`); the helpers (`studio/config.yaml` `helpers:`, `settings.helpers_on`):
+  sub-agents the Agent tool starts with `model` "haiku" or "sonnet", which the CLI resolves
+  through `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL`, set on every
+  launch by `settings.helper_env` through `run_session(env=)` / `cli_env(extra)` (which
+  never lets an API key or the background switch through); `--agents` is no use, since
+  `--safe-mode` ignores custom agents. Research gets `prompt._helpers_block` (Haiku looks
+  up, extracts numbers, finds catalysts; Sonnet reads trials and deals; each told
+  `CHECKER_RULES` and `max_fetches`), the cold fact-check `prompt._factcheck_step` (a
+  Haiku claim list, Sonnet checks in batches side by side, the writer settles what they
+  flag) and `revise_prompt(helpers=)` the same; off, one cold checker on the writer's
+  model as before. `run_studio.py --voice KEY` names a playbook voice for a piece started
+  by hand (`runner.new_piece(voice=)`, recorded as drawn "named"); `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
   `story_id`, an int or digit string, sets the piece's cluster only when it is in

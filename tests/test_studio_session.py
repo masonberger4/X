@@ -2389,3 +2389,18 @@ def test_a_piece_whose_cold_fact_check_never_reported_never_reaches_the_queue(ri
     polish = rig.cli.of("polish")
     assert len(polish) == rig.ctx.cfg["max_polish_rounds"]
     assert all(f"- {qa.NO_FACTCHECK}" in c.prompt for c in polish)
+
+
+# ---- helpers -----------------------------------------------------------------------
+
+
+def test_every_stage_starts_the_cli_with_the_helper_models(rig, cfg):
+    """The Agent tool's "sonnet" and "haiku" resolve through the child's environment, so
+    each launch carries the models studio/config.yaml names; none with the helpers off."""
+    cfg["helpers"] = {"enabled": True, "sonnet": "s-model", "haiku": "h-model", "max_fetches": 40}
+    SS.research(rig.ctx, rig.new_piece())
+    want = {"ANTHROPIC_DEFAULT_SONNET_MODEL": "s-model", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "h-model"}
+    assert [c.kw["env"] for c in rig.cli.calls] == [want] * len(rig.cli.calls)
+    cfg["helpers"]["enabled"] = False
+    SS.research(rig.ctx, rig.new_piece())
+    assert rig.cli.calls[-1].kw["env"] == {}

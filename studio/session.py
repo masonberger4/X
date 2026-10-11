@@ -30,7 +30,7 @@ from studio import prompt as P
 from studio import store as S
 from studio import topics as T
 from studio import voices as V
-from studio.settings import stage_max_turns, stage_timeout
+from studio.settings import helper_env, helpers_on, stage_max_turns, stage_timeout
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +159,9 @@ def _run_stage(
             transcript=workspace / TRANSCRIPT,
             on_event=on_event,
             cfg=ctx.root_cfg,
+            # The Agent tool's "sonnet" and "haiku" are the helper models studio/config.yaml
+            # names (settings.helper_env; empty with the helpers off).
+            env=helper_env(ctx.cfg),
         )
     except claude_cli.ClaudeCliError as exc:
         S.finish_run(ctx.conn, run_id, outcome="error", detail=str(exc))
@@ -470,6 +473,7 @@ def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
         edited_posts=hand.get("files") or [],
         dropped_cards=[_card_line(c) for c in (edits.dropped if edits else [])],
         voice=V.given(piece.voice, piece.meta.get("voice")),
+        helpers=helpers_on(ctx.cfg),
     )
     result = _run_stage(ctx, piece, "revise", text, first=False)
     if not result.ok:
