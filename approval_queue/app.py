@@ -13,6 +13,8 @@ Routes:
                               left behind by a run that died), so the next run tries it
                               again; the draft stays approved
   GET  /status/{status}       approved / rejected / failed lists
+  GET  /manifest.webmanifest, /app-icon-{192,512}.png, /apple-touch-icon.png
+                              what a phone needs to add the app to its home screen
 
 The edit and reject forms take an optional category (why the draft was edited or
 rejected); the detail page shows a before/after diff for every edit. A studio piece is
@@ -108,7 +110,12 @@ def cross_site(method: str, headers: Mapping[str, str]) -> str:
     whatever name or address the browser reached it by (localhost, the LAN, Tailscale).
     Origin "null" (a sandboxed frame, a data: URL) names no host and is refused. A request
     with neither header (curl, the tests, a script on this machine) goes on: a browser
-    sends Origin with every cross-site POST."""
+    sends Origin with every cross-site POST.
+
+    Behind a proxy on the same machine (`tailscale serve`, HOWTO part 8) the browser's
+    host may arrive as X-Forwarded-Host rather than Host, so a sender naming that one goes
+    on too. A web page cannot forge it: a form sends no custom header, and a script that
+    adds one needs a CORS preflight this app never answers."""
     if method.upper() in SAFE_METHODS:
         return ""
     for name in ("origin", "referer"):
@@ -116,7 +123,8 @@ def cross_site(method: str, headers: Mapping[str, str]) -> str:
         if not sender:
             continue
         own = (headers.get("host") or "").strip().lower()
-        if own and _host_of(sender) == own:
+        forwarded = (headers.get("x-forwarded-host") or "").split(",")[0].strip().lower()
+        if _host_of(sender) in {h for h in (own, forwarded) if h}:
             return ""
         return (
             f"Refused: this request was sent from another site ({name.title()}: {sender[:200]}), "
@@ -145,6 +153,26 @@ class SameOriginOnly:
 
 app = FastAPI(title="Approval queue")
 app.add_middleware(SameOriginOnly)
+
+STATIC_DIR = Path(__file__).with_name("static")
+# Home-screen app (HOWTO part 8): the manifest and its icons, by fixed names so a phone
+# finds /apple-touch-icon.png on its own. Served by the panel too (it adopts these routes).
+APP_FILES = {
+    "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+    "/app-icon-192.png": ("icon-192.png", "image/png"),
+    "/app-icon-512.png": ("icon-512.png", "image/png"),
+    "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
+}
+
+
+def _app_file_route(path: str, name: str, media_type: str) -> None:
+    @app.get(path, include_in_schema=False)
+    def serve() -> FileResponse:
+        return FileResponse(STATIC_DIR / name, media_type=media_type)
+
+
+for _path, (_name, _type) in APP_FILES.items():
+    _app_file_route(_path, _name, _type)
 
 
 def get_conn() -> Iterator[store.sqlite3.Connection]:

@@ -613,30 +613,51 @@ that publishing stays off unless you turn it on in `ops\config.yaml`.
 
 ### Using it from your phone
 
-The page has no login and its buttons run the pipeline, so the phone has to
-reach the PC without the PC being open to the internet. Two ways.
+The phone uses the same app and the same data as the PC: the PC runs it, and
+the phone opens its pages through Tailscale, a free private network between
+your own devices. The page has no login and its buttons run the pipeline, so
+nothing here opens the PC to the internet or to other people on your Wi-Fi.
+The PC has to be on and running the app; the phone works on Wi-Fi or mobile
+data. Posting stays the same: copy from the phone and paste into X.
 
-**On the same Wi-Fi** (quick, home only). Start the app so it listens on the
-network, not just on the PC:
-```
-python run_app.py --host 0.0.0.0
-```
-Say yes if Windows asks to let Python through the firewall. Find the PC's
-address with `ipconfig` (the "IPv4 Address" line, something like
-`192.168.1.23`) and open `http://192.168.1.23:8000` on the phone. This only
-works while the phone is on the same Wi-Fi, and anyone else on that Wi-Fi
-could open it too.
+**One-time setup**
+1. Install Tailscale on the PC and on the phone (tailscale.com, or the App
+   Store / Play Store) and sign in to both with the same account.
+2. Start the app on a fixed port. The desktop app picks a random port unless
+   you give it one, so make a shortcut to `Pipeline.exe` and add
+   ` --port 8000` to the end of its Target (right-click, Properties). With
+   the browser version, `python run_app.py` already uses 8000. Only one of
+   them can have port 8000 at a time.
+3. In a command prompt on the PC, run once:
+   ```
+   tailscale serve --bg 8000
+   ```
+   The first time, it prints a link to turn on HTTPS for your Tailscale
+   network: open it, allow it, and run the command again. It then prints the
+   address, something like `https://my-pc.tail1234.ts.net`. It keeps working
+   after a restart; `tailscale serve reset` turns it off.
+4. Open that address on the phone and add it to the home screen, so it opens
+   full screen with its own icon like an app:
+   - iPhone (Safari): the Share button, then "Add to Home Screen".
+   - Android (Chrome): the menu (three dots), then "Add to Home screen" or
+     "Install app".
 
-**From anywhere with Tailscale** (recommended). Tailscale is a free private
-network between your own devices; nobody else can reach it.
-1. Install Tailscale on the PC and on the phone (tailscale.com) and sign in
-   to both with the same account.
-2. Start the app with `--host 0.0.0.0` as above.
-3. On the phone, open `http://<pc-name>:8000`, using the name Tailscale shows
-   for the PC.
-Works on mobile data as well as Wi-Fi. The PC still has to be on and running
-the app; to have it start by itself, add `python run_app.py --host 0.0.0.0`
-as a task in Task Scheduler (part 6) that runs at log-on.
+**Day to day.** Leave the app running on the PC. The desktop app serves the
+phone only while its window is open (closing it stops everything), so
+minimise it rather than closing it. To have the phone work without the window,
+start `python run_app.py` at log-on from Task Scheduler (part 6) instead.
+
+The app itself keeps listening only on the PC (127.0.0.1); `tailscale serve`
+passes your phone's requests to it. A button pressed on the phone is checked
+the same way as one pressed on the PC, so a web page open on the phone still
+cannot press them.
+
+**Quick alternative on the same Wi-Fi** (home only, no Tailscale): start the
+app with `python run_app.py --host 0.0.0.0`, say yes if Windows asks to let
+Python through the firewall, find the PC's address with `ipconfig` (the
+"IPv4 Address" line, like `192.168.1.23`) and open `http://192.168.1.23:8000`
+on the phone. Anyone else on that Wi-Fi could open it too, so don't use this
+on a network you share with strangers.
 
 ## Part 9. The studio: one Opus session per post
 

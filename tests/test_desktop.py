@@ -90,6 +90,7 @@ def test_the_manifest_names_every_settings_file_template_and_cli():
         assert cfg in sources, f"{cfg} is not bundled"
     assert root / "approval_queue" / "templates" in sources
     assert root / "panel" / "templates" in sources
+    assert root / "approval_queue" / "static" in sources  # the home-screen app's icons
     for cli in frozen.CLIS:
         assert root / f"{cli}.py" in sources and cli in hidden
     assert "panel.app" in hidden
