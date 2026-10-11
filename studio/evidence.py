@@ -88,6 +88,8 @@ def measure(conn: sqlite3.Connection, cfg: dict[str, Any]) -> Evidence:
     measured: list[L.Measured] = []
     posted: list[Posted] = []
     for head in S.fetch_posted_heads(conn):
+        if queue_store.is_reply_item(head.item_id):
+            continue  # a reply's reach is not a post's: it would drag the baseline down
         when = parse_when(head.posted_at)
         if when is None:
             continue

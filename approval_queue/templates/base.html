@@ -11,6 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="Pipeline">
   <title>{% block title %}Approval queue{% endblock %}</title>
+  {% block head %}{% endblock %}
   <style>
     /* ==========================================================================
        OUTRUN SUNSET  ·  a night drive into a 1986 synthwave sunset
@@ -993,6 +994,7 @@
   {% if HAS_PANEL %}<a href="/">Dashboard</a>
   <a href="/studio">Studio</a>
   <a href="/studio/radar">Radar</a>
+  <a href="/replies">Replies</a>
   <a href="/sources">Sources</a>
   <a href="/feed">Feed</a>
   <a href="/runs">Runs</a>

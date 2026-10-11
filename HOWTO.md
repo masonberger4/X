@@ -949,6 +949,36 @@ reference pieces in `studio\exemplars\`.
 
 ---
 
+## Part 10. Replies from screenshots
+
+Replying under other people's posts is how a new account gets found. You find the posts
+yourself (nothing is read from X, so it costs nothing beyond your Claude login); the app
+writes the reply.
+
+1. In the control panel open **Replies** (`/replies`). Take a screenshot of the post on X
+   (Win+Shift+S), click the page and press Ctrl+V. Add up to four (the post, and the thread
+   under it if it matters), or drop or choose image files.
+2. Optionally paste the post's link (then the reply page links straight to it) and a note
+   on what you want to say ("push back on the control arm"). Press **Write the reply**.
+3. The page refreshes itself while `models.replier` reads the screenshots (and may check a
+   fact on the web). It shows who it read as the author and the post's text, so you can
+   see it read them right, then the reply. Every reply is checked in code first: no
+   investment or medical advice, no link or bare domain, no @handle that `config.yaml`
+   does not give (the companies, `mentions:`, `kol.handles`) other than the post's author,
+   and X's character limit. One that still breaks a rule after two tries is shown as
+   **blocked** with the reason. The writer may also say a post is not worth a reply.
+4. Not right? **Write again** with a note. Close? Edit it in the box.
+5. **Copy text**, open the post on X, press Reply, paste and send. Copy your reply's link,
+   paste it into the box and press **I posted it**. That logs it as posted (the same log
+   the copy-paste page writes), so the feedback step reads its numbers and the weekly
+   report shows replies as their own group. Forgot the link? Add it later on the same page.
+
+The settings are `replies:` in `config.yaml` (the character target, tries, how many
+screenshots, the writer's web tools and time limit) and the model is `models.replier`.
+The screenshots are kept in `reply_shots\` next to the database.
+
+---
+
 ## Fixing things
 
 | Symptom | What to do |
@@ -1002,7 +1032,9 @@ a source
 can set its own `min_abstract_chars` when its feed only carries a one-line
 summary, as the Fierce Biotech and BioPharma Dive entries do; `linking:` is the
 story-linking pass that merges a release with the trade-press write-ups of it
-before scoring, `enabled: false` turns it off),
+before scoring, `enabled: false` turns it off; `replies:` is part 10's reply page:
+the character target, tries, screenshots per reply and the writer's tools, with its
+model at `models.replier`),
 `publish\config.yaml`
 (posting slots, daily post cap, breaking-news rules; `media: attach_images`
 attaches or skips the cards; posting itself is manual only), `feedback\config.yaml`,

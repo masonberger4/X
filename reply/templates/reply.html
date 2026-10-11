@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Reply {{ r.id }}{% endblock %}
+{% block head %}{% if r.status == "writing" %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block content %}
+<style>
+  .shots img { max-width: 420px; width: 100%; margin: .3rem 0; border: 1px solid var(--border, #ddd); border-radius: 4px; display: block; }
+  .post { white-space: pre-wrap; }
+  .copied { color: var(--ok, #1b5e20); font-weight: 600; margin-left: .3rem; }
+</style>
+<p class="meta"><a href="/replies">&larr; all replies</a></p>
+<h1>Reply {{ r.id }}{% if r.author %} to @{{ r.author }}{% endif %} <span class="pill {{ {'ready': 'ok', 'posted': 'ok', 'writing': 'warn', 'skipped': 'skip', 'discarded': 'skip'}.get(r.status, 'fail') }}">{{ r.status }}</span></h1>
+{% if error %}<p class="flash over">{{ error }}</p>{% endif %}
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+
+{% if r.status == "writing" %}
+<p class="banner warn">Writing… {{ r.model or s.model }} is reading the screenshots{% if s.tools|length > 1 %} and may check a fact on the web{% endif %}. This page refreshes itself.</p>
+{% endif %}
+
+{% if r.reply and r.status in ("ready", "blocked") %}
+<h2>The reply</h2>
+{% if r.status == "blocked" %}<p class="flash over">It still breaks a rule after {{ r.attempts }} tries: {{ r.problems|join("; ") }}. Edit it below or write it again with a note.</p>{% endif %}
+<form method="post" action="/replies/{{ r.id }}/posted"
+      onsubmit="return confirm('Log reply {{ r.id }} as posted?')">
+  <textarea id="text" name="text" rows="5" cols="70" oninput="count()">{{ r.reply }}</textarea>
+  <div class="meta"><span id="n">{{ length }}</span>/280 as X counts it (target {{ s.max_chars }}).
+    <button type="button" onclick="copyText(this)">Copy text</button></div>
+  {% if r.why %}<p class="meta"><strong>What it adds:</strong> {{ r.why }}</p>{% endif %}
+  <ol class="meta">
+    <li>{% if r.post_url %}Open <a href="{{ r.post_url }}" target="_blank" rel="noopener noreferrer">the post</a>{% else %}Open the post on X{% endif %} and press <em>Reply</em>.</li>
+    <li><em>Copy text</em> and paste it (X puts {% if r.author %}@{{ r.author }}{% else %}the author's handle{% endif %} in front by itself). Edit here first if you change it, so the log matches what went out.</li>
+    <li>Send it, copy your reply's link, paste it below and press <em>I posted it</em>.</li>
+  </ol>
+  <p><label>Your reply's link <input name="url" size="50" placeholder="https://x.com/you/status/123..."></label>
+    <button type="submit">I posted it</button></p>
+  <p class="meta">The link lets the feedback step read the reply's numbers. You can add it later too.</p>
+</form>
+{% elif r.status == "skipped" %}
+<p class="banner">No reply suggested: {{ r.why }}</p>
+{% elif r.status == "failed" %}
+<p class="flash over">Not written: {{ r.error }}</p>
+{% elif r.status == "posted" %}
+<h2>Posted</h2>
+<div class="post">{{ r.reply }}</div>
+{% if not linked %}
+<form method="post" action="/replies/{{ r.id }}/link">
+  <label>Add your reply's link <input name="url" size="50" placeholder="https://x.com/you/status/123..."></label>
+  <button type="submit">Save link</button>
+</form>
+{% else %}<p class="meta">Logged with its link; the feedback step tracks it.</p>{% endif %}
+{% endif %}
+
+{% if r.rewritable %}
+<form method="post" action="/replies/{{ r.id }}/rewrite">
+  <p><label>Write it again{% if r.reply %} (a fresh reply){% endif %}, with a note (optional)<br>
+    <textarea name="note" rows="2" cols="70">{{ r.note }}</textarea></label></p>
+  <p><button type="submit">Write again</button></p>
+</form>
+{% endif %}
+{% if r.status not in ("posted", "discarded") %}
+<form method="post" action="/replies/{{ r.id }}/discard"><button type="submit" class="link">Drop it</button></form>
+{% endif %}
+
+<h2>The post</h2>
+{% if r.post_text %}<p class="meta">As the writer read it{% if r.author %}, by @{{ r.author }}{% endif %}:</p>
+<div class="post">{{ r.post_text }}</div>{% endif %}
+{% if r.post_url %}<p class="meta"><a href="{{ r.post_url }}" target="_blank" rel="noopener noreferrer">{{ r.post_url }}</a></p>{% endif %}
+{% if r.note %}<p class="meta"><strong>Your note:</strong> {{ r.note }}</p>{% endif %}
+<div class="shots">{% for name in r.shots %}<img src="/replies/{{ r.id }}/shot/{{ loop.index0 }}" alt="screenshot {{ loop.index }}">{% endfor %}</div>
+
+<script>
+function count() {
+  // An estimate: the server counts as X does (emoji and CJK weigh 2) when it checks.
+  document.getElementById("n").textContent = [...document.getElementById("text").value].length;
+}
+async function copyText(btn) {
+  const el = document.getElementById("text");
+  try { await navigator.clipboard.writeText(el.value); }
+  catch (e) { el.select(); document.execCommand("copy"); }
+  const s = document.createElement("span"); s.className = "copied"; s.textContent = "copied";
+  btn.after(s); setTimeout(() => s.remove(), 1500);
+}
+</script>
+{% endblock %}

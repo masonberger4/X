@@ -318,6 +318,11 @@ class DraftRow:
         draft is revised in the studio, which resumes the session that wrote it."""
         return studio_piece_id(self.item_id)
 
+    @property
+    def reply_to(self) -> dict[str, Any] | None:
+        """The X post a reply draft (reply/web.py) answers, else None."""
+        return self.draft.reply_to if is_reply_item(self.item_id) else None
+
 
 def _row_to_draft(r: sqlite3.Row) -> DraftRow:
     keys = r.keys()
@@ -369,6 +374,20 @@ def studio_piece_id(item_id: str | None) -> int | None:
         return None
     tail = item_id[len(STUDIO_ITEM_PREFIX) :]
     return int(tail) if tail.isdigit() else None
+
+
+REPLY_ITEM_PREFIX = "reply:"
+
+
+def reply_item_id(key: str) -> str:
+    """The item_id of a reply draft (reply/web.py): `reply:req<request id>`, one per reply
+    request, so logging the same reply twice finds the draft it has. Such a draft is posted
+    by hand, never by run_publish.py."""
+    return f"{REPLY_ITEM_PREFIX}{key}"
+
+
+def is_reply_item(item_id: str | None) -> bool:
+    return bool(item_id) and str(item_id).startswith(REPLY_ITEM_PREFIX)
 
 
 #: A studio draft's why_it_matters carries each fast-moving fact to re-check on posting day
