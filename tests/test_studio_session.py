@@ -2518,7 +2518,8 @@ def test_a_step_by_step_piece_runs_each_step_on_its_own_model_and_effort(steps_r
         steps["gather_deep"]["model"],
         steps["gather_light"]["model"],
     ]
-    assert gathers[1].kw["effort"] == "medium" and gathers[0].kw["effort"] is None
+    assert gathers[1].kw["effort"] == steps["gather_deep"]["effort"]
+    assert gathers[0].kw["effort"] == (steps["gather_light"]["effort"] or None)
     assert gathers[0].kw["max_turns"] == steps["gather_light"]["max_turns"]
     assert by_step["claim_list"]["model"] == steps["claim_list"]["model"]
     assert by_step["claim_list"]["tools"] == []
