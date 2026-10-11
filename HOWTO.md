@@ -675,13 +675,13 @@ empty areas, all handed back to the session to fix. Nothing posts from here: app
 and long posts need X Premium.
 
 A piece is made in **steps**, each on the model and effort you choose in
-`steps:` in `studio\config.yaml` (shipped: Opus 5.5 writes, Sonnet 5.5 and
-Haiku 4.5 do the legwork):
+`steps:` in `studio\config.yaml` (shipped: Opus 5.5 writes, Sonnet 5.5 does the
+research and checks, Haiku 4.5 lists the claims):
 
 | Step | Who | Shipped |
 |---|---|---|
 | plan | Opus session: 10-25 research questions in `research_plan.json` | high |
-| gather_light | the app, one call per lookup, numbers or catalyst question | Haiku 4.5, 8 turns |
+| gather_light | the app, one call per lookup, numbers or catalyst question | Sonnet 5.5 medium, 12 turns |
 | gather_deep | the app, one call per trial or deal question | Sonnet 5.5 medium, 12 turns |
 | factbase | Opus session: reads `gather.md`, checks the key sources, writes the fact base | max |
 | post | Opus session: the post, the cards, piece.json | max |

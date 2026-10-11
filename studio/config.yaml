@@ -74,7 +74,8 @@ tools: [Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Agent]
 # blank effort is the model's own default). Each piece records the settings it started
 # with, and its page shows every step's model, effort, cost and time, so a step that hurts
 # quality can be found and put back on the writer's model here, one at a time.
-# Haiku 4.5 runs with no effort setting (blank).
+# Haiku 4.5 runs with no effort setting (blank). It lists claims well (no web); as a
+# researcher it searched until its turns ran out and is billed for every page it reads.
 steps:
   enabled: true
   parallel: 6                   # app calls at once
@@ -84,10 +85,10 @@ steps:
   settle:   {effort: high}      # the writer: what the claim checks flagged
   polish:   {effort: high}      # the writer: the app's checks and the card review
   revise:   {effort: max}       # the writer: the editor's revision
-  gather_light:
-    model: claude-haiku-4-5-20251001
-    effort: ''
-    max_turns: 8
+  gather_light:                 # Haiku 4.5 ran out of turns on 15 of 16 questions (piece 31)
+    model: claude-sonnet-5-5
+    effort: medium
+    max_turns: 12
     timeout_minutes: 15
   gather_deep:
     model: claude-sonnet-5-5
