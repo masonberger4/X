@@ -5,7 +5,9 @@ copy-paste page shows for one approved draft (each post's final text, numbered a
 re-checked exactly as run_publish.py would post it, the pictures anchored to it, and a
 studio piece's facts to re-check on posting day, `approval_queue/store.py:recheck_lines`), and
 `confirm_manual` logs it as posted through step 3's own `publish.store.record_manual` once
-the human says it is on X. Nothing here talks to X.
+the human says it is on X. Nothing here talks to X. A reply draft (reply/web.py) is
+always posted this way, whatever `posting:` says (`is_reply`): the page opens the post it
+answers, and the reply is pasted under it.
 
 `parse_order` is pure: the "Set schedule" form's `order_<draft id>` boxes become the
 ordered list of draft ids (blank boxes drop out, ties keep the page's order). `save_order`
@@ -83,6 +85,18 @@ class ManualDraft:
     # Fast-moving facts to confirm before posting (a studio piece's recheck_before_posting):
     # the session wrote them for posting day, and this page is where posting happens.
     recheck: list[str] = field(default_factory=list)
+    # A reply draft: the post it answers ({tweet_id, url, author, text, ...}); None otherwise.
+    reply_to: dict | None = None
+
+
+def is_reply(draft_id: int) -> bool:
+    """Whether this draft is a reply (posted by hand under the post it answers)."""
+    conn = queue_store.connect(publish_store.db_path())
+    try:
+        row = queue_store.get_draft(conn, draft_id)
+    finally:
+        conn.close()
+    return row is not None and queue_store.is_reply_item(row.item_id)
 
 
 def manual_post(draft_id: int, now: datetime | None = None) -> ManualDraft | None:
@@ -91,7 +105,9 @@ def manual_post(draft_id: int, now: datetime | None = None) -> ManualDraft | Non
     cfg = load_publish_config()
     conn = publish_store.connect()
     try:
-        found = publish_store.fetch_approved(limit=1, conn=conn, draft_ids=[draft_id])
+        found = publish_store.fetch_approved(
+            limit=1, conn=conn, draft_ids=[draft_id], include_replies=True
+        )
         if not found:
             row = publish_store.get_schedule(conn, draft_id)
             if row is None:
@@ -105,11 +121,23 @@ def manual_post(draft_id: int, now: datetime | None = None) -> ManualDraft | Non
     piece = queue_store.studio_piece_id(approved.item_id)
     # A studio draft has no feed item, so no title of its own: the queue names it this way.
     title = approved.title or (f"Studio piece {piece}" if piece is not None else "")
+    reply_to = approved.reply_to
+    if reply_to:
+        title = f"Reply to @{reply_to.get('author') or '?'}"
     recheck = queue_store.recheck_lines(approved.why_it_matters)
     try:
         _, texts = run_publish.texts_for(approved, cfg["thread_numbering"])
     except ThreadError as exc:
-        return ManualDraft(draft_id, title, approved.shape, [], [], error=str(exc), recheck=recheck)
+        return ManualDraft(
+            draft_id,
+            title,
+            approved.shape,
+            [],
+            [],
+            error=str(exc),
+            recheck=recheck,
+            reply_to=reply_to,
+        )
     paths: list[str] = []
     posts = [ManualPost(i, t) for i, t in enumerate(texts, 1)]
     for pos, pics in sorted(run_publish.images_for(approved, cfg).items()):
@@ -118,7 +146,14 @@ def manual_post(draft_id: int, now: datetime | None = None) -> ManualDraft | Non
             target.images.append((len(paths), alt))
             paths.append(path)
     return ManualDraft(
-        draft_id, title, approved.shape, posts, paths, blocked=blocked, recheck=recheck
+        draft_id,
+        title,
+        approved.shape,
+        posts,
+        paths,
+        blocked=blocked,
+        recheck=recheck,
+        reply_to=reply_to,
     )
 
 

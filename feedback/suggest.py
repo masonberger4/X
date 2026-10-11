@@ -88,16 +88,18 @@ def _clear_effects(
 
 # Report groups of the `source` dimension that are no ingest source, so no
 # sources[...] key in config.yaml: the studio's posts (step 10, feedback/store.py names
-# their source 'studio') and posts whose story is gone (feedback/analysis.py's 'unknown').
+# their source 'studio'), replies (the /replies page, 'reply') and posts whose story is gone
+# (feedback/analysis.py's 'unknown').
 STUDIO_SOURCE = "studio"
-NOT_A_FEED = (STUDIO_SOURCE, "unknown")
+REPLY_SOURCE = "reply"
+NOT_A_FEED = (STUDIO_SOURCE, REPLY_SOURCE, "unknown")
 
 
 def _drafter_rows(rows: list[PostRow]) -> list[PostRow]:
     """The drafter's posts: what its settings (feeds, voice guide) are judged by. A studio
     post is written by another process from another brief, so it stays a report group of
     its own and never sits in the drafter's comparison."""
-    return [r for r in rows if r.source != STUDIO_SOURCE]
+    return [r for r in rows if r.source not in (STUDIO_SOURCE, REPLY_SOURCE)]
 
 
 def _source_suggestions(a: Analysis, min_posts: int, effect_ratio: float) -> list[Suggestion]:

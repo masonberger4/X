@@ -17,7 +17,9 @@ Built steps: 1 ingest + dedup + prefilter + score + digest, 2 the human approval
 6 conference abstracts + KOL X list + HTTP retry, 8 control panel (one web app over the
 whole workflow), 10 the studio (one long Claude Code session per post on Opus 5.5 at max
 effort: research, fact base, long post, cards, its own cold fact-check; the app checks it
-and queues it; `run_studio.py`, `/studio`). The studio is the only writer: step 2's single
+and queues it; `run_studio.py`, `/studio`), and replies (`reply/`, `/replies`: one reply per
+post the editor screenshots, checked in code, posted by hand and logged). The studio is the
+only writer of posts: step 2's single
 drafter (`run_draft.py`), step 2b's claim checker (`run_verify.py`), step 7's voice
 learning loop and step 9's swarm (`swarm/`, `run_evolve.py`, the A/B pick pages, `/swarm`)
 were retired and their code removed. Their old tables (`draft_examples`, `image_grades`,
@@ -29,7 +31,8 @@ each step is in `prompts/` (see `prompts/README.md`). Nothing posts unless
 "Publish now" on the approved page or runs `run_publish.py --live` by hand. Nothing posts on
 a timer (the panel has no automatic publisher, its automatic runs start only ingest, score,
 the studio's steps and feedback, and `run_ops.py run` refuses any configured step
-carrying `--live`).
+carrying `--live`). A reply draft is never posted by a publish run at all: it is pasted by
+hand under the post it answers.
 
 ## Commands
 - Install: `pip install -e ".[dev]"`; running the pipeline (not the tests) also needs the
@@ -80,7 +83,9 @@ carrying `--live`).
   `filter/link.py` story linking), `studio/scan.py:call_scanner`
   (the radar's daily scan: the CLI with `tools=["WebSearch","WebFetch"]`, its own time
   limit), `studio/playbook.py:call_rewriter` (the studio's learning loop: one playbook
-  rewrite, no tools, its own time limit), `claude_cli.run_claude` (the only place that
+  rewrite, no tools, its own time limit), `reply/writer.py:call_replier` (one reply from
+  the editor's screenshots, attached to the call: Read plus the tools and time limit of
+  `replies:`), `claude_cli.run_claude` (the only place that
   spawns the Claude Code CLI and the
   app's only way to reach Claude beside `claude_cli.run_session`, the studio's sessions:
   every Claude call site above routes through it; there is no Anthropic API
@@ -630,6 +635,31 @@ carrying `--live`).
   hook the panel wires to `panel/publishing.py:add_head_link` ->
   `publish/store.py:set_head_tweet`, which replaces only post 1's `manual-` marker. The
   playbook editor and its reset save versions through `playbook.save`.
+- **Replies (`reply/`, the panel's `/replies`) answer posts the editor found, by hand.**
+  Nothing is read from X: the editor pastes screenshots (data: URLs in an urlencoded form,
+  `web.parse_shots`, no multipart; `replies.max_shots`, `max_shot_mb`), optionally the
+  post's x.com link and a note. `reply/store.py` owns `reply_requests` (writing, ready,
+  skipped, blocked, failed, posted, discarded) and the files in `<db folder>/reply_shots/`.
+  `web.spawn` writes in a thread of the app (`writer.run_request`, which never raises);
+  `store.settle_dead` fails a request a stopped app left `writing`. One call per attempt
+  (`reply/writer.py:call_replier`, `models.replier`): the screenshots go into the call's
+  private folder through `claude_cli.run_claude(attachments=)`, with Read always and
+  `replies.tools` beside it; `reply/prompt.py` (pure) treats them as data and takes JSON
+  `author`, `post_text`, then `reply`+`why` or `skip`. `reply/checks.py` (pure) blocks
+  what `studio/safety.py:blocking_problems` blocks, more than one post, over
+  `replies.max_chars` by `studio/xcount.py`, and any @handle outside `known_handles`
+  (`draft/tags.py:load_handles`, `kol.handles`, the author as read); a failing reply goes
+  back with its problems up to `max_attempts`, then is `blocked`. "I posted it" re-checks
+  the text as posted (280), inserts a single-post draft, item_id `reply:req<id>`
+  (`approval_queue/store.py:reply_item_id`; `DraftRow.reply_to`; cluster_id NULL so it
+  never takes a story from the studio; the post in `Draft.reply_to`, stored in
+  `drafts.format_json`), approves it (an `edit` when the text changed) and logs it through
+  the `confirm` hook the panel wires to `panel/publishing.py:confirm_manual`, then a later
+  link through `add_link` (`add_head_link`). `publish/store.py:fetch_approved` leaves
+  replies out unless `include_replies=True`, which only `manual_post` passes, and "Publish
+  now" on one opens the copy-paste page (`publishing.is_reply`). Step 4 reports replies as
+  the `reply` group (`suggest.REPLY_SOURCE`, not a feed), and
+  `studio/evidence.py:measure` leaves them out of the studio's baseline.
 - **Docs move with the code.** `tests/test_docs_coverage.py` fails when a CLI,
   a `--flag`, an `ops/config.yaml` step or a settings file is not named in
   HOWTO.md / README.md (flags may instead sit in the CLI's usage docstring),
@@ -677,6 +707,9 @@ ops/      config.yaml, models.py, lock.py, runner.py, health.py, alert.py,
           autorun.py (pure: run times, slot clock, the automatic-run allowlist),
           backup.py, store.py (pipeline_runs, health_checks, alerts_sent +
           read-only adapters)
+reply/    prompt.py (pure: the writer's prompt and answer), checks.py (pure: the lines a
+          reply never crosses), writer.py (call_replier, write, run_request), store.py
+          (reply_requests, reply_shots/), web.py + templates/ (/replies)
 deploy/   crontab.example, pipeline.service, pipeline.timer, pipeline-studio.service,
           pipeline-studio.timer, desktop.spec, README.md
 studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, variety),

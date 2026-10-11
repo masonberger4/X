@@ -143,6 +143,14 @@ class Approved:
     # The draft's "why it matters" note for the human posting it (a studio draft's carries
     # the facts to re-check on posting day); never posted.
     why_it_matters: str = ""
+    # A reply draft (reply/web.py): the X post it answers. Only the panel's copy-paste
+    # page ever sees one (fetch_approved(include_replies=True)); a publish run never does.
+    reply_to: dict | None = None
+
+
+#: item_id prefix of a reply draft (approval_queue/store.py:REPLY_ITEM_PREFIX). Replies are
+#: posted by hand under the post they answer, never by a publish run.
+REPLY_ITEM_PREFIX = "reply:"
 
 
 def _db_file(conn: sqlite3.Connection) -> Path | None:
@@ -204,6 +212,16 @@ def _images_for(
     return out
 
 
+def _reply_for(format_json: str | None) -> dict | None:
+    """The post a reply draft answers, from drafts.format_json (None for any other draft)."""
+    try:
+        d = json.loads(format_json or "")
+    except json.JSONDecodeError:
+        return None
+    r = d.get("reply_to") if isinstance(d, dict) else None
+    return dict(r) if isinstance(r, dict) and r else None
+
+
 def _format_for(format_json: str | None) -> tuple[str, int]:
     """(shape, max_chars) from drafts.format_json; a thread of 280 without it."""
     if not format_json:
@@ -240,9 +258,13 @@ def fetch_approved(
     limit: int = 10,
     conn: sqlite3.Connection | None = None,
     draft_ids: list[int] | None = None,
+    include_replies: bool = False,
 ) -> list[Approved]:
     """Approved drafts that have not been claimed for publishing, oldest approval first.
-    With `draft_ids`, only those drafts (the panel's "Publish now" names one).
+    With `draft_ids`, only those drafts (the panel's "Publish now" names one). Reply drafts
+    (item_id `reply:`) are left out unless `include_replies`: they are posted by hand from
+    the copy-paste page (panel/publishing.py), so a publish run can never post one as a
+    post of its own.
 
     This is the ONLY place step 3 reads the drafts/decisions (and items/scores) tables.
     """
@@ -283,6 +305,9 @@ def fetch_approved(
                 return []
             only = f" AND d.id IN ({','.join('?' * len(draft_ids))})"
             params.extend(int(i) for i in draft_ids)
+        if not include_replies:
+            only += " AND d.item_id NOT LIKE ?"
+            params.append(REPLY_ITEM_PREFIX + "%")
         params.append(limit)
         rows = conn.execute(
             f"""
@@ -338,6 +363,9 @@ def fetch_approved(
                 max_chars=max_chars,
                 images=images,
                 why_it_matters=r["why_it_matters"] or "",
+                reply_to=_reply_for(r["format_json"])
+                if str(r["item_id"]).startswith(REPLY_ITEM_PREFIX)
+                else None,
             )
         )
     return out

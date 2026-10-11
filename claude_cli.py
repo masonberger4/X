@@ -222,12 +222,15 @@ def run_claude(
     cfg: dict[str, Any] | None = None,
     effort: str | None = None,
     tools: list[str] | None = None,
+    attachments: dict[str, bytes] | None = None,
 ) -> str:
     """The single subprocess call. The user prompt goes in on stdin (no arg-length limit).
     `effort` (low|medium|high|xhigh|max) maps to the CLI's --effort; `tools` is empty for
     every caller except the claim verifier and the image grader. The call runs from a
     private folder of its own (`private_workdir`), which also holds the system prompt's
-    file, and the folder is removed when the call ends."""
+    file, and the folder is removed when the call ends. `attachments` ({file name: bytes})
+    are written into that folder first, for a call whose tools include Read (the reply
+    writer's screenshots); a name is a bare file name, never a path."""
     settings = cli_settings(cfg)
     binary = resolve_binary(settings)
     with private_workdir() as workdir:
@@ -236,6 +239,11 @@ def run_claude(
             system_file = os.path.join(workdir, "system-prompt.md")
             with open(system_file, "w", encoding="utf-8") as fh:
                 fh.write(system)
+        for name, data in (attachments or {}).items():
+            if os.path.basename(name) != name or name in ("", ".", "..", "system-prompt.md"):
+                raise ValueError(f"attachment name must be a bare file name: {name!r}")
+            with open(os.path.join(workdir, name), "wb") as fh:
+                fh.write(data)
         argv = build_argv(binary, model, system_file, settings, effort, tools)
         log.debug("running %s (%d chars of prompt)", binary, len(user))
         try:

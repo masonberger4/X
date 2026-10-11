@@ -3,7 +3,7 @@
 {% block content %}
 <h1>{{ status|capitalize }} drafts <span class="meta">({{ drafts|length }})</span></h1>
 {% if notice %}<p class="flash">{{ notice }}</p>{% endif %}
-<p class="meta">Open a draft for the full text, its cards and the approve buttons. A studio piece is revised from its studio page.</p>
+<p class="meta">Open a draft for the full text, its cards and the approve buttons. A studio piece is revised from its studio page. A reply is posted by hand under the post it answers.</p>
 {% if status == "approved" %}
   <p class="meta">Waiting to be published by <code>run_publish.py</code> at the next slot, in the order below.
   {% if hidden_posted %}{{ hidden_posted }} already posted, hidden. <a href="/status/approved?posted=1">Show posted</a>.
@@ -33,7 +33,7 @@
       <td class="order-only">{% if not p or p.status == "pending" %}<input class="order" type="number" min="1" name="order_{{ d.id }}" form="order-form" value="{{ p.position if p and p.position else '' }}" aria-label="publishing order of draft {{ d.id }}">{% endif %}</td>
       {% endif %}
       <td>{{ "%.1f"|format(d.total) if d.total is not none else "–" }}</td>
-      <td>{{ d.source or "?" }}{% if d.status != status %}<br><span class="meta">{{ d.status }}</span>{% endif %}
+      <td>{{ d.source or ("X reply" if d.reply_to else "?") }}{% if d.status != status %}<br><span class="meta">{{ d.status }}</span>{% endif %}
         {% if status == "approved" %}{% set p = publish.get(d.id) %}<br>
           {% if not p or p.status == "pending" %}<span class="pill skip">waiting</span>{% if p and p.position %} <span class="pill ok" title="publishing order">#{{ p.position }}</span>{% endif %}
           {% elif p.status == "posted" %}<a class="pill ok" href="{{ p.tweet_url }}" target="_blank" rel="noopener noreferrer">posted</a>
@@ -42,10 +42,10 @@
           {% else %}<span class="pill warn">{{ p.status }}</span>{% endif %}
           {% if HAS_PANEL and (not p or p.status == "pending") %}
           <form method="post" action="/publishing/now" class="order-hide" style="margin-top:.3rem"
-                {% if not (manual_posting is defined and manual_posting()) %}onsubmit="return confirm('Post draft {{ d.id }} to X now?')"{% endif %}>
+                {% if not (manual_posting is defined and manual_posting()) and not d.reply_to %}onsubmit="return confirm('Post draft {{ d.id }} to X now?')"{% endif %}>
             <input type="hidden" name="draft_id" value="{{ d.id }}">
             <input type="hidden" name="back" value="/status/approved">
-            <button type="submit" {% if not (manual_posting is defined and manual_posting()) and publish_running() %}disabled title="a publish is already running"{% endif %}>Publish now</button>
+            <button type="submit" {% if not (manual_posting is defined and manual_posting()) and not d.reply_to and publish_running() %}disabled title="a publish is already running"{% endif %}>Publish now</button>
           </form>
           {% endif %}
           {% if releasable.get(d.id) %}
@@ -62,7 +62,9 @@
           {% endif %}
         {% endif %}</td>
       <td>
-        <a href="/drafts/{{ d.id }}"><strong>{% if d.studio_piece %}Studio piece {{ d.studio_piece }}{% else %}{{ d.title or d.item_id }}{% endif %}</strong></a>
+        <a href="/drafts/{{ d.id }}"><strong>{% if d.studio_piece %}Studio piece {{ d.studio_piece }}{% elif d.reply_to %}Reply to @{{ d.reply_to.author }}{% else %}{{ d.title or d.item_id }}{% endif %}</strong></a>
+        {% if d.reply_to %}<span class="pill skip">reply</span>
+        {% if d.reply_to.text %}<div class="meta">On: “{{ d.reply_to.text[:160] }}{% if d.reply_to.text|length > 160 %}…{% endif %}”</div>{% endif %}{% endif %}
         {% set first = d.draft.thread[0] if d.draft.thread else "" %}
         <div class="meta">{{ first[:400] }}{% if first|length > 400 %}…{% endif %}</div>
         {% if d.rejection_reason %}<div class="meta over">{{ d.rejection_reason }}</div>{% endif %}

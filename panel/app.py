@@ -17,7 +17,8 @@ Routes owned here:
                         (auto_run_enabled / auto_run_times in ops/config.yaml)
   POST /publishing/now    post one approved draft now: with `posting: manual` (shipped) it
                           opens the copy-paste page, with `posting: api` it runs
-                          run_publish.py --live --now --draft
+                          run_publish.py --live --now --draft; a reply draft always opens
+                          the copy-paste page
   GET  /publishing/manual/{id}         the copy-paste page: each post's text and pictures
   GET  /publishing/manual/{id}/image/{k}  one picture of it
   POST /publishing/manual/{id}/done    "I posted it": log the draft as posted (no X call)
@@ -29,6 +30,8 @@ performance page) are included too; their buttons start the studio_now / studio_
 studio_scan_now / studio_learn_now steps through the same runs, the performance page's
 "add the post's link" goes through panel/publishing.py:add_head_link, and when a studio
 run ends, stopped or not, a piece it left mid-stage is marked interrupted (`_after_run`).
+The reply page (reply/web.py: /replies) is included the same way; its "I posted it" logs
+through panel/publishing.py:confirm_manual, like the copy-paste page's.
 
 The approval queue's routes are included unchanged (/queue, /drafts/..., /status/...),
 so the operator has one URL for the whole workflow. Everything else this app shows is
@@ -81,6 +84,7 @@ from panel.autorun import LEADER_SUFFIX, AutoRunner
 from panel.frozen import data_dir, step_interpreter
 from panel.jobs import Job, JobError, JobManager
 from publish import scheduler as publish_scheduler
+from reply import web as reply_web
 from score import editorial
 from studio import web as studio_web
 
@@ -520,7 +524,8 @@ async def publish_now(request: Request):
         draft_id = int(_first(form, "draft_id") or "")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="draft_id must be a number") from exc
-    if manual_posting():
+    if manual_posting() or publish_order_store.is_reply(draft_id):
+        # A reply is always posted by hand, under the post it answers.
         return RedirectResponse(f"/publishing/manual/{draft_id}", status_code=303)
     try:
         JOBS.start_publish_now(draft_id)
@@ -714,3 +719,25 @@ def _adopt_studio_routes() -> None:
 
 
 _adopt_studio_routes()
+
+
+def _adopt_reply_routes() -> None:
+    """The reply page (reply/web.py): "I posted it" logs through the copy-paste page's own
+    confirm_manual, and a later link through add_head_link."""
+    reply_web.configure(
+        queue_templates=QUEUE_TEMPLATES_DIR,
+        confirm=publish_order_store.confirm_manual,
+        add_link=publish_order_store.add_head_link,
+    )
+    env = reply_web.templates.env
+    env.globals["HAS_PANEL"] = True
+    env.globals["current_run"] = current_run
+    env.globals["current_runs"] = current_runs
+    env.globals["busy_steps"] = busy_steps
+    env.globals["publish_live"] = publish_live
+    env.globals["publish_running"] = publish_running
+    timeutil.install_jinja_filters(env)
+    app.include_router(reply_web.router)
+
+
+_adopt_reply_routes()

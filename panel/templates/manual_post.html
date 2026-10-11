@@ -8,7 +8,7 @@
   .copied { color: var(--ok, #1b5e20); font-weight: 600; margin-left: .3rem; }
 </style>
 <p><a href="/status/approved">&larr; back to approved</a></p>
-<h1>Post draft {{ d.draft_id }} on X</h1>
+<h1>{{ 'Reply' if d.reply_to else 'Post draft' }} {{ d.draft_id }} on X</h1>
 {% if error %}<p class="flash low">{{ error }}</p>{% endif %}
 
 {% if d.status %}
@@ -23,11 +23,23 @@
 </div>
 {% endif %}
 {% if d.blocked %}<p class="flash">Heads up: the publishing limits say wait ({{ d.blocked }}). You can still post it.</p>{% endif %}
+{% if d.reply_to %}
+<div class="mpost">
+  <strong>Replying to @{{ d.reply_to.author }}</strong>{% if d.reply_to.posted_at %} <span class="meta">posted {{ d.reply_to.posted_at|localtime }}</span>{% endif %}
+  <pre>{{ d.reply_to.text }}</pre>
+</div>
+<ol class="meta">
+  <li>Open <a href="{{ d.reply_to.url }}" target="_blank" rel="noopener noreferrer">the post on x.com</a> and press <em>Reply</em> under it.</li>
+  <li><em>Copy text</em> below and paste it into the reply box (X puts @{{ d.reply_to.author }} in front by itself).</li>
+  <li>Reply, come back here and press <em>I posted it</em> (the link to your reply is optional).</li>
+</ol>
+{% else %}
 <ol class="meta">
   <li>Open <a href="https://x.com/compose/post" target="_blank" rel="noopener noreferrer">x.com/compose/post</a>.</li>
   <li>For each post below: <em>Copy text</em> and paste it; then <em>Copy picture</em> and paste it into the same post (or drag the picture in).{% if d.posts|length > 1 %} Use the <strong>+</strong> in the composer to add the next post of the thread.{% endif %}</li>
   <li>Post it, come back here and press <em>I posted it</em>.</li>
 </ol>
+{% endif %}
 
 {% for p in d.posts %}
 <div class="mpost">
