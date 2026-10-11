@@ -72,7 +72,7 @@ def bundle_manifest(root: Path = REPO_ROOT) -> tuple[list[tuple[str, str]], list
     """(datas, hiddenimports) for the PyInstaller spec.
 
     datas are (source path, destination folder inside the bundle) pairs: the root
-    config.yaml, every step's own config.yaml, the template folders,
+    config.yaml, every step's own config.yaml, the template folders, the home-screen app's icons,
     the studio's brief, angles, playbook seed, fonts and reference pieces, and a copy of
     each CLI script so `ops/runner.py`'s existence check passes.
     """
@@ -81,6 +81,8 @@ def bundle_manifest(root: Path = REPO_ROOT) -> tuple[list[tuple[str, str]], list
         datas.append((str(cfg), cfg.parent.name))
     for pkg in ("approval_queue", "panel", "studio"):
         datas.append((str(root / pkg / "templates"), f"{pkg}/templates"))
+    # The home-screen app's manifest and icons.
+    datas.append((str(root / "approval_queue" / "static"), "approval_queue/static"))
     # The studio's brief, angle library, playbook seed, card fonts and reference pieces.
     for name in ("angles.yaml", "playbook.md"):
         datas.append((str(root / "studio" / name), "studio"))

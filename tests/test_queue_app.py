@@ -580,3 +580,32 @@ def test_cross_site_compares_the_sending_host_with_the_requests_own(host, sender
     assert bool(queue_app.cross_site("POST", headers)) is refused
     assert queue_app.cross_site("GET", headers) == ""
     assert queue_app.cross_site("HEAD", headers) == ""
+
+
+@pytest.mark.parametrize(
+    ("forwarded", "sender", "refused"),
+    [
+        ("my-pc.tail1234.ts.net", "https://my-pc.tail1234.ts.net", False),  # tailscale serve
+        ("my-pc.tail1234.ts.net, proxy", "https://my-pc.tail1234.ts.net/queue", False),
+        ("my-pc.tail1234.ts.net", "https://evil.example", True),
+        ("", "https://my-pc.tail1234.ts.net", True),
+    ],
+)
+def test_cross_site_accepts_the_host_a_local_proxy_forwards(forwarded, sender, refused):
+    headers = {"host": "127.0.0.1:8000", "x-forwarded-host": forwarded, "referer": sender}
+    assert bool(queue_app.cross_site("POST", headers)) is refused
+
+
+def test_the_home_screen_app_files_are_served(client):
+    r = client.get("/manifest.webmanifest")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/manifest+json")
+    manifest = r.json()
+    assert manifest["display"] == "standalone" and manifest["start_url"] == "/"
+    for icon in manifest["icons"]:
+        got = client.get(icon["src"])
+        assert got.status_code == 200 and got.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert client.get("/apple-touch-icon.png").headers["content-type"] == "image/png"
+    page = client.get("/queue").text
+    assert 'rel="manifest" href="/manifest.webmanifest"' in page
+    assert 'rel="apple-touch-icon"' in page

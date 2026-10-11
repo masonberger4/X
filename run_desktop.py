@@ -8,7 +8,7 @@ automatic-publishing loop (the publishing page's switch), which only ticks while
 window is open. --port 0
 (the default) picks a free port, so it never clashes with a run_app.py already on 8000;
 give a fixed --port
-and --host 0.0.0.0 to reach the same window from a phone (HOWTO part 8). --no-window
+(8000) to reach the same app from a phone through `tailscale serve` (HOWTO part 8). --no-window
 starts the server, prints its address and waits: for a headless check, or to open the
 page in a second browser as well.
 

@@ -469,3 +469,9 @@ def test_a_studio_button_pressed_during_a_session_says_what_is_running(monkeypat
         panel_app._start_studio(["studio_resume"])
     with pytest.raises(RuntimeError, match="studio_now is already running"):
         panel_app._start_studio(["studio_now"])
+
+
+def test_the_panel_serves_the_home_screen_app(client):
+    assert client.get("/manifest.webmanifest").status_code == 200
+    assert client.get("/app-icon-192.png").status_code == 200
+    assert 'rel="manifest"' in client.get("/").text
