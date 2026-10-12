@@ -27,6 +27,7 @@ import claude_cli
 from approval_queue import store as queue_store
 from studio import ingest, qa
 from studio import prompt as P
+from studio import steps as ST
 from studio import store as S
 from studio import topics as T
 from studio import voices as V
@@ -105,7 +106,14 @@ def _echo(ctx: Context, line: str) -> None:
 
 
 def _run_stage(
-    ctx: Context, piece: S.Piece, stage: str, prompt_text: str, *, first: bool
+    ctx: Context,
+    piece: S.Piece,
+    stage: str,
+    prompt_text: str,
+    *,
+    first: bool,
+    effort: str | None = None,
+    tools: list[str] | None = None,
 ) -> claude_cli.SessionResult:
     """One CLI invocation. Records a studio_runs row around it. A CLI that cannot run at
     all leaves the piece interrupted (so it can be resumed at once) and the error goes up,
@@ -117,7 +125,9 @@ def _run_stage(
     # fresh one, and the caller's copy of the piece predates that.
     piece = S.get_piece(ctx.conn, piece.id) or piece
     workspace = Path(piece.workspace)
-    run_id = S.start_run(ctx.conn, piece.id, stage)
+    effort = effort or piece.effort or None
+    tools = list(ctx.cfg["tools"]) if tools is None else tools
+    run_id = S.start_run(ctx.conn, piece.id, stage, model=piece.model, effort=effort or "")
     _write_log(workspace, f"=== {stage} ===")
     started = False
 
@@ -148,9 +158,9 @@ def _run_stage(
             # Every launch, resumes included: the CLI's record of the first launch's system
             # prompt lasts only until the conversation is compacted (claude_cli.run_session).
             system=ctx.system,
-            effort=piece.effort or None,
-            tools=ctx.cfg["tools"],
-            allowed=ctx.cfg["tools"],
+            effort=effort,
+            tools=tools,
+            allowed=tools,
             # No --add-dir: under --restricted a folder added is one the file tools can
             # write, and the reference pieces are read from the piece's own copy.
             flags=ctx.cfg["cli_flags"],
@@ -185,7 +195,7 @@ def _run_stage(
             outcome="session_lost",
             detail=f"the CLI no longer has session {piece.session_id}",
         )
-        return fresh_session(ctx, piece, stage, prompt_text)
+        return fresh_session(ctx, piece, stage, prompt_text, effort=effort, tools=tools)
     say(
         f"stage ended: {result.subtype or ('success' if result.ok else 'error')} after "
         f"{result.num_turns} turns"
@@ -243,7 +253,13 @@ def _run_cost(ctx: Context, piece: S.Piece, result: claude_cli.SessionResult) ->
 
 
 def fresh_session(
-    ctx: Context, piece: S.Piece, stage: str, prompt_text: str
+    ctx: Context,
+    piece: S.Piece,
+    stage: str,
+    prompt_text: str,
+    *,
+    effort: str | None = None,
+    tools: list[str] | None = None,
 ) -> claude_cli.SessionResult:
     """Run a stage in a new session because the CLI no longer has the piece's own (its
     stored conversation was cleaned up, `claude_cli.session_lost`). Every later --resume
@@ -265,7 +281,15 @@ def fresh_session(
     _echo(ctx, f"[piece {piece.id} {stage}] {note}")
     log.warning("piece %s: %s", piece.id, note)
     piece = S.get_piece(ctx.conn, piece.id) or piece
-    return _run_stage(ctx, piece, stage, P.fresh_session_prompt(stage, prompt_text), first=True)
+    return _run_stage(
+        ctx,
+        piece,
+        stage,
+        P.fresh_session_prompt(stage, prompt_text),
+        first=True,
+        effort=effort,
+        tools=tools,
+    )
 
 
 def _lost_sessions(piece: S.Piece) -> list[str]:
@@ -314,14 +338,22 @@ def research(
         offered = sorted({*_offered(piece), *(s.cluster_id for s in brief.shortlist)})
         S.update_piece(ctx.conn, piece.id, meta={"offered_stories": offered})
     write_earlier(Path(piece.workspace), brief)
-    text = P.research_prompt(brief)
-    if note.strip():  # the editor's words when pressing Resume
-        text += f"\n\nTHE EDITOR ADDS\n{note.strip()}"
-    if resumed_reason:
-        text = P.resume_prompt("research", resumed_reason, text)
-    result = _run_stage(ctx, piece, "research", text, first=first)
-    if not result.ok:
-        return _fail(ctx, piece, "research", result.detail, interrupted=_stopped_early(result))
+    plan = piece_steps(piece)
+    if plan is not None:
+        stopped = _research_steps(
+            ctx, piece, brief, plan, first=first, resumed_reason=resumed_reason, note=note
+        )
+        if stopped is not None:
+            return stopped
+    else:
+        text = P.research_prompt(brief)
+        if note.strip():  # the editor's words when pressing Resume
+            text += f"\n\nTHE EDITOR ADDS\n{note.strip()}"
+        if resumed_reason:
+            text = P.resume_prompt("research", resumed_reason, text)
+        result = _run_stage(ctx, piece, "research", text, first=first)
+        if not result.ok:
+            return _fail(ctx, piece, "research", result.detail, interrupted=_stopped_early(result))
     workspace = Path(piece.workspace)
     if not (workspace / P.FACTBASE_FILE).is_file():
         return _fail(
@@ -371,6 +403,163 @@ def research(
         S.update_piece(ctx.conn, piece.id, stage=S.STAGE_RESEARCH_READY)
         return Outcome(S.STAGE_RESEARCH_READY, "research done; waiting for the editor")
     return write(ctx, piece)
+
+
+# ---- the step-by-step piece (studio/config.yaml `steps:`, studio/steps.py) ------------
+
+RESEARCH_STEPS = ("plan", "gather", "factbase")
+CHECK_STEPS = ("claim_list", "claim_check", "settle")
+WRITE_STEPS = ("post", *CHECK_STEPS)
+# The plan step reads the reference pieces and may search briefly to understand the story;
+# the research itself is the gather step's.
+PLAN_TOOLS = ("Read", "Write", "Edit", "Glob", "Grep", "WebSearch")
+
+
+def piece_steps(piece: S.Piece) -> dict[str, Any] | None:
+    """The step settings the piece started with (runner.new_piece records them), or None
+    for a piece written as one session: one from before steps, or with steps off."""
+    steps = piece.meta.get("steps")
+    return steps if isinstance(steps, dict) and steps.get("enabled") else None
+
+
+def _session_tools(ctx: Context) -> list[str]:
+    """The writer's tools in a step-by-step piece: no Agent, so the legwork goes to the
+    app's steps on the models chosen for them, never to sub-agents of the writer's own."""
+    return [t for t in ctx.cfg["tools"] if t != "Agent"]
+
+
+def _steps_done(piece: S.Piece) -> set[str]:
+    done = piece.meta.get("steps_done")
+    return {str(d) for d in done} if isinstance(done, list) else set()
+
+
+def _mark_step(ctx: Context, piece: S.Piece, step: str) -> None:
+    current = S.get_piece(ctx.conn, piece.id) or piece
+    S.update_piece(ctx.conn, piece.id, meta={"steps_done": sorted(_steps_done(current) | {step})})
+
+
+def _reset_steps(ctx: Context, piece: S.Piece, steps: tuple[str, ...]) -> set[str]:
+    """Forget that `steps` ran (a fresh research, write or revision runs them again).
+    Returns what is still recorded as done."""
+    current = S.get_piece(ctx.conn, piece.id) or piece
+    left = _steps_done(current) - set(steps)
+    S.update_piece(ctx.conn, piece.id, meta={"steps_done": sorted(left)})
+    return left
+
+
+def _research_steps(
+    ctx: Context,
+    piece: S.Piece,
+    brief: P.Brief,
+    plan: dict[str, Any],
+    *,
+    first: bool,
+    resumed_reason: str,
+    note: str,
+) -> Outcome | None:
+    """Research as steps: the writer's plan, the app's gather calls, the writer's fact base.
+    None when the fact base step finished (the caller checks its files); an Outcome when a
+    step stopped the piece. A resumed research skips the steps already done."""
+    done = _steps_done(piece) if resumed_reason else _reset_steps(ctx, piece, RESEARCH_STEPS)
+    workspace = Path(piece.workspace)
+    extra = f"\n\nTHE EDITOR ADDS\n{note.strip()}" if note.strip() else ""
+    if "plan" not in done or not ST.read_plan(workspace):
+        text = P.plan_prompt(brief) + extra
+        if resumed_reason:
+            text = P.resume_prompt("research", resumed_reason, text)
+        result = _run_stage(
+            ctx,
+            piece,
+            "plan",
+            text,
+            first=first,
+            effort=plan["plan"]["effort"],
+            tools=[t for t in PLAN_TOOLS if t in ctx.cfg["tools"]],
+        )
+        if not result.ok:
+            return _fail(ctx, piece, "research", result.detail, interrupted=_stopped_early(result))
+        if not ST.read_plan(workspace):
+            return _fail(
+                ctx,
+                piece,
+                "research",
+                f"the plan step wrote no questions in {P.PLAN_FILE}; Resume to plan again",
+                interrupted=True,
+            )
+        _mark_step(ctx, piece, "plan")
+        first = False
+        resumed_reason = ""  # the steps after it start fresh
+    questions = ST.read_plan(workspace)
+    answered, missing = ST.gather(
+        ctx, piece, plan, questions, today=brief.today, topic=piece.topic or piece.title or ""
+    )
+    _mark_step(ctx, piece, "gather")
+    text = P.factbase_prompt(brief, answered, missing) + extra
+    if resumed_reason:
+        text = P.resume_prompt("research", resumed_reason, text)
+    result = _run_stage(
+        ctx,
+        piece,
+        "factbase",
+        text,
+        first=first,
+        effort=plan["factbase"]["effort"],
+        tools=_session_tools(ctx),
+    )
+    if not result.ok:
+        return _fail(ctx, piece, "research", result.detail, interrupted=_stopped_early(result))
+    _mark_step(ctx, piece, "factbase")
+    return None
+
+
+def _cold_check(
+    ctx: Context, piece: S.Piece, plan: dict[str, Any], today: str, *, stage: str = "write"
+) -> Outcome | None:
+    """The cold fact-check as steps: the claim list and the claim checks (the app's calls),
+    then the writer settles what they flagged and writes factcheck.md. With nothing flagged
+    the app writes the log itself. None when done; an Outcome when a step stopped the piece
+    (interrupted, so Resume carries on from the step that stopped)."""
+    piece = S.get_piece(ctx.conn, piece.id) or piece
+    workspace = Path(piece.workspace)
+    done = _steps_done(piece)
+    if "claim_list" in done and ST.load_claims(workspace):
+        claims = ST.load_claims(workspace)
+    else:
+        claims, why = ST.claim_list(ctx, piece, plan)
+        if not claims:
+            return _fail(ctx, piece, stage, f"the claim list step failed: {why}", interrupted=True)
+        _mark_step(ctx, piece, "claim_list")
+    if "claim_check" in done and ST.load_checks(workspace):
+        results = ST.load_checks(workspace)
+    else:
+        results = ST.claim_check(ctx, piece, plan, claims, today=today)
+        _mark_step(ctx, piece, "claim_check")
+    if "settle" in done:
+        return None
+    flagged = ST.flagged(results)
+    if not flagged:
+        ST.write_clean_factcheck(workspace, results)
+        _mark_step(ctx, piece, "settle")
+        return None
+    text = P.settle_prompt(
+        flagged,
+        checked=len(results),
+        confirmed=len(results) - len(flagged),
+        unchecked=sum(1 for r in flagged if r.get("verdict") == ST.UNCHECKED),
+    )
+    result = _run_stage(
+        ctx,
+        piece,
+        "settle",
+        text,
+        first=False,
+        effort=plan["settle"]["effort"],
+        tools=_session_tools(ctx),
+    )
+    if not result.ok:
+        return _fail(ctx, piece, stage, result.detail, interrupted=_stopped_early(result))
+    _mark_step(ctx, piece, "settle")
+    return None
 
 
 def write_earlier(workspace: Path, brief: P.Brief) -> None:
@@ -431,6 +620,29 @@ def write(ctx: Context, piece: S.Piece, note: str = "", *, resumed_reason: str =
     piece = S.get_piece(ctx.conn, piece.id) or piece
     brief = ctx.brief_for(piece)
     write_earlier(Path(piece.workspace), brief)
+    plan = piece_steps(piece)
+    if plan is not None:
+        done = _steps_done(piece) if resumed_reason else _reset_steps(ctx, piece, WRITE_STEPS)
+        if "post" not in done:
+            text = P.write_prompt(brief, note, by_app=True)
+            if resumed_reason:
+                text = P.resume_prompt("write", resumed_reason, text)
+            result = _run_stage(
+                ctx,
+                piece,
+                "post",
+                text,
+                first=False,
+                effort=plan["post"]["effort"],
+                tools=_session_tools(ctx),
+            )
+            if not result.ok:
+                return _fail(ctx, piece, "write", result.detail, interrupted=_stopped_early(result))
+            _mark_step(ctx, piece, "post")
+        stopped = _cold_check(ctx, piece, plan, brief.today)
+        if stopped is not None:
+            return stopped
+        return polish(ctx, piece)
     text = P.write_prompt(brief, note)
     if resumed_reason:
         text = P.resume_prompt("write", resumed_reason, text)
@@ -465,15 +677,30 @@ def revise(ctx: Context, piece: S.Piece, note: str) -> Outcome:
         request_note="",
         meta={"revise_note": note},
     )
+    plan = piece_steps(piece)
     text = P.revise_prompt(
         note,
         edited_posts=hand.get("files") or [],
         dropped_cards=[_card_line(c) for c in (edits.dropped if edits else [])],
         voice=V.given(piece.voice, piece.meta.get("voice")),
+        by_app=plan is not None,
     )
-    result = _run_stage(ctx, piece, "revise", text, first=False)
+    result = _run_stage(
+        ctx,
+        piece,
+        "revise",
+        text,
+        first=False,
+        effort=plan["revise"]["effort"] if plan else None,
+        tools=_session_tools(ctx) if plan else None,
+    )
     if not result.ok:
         return _fail(ctx, piece, "revise", result.detail, interrupted=_stopped_early(result))
+    if plan is not None:
+        _reset_steps(ctx, piece, CHECK_STEPS)
+        stopped = _cold_check(ctx, piece, plan, ctx.brief_for(piece).today, stage="revise")
+        if stopped is not None:
+            return stopped
     return polish(ctx, piece)
 
 
@@ -584,7 +811,16 @@ def polish(ctx: Context, piece: S.Piece) -> Outcome:
             pictures=report.pictures,
             review_only=review_only,
         )
-        result = _run_stage(ctx, piece, "polish", text, first=False)
+        plan = piece_steps(piece)
+        result = _run_stage(
+            ctx,
+            piece,
+            "polish",
+            text,
+            first=False,
+            effort=plan["polish"]["effort"] if plan else None,
+            tools=_session_tools(ctx) if plan else None,
+        )
         if not result.ok:
             return _fail(ctx, piece, "polish", result.detail, interrupted=_stopped_early(result))
         reviewed = True

@@ -1110,3 +1110,16 @@ def test_a_piece_page_names_the_voice_it_was_given(client, sconn):
     assert "Reads the footnotes first." in body
     plain = make_piece(sconn, stage=S.STAGE_READY)
     assert "voice <strong>" not in client.get(f"/studio/{plain.id}").text
+
+
+def test_a_piece_page_shows_each_steps_model_effort_and_cost(client, sconn, tmp_path):
+    from studio.settings import load_studio_config, piece_steps
+
+    steps = piece_steps(load_studio_config())
+    piece = make_piece(sconn, stage=S.STAGE_READY, workspace=tmp_path, meta={"steps": steps})
+    run = S.start_run(sconn, piece.id, "claim_check", model="claude-sonnet-5-5", effort="medium")
+    S.finish_run(sconn, run, outcome="ok", turns=7, cost_usd=1.25, duration_ms=120_000)
+    body = client.get(f"/studio/{piece.id}").text
+    assert "Step settings" in body
+    assert steps["gather_light"]["model"] in body
+    assert "claude-sonnet-5-5" in body and "$1.25" in body

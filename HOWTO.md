@@ -665,14 +665,40 @@ The studio is how the account's best posts get made now. Each piece is ONE Claud
 Code session on Opus 5.5 at max effort, the same way the Merck SPR2015, Summit
 catalyst map and next-gen CTLA-4 posts were made by hand in a chat. The session
 researches the topic and writes a fact base with every source. It then writes a
-long post (or a thread of long posts), designs the cards, and runs its own cold
-fact-check through a fresh sub-agent. The app draws the cards, counts characters
+long post (or a thread of long posts), designs the cards, and a cold fact-check
+checks every claim. The app draws the cards, counts characters
 the way X does, checks the few lines that are never crossed (no investment or
 medical advice, no links) and hands any problem back to the same session. The
 finished piece waits in the pending queue as "Studio piece N" with its cards
 attached. Cards are checked too: text cut off, overlapping or off the edge, and big
 empty areas, all handed back to the session to fix. Nothing posts from here: approving and "Publish now" work as in part 5,
 and long posts need X Premium.
+
+A piece is made in **steps**, each on the model and effort you choose in
+`steps:` in `studio\config.yaml` (shipped: Opus 5.5 writes, Sonnet 5.5 does the
+research and checks, Haiku 4.5 lists the claims):
+
+| Step | Who | Shipped |
+|---|---|---|
+| plan | Opus session: 10-25 research questions in `research_plan.json` | high |
+| gather_light | the app, one call per lookup, numbers or catalyst question | Sonnet 5.5 medium, 12 turns |
+| gather_deep | the app, one call per trial or deal question | Sonnet 5.5 medium, 12 turns |
+| factbase | Opus session: reads `gather.md`, checks the key sources, writes the fact base | max |
+| post | Opus session: the post, the cards, piece.json | max |
+| claim_list | the app: every checkable claim of the post and cards | Haiku 4.5 |
+| claim_check | the app: 10 claims per call, checked on the web | Sonnet 5.5 medium |
+| settle | Opus session: fixes what the checks flagged, writes factcheck.md | high |
+| polish | Opus session: the app's checks and the card review | high |
+
+The app runs its calls side by side (`parallel: 6`), each with a turn cap and a
+time limit, so no step can run on for hours. Every piece keeps the settings it
+started with, and its studio page shows a **Step settings** table and, per run,
+the model, effort, minutes and cost. What each app call brought back stays in
+the piece's folder (`steps\gather\q01.json`, `gather.md`, `claim_checks.md`),
+so a wrong fact can be traced to the step that brought it in. If a step hurts
+quality, put it back on the writer's model (blank `model:`) or raise its effort,
+one step at a time, and compare. `enabled: false` writes the whole piece in one
+Opus session again, with its own fact-checker.
 
 1. Nothing new to install. The session runs through the Claude Code you set up
    in part 1, and the cards are drawn by Microsoft Edge, which comes with
@@ -901,6 +927,7 @@ and long posts need X Premium.
    python run_studio.py --list
    python run_studio.py --topic "next-gen CTLA-4" --checkpoint
    python run_studio.py --story 123 --angle readout_reaction
+   python run_studio.py --topic "BCMA's next round" --angle contrarian_take --voice desk_note
    python run_studio.py --now --no-checkpoint
    python run_studio.py --resume-only
    python run_studio.py --dry-run
@@ -912,7 +939,9 @@ and long posts need X Premium.
    python run_studio.py --learn-now
    python run_studio.py --learn --dry-run
    ```
-   `--list` shows recent pieces and queued topics; `--dry-run` prints the
+   `--angle` and `--voice` (a key from the playbook's Voices section, such as
+   `desk_note`) fix the angle and the voice instead of leaving them to the session
+   and the draw. `--list` shows recent pieces and queued topics; `--dry-run` prints the
    research prompt the next piece would get and starts nothing; plain
    `run_studio.py` is the automatic run. `--scan` runs the radar's scan when one
    is due (once a day), `--scan-now` runs it now, and `--scan --dry-run` prints

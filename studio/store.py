@@ -204,10 +204,14 @@ MANUAL_METRICS = ("impressions", "likes", "reposts", "replies", "quotes", "bookm
 # with it, so the item finds the story again (runner.follow_merges).
 # voice: the key of the playbook voice the piece is written in (studio/voices.py), '' for
 # a piece from before voices or with voices off.
+# model, effort: what one run ran on (a step-by-step piece's steps differ; studio/steps.py),
+# '' for a run from before they were recorded.
 _MIGRATIONS = (
     ("studio_pieces", "story_item", "TEXT NOT NULL DEFAULT ''"),
     ("studio_topics", "story_item", "TEXT NOT NULL DEFAULT ''"),
     ("studio_pieces", "voice", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_runs", "model", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_runs", "effort", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -520,10 +524,13 @@ def repoint_story(conn: sqlite3.Connection, old: int, new: int) -> int:
 # --- runs -----------------------------------------------------------------------------
 
 
-def start_run(conn: sqlite3.Connection, piece_id: int, stage: str) -> int:
+def start_run(
+    conn: sqlite3.Connection, piece_id: int, stage: str, *, model: str = "", effort: str = ""
+) -> int:
     cur = conn.execute(
-        "INSERT INTO studio_runs (piece_id, stage, started_at) VALUES (?, ?, ?)",
-        (piece_id, stage, _now()),
+        "INSERT INTO studio_runs (piece_id, stage, started_at, model, effort) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (piece_id, stage, _now(), model, effort),
     )
     conn.commit()
     return int(cur.lastrowid)
@@ -559,6 +566,8 @@ class RunRow:
     turns: int
     cost_usd: float
     duration_ms: int
+    model: str = ""
+    effort: str = ""
 
 
 def list_runs(conn: sqlite3.Connection, piece_id: int) -> list[RunRow]:
@@ -577,6 +586,8 @@ def list_runs(conn: sqlite3.Connection, piece_id: int) -> list[RunRow]:
             turns=int(r["turns"]),
             cost_usd=float(r["cost_usd"]),
             duration_ms=int(r["duration_ms"]),
+            model=r["model"],
+            effort=r["effort"],
         )
         for r in rows
     ]

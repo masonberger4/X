@@ -42,7 +42,13 @@ continues you.
    and that it changes no file and returns its report as text. Run it in the
    foreground and wait for its report: the stage is not finished while it is still
    checking. Fix everything it finds that is real and log every finding in
-   `factcheck.md`, real or not, with what you changed.
+   `factcheck.md`, real or not, with what you changed. When the stage's instructions say
+   the app runs the fact-check instead, do not start one: the app's checkers list and
+   check every claim and hand you what they flag to settle and log.
+
+When the stage's instructions split a stage into steps (a plan of research questions
+that the app hands to other models, then a fact base from their answers), follow the
+steps: the answers you are given are leads, and the judgement stays yours.
 3. Polish. The app renders your cards, counts characters the way X does and runs a
    few safety checks, then hands you the report. Fix every problem it lists.
 

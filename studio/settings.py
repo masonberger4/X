@@ -54,6 +54,48 @@ DEFAULTS: dict[str, Any] = {
         "max_cards_total": 4,
     },
     "render": {"browser": "", "timeout_seconds": 60},
+    # The piece's steps (studio/steps.py): the effort of each step the writer's session
+    # runs, and the model, effort, tools and limits of each step the app runs on its own.
+    # Blank effort = the writer's `effort:`; blank model = the writer's `model:`.
+    "steps": {
+        "enabled": False,
+        "parallel": 6,
+        "plan": {"effort": ""},
+        "factbase": {"effort": ""},
+        "post": {"effort": ""},
+        "settle": {"effort": ""},
+        "polish": {"effort": ""},
+        "revise": {"effort": ""},
+        "gather_light": {
+            "model": "",
+            "effort": "",
+            "tools": ["WebSearch", "WebFetch"],
+            "max_turns": 8,
+            "timeout_minutes": 15,
+        },
+        "gather_deep": {
+            "model": "",
+            "effort": "",
+            "tools": ["WebSearch", "WebFetch"],
+            "max_turns": 12,
+            "timeout_minutes": 20,
+        },
+        "claim_list": {
+            "model": "",
+            "effort": "",
+            "tools": [],
+            "max_turns": 3,
+            "timeout_minutes": 10,
+        },
+        "claim_check": {
+            "model": "",
+            "effort": "",
+            "tools": ["WebSearch", "WebFetch"],
+            "max_turns": 15,
+            "timeout_minutes": 20,
+            "batch": 10,
+        },
+    },
     "radar": {
         "enabled": True,
         "scan_every_hours": 20,
@@ -117,7 +159,9 @@ def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
         raise ValueError("studio/config.yaml must be a mapping")
     cfg = copy.deepcopy(DEFAULTS)
     for key, value in raw.items():
-        if key in _SECTIONS:
+        if key == "steps":
+            cfg[key] = _merge_steps(cfg[key], value or {})
+        elif key in _SECTIONS:
             cfg[key] = {**cfg[key], **(value or {})}
         else:
             cfg[key] = value
@@ -144,6 +188,54 @@ def load_studio_config(path: str | Path | None = None) -> dict[str, Any]:
     learn["model"] = str(learn.get("model") or "").strip() or cfg["model"]
     learn["effort"] = str(learn.get("effort") or "").strip() or str(cfg.get("effort") or "")
     return cfg
+
+
+# The steps the writer's own session runs (one model all the way: only the effort can
+# differ) and the steps the app runs as calls of their own (any model).
+SESSION_STEPS = ("plan", "factbase", "post", "settle", "polish", "revise")
+APP_STEPS = ("gather_light", "gather_deep", "claim_list", "claim_check")
+
+
+def _merge_steps(base: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("studio/config.yaml steps: must be a mapping")
+    out = copy.deepcopy(base)
+    for key, value in raw.items():
+        if isinstance(out.get(key), dict):
+            if not isinstance(value, dict):
+                raise ValueError(f"studio/config.yaml steps.{key} must be a mapping")
+            out[key] = {**out[key], **value}
+        else:
+            out[key] = value
+    return out
+
+
+def piece_steps(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The step settings a new piece is written with, every blank filled in from the
+    writer's model and effort. Recorded in the piece's meta when it starts (runner.new_piece),
+    so a piece keeps the settings it began with and every draft can be traced to the model
+    and effort of each step that made it."""
+    steps = cfg.get("steps") or {}
+    model = str(cfg.get("model") or "")
+    effort = str(cfg.get("effort") or "")
+    out: dict[str, Any] = {
+        "enabled": bool(steps.get("enabled")),
+        "parallel": max(1, int(steps.get("parallel") or 1)),
+    }
+    for name in SESSION_STEPS:
+        own = steps.get(name) or {}
+        out[name] = {"model": model, "effort": str(own.get("effort") or "").strip() or effort}
+    for name in APP_STEPS:
+        own = dict(steps.get(name) or {})
+        own["model"] = str(own.get("model") or "").strip() or model
+        own["effort"] = str(own.get("effort") or "").strip()
+        own["tools"] = [str(t) for t in (own.get("tools") or [])]
+        own["max_turns"] = max(0, int(own.get("max_turns") or 0))
+        own["timeout_minutes"] = max(0.0, float(own.get("timeout_minutes") or 0))
+        if name == "claim_check":
+            own["batch"] = max(1, int(own.get("batch") or 10))
+        out[name] = own
+    return out
 
 
 def stage_timeout(cfg: dict[str, Any], stage: str) -> float | None:

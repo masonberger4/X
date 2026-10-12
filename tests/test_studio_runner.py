@@ -85,6 +85,7 @@ def sconn(conn):
 @pytest.fixture
 def cfg() -> dict[str, Any]:
     c = load_studio_config()
+    c["steps"]["enabled"] = False  # one session per piece; the steps are tested on their own
     c["auto"] = {"enabled": True, "max_new_per_day": 1, "min_hours_between": 6, "checkpoint": False}
     c["manual"] = {"checkpoint": True}
     c["variety"] = {"avoid_recent_angles": 3, "avoid_recent_hooks": 2, "recent_pieces_shown": 8}
@@ -784,6 +785,22 @@ def test_a_new_piece_keeps_a_known_angle_and_refuses_an_unknown_one(sconn, cfg, 
         )
     assert [p.id for p in S.list_pieces(sconn)] == [piece.id]
     assert [p.name for p in (tmp_path / "studio_pieces").iterdir()] == [Path(piece.workspace).name]
+
+
+def test_a_new_piece_keeps_a_named_voice_and_refuses_an_unknown_one(sconn, cfg, tmp_path):
+    """--voice: the editor names the voice instead of the draw, recorded as assign_voice
+    records a drawn one, so every stage writes in it."""
+    piece = runner.new_piece(
+        sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, voice="desk_note", checkpoint=True
+    )
+    assert piece.voice == "desk_note"
+    assert piece.meta["voice"]["key"] == "desk_note"
+    assert piece.meta["voice"]["drawn"] == "named"
+    with pytest.raises(ValueError, match="unknown voice 'no_such_voice'"):
+        runner.new_piece(
+            sconn, cfg, origin=S.ORIGIN_MANUAL, topic="x", voice="no_such_voice", checkpoint=True
+        )
+    assert [p.id for p in S.list_pieces(sconn)] == [piece.id]
 
 
 # ---- build_brief ---------------------------------------------------------------------
@@ -1833,6 +1850,7 @@ RUN_DEFAULTS = dict(
     topic="",
     story=None,
     angle="",
+    voice="",
     checkpoint=None,
     dry_run=False,
 )
@@ -1847,6 +1865,10 @@ RUN_DEFAULTS = dict(
         (["--topic", TOPIC], {"now": True, "topic": TOPIC}),
         (["--story", "123"], {"now": True, "story": 123}),
         (["--now", "--angle", "deal_decoder"], {"now": True, "angle": "deal_decoder"}),
+        (
+            ["--topic", TOPIC, "--voice", "desk_note"],
+            {"now": True, "topic": TOPIC, "voice": "desk_note"},
+        ),
         (["--checkpoint"], {"checkpoint": True}),
         (["--no-checkpoint"], {"checkpoint": False}),
         (["--dry-run"], {"dry_run": True}),
@@ -2155,3 +2177,13 @@ def test_a_dry_run_shows_the_voice_the_next_piece_may_get_and_records_none(rig, 
     out = capsys.readouterr().out
     assert "THE VOICE THIS PIECE WILL BE WRITTEN IN" in out
     assert rig.pieces() == []
+
+
+def test_a_new_piece_keeps_the_step_settings_it_started_with(sconn, cfg):
+    from studio.settings import piece_steps
+
+    cfg["steps"]["enabled"] = True
+    piece = runner.new_piece(sconn, cfg, origin=S.ORIGIN_MANUAL, topic=TOPIC, checkpoint=True)
+    assert piece.meta["steps"] == piece_steps(cfg)
+    cfg["steps"]["claim_check"]["model"] = "changed-later"
+    assert S.get_piece(sconn, piece.id).meta["steps"]["claim_check"]["model"] != "changed-later"

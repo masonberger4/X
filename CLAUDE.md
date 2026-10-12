@@ -421,7 +421,25 @@ hand under the post it answers.
   the reference pieces as the piece's own copy, `<piece>/reference/`
   (`session.copy_reference`, made when a stage starts and none is there; never an
   `--add-dir`, which --restricted would make writable, so no session can change
-  `studio/exemplars`); `tools` and the isolation `cli_flags` (`--safe-mode
+  `studio/exemplars`); the step-by-step piece (`studio/config.yaml` `steps:`, `settings.piece_steps`,
+  recorded in the piece's meta `steps` by `runner.new_piece` so a piece keeps the settings
+  it started with; a piece without them, or with `enabled: false`, is one session as
+  below): the writer's session runs `plan` (`prompt.plan_prompt`, `research_plan.json`,
+  `session.PLAN_TOOLS`), `factbase` (`prompt.factbase_prompt`, from `gather.md`), `post`
+  (`write_prompt(by_app=True)`), `settle` (`prompt.settle_prompt`, the flagged claims) and
+  polish/revise, each at its own `effort` and never with the Agent tool
+  (`session._session_tools`); between them `studio/steps.py` runs the app's own calls
+  (`run_calls`: fresh `run_session`s from `<piece>/steps/<step>/`, no system prompt, the
+  step's model, effort, tools, `max_turns` and time limit, `parallel` at once in a thread
+  pool, the database touched only from the calling thread, each a `studio_runs` row with
+  its `model`/`effort`, guarded migration): `gather` (`gather_light` for lookup, numbers
+  and catalyst questions, `gather_deep` for trial and deal; `read_plan` cleans the plan,
+  answers in `steps/gather/<id>.json` and `gather.md`, a resumed research asks only what
+  is still open), `claim_list` and `claim_check` (`claim_checks.md`; nothing flagged and
+  the app writes factcheck.md itself, `write_clean_factcheck`). `meta.steps_done` lets a
+  Resume carry on from the step that stopped (`session._research_steps`,
+  `session._cold_check`). `run_studio.py --voice KEY` names a playbook voice for a piece started
+  by hand (`runner.new_piece(voice=)`, recorded as drawn "named"); `tools` and the isolation `cli_flags` (`--safe-mode
   --restricted --permission-mode dontAsk`) from `studio/config.yaml`; API keys stripped by
   `cli_env`). Stages (`studio/session.py`): research (`factbase.md`, `research.json`; its
   `story_id`, an int or digit string, sets the piece's cluster only when it is in
@@ -708,7 +726,9 @@ deploy/   crontab.example, pipeline.service, pipeline.timer, pipeline-studio.ser
 studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, variety),
           brief/ (session.md, voice.md, cards.md: the appended system prompt), playbook.md
           (seed), exemplars/ (reference pieces), fonts/, prompt.py (pure stage prompts),
-          session.py (stages), runner.py (one run: stale pieces, requests, new piece),
+          session.py (stages), steps.py (the app's own calls of a step-by-step piece:
+          gather, claim list, claim checks), runner.py (one run: stale pieces, requests,
+          new piece),
           qa.py + xcount.py + safety.py (the checks), render.py (cards via headless browser),
           ingest.py (into the queue), topics.py (feed stories), store.py (studio_pieces,
           studio_runs, studio_topics, studio_scans, studio_radar_topics,
