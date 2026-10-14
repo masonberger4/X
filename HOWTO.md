@@ -747,12 +747,17 @@ Opus session again, with its own fact-checker.
    ("next-gen CTLA-4", "Merck's KRAS G12D deal", "what ESMO week means for
    $SMMT"), pick an angle or leave it to the session, and press **Write it**. On
    the **Feed** page, **Write a studio piece** under a story does the same with
-   that story. A piece you start stops after research by default (the tick box)
-   so you can read the fact base first. If the feed merges that story with another
+   that story. A piece you start runs straight through, research, writing, the
+   fact-check and polish, until it is a pending draft in the queue; every step's
+   output (the fact base, the research answers, the claim checks) is still saved
+   and shown on the piece's page. Tick **stop after research** only when you want
+   to read the fact base before it writes (`manual: checkpoint` in
+   `studio\config.yaml` sets the default, off as shipped). If the feed merges that story with another
    before the studio gets to it, the piece follows it to the merged story. The run
    shows on the runs page like any other; its Stop button ends it, and the piece
    shows `interrupted` with Resume and Discard as soon as the run has stopped.
-4. The research checkpoint. When a piece says **read the research**, open it:
+4. The research checkpoint, only for a piece you ticked to stop after research.
+   When a piece says **read the research**, open it:
    the fact base is there with every source marked opened or seen in search
    results only, the X handles it verified, the corrections it made and the
    questions it could not answer. Type any direction (the angle you want, what to

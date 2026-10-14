@@ -1090,15 +1090,15 @@ def test_the_feed_offers_a_studio_piece_for_each_story(client, conn, started):
     body = client.get("/feed?all=1").text
     form = body.split('action="/studio/topics"')[1].split("</form>")[0]
     assert f'<input type="hidden" name="story" value="{cid}">' in form
-    assert '<input type="hidden" name="checkpoint" value="1">' in form
+    assert 'name="checkpoint"' not in form
     assert ">Write a studio piece</button>" in form
 
-    # pressing it queues the story, to stop after research, and starts the studio
-    r = client.post("/studio/topics", data={"story": str(cid), "checkpoint": "1"})
+    # pressing it queues the story, to run through to a pending draft, and starts the studio
+    r = client.post("/studio/topics", data={"story": str(cid)})
     assert flash_of(r) == started_message(1, "studio_now")
     S.ensure_tables(conn)
     [topic] = S.queued_topics(conn)
-    assert (topic.topic, topic.cluster_id, topic.checkpoint) == ("", cid, True)
+    assert (topic.topic, topic.cluster_id, topic.checkpoint) == ("", cid, False)
     assert started == [["studio_now"]]
 
 

@@ -390,7 +390,7 @@ def test_each_feed_story_offers_a_studio_piece(client, conn):
     body = client.get("/feed").text
     form = body.split('<form method="post" action="/studio/topics"')[1].split("</form>")[0]
     assert f'name="story" value="{cluster_id}"' in form
-    assert 'name="checkpoint" value="1"' in form  # it stops after research for the editor
+    assert 'name="checkpoint"' not in form  # it runs through to a pending draft
     assert "Write a studio piece" in form
 
 

@@ -31,7 +31,7 @@ DEFAULTS: dict[str, Any] = {
         "min_hours_between": 6,
         "checkpoint": False,
     },
-    "manual": {"checkpoint": True},
+    "manual": {"checkpoint": False},
     "workspace_dir": "studio_pieces",
     "timeouts": {"research": 150, "write": 180, "polish": 60, "revise": 120},
     "max_turns": {"research": 0, "write": 0, "polish": 40, "revise": 0},

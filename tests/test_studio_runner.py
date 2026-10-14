@@ -1196,7 +1196,11 @@ def test_a_queued_topic_comes_next_and_is_claimed_by_its_piece(rig, sconn, cfg):
     cfg["auto"]["enabled"] = False  # a human's topic is not held back by the automatic limits
     story = seed_item(sconn, "s1", total=40)
     first = S.queue_topic(
-        sconn, topic="Merck's KRAS G12D deal", cluster_id=story, angle="deal_decoder"
+        sconn,
+        topic="Merck's KRAS G12D deal",
+        cluster_id=story,
+        angle="deal_decoder",
+        checkpoint=True,
     )
     second = S.queue_topic(sconn, topic="later", checkpoint=False)
 
@@ -1473,7 +1477,7 @@ def _hold_slots(rig, slots):
 
 def test_a_run_finds_every_writing_slot_taken_and_does_nothing(rig, sconn, cfg):
     stuck = make_piece(sconn, stage=S.STAGE_WRITING)
-    S.queue_topic(sconn, topic="a queued topic")
+    S.queue_topic(sconn, topic="a queued topic", checkpoint=True)
     n = runner.max_parallel(cfg)
     assert n == 3  # shipped
     held = _hold_slots(rig, range(1, n + 1))
