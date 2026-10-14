@@ -31,9 +31,12 @@ auto:
   # studio page resumes the same session with your notes.
   checkpoint: false
 
-# The default for a piece started from the panel or with --topic.
+# The default for a piece started from the panel or with --topic: off, so a started piece
+# runs research, writing, the fact-check and polish straight through to a pending draft.
+# Each step still saves its output in the piece's folder (factbase.md, gather.md, ...),
+# readable from the studio page; tick "stop after research" on a piece to pause it.
 manual:
-  checkpoint: true
+  checkpoint: false
 
 # Where each piece's files live: the fact base, the posts, the cards, the session log.
 # Relative to the data folder (the repo, or the folder Pipeline.exe sits in).

@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS studio_topics (
     cluster_id INTEGER,
     story_item TEXT NOT NULL DEFAULT '',
     angle      TEXT NOT NULL DEFAULT '',
-    checkpoint INTEGER NOT NULL DEFAULT 1,
+    checkpoint INTEGER NOT NULL DEFAULT 0,
     piece_id   INTEGER
 );
 
@@ -636,7 +636,7 @@ def queue_topic(
     topic: str = "",
     cluster_id: int | None = None,
     angle: str = "",
-    checkpoint: bool = True,
+    checkpoint: bool = False,
     story_item: str = "",
 ) -> int:
     if not topic.strip() and cluster_id is None:

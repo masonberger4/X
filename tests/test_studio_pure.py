@@ -1589,3 +1589,18 @@ def test_a_claim_check_gets_the_post_for_context_and_asks_for_whole_statements()
     assert "7. (post 1) HR 0.40" in check
     assert "THE POST THEY COME FROM" in check and "the post" in check
     assert "never a bare figure" in P.claim_list_prompt(["p"], [])
+
+
+def test_a_started_piece_runs_through_to_a_pending_draft_as_shipped():
+    """No piece stops after research unless the editor ticks the box: neither the shipped
+    config, the defaults, nor a queued topic's default asks for the checkpoint."""
+    import inspect
+
+    from studio import settings
+    from studio import store as studio_store
+
+    assert settings.load_studio_config()["manual"]["checkpoint"] is False
+    assert settings.load_studio_config()["auto"]["checkpoint"] is False
+    assert settings.DEFAULTS["manual"]["checkpoint"] is False
+    default = inspect.signature(studio_store.queue_topic).parameters["checkpoint"].default
+    assert default is False

@@ -29,7 +29,7 @@ pieces already posted: their numbers, what has done well, and the playbook's his
         {% for key, a in angles.items() %}<option value="{{ key }}">{{ a.name }}</option>{% endfor %}
       </select>
     </label>
-    <label><input type="checkbox" name="checkpoint" value="1" {% if cfg.manual.checkpoint %}checked{% endif %}> stop after research so I can read the fact base</label>
+    <label><input type="checkbox" name="checkpoint" value="1" {% if cfg.manual.checkpoint %}checked{% endif %}> stop after research so I can read the fact base (off: it runs through to a pending draft)</label>
   </p>
   <p><button type="submit">Write it</button></p>
 </form>

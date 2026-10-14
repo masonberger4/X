@@ -66,7 +66,6 @@ before the first automatic studio run.</p>
       <td>{{ s.score if s.score is not none else "-" }}</td>
       <td><form method="post" action="/studio/topics" class="inline">
         <input type="hidden" name="story" value="{{ s.cluster_id }}">
-        <input type="hidden" name="checkpoint" value="1">
         <button type="submit">Write it</button></form></td></tr>
   {% endfor %}
 </table>
@@ -98,7 +97,6 @@ Dates are as precise as the source was; a quarter counts until it ends.</p>
           <option value="">the session chooses</option>
           {% for key, a in angles.items() %}<option value="{{ key }}" {% if key == suggested[c.id] %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
         </select>
-        <input type="hidden" name="checkpoint" value="1">
         <button type="submit">{{ "Write the reaction" if section == "passed" else "Write the preview" }}</button>
       </form>
       {% elif c.piece_id is none %}<span class="pill warn">queued</span>{% endif %}

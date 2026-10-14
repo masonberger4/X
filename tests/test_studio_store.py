@@ -532,8 +532,10 @@ def test_a_queued_topic_needs_words_or_a_story(sconn, topic):
 
 
 def test_a_queued_topic_is_stored_trimmed_with_its_checkpoint(sconn, clock):
-    tid = S.queue_topic(sconn, topic="  next-gen CTLA-4  ", angle=" class_deep_dive ")
-    story = S.queue_topic(sconn, cluster_id=42, checkpoint=False)
+    tid = S.queue_topic(
+        sconn, topic="  next-gen CTLA-4  ", angle=" class_deep_dive ", checkpoint=True
+    )
+    story = S.queue_topic(sconn, cluster_id=42)  # runs straight through unless asked
     first, second = S.queued_topics(sconn)
     assert first == S.QueuedTopic(
         id=tid,
