@@ -992,8 +992,14 @@ writes the reply.
 1. In the control panel open **Replies** (`/replies`). Take a screenshot of the post on X
    (Win+Shift+S), click the page and press Ctrl+V. Add up to four (the post, and the thread
    under it if it matters), or drop or choose image files.
-2. Optionally paste the post's link (then the reply page links straight to it) and a note
-   on what you want to say ("push back on the control arm"). Press **Write the reply**.
+2. Is the screenshot someone replying to or quoting one of your own posts? Paste your
+   post's x.com link into **Your post it answers**. The writer then gets that post as it
+   went out and, for a Studio piece, the piece's fact base (cut at
+   `replies.factbase_max_chars`), and answers as the post's author from the facts the piece
+   was built on. The post must be logged with its link (on the copy-paste page, or **add
+   the post's link** on `/studio/performance`); a link nothing was logged under is refused.
+   Leave the box empty for anyone else's post. Optionally add a note on what you want to
+   say ("push back on the control arm"). Press **Write the reply**.
 3. The page refreshes itself while `models.replier` reads the screenshots (and may check a
    fact on the web). It shows who it read as the author and the post's text, so you can
    see it read them right, then the reply. Every reply is checked in code first: no
@@ -1008,7 +1014,8 @@ writes the reply.
    report shows replies as their own group. Forgot the link? Add it later on the same page.
 
 The settings are `replies:` in `config.yaml` (the character target, tries, how many
-screenshots, the writer's web tools and time limit) and the model is `models.replier`.
+screenshots, the writer's web tools and time limit, how much of your post's fact base it
+gets) and the model is `models.replier`.
 The screenshots are kept in `reply_shots\` next to the database.
 
 ---

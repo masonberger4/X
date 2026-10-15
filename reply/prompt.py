@@ -28,6 +28,8 @@ Rules that are never crossed:
 - At most {max_chars} characters. One post, not a thread.
 - Only state what you are sure of. If you need a fact you can check, check it; if you cannot, leave it out. A preprint is called a preprint.
 
+Sometimes the screenshots answer one of the account's own posts: someone replied to it or quoted it. Then YOUR POST gives what the account posted and, when there is one, the fact base it was written from, as a file to read with the Read tool. Reply as the person who wrote that post: stand behind it where the evidence does, say so plainly where they have a point, and take facts from the fact base before you search. Do not restate your post; answer what they said.
+
 If the post is off the beat, is personal, is a patient's story, or you have nothing that adds to it, do not write a reply: skip, and say why.
 
 Answer with ONLY a JSON object:
@@ -48,13 +50,23 @@ def build_user(
     note: str = "",
     previous: str = "",
     problems: list[str] | None = None,
+    own_texts: list[str] | None = None,
+    own_factbase: str = "",
 ) -> str:
     """The screenshot files to read, the post's link and the editor's note when given, the
-    handles the reply may use and, on another attempt, the reply that failed the checks
-    with what was wrong with it."""
+    account's own post they answer (its text, and its fact base's file name) when the editor
+    gave its link, the handles the reply may use and, on another attempt, the reply that
+    failed the checks with what was wrong with it."""
     lines = ["SCREENSHOTS (read each with the Read tool): " + ", ".join(files)]
     if post_url:
         lines.append(f"THE POST'S LINK: {post_url}")
+    if own_texts:
+        lines += ["YOUR POST (the account's own post the screenshots answer):"]
+        lines += [t for t in own_texts if t.strip()]
+        if own_factbase:
+            lines.append(
+                f"ITS FACT BASE (read with the Read tool before you search): {own_factbase}"
+            )
     if note:
         lines += ["THE EDITOR'S NOTE (from the account's owner):", note]
     lines.append(

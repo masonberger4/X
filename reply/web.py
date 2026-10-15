@@ -1,7 +1,8 @@
 """The reply page, included into the control panel (panel/app.py).
 
-  GET  /replies                 paste screenshots of a post you found on X (and its link,
-                                and a note on what you want to say); recent requests below
+  GET  /replies                 paste screenshots of a post you found on X (the link of
+                                your own post it answers, when it does, and a note on what
+                                you want to say); recent requests below
   POST /replies                 save them and start writing the reply
   GET  /replies/{id}            the screenshots, what the writer read off them, and the
                                 reply: copy it, edit it, write it again with a note
@@ -132,13 +133,22 @@ def parse_shots(values: list[str], max_shots: int, max_mb: float) -> list[tuple[
     return shots
 
 
-def _post_url(value: str) -> str:
-    """The post's x.com link, or "" (anything else is refused, never stored as a link)."""
+def _own_url(conn, value: str) -> str:
+    """The link of the account's own post the screenshots answer, or "". Refused unless it
+    is an x.com/<user>/status/<id> address of a post step 3 logged, so the writer can be
+    given that post and its studio piece's fact base."""
+    from publish.store import tweet_id_from_url
+
     value = value.strip()
     if not value:
         return ""
     if not _TWEET_URL.match(value):
-        raise ValueError("the post's link must be an x.com/<user>/status/<id> address")
+        raise ValueError("your post's link must be an x.com/<user>/status/<id> address")
+    if S.own_post(conn, tweet_id_from_url(value) or "") is None:
+        raise ValueError(
+            "no posted piece has that link: add it on the studio's performance page first "
+            "(or leave the box empty)"
+        )
     return value.split("?", 1)[0]
 
 
@@ -173,10 +183,10 @@ async def replies_create(request: Request, conn: Conn):
     s = writer.settings(_config())
     try:
         shots = parse_shots(form.get("shot") or [], s["max_shots"], s["max_shot_mb"])
-        post_url = _post_url(_first(form, "post_url"))
+        own_url = _own_url(conn, _first(form, "own_url"))
     except ValueError as exc:
         return _back(error=str(exc))
-    rid = S.create(conn, shots, post_url=post_url, note=_first(form, "note"))
+    rid = S.create(conn, shots, own_url=own_url, note=_first(form, "note"))
     spawn(rid)
     log.info("reply request %d: writing", rid)
     return _back(rid)
@@ -206,8 +216,18 @@ def reply_page(request: Request, rid: int, conn: Conn, error: str = "", flash: s
             "s": s,
             "length": x_length(req.reply) if req.reply else 0,
             "linked": _linked(conn, req),
+            "own": _own(conn, req),
         },
     )
+
+
+def _own(conn, req: S.Request) -> S.OwnPost | None:
+    """The account's own post this reply is about, for the page to name."""
+    from publish.store import tweet_id_from_url
+
+    if not req.own_url:
+        return None
+    return S.own_post(conn, tweet_id_from_url(req.own_url) or "")
 
 
 def _linked(conn, req: S.Request) -> bool:

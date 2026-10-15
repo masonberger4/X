@@ -188,7 +188,8 @@ def test_paste_screenshots_and_get_a_reply(client, db_file):
         ({"shot": ["data:text/html;base64,PGI+"]}, "PNG, JPEG"),
         ({"shot": ["data:image/png;base64,@@@"]}, "could not be read"),
         ({"shot": [SHOT] * 5}, "at most 4"),
-        ({"shot": [SHOT], "post_url": "https://evil.example/x"}, "x.com"),
+        ({"shot": [SHOT], "own_url": "https://evil.example/x"}, "x.com"),
+        ({"shot": [SHOT], "own_url": "https://x.com/me/status/999999"}, "no posted piece"),
     ],
 )
 def test_bad_screenshots_and_links_are_refused(client, data, error):
@@ -259,6 +260,87 @@ def test_i_posted_it_logs_the_reply_as_posted_for_tracking(client, db_file):
     assert "no written reply" in client.get(r.headers["location"]).text
     detail = client.get(f"/drafts/{req.draft_id}").text
     assert "Reply to @drZ" in detail and f'href="/replies/{rid}"' in detail
+    conn.close()
+
+
+def _posted_studio_piece(conn, tmp_path, tweet_id="444444", factbase="# Facts\nORR 62%.\n"):
+    """A studio piece with a fact base, its draft approved and logged as posted by hand."""
+    from draft.schema import Draft
+    from studio import store as studio_store
+
+    workspace = tmp_path / "piece"
+    workspace.mkdir()
+    if factbase is not None:
+        (workspace / "factbase.md").write_text(factbase, encoding="utf-8")
+    sconn = studio_store.connect(queue_store.db_path())
+    piece_id = studio_store.create_piece(
+        sconn,
+        origin="manual",
+        topic="t",
+        cluster_id=None,
+        requested_angle="",
+        checkpoint=False,
+        session_id="s",
+        workspace=str(workspace),
+        model="m",
+        effort="max",
+    )
+    sconn.close()
+    draft = Draft(
+        thread=["My read on the CAR-T data: ORR 62% in a heavily pretreated group."],
+        suggested_visual="",
+        why_it_matters="w",
+        shape="long",
+        anchors=[],
+        max_chars=25000,
+        wanted_visuals=0,
+    )
+    draft_id = queue_store.insert_draft(
+        conn, item_id=queue_store.studio_item_id(piece_id), model="m", draft=draft
+    )
+    queue_store.approve(conn, draft_id)
+    pconn = publish_store.connect()
+    assert publish_store.record_manual(
+        pconn, draft_id, draft.thread, f"https://x.com/biotech_leads/status/{tweet_id}"
+    )
+    pconn.close()
+    return piece_id
+
+
+def test_a_reply_to_someone_answering_my_post_gets_that_posts_studio_fact_base(
+    client, db_file, tmp_path
+):
+    conn = S.connect()
+    piece_id = _posted_studio_piece(conn, tmp_path)
+    own = "https://x.com/biotech_leads/status/444444?s=20"
+    r = client.post("/replies", data={"shot": [SHOT], "own_url": own})
+    rid = int(r.headers["location"].rsplit("/", 1)[1])
+    req = S.get(conn, rid)
+    assert req.own_url == "https://x.com/biotech_leads/status/444444" and req.post_url == ""
+
+    call = FakeCall(_answer())
+    assert writer.run_request(rid, _cfg(), call=call) == S.READY
+    user = call.users[0]
+    assert "YOUR POST" in user and "ORR 62% in a heavily pretreated group" in user
+    assert writer.FACTBASE_NAME in user
+    assert call.kw["attachments"][writer.FACTBASE_NAME] == b"# Facts\nORR 62%.\n"
+    page = client.get(f"/replies/{rid}").text
+    assert f'href="/studio/{piece_id}"' in page and "About your post" in page
+
+    # the fact base is cut to the configured size
+    texts, factbase = writer.own_context(conn, own, 5)
+    assert texts[0].startswith("My read")
+    assert factbase.startswith("# Fac") and "cut at 5" in factbase
+    conn.close()
+
+
+def test_without_my_posts_link_the_writer_gets_no_post_of_mine(client, db_file):
+    conn = S.connect()
+    rid = S.create(conn, [("png", PNG)])
+    call = FakeCall(_answer())
+    writer.run_request(rid, _cfg(), call=call)
+    assert "YOUR POST" not in call.users[0]
+    assert list(call.kw["attachments"]) == ["screenshot_1.png"]
     conn.close()
 
 
