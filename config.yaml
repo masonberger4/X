@@ -596,3 +596,5 @@ replies:
   max_shot_mb: 8                  # per screenshot
   tools: [WebSearch, WebFetch]    # beside Read (always on, for the screenshots); [] for none
   timeout_seconds: 300            # per call, in place of claude_code.timeout_seconds
+  factbase_max_chars: 30000       # when you give your own post's link, its Studio fact base
+                                  # goes to the writer cut at this many characters; 0 for none

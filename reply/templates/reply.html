@@ -64,6 +64,7 @@
 {% if r.post_text %}<p class="meta">As the writer read it{% if r.author %}, by @{{ r.author }}{% endif %}:</p>
 <div class="post">{{ r.post_text }}</div>{% endif %}
 {% if r.post_url %}<p class="meta"><a href="{{ r.post_url }}" target="_blank" rel="noopener noreferrer">{{ r.post_url }}</a></p>{% endif %}
+{% if r.own_url %}<p class="meta"><strong>About your post:</strong> <a href="{{ r.own_url }}" target="_blank" rel="noopener noreferrer">{{ r.own_url }}</a>{% if own and own.piece_id %} (<a href="/studio/{{ own.piece_id }}">Studio piece {{ own.piece_id }}</a>; the writer had its fact base){% endif %}</p>{% endif %}
 {% if r.note %}<p class="meta"><strong>Your note:</strong> {{ r.note }}</p>{% endif %}
 <div class="shots">{% for name in r.shots %}<img src="/replies/{{ r.id }}/shot/{{ loop.index0 }}" alt="screenshot {{ loop.index }}">{% endfor %}</div>
 

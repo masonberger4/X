@@ -648,8 +648,13 @@ hand under the post it answers.
   playbook editor and its reset save versions through `playbook.save`.
 - **Replies (`reply/`, the panel's `/replies`) answer posts the editor found, by hand.**
   Nothing is read from X: the editor pastes screenshots (data: URLs in an urlencoded form,
-  `web.parse_shots`, no multipart; `replies.max_shots`, `max_shot_mb`), optionally the
-  post's x.com link and a note. `reply/store.py` owns `reply_requests` (writing, ready,
+  `web.parse_shots`, no multipart; `replies.max_shots`, `max_shot_mb`), optionally a note
+  and the link of the account's own post they answer (`own_url`, guarded migration; the
+  form no longer asks for the other post's `post_url`, kept for old rows). `web._own_url`
+  refuses a link no posted row carries; `store.own_post` (read-only: step 3's `posts` by
+  tweet id, step 2's `drafts`, `studio_pieces`) finds the post's texts and its studio
+  piece's folder, and `writer.own_context` gives the writer those texts as YOUR POST and
+  the piece's `factbase.md` as an attachment cut at `replies.factbase_max_chars`. `reply/store.py` owns `reply_requests` (writing, ready,
   skipped, blocked, failed, posted, discarded) and the files in `<db folder>/reply_shots/`.
   `web.spawn` writes in a thread of the app (`writer.run_request`, which never raises);
   `store.settle_dead` fails a request a stopped app left `writing`. One call per attempt
