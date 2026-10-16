@@ -114,17 +114,25 @@ def test_the_run_fragment_reports_whether_a_run_is_in_flight(client):
 
 def test_the_approval_queue_is_part_of_the_same_app(client, conn, draft_id):
     assert client.get("/").status_code == 200  # the dashboard, not the queue
-    assert f"/drafts/{draft_id}" in client.get("/queue").text
+    assert client.get("/queue").headers["location"] == "/status/approved"
     assert "Preprint. ORR 88%." in client.get(f"/drafts/{draft_id}").text
     r = client.post(f"/drafts/{draft_id}/approve", data={"note": "good"})
-    assert r.status_code == 303 and r.headers["location"] == "/queue"
+    assert r.status_code == 303 and r.headers["location"] == "/status/approved"
+    assert f"/drafts/{draft_id}" in client.get("/status/approved").text
     assert queue_store.get_draft(conn, draft_id).status == "approved"
 
 
 def test_the_nav_links_both_halves_together(client):
     body = client.get("/").text
-    for link in ('href="/"', 'href="/sources"', 'href="/runs"', 'href="/queue"', 'href="/studio"'):
+    for link in (
+        'href="/"',
+        'href="/sources"',
+        'href="/runs"',
+        'href="/status/approved"',
+        'href="/studio"',
+    ):
         assert link in body
+    assert 'href="/queue"' not in body  # no pending page
 
 
 def test_the_panel_has_no_publish_button(client):
@@ -136,7 +144,7 @@ def test_the_panel_has_no_publish_button(client):
 
 def test_the_queue_pages_keep_the_panel_links_in_the_nav(client):
     """The queue renders with its own template env; inside the panel it must still link back."""
-    for path in ("/queue", "/status/approved"):
+    for path in ("/status/approved", "/status/rejected"):
         body = client.get(path).text
         assert 'href="/"' in body and 'href="/feed"' in body and 'href="/runs"' in body, path
 
@@ -362,7 +370,7 @@ def test_the_studio_is_part_of_the_same_app(client):
     body = client.get("/studio").text
     assert "<h1>Studio</h1>" in body
     # the shared layout: the panel's nav, and a run bar with the studio's two buttons
-    for link in ('href="/"', 'href="/runs"', 'href="/feed"', 'href="/queue"'):
+    for link in ('href="/"', 'href="/runs"', 'href="/feed"', 'href="/status/approved"'):
         assert link in body
     bar = _runbar(body)
     assert 'value="studio_now"' in bar and 'value="studio_resume"' in bar
@@ -370,7 +378,7 @@ def test_the_studio_is_part_of_the_same_app(client):
     assert "<h1>Playbook</h1>" in client.get("/studio/playbook").text
     assert client.get("/studio/999").status_code == 404
     # and the nav on every page, the queue's included, links to it
-    for path in ("/", "/queue", "/studio"):
+    for path in ("/", "/status/approved", "/studio"):
         assert 'href="/studio"' in client.get(path).text, path
 
 

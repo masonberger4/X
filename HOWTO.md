@@ -106,18 +106,20 @@ Every post is written by the studio (part 9): one Opus session per piece,
 researched, fact-checked and with designed cards. The older single drafter
 (`run_draft.py`), the swarm and its A/B pick page, the claim checker
 (`run_verify.py`) and the voice report were retired; the studio is the only writer.
-A finished piece lands in the approval queue as a pending draft.
+A finished piece lands in the approval queue already approved: there is no
+pending page any more. It waits on the approved page until you publish it.
 
 1. Open the approval page.
    ```
    python run_app.py
    ```
-   Then open http://localhost:8000/queue in a browser (the front page is the
-   dashboard; part 8 explains it). `python run_queue.py` still opens the
-   approval page on its own if that is all you want. For each draft: approve,
-   edit or reject. An approve is not final: "Reopen" on the approved page
-   brings a draft that has not gone out yet back here as pending. Press Ctrl+C
-   in the window to stop the server when done.
+   Then open http://localhost:8000/status/approved in a browser (the front page
+   is the dashboard; part 8 explains it; the old `/queue` address opens the
+   approved page too). `python run_queue.py` still opens the approval pages on
+   their own if that is all you want. Open a draft to read it, edit it by hand
+   (it stays approved) or reject it. Edits and picture drops are refused once
+   any of the draft is on X or a publish run has claimed it. Press Ctrl+C in the
+   window to stop the server when done.
 2. To change a piece in words, use its studio page (part 9): the queue's draft
    page points there. "Edit by hand", folded away on the draft page, is there for
    a one-word fix. A save that breaks a rule (a post over the draft's length limit,
@@ -400,8 +402,8 @@ motion, that bar stands still too. Four pages:
   window. "Show decided" brings them back. The "Ingest and score" button at
   the top runs those two steps (the same run the runs page starts); the
   page says a run is going and the log is on the runs page.
-- **Pending** (`/queue`) — the approval queue from part 3.
-- **Approved** (`/status/approved`) — the drafts waiting for a slot, and
+- **Approved** (`/status/approved`) — every finished studio piece lands here
+  (there is no pending page; `/queue` opens this page). The drafts waiting for a slot, and
   where you decide what posts when. "Publish now" next to a draft posts that
   one draft right away, outside the slots (the daily cap and the minimum gap
   from `publish\config.yaml` still apply, and the run's log is on the runs
@@ -410,17 +412,14 @@ motion, that bar stands still too. Four pages:
   shows a number box next to each waiting draft: number them 1, 2, 3 for the
   order the scheduled slots should post them and press "Save order". A
   draft without a number follows the numbered ones by score. The order is
-  kept on the draft (shown as #1, #2) until it posts. "Reopen" next to a
-  waiting draft takes it back off the list and makes it pending again, so you
-  can edit or reject it; the order you saved for it is forgotten
-  rather than coming back the next time you approve it, and the box beside the
-  button puts your reason in the draft's history. It is refused for anything
+  kept on the draft (shown as #1, #2) until it posts. To change a waiting
+  draft, open it: "Edit by hand" and the picture drops change it in place and
+  it stays approved, with its saved order. They are refused for anything
   already on X — posted, or a thread that stopped halfway — and for a draft a
   publish run has just claimed, because that run will not look at the draft
-  again before it posts (the draft's own page says which); reopening cannot
+  again before it posts (the draft's own page says which); nothing here can
   unpost a tweet, so reject it instead if it should not run again. A draft
-  whose last attempt failed or was refused can be reopened, and its failed
-  schedule row goes with it, though the posts log keeps the history.
+  whose last attempt failed or was refused can still be changed.
   "Release" next to a draft is the other half of that: it puts a draft whose
   publish attempt posted nothing back in line *without* taking it off the
   approved list, so the next run tries it again with the order you set kept.
@@ -510,7 +509,7 @@ motion, that bar stands still too. Four pages:
     is failing, sends the alert from part 6 (webhook or email), since nobody
     was watching it.
   - Each automatic run costs what pressing the buttons costs.
-- **Pending / Approved / Rejected / Failed** — the
+- **Approved / Rejected / Failed** — the
   approval pages from part 3. The Approved page is the waiting list for
   `run_publish.py`: each row says `waiting`, `posted` (a link to the tweet),
   `failed` or `partial thread`, and drafts already posted are hidden until you
@@ -669,9 +668,9 @@ long post (or a thread of long posts), designs the cards, and a cold fact-check
 checks every claim. The app draws the cards, counts characters
 the way X does, checks the few lines that are never crossed (no investment or
 medical advice, no links) and hands any problem back to the same session. The
-finished piece waits in the pending queue as "Studio piece N" with its cards
+finished piece waits on the approved page as "Studio piece N" with its cards
 attached. Cards are checked too: text cut off, overlapping or off the edge, and big
-empty areas, all handed back to the session to fix. Nothing posts from here: approving and "Publish now" work as in part 5,
+empty areas, all handed back to the session to fix. Nothing posts from here: "Publish now" works as in part 5,
 and long posts need X Premium.
 
 A piece is made in **steps**, each on the model and effort you choose in
@@ -748,7 +747,7 @@ Opus session again, with its own fact-checker.
    $SMMT"), pick an angle or leave it to the session, and press **Write it**. On
    the **Feed** page, **Write a studio piece** under a story does the same with
    that story. A piece you start runs straight through, research, writing, the
-   fact-check and polish, until it is a pending draft in the queue; every step's
+   fact-check and polish, until it is an approved draft in the queue; every step's
    output (the fact base, the research answers, the claim checks) is still saved
    and shown on the piece's page. Tick **stop after research** only when you want
    to read the fact base before it writes (`manual: checkpoint` in
@@ -764,8 +763,9 @@ Opus session again, with its own fact-checker.
    lead with, what to drop) and press **Continue: write the piece**.
 5. Review. The piece's page shows the post exactly as it will be posted, the
    cards, the fact-check log (every finding, what changed, what stayed
-   unverified) and the session's own log. The same draft is on the pending page;
-   approve it there. Once you change the text by hand in the queue, the piece's
+   unverified) and the session's own log. The same draft is on the approved
+   page, ready for "Publish now"; reject it there if it should not go out. Once
+   you change the text by hand in the queue, the piece's
    page shows the queue's text as the post, with the session's own files folded
    away below it. A piece cites an analyst's price target only when it bears on
    the story, and then the post says what the target rests on (the firm's
@@ -784,9 +784,9 @@ Opus session again, with its own fact-checker.
    latest before posting.
 6. Changes. Type them on the piece's page and press **Revise**: the session that
    wrote it rewrites it, fact-checks what changed and replaces the queue draft.
-   A draft you rejected comes back to pending with the revision; one you already
-   approved has to be reopened on the approved page first (the piece says
-   `not revised: draft N is approved ...` otherwise, and no session is spent).
+   The draft stays approved with the revision, and one you rejected comes back
+   approved. A draft a publish run has claimed or that is already on X is not
+   revised (the piece says `not revised: draft N ...`, and no session is spent).
    The queue's own Revise button would flatten a studio piece, so it points you
    here instead. Hand edits on the queue page still work, and a Revise keeps
    them: before the session runs, the app writes the queue's text into the
@@ -797,7 +797,7 @@ Opus session again, with its own fact-checker.
    draft comes back only if none of it reached X (a posted one would never be
    posted again, so no session is spent on it), and without the publishing
    order it had before. While the studio works on a piece, or a run you asked
-   for waits to start, its queue draft is **on hold**: Approve, Edit, Reject and
+   for waits to start, its queue draft is **on hold**: Edit, Reject and
    Drop picture say so instead of acting, since the revision replaces the draft
    when it lands.
 7. When something stops. A piece marked `interrupted` (stopped, timed out, the
@@ -809,8 +809,8 @@ Opus session again, with its own fact-checker.
    same session carries on with everything it already read, and anything you type
    in the box goes to it. If you edited its queue draft by hand while it was
    stopped, Resume goes through a revision first, so your edit is not
-   overwritten; if you approved the draft a stopped revision would replace,
-   Resume says so and runs nothing until you reopen it. A piece whose
+   overwritten; if a publish run claimed the draft a stopped revision would
+   replace, Resume says so and runs nothing until that claim is gone. A piece whose
    run was stopped (the Stop button, the desktop window closed, the PC restarted)
    turns `interrupted` as soon as you open its page or the studio page, or the
    panel sees the run end; while a studio run is still going, its pieces keep
@@ -819,7 +819,7 @@ Opus session again, with its own fact-checker.
    reads the piece's own files (fact base, posts, cards, fact-check log) first;
    the piece's session log says when that happened. **Discard** gives up on a
    piece: its files stay in the `studio_pieces` folder, and a draft of it still
-   pending in the queue is
+   waiting in the queue (none of it on X, no publish run holding it) is
    rejected. A piece discarded before it reached the queue gives its story back to
    the shortlist.
 8. The playbook. **Studio → The playbook** is the short note every session

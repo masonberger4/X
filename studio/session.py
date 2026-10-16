@@ -842,7 +842,7 @@ def polish(ctx: Context, piece: S.Piece) -> Outcome:
     report.warnings += [f"unresolved: {p}" for p in report.fixable]
     try:
         draft_id = ctx.ingest(S.get_piece(ctx.conn, piece.id) or piece, report)
-    except Exception as exc:  # the queue refused it (a revised draft no longer pending)
+    except Exception as exc:  # the queue refused it (a revised draft publishing holds)
         log.warning("piece %s could not go into the queue: %s", piece.id, exc)
         return _fail(ctx, piece, "polish", f"could not put the piece in the queue: {exc}")
     S.update_piece(

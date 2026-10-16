@@ -29,6 +29,7 @@ from typing import Any
 import pytest
 
 import claude_cli
+from approval_queue import publishing
 from approval_queue import store as queue_store
 from draft.schema import SHAPE_LONG, Draft
 from publish import store as publish_store
@@ -38,7 +39,7 @@ from studio import render as render_mod
 from studio import session as SS
 from studio import store as S
 from studio.settings import load_studio_config
-from tests.conftest import seed_item
+from tests.conftest import claim_for_publishing, drop_claim, seed_item
 
 SYSTEM = "STANDING INSTRUCTIONS: who you are, how a piece is made, the voice, the cards."
 MODEL = "writer-model"
@@ -510,7 +511,7 @@ def _why(piece_id: int, warnings: Sequence[str] = ()) -> str:
 # ---- research to the queue ---------------------------------------------------------
 
 
-def test_a_piece_goes_from_research_to_a_pending_draft_in_the_queue(rig):
+def test_a_piece_goes_from_research_to_an_approved_draft_in_the_queue(rig):
     piece = rig.new_piece()
     out = SS.research(rig.ctx, piece)
 
@@ -532,7 +533,7 @@ def test_a_piece_goes_from_research_to_a_pending_draft_in_the_queue(rig):
 
     row = rig.draft(p)
     assert row.id == p.draft_id
-    assert row.status == queue_store.STATUS_PENDING
+    assert row.status == queue_store.STATUS_APPROVED
     assert row.item_id == f"studio:{p.id}" and row.studio_piece == p.id
     assert row.cluster_id == 42
     assert row.model == f"{MODEL} (studio)"
@@ -545,7 +546,9 @@ def test_a_piece_goes_from_research_to_a_pending_draft_in_the_queue(rig):
     assert d.chart is None and d.table is None
     assert d.suggested_visual == f"card 1: {CARD_1.alt}; card 2: {CARD_2.alt}"
     assert d.why_it_matters == _why(p.id)
-    assert queue_store.list_decisions(rig.conn, row.id) == []  # waiting for the editor
+    assert [(d["action"], d["note"]) for d in queue_store.list_decisions(rig.conn, row.id)] == [
+        ("approve", "finished in the studio")
+    ]
 
 
 def test_the_cards_are_copied_into_the_queue_and_anchored_to_their_posts(rig):
@@ -1587,7 +1590,7 @@ def test_revise_rewrites_the_queue_draft_in_place(rig):
     assert (p.shape, p.title) == ("long_post", TITLE)
 
     row = rig.draft(p)
-    assert (row.id, row.status) == (before.id, queue_store.STATUS_PENDING)
+    assert (row.id, row.status) == (before.id, queue_store.STATUS_APPROVED)
     assert row.draft.thread == [POST_SINGLE]
     assert (row.draft.shape, row.draft.max_chars) == (SHAPE_LONG, MAX_CHARS)
     assert (row.draft.anchors, row.draft.wanted_visuals) == ([1], 1)
@@ -1617,7 +1620,10 @@ def test_a_revision_with_more_cards_adds_pictures(rig):
     assert queue_store.image_file(row.id, 1).exists()
 
 
-def test_a_rejected_draft_comes_back_to_pending_with_the_revision(rig):
+CLAIMED = "publishing has already claimed this draft"
+
+
+def test_a_rejected_draft_comes_back_approved_with_the_revision(rig):
     piece = rig.ready_piece()
     draft_id = rig.get(piece.id).draft_id
     queue_store.reject(rig.conn, draft_id)
@@ -1627,13 +1633,13 @@ def test_a_rejected_draft_comes_back_to_pending_with_the_revision(rig):
 
     assert out.stage == S.STAGE_READY
     row = queue_store.get_draft(rig.conn, draft_id)
-    assert (row.status, row.draft.thread) == (queue_store.STATUS_PENDING, [POST_SINGLE])
+    assert (row.status, row.draft.thread) == (queue_store.STATUS_APPROVED, [POST_SINGLE])
     actions = [d["action"] for d in queue_store.list_decisions(rig.conn, draft_id)]
-    assert actions[-3:] == ["reject", "reopen", "revise"]
+    assert actions[-3:] == ["reject", "revise", "approve"]
 
 
-@pytest.mark.parametrize("decide", [queue_store.approve])
-def test_revise_leaves_a_draft_that_was_decided_alone(rig, decide):
+@pytest.mark.parametrize("decide", [claim_for_publishing])
+def test_revise_leaves_a_draft_publishing_holds_alone(rig, decide):
     piece = rig.ready_piece()
     draft_id = rig.get(piece.id).draft_id
     decide(rig.conn, draft_id)
@@ -1646,7 +1652,7 @@ def test_revise_leaves_a_draft_that_was_decided_alone(rig, decide):
     assert out.stage == p.stage == S.STAGE_FAILED
     assert p.meta["failed_stage"] == "polish"
     assert p.error.startswith("could not put the piece in the queue: ")
-    assert f"draft {draft_id} is {before.status}, not pending" in p.error
+    assert f"draft {draft_id} cannot be revised now: {CLAIMED}" in p.error
     assert p.draft_id == draft_id
     after = queue_store.get_draft(rig.conn, draft_id)
     assert (after.status, after.draft.thread, after.images) == (
@@ -1660,24 +1666,25 @@ def test_revise_leaves_a_draft_that_was_decided_alone(rig, decide):
     ]
 
 
-def test_revise_blocker_names_an_approved_draft_and_lets_a_rejected_one_through(rig):
+def test_revise_blocker_names_a_draft_publishing_holds_and_lets_the_others_through(rig):
     p = rig.get(rig.ready_piece().id)
-    assert ingest.revise_blocker(rig.conn, p) == ""  # pending: a revision can replace it
+    assert ingest.revise_blocker(rig.conn, p) == ""  # approved: a revision can replace it
     queue_store.reject(rig.conn, p.draft_id)
     assert ingest.revise_blocker(rig.conn, p) == ""  # rejected: the revision brings it back
     queue_store.approve(rig.conn, p.draft_id)
-    assert ingest.revise_blocker(rig.conn, p) == (
-        f"draft {p.draft_id} is approved, not pending; reopen it in the queue before revising"
+    claim_for_publishing(rig.conn, p.draft_id)
+    assert ingest.revise_blocker(rig.conn, p).startswith(
+        f"draft {p.draft_id} cannot be revised now: {CLAIMED}"
     )
 
 
-def test_discarding_withdraws_a_pending_draft_only(rig):
+def test_discarding_withdraws_a_waiting_draft_only(rig):
     p = rig.get(rig.ready_piece().id)
     assert ingest.withdraw(rig.conn, p) == p.draft_id
     row = queue_store.get_draft(rig.conn, p.draft_id)
     assert row.status == queue_store.STATUS_REJECTED
     assert queue_store.list_decisions(rig.conn, p.draft_id)[-1]["note"] == "discarded in the studio"
-    assert ingest.withdraw(rig.conn, p) is None  # not pending any more: left alone
+    assert ingest.withdraw(rig.conn, p) is None  # rejected already: left alone
     assert ingest.withdraw(rig.conn, rig.new_piece()) is None  # no draft at all
 
 
@@ -1687,7 +1694,7 @@ def test_revise_blocker_lets_a_piece_without_a_draft_through(rig):
 
 def test_with_the_queue_check_a_decided_draft_costs_no_session(rig):
     piece = rig.ready_piece()
-    queue_store.approve(rig.conn, rig.get(piece.id).draft_id)
+    claim_for_publishing(rig.conn, rig.get(piece.id).draft_id)
     rig.ctx.revisable = functools.partial(ingest.revise_blocker, rig.conn)
     calls = len(rig.cli.calls)
     out = SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
@@ -1696,22 +1703,22 @@ def test_with_the_queue_check_a_decided_draft_costs_no_session(rig):
     assert rig.get(piece.id).stage == S.STAGE_READY
 
 
-def test_a_revision_refused_by_the_queue_goes_in_once_the_draft_is_reopened(rig):
+def test_a_revision_refused_by_the_queue_goes_in_once_publishing_lets_go(rig):
     piece = rig.ready_piece()
     draft_id = rig.get(piece.id).draft_id
-    queue_store.approve(rig.conn, draft_id)
+    claim_for_publishing(rig.conn, draft_id)
     rig.cli.work["revise"] = _rewrite_to_one_post
     SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
     assert rig.get(piece.id).stage == S.STAGE_FAILED
 
-    queue_store.reopen(rig.conn, draft_id)
+    drop_claim(rig.conn, draft_id)
     calls = len(rig.cli.calls)
     out = SS.resume_interrupted(rig.ctx, rig.get(piece.id))
 
     assert out.stage == S.STAGE_READY
     assert rig.cli.stages()[calls:] == ["polish"]  # the revised files are only checked again
     row = queue_store.get_draft(rig.conn, draft_id)
-    assert (row.status, row.draft.thread) == (queue_store.STATUS_PENDING, [POST_SINGLE])
+    assert (row.status, row.draft.thread) == (queue_store.STATUS_APPROVED, [POST_SINGLE])
     [logged] = [
         d for d in queue_store.list_decisions(rig.conn, draft_id) if d["action"] == "revise"
     ]
@@ -1986,8 +1993,8 @@ def test_a_card_that_could_not_be_attached_is_never_read_as_the_editors_hand_edi
 
 def test_no_hand_edit_means_nothing_is_written_back(rig):
     piece = rig.ready_piece()
-    queue_store.approve(rig.conn, rig.get(piece.id).draft_id)  # decisions that change nothing
-    queue_store.reopen(rig.conn, rig.get(piece.id).draft_id)
+    queue_store.reject(rig.conn, rig.get(piece.id).draft_id)  # decisions that change nothing
+    queue_store.approve(rig.conn, rig.get(piece.id).draft_id)
     assert ingest.hand_edits(rig.conn, rig.get(piece.id)) is None
     rig.cli.work["revise"] = _rewrite_to_one_post
     SS.revise(rig.ctx, rig.get(piece.id), "One post.")
@@ -2229,16 +2236,16 @@ def test_revising_a_piece_whose_folder_is_gone_leaves_it_in_the_queue(rig):
     assert len(rig.cli.calls) == calls
     assert (out.stage, p.stage, p.error) == (S.STAGE_READY, S.STAGE_READY, missing)
     assert out.message == f"revision not started: {missing}"
-    assert rig.draft(p).status == queue_store.STATUS_PENDING
+    assert rig.draft(p).status == queue_store.STATUS_APPROVED
 
 
 # ---- Resume on a polish the queue would refuse ---------------------------------------
 
 
-def test_resuming_a_polish_whose_draft_was_approved_meanwhile_spends_no_round(rig):
-    """A revision's polish round was stopped, so the old draft stayed pending; the editor
-    approved it, then pressed Resume. The queue would refuse the polished piece, so no round
-    runs (each one could take an hour) and the piece says why."""
+def test_resuming_a_polish_whose_draft_was_claimed_meanwhile_spends_no_round(rig):
+    """A revision's polish round was stopped, so the old draft stayed in the queue; a
+    publish run claimed it, then the editor pressed Resume. The queue would refuse the
+    polished piece, so no round runs (each one could take an hour) and the piece says why."""
     rig.ctx.revisable = functools.partial(ingest.revise_blocker, rig.conn)
     piece = rig.ready_piece()
     rig.cli.fail("polish", stopped("killed"))
@@ -2246,19 +2253,21 @@ def test_resuming_a_polish_whose_draft_was_approved_meanwhile_spends_no_round(ri
     SS.revise(rig.ctx, rig.get(piece.id), "Shorter.")
     stuck = rig.get(piece.id)
     assert (stuck.stage, stuck.meta["failed_stage"]) == (S.STAGE_INTERRUPTED, "polish")
-    queue_store.approve(rig.conn, stuck.draft_id)
+    claim_for_publishing(rig.conn, stuck.draft_id)
     calls = len(rig.cli.calls)
 
     out = SS.resume_interrupted(rig.ctx, stuck)
 
     p = rig.get(piece.id)
-    blocked = f"draft {p.draft_id} is approved, not pending; reopen it in the queue before revising"
+    blocked = f"draft {p.draft_id} cannot be revised now: " + publishing.block_reason(
+        rig.conn, p.draft_id, queue_store.publish_states(rig.conn, [p.draft_id])[p.draft_id]
+    )
     assert len(rig.cli.calls) == calls
     assert (out.stage, p.stage, p.error) == (S.STAGE_INTERRUPTED, S.STAGE_INTERRUPTED, blocked)
     assert out.message == f"not resumed: {blocked}"
     assert p.meta["failed_stage"] == "polish"
-    # reopened, the same Resume polishes and puts the revision in the queue
-    queue_store.reopen(rig.conn, p.draft_id)
+    # once publishing lets go, the same Resume polishes and puts the revision in the queue
+    drop_claim(rig.conn, p.draft_id)
     assert SS.resume_interrupted(rig.ctx, rig.get(piece.id)).stage == S.STAGE_READY
     assert rig.cli.stages()[calls:] == ["polish"]
     assert rig.draft(rig.get(piece.id)).draft.thread == [POST_SINGLE]

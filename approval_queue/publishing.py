@@ -1,19 +1,22 @@
-"""What the queue needs from step 3 when a human takes a draft back, or puts it back in line.
+"""What the queue needs from step 3 when a human changes an approved draft, or puts it back
+in line.
 
-Reopening an approved draft, and releasing one whose publish attempt ended without a
-tweet, are the two places step 2 writes into step 3's tables, and both write only through
+Forgetting a draft's schedule row (the studio, when a revision brings a rejected draft
+back), and releasing one whose publish attempt ended without a tweet, are the two places
+step 2 writes into step 3's tables, and both write only through
 `publish/store.py` (`forget`, `release_failed`, `release_claimed`), which refuses anything
 live. Everything else the queue knows about publishing it reads through
 `store.publish_states`. Keeping these calls here rather than in a route mirrors
 `panel/publishing.py`, so the carve-out is stated in one place instead of being spelled out
 at the call site.
 
-A release differs from a reopen: the draft stays approved and keeps its place in the
+A release differs from a forget: the draft stays approved and keeps its place in the
 publishing order, only step 3's dead schedule row goes, so the next run considers it again.
 `release_reason` is the one gate, read by both the button and the route.
 
-Others ask the reopen question through here too: the studio, before it brings a rejected
-draft back to pending with a revision (studio/ingest.py, which then calls `forget`).
+`block_reason` is the question every change asks: the queue's edit and picture drops on
+an approved draft, and the studio before a revision replaces one or brings a rejected
+draft back (studio/ingest.py, which then calls `forget`).
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ STALE_CLAIM_MINUTES = publish_store.STALE_CLAIM_MINUTES
 RELEASABLE_STATES = (publish_store.SCHED_FAILED, publish_store.SCHED_REFUSED)
 
 _LIVE = (
-    "this draft is already live on X and cannot be reopened; reject it instead if it "
+    "this draft is already live on X and cannot be changed; reject it instead if it "
     "should not run again"
 )
 _LIVE_RELEASE = (
@@ -46,8 +49,8 @@ _FRESH_CLAIM = (
     "does"
 )
 _CLAIMED = (
-    "publishing has already claimed this draft and will not re-read its status; wait until "
-    'that run finishes before reopening it. If that run died without posting, "Release" '
+    "publishing has already claimed this draft and will not re-read it; wait until "
+    'that run finishes before changing it. If that run died without posting, "Release" '
     "puts the draft back in line first"
 )
 
@@ -55,7 +58,7 @@ _CLAIMED = (
 def block_reason(conn: sqlite3.Connection, draft_id: int, info) -> str:
     """Why step 3 will not let go of this draft, or "" when it will. The posts log is asked
     first and on its own: a schedule row can be missing, deleted or lagging while tweets
-    exist, and a draft that reached X is never reopened whatever the schedule says. `info`
+    exist, and a draft that reached X is never changed whatever the schedule says. `info`
     is that draft's `store.publish_states` entry, or None when step 3 never saw it."""
     if publish_store.is_live(conn, draft_id):
         return _LIVE
@@ -64,7 +67,7 @@ def block_reason(conn: sqlite3.Connection, draft_id: int, info) -> str:
     if info.status == "claimed":
         return _CLAIMED
     return (
-        f"publishing still holds this draft (it is {info.status}); it cannot be reopened "
+        f"publishing still holds this draft (it is {info.status}); it cannot be changed "
         "until that is resolved"
     )
 

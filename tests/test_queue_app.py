@@ -30,8 +30,19 @@ def draft_id(conn):
     return store.insert_draft(conn, item_id="i1", model="m", draft=d)
 
 
-def test_index_lists_pending_with_source_score_rationale(client, draft_id):
-    r = client.get("/queue")
+def test_the_old_pending_page_opens_the_approved_one(client, conn, draft_id):
+    for path in ("/queue", "/"):
+        r = client.get(path)
+        assert r.status_code == 303 and r.headers["location"] == "/status/approved"
+    assert client.get("/queue?notice=hi").headers["location"] == "/status/approved?notice=hi"
+    assert "hi" in client.get("/status/approved?notice=hi").text
+    # the nav has no Pending link any more
+    assert 'href="/queue"' not in client.get("/status/approved").text
+
+
+def test_approved_page_lists_drafts_with_source_score_rationale(client, conn, draft_id):
+    store.approve(conn, draft_id)
+    r = client.get("/status/approved")
     assert r.status_code == 200
     body = r.text
     assert "biorxiv" in body and "8.5" in body and "rationale i1" in body
@@ -50,18 +61,17 @@ def test_detail_shows_post_thread_and_lengths(client, draft_id):
 
 def test_approve_action(client, conn, draft_id):
     r = client.post(f"/drafts/{draft_id}/approve", data={"note": "good"})
-    assert r.status_code == 303 and r.headers["location"] == "/queue"
+    assert r.status_code == 303 and r.headers["location"] == "/status/approved"
     row = store.get_draft(conn, draft_id)
     assert row.status == "approved"
     dec = store.list_decisions(conn, draft_id)
     assert dec[0]["action"] == "approve" and dec[0]["note"] == "good"
-    assert f"/drafts/{draft_id}" not in client.get("/queue").text
     assert f"/drafts/{draft_id}" in client.get("/status/approved").text
 
 
 def test_approve_action_no_table_has_no_notice(client, conn, draft_id):
     r = client.post(f"/drafts/{draft_id}/approve", data={"note": "good"})
-    assert r.status_code == 303 and r.headers["location"] == "/queue"
+    assert r.status_code == 303 and r.headers["location"] == "/status/approved"
     assert "notice=" not in r.headers["location"]
     row = store.get_draft(conn, draft_id)
     assert row.status == "approved"
@@ -75,7 +85,7 @@ def test_edit_action_saves_original_and_edited(client, conn, draft_id):
             "note": "tightened",
         },
     )
-    assert r.status_code == 303
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}"
     row = store.get_draft(conn, draft_id)
     assert row.status == "approved"
     assert row.draft.thread == ["Preprint, edited. first", "second", "last"]
@@ -86,13 +96,16 @@ def test_edit_action_saves_original_and_edited(client, conn, draft_id):
     assert dec["note"] == "tightened"
 
 
-def test_edit_keep_pending(client, conn, draft_id):
-    r = client.post(
-        f"/drafts/{draft_id}/edit",
-        data={"thread": "a\n---\nb\n---\nc", "keep_pending": "1"},
-    )
+def test_an_approved_draft_is_edited_in_place_and_stays_approved(client, conn, draft_id):
+    store.approve(conn, draft_id)
+    page = client.get(f"/drafts/{draft_id}").text
+    assert f'action="/drafts/{draft_id}/edit"' in page and ">Save<" in page
+    assert f'action="/drafts/{draft_id}/approve"' not in page  # it is approved already
+    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": "a\n---\nb\n---\nc"})
     assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}"
-    assert store.get_draft(conn, draft_id).status == "pending"
+    row = store.get_draft(conn, draft_id)
+    assert row.status == "approved" and row.draft.thread == ["a", "b", "c"]
+    assert store.list_decisions(conn, draft_id)[-1]["action"] == "edit"
 
 
 def test_edit_rejects_over_280_and_empty(client, conn, draft_id):
@@ -101,7 +114,7 @@ def test_edit_rejects_over_280_and_empty(client, conn, draft_id):
     # The refusal is the detail page itself, error on top and the typed text kept, with a
     # way back; never FastAPI's bare JSON page.
     assert "Not saved" in r.text and "post 1 is 281 characters" in r.text
-    assert "x" * 281 in r.text and 'href="/queue"' in r.text
+    assert "x" * 281 in r.text and 'href="/status/approved"' in r.text
     assert "<details open>" in r.text
     r = client.post(f"/drafts/{draft_id}/edit", data={"thread": ""})
     assert r.status_code == 400 and "cannot be empty" in r.text
@@ -117,19 +130,8 @@ def test_reject_action(client, conn, draft_id):
     assert f"/drafts/{draft_id}" in client.get("/status/rejected").text
 
 
-def test_reopen_action_sends_an_approved_draft_back_to_pending(client, conn, draft_id):
-    client.post(f"/drafts/{draft_id}/approve")
-    r = client.post(f"/drafts/{draft_id}/reopen", data={"note": "second thoughts"})
-    assert r.status_code == 303 and r.headers["location"] == "/status/approved"
-    assert store.get_draft(conn, draft_id).status == "pending"
-    assert f"/drafts/{draft_id}" in client.get("/queue").text
-    assert f"/drafts/{draft_id}" not in client.get("/status/approved").text
-    dec = store.list_decisions(conn, draft_id)[-1]
-    assert dec["action"] == "reopen" and dec["note"] == "second thoughts"
-
-
 def test_actions_on_missing_draft_404(client):
-    for action in ("approve", "reject", "reopen"):
+    for action in ("approve", "reject"):
         assert client.post(f"/drafts/999/{action}").status_code == 404
     assert client.post("/drafts/999/edit", data={"thread": "s"}).status_code == 404
     assert client.get("/status/bogus").status_code == 404
@@ -150,21 +152,16 @@ def test_edit_form_accepts_category_and_rejects_unknown(client, conn, draft_id):
     assert store.list_decisions(conn, draft_id)[0]["category"] == "factual"
 
 
-def test_approved_page_offers_reopen_but_not_approve_reject_or_revise(client, conn, draft_id):
+def test_approved_page_offers_no_reopen_approve_reject_or_revise(client, conn, draft_id):
     store.approve(conn, draft_id)
     body = client.get("/status/approved").text
-    assert f'action="/drafts/{draft_id}/reopen"' in body and ">Reopen<" in body
-    for action in ("approve", "reject", "revise", "edit"):
+    for action in ("reopen", "approve", "reject", "revise", "edit"):
         assert f'action="/drafts/{draft_id}/{action}"' not in body
     # "Publish now" belongs to the panel; the standalone queue never offers it. Ask for the
     # standalone globals rather than assuming them: importing panel.app sets the panel's on
     # this same environment, for the whole process (conftest puts back whatever we change).
     queue_app.install_standalone_globals()
     assert 'action="/publishing/now"' not in client.get("/status/approved").text
-    # once step 3 has it, neither button is offered any more
-    _publish_draft(conn, draft_id, tweet_id="555")
-    body = client.get("/status/approved?posted=1").text
-    assert f'action="/drafts/{draft_id}/reopen"' not in body
 
 
 def _publish_draft(conn, draft_id, *, status="posted", tweet_id="555", error=None):
@@ -224,11 +221,9 @@ def test_approved_page_shows_failed_and_partial_but_keeps_them(client, conn, dra
     conn.commit()
     body = client.get("/status/approved").text
     assert f"/drafts/{draft_id}" in body and "partial thread" in body
-    # the pending list never shows publish pills
-    assert "waiting" not in client.get("/queue").text
 
 
-# --- reopen: what step 3 has already done to the draft --------------------------------
+# --- editing an approved draft: what step 3 has already done to it ----------------------
 
 
 def _schedule_row(conn, draft_id):
@@ -245,109 +240,69 @@ def _claim_draft(conn, draft_id):
     assert pstore.claim(conn, draft_id, "08:30")
 
 
+EDIT = {"thread": "changed\n---\nb"}
+
+
+def _changes(client, draft_id):
+    """The status of each change an approved draft may get: the edit and the picture drops."""
+    return [
+        client.post(f"/drafts/{draft_id}/edit", data=EDIT).status_code,
+        client.post(f"/drafts/{draft_id}/image/drop").status_code,
+        client.post(f"/drafts/{draft_id}/image/0/drop").status_code,
+    ]
+
+
 @pytest.mark.parametrize("state", ["posted", "partial", "claimed"])
-def test_reopen_refused_once_publishing_owns_the_draft(client, conn, draft_id, state):
+def test_an_approved_draft_is_not_changed_once_publishing_owns_it(client, conn, draft_id, state):
     store.approve(conn, draft_id)
     if state == "claimed":
         _claim_draft(conn, draft_id)
     else:
         _publish_draft(conn, draft_id, status=state, tweet_id="555")
-    r = client.post(f"/drafts/{draft_id}/reopen")
-    assert r.status_code == 303 and r.headers["location"].startswith(f"/drafts/{draft_id}?error=")
-    # the three refusals mean different things to the operator, so they must read differently
-    said = unquote(r.headers["location"])
-    assert ("already claimed" in said) if state == "claimed" else ("live on X" in said)
-    assert store.get_draft(conn, draft_id).status == "approved"
-    assert "reopen" not in [d["action"] for d in store.list_decisions(conn, draft_id)]
-    # and the schedule row survives the refusal
+    r = client.post(f"/drafts/{draft_id}/edit", data=EDIT)
+    assert r.status_code == 409
+    # the refusals mean different things to the operator, so they must read differently
+    assert ("already claimed" in r.text) if state == "claimed" else ("live on X" in r.text)
+    assert _changes(client, draft_id) == [409, 409, 409]
+    row = store.get_draft(conn, draft_id)
+    assert row.status == "approved" and row.draft.thread[0] == "Preprint. ORR 88%. one"
+    assert "edit" not in [d["action"] for d in store.list_decisions(conn, draft_id)]
     assert _schedule_row(conn, draft_id) is not None
+    # and the page offers neither the form nor the drops, saying why
+    page = client.get(f"/drafts/{draft_id}").text
+    assert f'action="/drafts/{draft_id}/edit"' not in page and "can no longer be changed" in page
 
 
 @pytest.mark.parametrize("state", ["failed", "refused"])
-def test_reopen_allowed_after_a_failed_or_refused_attempt(client, conn, draft_id, state):
+def test_an_approved_draft_may_change_after_a_failed_or_refused_attempt(
+    client, conn, draft_id, state
+):
     store.approve(conn, draft_id)
     _publish_draft(conn, draft_id, status=state, tweet_id=None, error="HTTP 403")
-    r = client.post(f"/drafts/{draft_id}/reopen")
-    assert r.status_code == 303 and r.headers["location"] == "/status/approved"
-    assert store.get_draft(conn, draft_id).status == "pending"
-    assert store.list_decisions(conn, draft_id)[-1]["action"] == "reopen"
-    # the failed attempt's schedule row goes too, so the draft comes back clean
-    assert publish_store.get_schedule(conn, draft_id) is None
+    r = client.post(f"/drafts/{draft_id}/edit", data=EDIT)
+    assert r.status_code == 303
+    assert store.get_draft(conn, draft_id).draft.thread == ["changed", "b"]
 
 
-def test_reopen_allowed_while_only_scheduled_or_with_no_schedule_row(client, conn, draft_id):
+def test_an_approved_draft_may_change_while_only_scheduled_or_with_no_schedule_row(
+    client, conn, draft_id
+):
     from publish import store as pstore
 
-    store.approve(conn, draft_id)
-    seed_item(conn, "i2", source="pubmed")
-    other = store.insert_draft(
-        conn,
-        item_id="i2",
-        model="m",
-        draft=Draft(thread=["Second"], suggested_visual="", why_it_matters=""),
-    )
-    store.approve(conn, other)
-    pstore.connect(conn.execute("PRAGMA database_list").fetchone()[2]).close()
-    pstore.set_order(conn, [draft_id])  # a saved publishing order, nothing claimed
-    assert _schedule_row(conn, other) is None
-
-    for did in (draft_id, other):
-        r = client.post(f"/drafts/{did}/reopen")
-        assert r.status_code == 303 and r.headers["location"] == "/status/approved"
-        assert store.get_draft(conn, did).status == "pending"
-
-
-@pytest.mark.parametrize("status", ["pending", "rejected"])
-def test_reopen_refused_for_a_draft_that_is_not_approved(client, conn, draft_id, status):
-    if status == "rejected":
-        store.reject(conn, draft_id)
-    r = client.post(f"/drafts/{draft_id}/reopen")
-    assert r.status_code == 303 and "error=" in r.headers["location"]
-    assert status in r.headers["location"]
-    assert store.get_draft(conn, draft_id).status == status
-    assert "reopen" not in [d["action"] for d in store.list_decisions(conn, draft_id)]
-
-
-def test_reopen_releases_an_unclaimed_schedule_row_but_never_a_live_one(client, conn, draft_id):
-    from publish import store as pstore
-
-    store.approve(conn, draft_id)
-    pstore.connect(conn.execute("PRAGMA database_list").fetchone()[2]).close()
-    pstore.set_order(conn, [draft_id])
-    assert _schedule_row(conn, draft_id)["position"] == 1
-    assert client.post(f"/drafts/{draft_id}/reopen").status_code == 303
-    # the saved order is gone, so re-approving does not resurrect it
-    assert _schedule_row(conn, draft_id) is None
-
-    # a posted draft keeps its row (the refusal never reaches release_unclaimed)
-    store.approve(conn, draft_id)
-    _publish_draft(conn, draft_id, tweet_id="555")
-    assert client.post(f"/drafts/{draft_id}/reopen").status_code == 303
-    assert _schedule_row(conn, draft_id) is not None
-    # ... and so does a claimed one
-    seed_item(conn, "i3", source="pubmed")
-    other = store.insert_draft(
-        conn,
-        item_id="i3",
-        model="m",
-        draft=Draft(thread=["Third"], suggested_visual="", why_it_matters=""),
-    )
-    store.approve(conn, other)
-    _claim_draft(conn, other)
-    assert client.post(f"/drafts/{other}/reopen").status_code == 303
-    assert _schedule_row(conn, other) is not None
-
-
-def test_reopen_works_before_any_publish_run_has_made_step_3s_tables(client, conn, draft_id):
     store.approve(conn, draft_id)
     present = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "schedule" not in present and "posts" not in present
-    r = client.post(f"/drafts/{draft_id}/reopen")
-    assert r.status_code == 303 and r.headers["location"] == "/status/approved"
-    assert store.get_draft(conn, draft_id).status == "pending"
+    assert "schedule" not in present  # before any publish run made step 3's tables
+    assert client.post(f"/drafts/{draft_id}/edit", data=EDIT).status_code == 303
+    pstore.connect(conn.execute("PRAGMA database_list").fetchone()[2]).close()
+    pstore.set_order(conn, [draft_id])  # a saved publishing order, nothing claimed
+    assert client.post(f"/drafts/{draft_id}/edit", data={"thread": "x"}).status_code == 303
+    assert store.get_draft(conn, draft_id).draft.thread == ["x"]
+    assert _schedule_row(conn, draft_id)["position"] == 1  # the order survives an edit
 
 
-def test_reopen_refused_for_a_draft_that_reached_x_without_a_schedule_row(client, conn, draft_id):
+def test_an_approved_draft_that_reached_x_without_a_schedule_row_is_not_changed(
+    client, conn, draft_id
+):
     """The posts log is the ground truth. A schedule row can be missing — deleted by hand,
     or lost to a release — while the tweets are still up, and the draft must stay put."""
     store.approve(conn, draft_id)
@@ -355,55 +310,23 @@ def test_reopen_refused_for_a_draft_that_reached_x_without_a_schedule_row(client
     conn.execute("DELETE FROM schedule WHERE draft_id = ?", (draft_id,))
     conn.commit()
     assert store.publish_states(conn, [draft_id]) == {}  # schedule alone says: never posted
-    r = client.post(f"/drafts/{draft_id}/reopen")
-    assert r.status_code == 303 and "error=" in r.headers["location"]
-    assert "live%20on%20X" in r.headers["location"]
-    assert store.get_draft(conn, draft_id).status == "approved"
-    assert "reopen" not in [d["action"] for d in store.list_decisions(conn, draft_id)]
+    r = client.post(f"/drafts/{draft_id}/edit", data=EDIT)
+    assert r.status_code == 409 and "live on X" in r.text
 
 
-def test_reopen_refused_for_a_schedule_state_it_does_not_know(client, conn, draft_id):
-    """The guard is an allowlist: a state a later step 3 invents holds the draft instead of
-    falling through to a reopen."""
+def test_an_approved_draft_in_a_schedule_state_it_does_not_know_is_not_changed(
+    client, conn, draft_id
+):
+    """The guard is an allowlist: a state a later step 3 invents holds the draft."""
     store.approve(conn, draft_id)
     _publish_draft(conn, draft_id, status="posting", tweet_id=None)
-    r = client.post(f"/drafts/{draft_id}/reopen")
-    assert r.status_code == 303 and "error=" in r.headers["location"]
+    assert client.post(f"/drafts/{draft_id}/edit", data=EDIT).status_code == 409
+
+
+def test_a_rejected_draft_may_still_be_edited_back_to_approved(client, conn, draft_id):
+    store.reject(conn, draft_id)
+    assert client.post(f"/drafts/{draft_id}/edit", data=EDIT).status_code == 303
     assert store.get_draft(conn, draft_id).status == "approved"
-
-
-@pytest.mark.parametrize(
-    "state,offered",
-    [
-        (None, True),
-        ("pending", True),
-        ("failed", True),
-        ("refused", True),
-        ("claimed", False),
-        ("posted", False),
-        ("partial", False),
-    ],
-)
-def test_the_reopen_button_is_offered_exactly_where_the_route_allows_it(
-    client, conn, draft_id, state, offered
-):
-    """The approved list, the draft's page and the route each decide whether a draft can be
-    taken back. All three read PublishInfo.reopenable, and this pins them to one table."""
-    store.approve(conn, draft_id)
-    if state == "claimed":
-        _claim_draft(conn, draft_id)
-    elif state == "pending":
-        publish_store.set_order(conn, [draft_id])
-    elif state is not None:
-        # failed and refused mean nothing reached X; posted and partial mean something did
-        live = state in ("posted", "partial")
-        _publish_draft(conn, draft_id, status=state, tweet_id="555" if live else None)
-    form = f'action="/drafts/{draft_id}/reopen"'
-    assert (form in client.get("/status/approved?posted=1").text) is offered
-    assert (form in client.get(f"/drafts/{draft_id}").text) is offered
-    # and the route agrees with the button
-    client.post(f"/drafts/{draft_id}/reopen")
-    assert (store.get_draft(conn, draft_id).status == "pending") is offered
 
 
 def test_detail_shows_created_at_in_the_display_timezone(client, conn, draft_id):
@@ -557,7 +480,8 @@ def test_the_apps_own_pages_and_requests_without_a_site_go_through(client, conn,
 
 def test_pages_are_read_from_anywhere(client, draft_id):
     # a link from elsewhere opens a page; only a change is refused
-    assert client.get("/queue", headers={"Origin": "https://evil.example"}).status_code == 200
+    page = client.get("/status/approved", headers={"Origin": "https://evil.example"})
+    assert page.status_code == 200
     r = client.get(f"/drafts/{draft_id}", headers={"Referer": "https://evil.example/"})
     assert r.status_code == 200
 
@@ -606,6 +530,6 @@ def test_the_home_screen_app_files_are_served(client):
         got = client.get(icon["src"])
         assert got.status_code == 200 and got.content[:8] == b"\x89PNG\r\n\x1a\n"
     assert client.get("/apple-touch-icon.png").headers["content-type"] == "image/png"
-    page = client.get("/queue").text
+    page = client.get("/status/approved").text
     assert 'rel="manifest" href="/manifest.webmanifest"' in page
     assert 'rel="apple-touch-icon"' in page

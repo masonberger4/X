@@ -957,15 +957,16 @@ def test_release_unclaimed_and_release_failed_agree_on_live_threads(conn, monkey
     assert store.get_schedule(conn, waiting) is None
 
 
-def test_reopening_a_draft_hides_it_from_publish_and_drops_its_position(conn):
-    """The whole reason release_unclaimed exists: a reopened draft is not approved, and
-    re-approving it must not resurrect the place in the queue it had before."""
+def test_a_draft_taken_off_the_approved_list_loses_its_position(conn):
+    """The whole reason release_unclaimed exists: a draft that left the approved list (the
+    studio brings a rejected one back with a revision) must not resurrect the place in the
+    queue it had before when it is approved again."""
     did = seed_draft(conn, "a")
     store.set_order(conn, [did])
     (a,) = store.fetch_approved(10, conn=conn)
     assert a.draft_id == did and a.position == 1
 
-    qstore.reopen(conn, did)
+    qstore.reject(conn, did)
     assert store.release_unclaimed(conn, [did]) == [did]
     assert store.fetch_approved(10, conn=conn) == []
 

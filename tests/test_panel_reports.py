@@ -204,7 +204,7 @@ def test_feedback_never_offers_to_apply_a_suggestion(client, conn):
 
 def test_the_nav_reaches_every_page(client):
     body = client.get("/").text
-    for link in ("/feed", "/publishing", "/feedback", "/sources", "/runs", "/queue"):
+    for link in ("/feed", "/publishing", "/feedback", "/sources", "/runs", "/status/approved"):
         assert f'href="{link}"' in body
 
 

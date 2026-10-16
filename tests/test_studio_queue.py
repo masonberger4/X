@@ -130,17 +130,22 @@ def test_the_standalone_queue_names_a_studio_draft_without_dead_links(
 
     monkeypatch.setitem(queue_app.templates.env.globals, "HAS_PANEL", False)
     piece_id, draft_id, _ = put_piece(conn, tmp_path, POSTS)
-    listing = row_of(client.get("/queue").text, draft_id)
+    listing = row_of(client.get("/status/approved").text, draft_id)
     detail = client.get(f"/drafts/{draft_id}").text
     assert f"<strong>Studio piece {piece_id}</strong>" in listing
     assert 'href="/studio/' not in listing and 'href="/studio/' not in detail
     assert "its studio page in the control panel (run_app.py)" in detail
 
 
-def test_the_pending_list_names_a_studio_draft_by_its_piece(client, conn, tmp_path):
+def test_a_finished_piece_lands_approved_and_named_by_its_piece(client, conn, tmp_path):
     plain = drafter_draft(conn)
+    store.approve(conn, plain)
     piece_id, draft_id, _ = put_piece(conn, tmp_path, POSTS, [(1, "Treg depletion by binder")])
-    body = client.get("/queue").text
+    row = store.get_draft(conn, draft_id)
+    assert row.status == "approved"
+    dec = store.list_decisions(conn, draft_id)
+    assert [(d["action"], d["note"]) for d in dec] == [("approve", "finished in the studio")]
+    body = client.get("/status/approved").text
     row = row_of(body, draft_id)
     assert f"<strong>Studio piece {piece_id}</strong>" in row
     assert f'<a href="/studio/{piece_id}">fact base, fact-check log and Revise' in row
@@ -167,9 +172,10 @@ def test_the_detail_page_names_the_piece_and_links_its_studio_page(client, conn,
     assert f'action="/drafts/{draft_id}/revise"' not in body
     # the cards come with no chart or table spec, so there is nothing to redraw
     assert f'action="/drafts/{draft_id}/image/redraw"' not in body
-    # the editor can still edit by hand, approve and reject here
-    for action in ("edit", "approve", "reject"):
+    # the editor can still edit by hand and reject here; it is approved already
+    for action in ("edit", "reject"):
         assert f'action="/drafts/{draft_id}/{action}"' in body
+    assert f'action="/drafts/{draft_id}/approve"' not in body
 
 
 def test_a_drafter_draft_keeps_its_title_and_has_no_revise_form(client, conn):
@@ -184,15 +190,15 @@ def test_editing_a_studio_post_is_held_to_its_own_limit(client, conn, tmp_path):
     _, draft_id, _ = put_piece(conn, tmp_path, POSTS[:1])
     five_thousand = "Next-gen CTLA-4, in full. " + "x" * 4974
     assert len(five_thousand) == 5000
-    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": five_thousand, "keep_pending": 1})
+    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": five_thousand})
     assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}"
     row = store.get_draft(conn, draft_id)
-    assert row.draft.thread == [five_thousand] and row.status == "pending"
+    assert row.draft.thread == [five_thousand] and row.status == "approved"
     assert (row.draft.shape, row.draft.max_chars) == ("long", 25000)  # the format is kept
     # the limit itself: 25000 fits, 25001 does not
-    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": "y" * 25000, "keep_pending": 1})
+    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": "y" * 25000})
     assert r.status_code == 303
-    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": "z" * 25001, "keep_pending": 1})
+    r = client.post(f"/drafts/{draft_id}/edit", data={"thread": "z" * 25001})
     assert r.status_code == 400
     assert "1 post(s) exceed 25000 characters (post 1 is 25001 characters)" in r.text
     assert store.get_draft(conn, draft_id).draft.thread == ["y" * 25000]
@@ -303,7 +309,7 @@ def test_an_approved_studio_draft_reaches_the_publisher_whole(client, conn, tmp_
     edited = POSTS[0] + " And the cold-tumour data is the reason to care." * 60
     assert len(edited) > 280
     r = client.post(f"/drafts/{draft_id}/edit", data={"thread": f"{edited}\n---\n{POSTS[1]}"})
-    assert r.status_code == 303 and r.headers["location"] == "/queue"  # saved and approved
+    assert r.status_code == 303 and r.headers["location"] == f"/drafts/{draft_id}"
     assert store.get_draft(conn, draft_id).status == "approved"
     (approved,) = publish_store.fetch_approved(conn=conn)
     assert approved.draft_id == draft_id and approved.edited
@@ -315,7 +321,7 @@ def test_an_approved_studio_draft_reaches_the_publisher_whole(client, conn, tmp_
     ]
     listed = client.get("/status/approved").text
     assert f"<strong>Studio piece {piece_id}</strong>" in row_of(listed, draft_id)
-    assert "fact base, fact-check log and Revise" not in listed  # only while it is pending
+    assert "fact base, fact-check log and Revise" in listed
 
 
 # ---- while the studio works on a piece, the queue leaves its draft alone ---------------
@@ -339,7 +345,7 @@ def test_a_studio_draft_is_held_while_its_revision_runs_or_waits(client, conn, t
 
     for path, form in (
         ("approve", {}),
-        ("edit", {"thread": "changed by hand", "keep_pending": 1}),
+        ("edit", {"thread": "changed by hand"}),
         ("reject", {"note": "not now"}),
         ("image/drop", {}),
         ("image/1/drop", {}),
@@ -348,22 +354,23 @@ def test_a_studio_draft_is_held_while_its_revision_runs_or_waits(client, conn, t
         assert r.status_code == 409, path
         assert "Not done: " in r.text and f"piece {piece_id}" in r.text
     row = store.get_draft(conn, draft_id)
-    assert (row.status, row.draft.thread, len(row.images)) == ("pending", POSTS, 2)
-    assert store.list_decisions(conn, draft_id) == []
+    assert (row.status, row.draft.thread, len(row.images)) == ("approved", POSTS, 2)
+    assert [d["action"] for d in store.list_decisions(conn, draft_id)] == ["approve"]
     # the pages say so before anyone presses a button
     assert "On hold: " in client.get(f"/drafts/{draft_id}").text
-    assert '<span class="pill warn">on hold</span>' in row_of(client.get("/queue").text, draft_id)
+    listed = client.get("/status/approved").text
+    assert '<span class="pill warn">on hold</span>' in row_of(listed, draft_id)
 
 
 def test_the_hold_lifts_when_the_piece_is_ready_again(client, conn, tmp_path):
     piece_id, draft_id, _ = put_piece(conn, tmp_path, POSTS)
     _hold(conn, piece_id, stage=studio_store.STAGE_REVISING)
-    assert client.post(f"/drafts/{draft_id}/approve").status_code == 409
+    assert client.post(f"/drafts/{draft_id}/reject").status_code == 409
     _hold(conn, piece_id, stage=studio_store.STAGE_READY)
     assert "On hold" not in client.get(f"/drafts/{draft_id}").text
-    assert "on hold" not in row_of(client.get("/queue").text, draft_id)
-    r = client.post(f"/drafts/{draft_id}/approve")
-    assert r.status_code == 303 and store.get_draft(conn, draft_id).status == "approved"
+    assert "on hold" not in row_of(client.get("/status/approved").text, draft_id)
+    r = client.post(f"/drafts/{draft_id}/reject")
+    assert r.status_code == 303 and store.get_draft(conn, draft_id).status == "rejected"
 
 
 def test_a_drafter_draft_is_never_held(client, conn):

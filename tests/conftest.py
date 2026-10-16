@@ -182,3 +182,37 @@ def _queue_template_globals():
     yield
     queue_app.templates.env.globals.clear()
     queue_app.templates.env.globals.update(before)
+
+
+def post_on_x(conn, draft_id: int) -> None:
+    """What step 3 writes once a draft is live on X: a claim and a posted first post."""
+    from publish import store as pstore
+
+    pstore.connect(conn.execute("PRAGMA database_list").fetchone()[2]).close()
+    pstore.claim(conn, draft_id, "08:30")
+    pstore.record_post(
+        conn,
+        draft_id=draft_id,
+        text="one",
+        kind="thread",
+        position=1,
+        slot="08:30",
+        tweet_id="555",
+        posted_at=None,
+        error=None,
+    )
+    pstore.finish(conn, draft_id, "posted", None)
+
+
+def claim_for_publishing(conn, draft_id: int) -> None:
+    """What step 3 does the moment it picks a draft up: a claimed schedule row, no posts."""
+    from publish import store as pstore
+
+    pstore.connect(conn.execute("PRAGMA database_list").fetchone()[2]).close()
+    assert pstore.claim(conn, draft_id, "08:30")
+
+
+def drop_claim(conn, draft_id: int) -> None:
+    """A dead claim let go (what the queue's Release does once it is stale)."""
+    conn.execute("DELETE FROM schedule WHERE draft_id = ?", (draft_id,))
+    conn.commit()

@@ -1,7 +1,8 @@
 """A finished studio piece into the approval queue, through approval_queue/store.py's own
 functions (the studio's one write outside its tables).
 
-The piece becomes an ordinary pending draft: shape `long` with the studio's per-post
+The piece becomes an ordinary approved draft (there is no pending page: the editor reads
+it on the approved page and publishes it by hand): shape `long` with the studio's per-post
 limit (one long post, or several posts that publish chains as replies, never numbered),
 every card copied into the queue's image folder and anchored to its post. The draft
 carries no claims to verify (the session ran its own cold fact-check), so step 2b leaves
@@ -92,22 +93,18 @@ def build_draft(piece: S.Piece, report: qa.Report, max_chars: int) -> Draft:
     )
 
 
-# A revision replaces a pending draft, and brings a rejected one back to pending (the
-# editor asked for it after rejecting). An approved or posted draft waits for a reopen in
-# the queue, where the publishing checks run.
-_REVISABLE = (queue_store.STATUS_PENDING, queue_store.STATUS_REJECTED)
+# A revision replaces an approved draft (staying approved) and brings a rejected one back
+# as approved (the editor asked for it after rejecting); a pending one from an older
+# version too. Step 3 is asked first whether it still holds the draft.
+_REVISABLE = (queue_store.STATUS_PENDING, queue_store.STATUS_APPROVED, queue_store.STATUS_REJECTED)
 
 
 def _not_revisable(conn: sqlite3.Connection, existing: queue_store.DraftRow) -> str:
-    """Why a revision could not replace this draft, or "". A rejected draft comes back to
-    pending, so step 3 is asked the queue's own Reopen question first: nothing of it on X
-    (a rejected draft may have been posted before it was rejected) and no publish run
-    holding it."""
+    """Why a revision could not replace this draft, or "". Step 3 is asked the queue's own
+    question first: nothing of it on X (a rejected draft may have been posted before it was
+    rejected) and no publish run holding it."""
     if existing.status not in _REVISABLE:
-        return (
-            f"draft {existing.id} is {existing.status}, not pending; reopen it in the queue "
-            "before revising"
-        )
+        return f"draft {existing.id} is {existing.status} and cannot be revised"
     if publishing.is_live(conn, existing.id):
         return (
             f"draft {existing.id} is already live on X, so a revision of it could never be "
@@ -115,7 +112,7 @@ def _not_revisable(conn: sqlite3.Connection, existing: queue_store.DraftRow) -> 
         )
     info = queue_store.publish_states(conn, [existing.id]).get(existing.id)
     held = publishing.block_reason(conn, existing.id, info)
-    return f"draft {existing.id} cannot come back for a revision: {held}" if held else ""
+    return f"draft {existing.id} cannot be revised now: {held}" if held else ""
 
 
 def revise_blocker(conn: sqlite3.Connection, piece: S.Piece) -> str:
@@ -127,10 +124,17 @@ def revise_blocker(conn: sqlite3.Connection, piece: S.Piece) -> str:
 
 
 def withdraw(conn: sqlite3.Connection, piece: S.Piece) -> int | None:
-    """A discarded piece leaves nothing to approve: its draft is rejected when it is still
-    pending. Returns that draft's id, or None when there was nothing to withdraw."""
+    """A discarded piece leaves nothing to publish: its draft is rejected when it is still
+    waiting (approved, or pending from an older version) and step 3 does not hold it.
+    Returns that draft's id, or None when there was nothing to withdraw."""
     existing = queue_store.find_by_item(conn, queue_store.studio_item_id(piece.id))
-    if existing is None or existing.status != queue_store.STATUS_PENDING:
+    if existing is None or existing.status not in (
+        queue_store.STATUS_PENDING,
+        queue_store.STATUS_APPROVED,
+    ):
+        return None
+    info = queue_store.publish_states(conn, [existing.id]).get(existing.id)
+    if publishing.block_reason(conn, existing.id, info):
         return None
     queue_store.reject(conn, existing.id, note="discarded in the studio")
     return existing.id
@@ -265,9 +269,9 @@ def _synced(piece: S.Piece) -> dict[str, Any] | None:
 def to_queue(
     conn: sqlite3.Connection, piece: S.Piece, report: qa.Report, *, max_chars: int = 25000
 ) -> int:
-    """Insert the piece as a pending draft, or replace the text and cards of its pending
-    draft after a revision. Returns the draft id, and records what went in (`queued` in the
-    piece's meta) for the next `hand_edits`."""
+    """Insert the piece as an approved draft, or replace the text and cards of its draft
+    after a revision (approved again when it had been rejected). Returns the draft id, and
+    records what went in (`queued` in the piece's meta) for the next `hand_edits`."""
     draft = build_draft(piece, report, max_chars)
     item_id = queue_store.studio_item_id(piece.id)
     model = f"{piece.model} (studio)"
@@ -276,6 +280,7 @@ def to_queue(
         draft_id = queue_store.insert_draft(
             conn, item_id=item_id, model=model, draft=draft, cluster_id=piece.cluster_id
         )
+        queue_store.approve(conn, draft_id, note="finished in the studio")
     else:
         blocked = _not_revisable(conn, existing)
         if blocked:
@@ -288,10 +293,10 @@ def to_queue(
                 "there; Revise (or Resume) the piece so the session starts from those changes"
             )
         draft_id = existing.id
-        if existing.status == queue_store.STATUS_REJECTED:
-            queue_store.reopen(conn, draft_id, note="revised in the studio after it was rejected")
-            # As the queue's own Reopen does: a publishing order saved while the draft was
-            # approved must not come back with it on re-approval.
+        brought_back = existing.status != queue_store.STATUS_APPROVED
+        if brought_back:
+            # While the draft is not approved no publish run can claim it: a publishing
+            # order saved when it was approved before must not come back with it.
             publishing.forget(conn, draft_id)
         # The editor's words, as the queue's own revise logs them. session.revise keeps
         # them in meta: the request's note is cleared when the revision starts.
@@ -303,6 +308,14 @@ def to_queue(
             model=model,
             note=note or "revised in the studio",
         )
+        if brought_back:
+            queue_store.approve(
+                conn,
+                draft_id,
+                note="revised in the studio after it was rejected"
+                if existing.status == queue_store.STATUS_REJECTED
+                else "revised in the studio",
+            )
     assert report.piece is not None  # build_draft refused a piece without one
     # The record says what the queue holds, from the moment the text is in: a card that
     # cannot be attached (a full disk, a picture another program holds open) fails the
