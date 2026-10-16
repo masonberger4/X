@@ -230,32 +230,40 @@ hand under the post it answers.
   Its own tables are `drafts` and `decisions`; edits log original vs edited text
   (`store.parse_decision_text` reads a decision's text back). A leftover `choosing` draft
   from the retired A/B pick is migrated to `pending` by `store.connect`.
-  An approve is reversible: `POST /drafts/{id}/reopen` (`store.reopen`, a `reopen`
-  decision carrying the text and the optional note) puts an approved draft back to
-  `pending`. `POST /drafts/{id}/release` is the other half: a draft whose publish attempt
+  **There is no pending page**: a finished studio piece lands `approved`
+  (`studio/ingest.py:to_queue`, an `approve` decision "finished in the studio"), `/queue`
+  and the standalone `/` redirect to `/status/approved`, and the nav has no Pending link.
+  `store._approve_leftover_pending` moves every non-reply `pending` draft to `approved`
+  once per database (table `queue_migrations`, name `pending_page_removed`, an `approve`
+  decision saying why); a reply draft is inserted pending and approved by its own page in
+  the same request. Reopen is gone (no route, no `store.reopen`; `ACTION_REOPEN` stays for
+  old rows): an approved draft is changed in place, its edit and picture drops refused
+  with a 409 while `publishing.block_reason` says step 3 holds it (`app._publish_held`;
+  the detail page hides the form and the drops then, `publish_block`), and its saved
+  order kept. `POST /drafts/{id}/release`: a draft whose publish attempt
   posted nothing goes back in line WITHOUT leaving the approved list (no decision row, the
   saved order kept) by dropping step 3's dead schedule row — `failed`/`refused` through
   `publish/store.py:release_failed`, and a `claimed` row left by a run that died through
   `release_claimed`, which refuses a claim younger than `store.STALE_CLAIM_MINUTES` (a run
   may still be posting that thread) and anything with a live `posts` row.
   `publishing.release_reason` is the one gate, read by the route and by the button on both
-  templates, as `block_reason` is for reopen. `approval_queue/publishing.py` is the queue's one door to step 3 (as
-  `panel/publishing.py` is the panel's): `block_reason` refuses the reopen when
+  templates, as `block_reason` is for a change. `approval_queue/publishing.py` is the queue's one door to step 3 (as
+  `panel/publishing.py` is the panel's): `block_reason` refuses a change when
   `publish/store.py:is_live` finds a `posts` row with a tweet id — the ground truth,
   asked before and independently of the schedule — or when the draft's
   `store.publish_states` entry is not `PublishInfo.reopenable`
-  (`store.REOPENABLE_STATES`, an allowlist of `pending`/`failed`/`refused`, which both
-  templates read too so the button and the route cannot drift). Nothing on X is ever
-  unposted here. The status flips first, which hides the draft from `fetch_approved` so
-  no run can claim it, and only then does `publishing.forget` call
-  `publish/store.py:forget` (step 2's one write into step 3's tables: it deletes that
-  draft's `schedule` row when it was never claimed, or claimed and failed or refused,
-  and never one that is posted or partial), so a saved `position` cannot resurrect
-  itself on re-approval. There is no snooze: a draft left `snoozed` in an older database
+  (`store.REOPENABLE_STATES`, an allowlist of `pending`/`failed`/`refused`). Nothing on X
+  is ever unposted here. When a studio revision brings a rejected draft back,
+  `publishing.forget` runs while it is still rejected (hidden from `fetch_approved`, so no
+  run can claim it) and calls `publish/store.py:forget` (it deletes that draft's
+  `schedule` row when it was never claimed, or claimed and failed or refused, and never
+  one that is posted or partial), so a saved `position` cannot resurrect itself on
+  re-approval. There is no snooze: a draft left `snoozed` in an older database
   is migrated to `pending` by `store.connect`, and `drafts.snoozed_until` stays in the
   schema as a dead column so old databases need no rebuild.
-  The queue changes a draft only by hand: approve, edit (`POST /drafts/{id}/edit`, a long
-  draft held to its own `max_chars`), reject, reopen, release and the picture drops. A
+  The queue changes a draft only by hand: approve (a rejected one back), edit
+  (`POST /drafts/{id}/edit`, a long draft held to its own `max_chars`; the draft is
+  approved after it), reject, release and the picture drops. A
   change in words goes to the studio: a studio piece is revised from its `/studio` page
   (`store.revise`, a `revise` decision holding the before/after); publish honours the
   latest `edit` or `revise` text.
@@ -271,8 +279,8 @@ hand under the post it answers.
   numbers nothing; `scheduler.numbering_mode` normalises the value).
   The queue touches those two tables only through
   `approval_queue/store.py:publish_states` (read-only, empty when the tables are
-  missing) to label and hide posted drafts on the approved page, and, on a reopen or a
-  release (above), `publish/store.py:forget`, `release_failed`, `release_claimed` and
+  missing) to label and hide posted drafts on the approved page, and, on a studio revision
+  of a rejected draft or a release (above), `publish/store.py:forget`, `release_failed`, `release_claimed` and
   `is_live`, which read and delete step 3's rows through step 3's own module.
   Texts are re-checked before posting and refused, never edited, on failure.
 - Step 4 reads other steps' tables only through `feedback/store.py:fetch_posted`
@@ -330,7 +338,7 @@ hand under the post it answers.
   It renders through the pure functions in `panel/views.py`
   (`now` is a parameter; no DB, network or clock), and includes the step 2 queue's
   routes into the same app so the queue's own module stays unchanged apart from its
-  index moving to `/queue`. `panel/jobs.py` never builds an argv: a job names steps
+  index moving to `/queue` (now a redirect to `/status/approved`). `panel/jobs.py` never builds an argv: a job names steps
   from `ops/config.yaml` and `ops/runner.py` runs them, refusing any step whose argv
   contains `--live`. **Runs go side by side, one step never twice**: `run_steps(lock_path=)`
   takes `ops/lock.py:step_lock_path(lock_path, step.lock_name)` around each step (`lock:` in
@@ -461,17 +469,18 @@ hand under the post it answers.
   "Sentences", which cards.md and the reply prompt repeat), cards
   drawn by `studio/render.py`; blocking problems keep a piece out of the queue, fixable ones
   go back to the session up to `max_polish_rounds` and then ride along as warnings, and one
-  review round always shows the session its PNGs), then `studio/ingest.py`: a pending draft
+  review round always shows the session its PNGs), then `studio/ingest.py`: an approved draft
   with `item_id` `studio:<piece id>` (`approval_queue/store.py:studio_item_id`,
   `DraftRow.studio_piece`), shape `long` at `x.long_post_max`, no claims, every card copied to `image_file(id, k)` and anchored to its post, each
   `recheck_before_posting` fact a `store.RECHECK_PREFIX` line of `why_it_matters`
   (`store.recheck_lines`, listed by the panel's copy-paste page through
   `Approved.why_it_matters`, plus one line naming the analyst targets the posts still
   cite, `qa.cited_targets` and `ingest._target_line`, or the words citing one no entry
-  lists); a revision (`store.revise`) replaces text and cards of a
-  pending draft, or of a rejected one that `store.reopen` brings back (refused when
-  `approval_queue/publishing.py:is_live` or `block_reason` says step 3 holds it, followed
-  by `publishing.forget`, as the queue's Reopen does). Every ingest records what it put in
+  lists); a revision (`store.revise`) replaces text and cards of an
+  approved draft (it stays approved), or of a rejected one it then approves again after
+  `publishing.forget` (refused when `approval_queue/publishing.py:is_live` or
+  `block_reason` says step 3 holds it); a discarded piece's waiting draft is rejected
+  under the same check (`ingest.withdraw`). Every ingest records what it put in
   (`queued` in the piece's meta); `ingest.hand_edits` compares the draft with it (the
   editor's text, cards dropped), `session.revise` writes those changes into the piece's
   files once (`write_back`, recorded as `hand_edit`) and names them in `revise_prompt`,
@@ -706,7 +715,7 @@ draft/    what the studio and the queue share, no model calls: schema.py (Draft,
           target_mentions, target_figures, target_problems, field_figure, SHARE_FIGURE)
 approval_queue/  store.py (drafts, decisions, image_dir, set_image, drop_image,
           studio_hold, drafted_cluster_ids, parse_decision_text),
-          publishing.py (the queue's door to step 3), app.py (/queue, /drafts/{id},
+          publishing.py (the queue's door to step 3), app.py (/status/{status}, /drafts/{id},
           /drafts/{id}/image), templates/
 panel/    views.py (pure view models, sparkline geometry), feed.py (scored feed +
           ratings), jobs.py (JobManager, background step runs, "Publish now", automatic mode),

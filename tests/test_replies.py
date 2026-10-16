@@ -400,9 +400,8 @@ def test_publish_now_on_a_reply_opens_the_copy_paste_page_even_with_api_posting(
 
 def test_the_queue_keeps_a_reply_to_one_post(db_file, conn):
     draft_id = _approved_reply(conn)
-    queue_store.reopen(conn, draft_id)
     client = TestClient(queue_app.app, follow_redirects=False)
-    assert "Reply to @drA" in client.get("/queue").text
+    assert "Reply to @drA" in client.get("/status/approved").text
     r = client.post(f"/drafts/{draft_id}/edit", data={"thread": "one\n---\ntwo"})
     assert r.status_code == 400 and "a reply is one post" in r.text
 

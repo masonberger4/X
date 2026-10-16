@@ -45,13 +45,15 @@ STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"  # drafter produced output that broke a hard rule
 STATUSES = (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_FAILED)
-# Statuses a reviewer may still change a draft in: only a draft still awaiting a decision.
-EDITABLE_STATUSES = (STATUS_PENDING,)
+# Statuses a reviewer may still change a draft in. There is no pending page any more: a
+# finished studio piece lands approved, and the editor edits it there until it is posted
+# (the routes also ask step 3 whether it still holds the draft).
+EDITABLE_STATUSES = (STATUS_PENDING, STATUS_APPROVED)
 
 ACTION_APPROVE = "approve"
 ACTION_EDIT = "edit"
 ACTION_REJECT = "reject"
-ACTION_REOPEN = "reopen"  # an approved draft was moved back to pending
+ACTION_REOPEN = "reopen"  # retired: an approved draft was moved back to pending (old rows)
 ACTION_REVISE = "revise"  # the drafter rewrote the draft on the human's instructions
 ACTIONS = (ACTION_APPROVE, ACTION_EDIT, ACTION_REJECT, ACTION_REOPEN, ACTION_REVISE)
 
@@ -173,7 +175,50 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # The retired swarm's A/B pick is gone too: a draft left awaiting it holds one variant, which
     # becomes an ordinary pending draft.
     conn.execute("UPDATE drafts SET status = ? WHERE status = 'choosing'", (STATUS_PENDING,))
+    _approve_leftover_pending(conn)
     conn.commit()
+
+
+#: One-time data moves, each done once per database (table queue_migrations).
+_PENDING_PAGE_REMOVED = "pending_page_removed"
+
+
+def _approve_leftover_pending(conn: sqlite3.Connection) -> None:
+    """The pending page is gone: a finished studio piece lands approved, so the drafts an
+    older version left pending are approved, once, with an 'approve' decision saying why,
+    and show on the approved page. A reply draft is left alone: the reply page inserts it
+    and approves it itself in the same request. Once per database (queue_migrations), so a
+    draft inserted pending and approved a moment later by its own caller is never touched."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS queue_migrations (name TEXT PRIMARY KEY, applied_at TEXT)"
+    )
+    done = conn.execute(
+        "SELECT 1 FROM queue_migrations WHERE name = ?", (_PENDING_PAGE_REMOVED,)
+    ).fetchone()
+    if done is not None:
+        return
+    rows = conn.execute(
+        "SELECT id, thread_json FROM drafts WHERE status = ? AND item_id NOT LIKE 'reply:%'",
+        (STATUS_PENDING,),
+    ).fetchall()
+    for r in rows:
+        try:
+            thread = [str(t) for t in json.loads(r["thread_json"] or "[]")]
+        except (TypeError, ValueError):
+            thread = []
+        _set_status(conn, int(r["id"]), STATUS_APPROVED)
+        _record_decision(
+            conn,
+            int(r["id"]),
+            ACTION_APPROVE,
+            _serialise_text(thread),
+            None,
+            "moved to approved: the pending page was removed",
+        )
+    conn.execute(
+        "INSERT INTO queue_migrations (name, applied_at) VALUES (?, ?)",
+        (_PENDING_PAGE_REMOVED, _now()),
+    )
 
 
 def db_path() -> Path:
@@ -877,19 +922,6 @@ def reject(
     _set_status(conn, draft_id, STATUS_REJECTED)
     did = _record_decision(
         conn, draft_id, ACTION_REJECT, _serialise_text(row.draft.thread), None, note, category
-    )
-    conn.commit()
-    return did
-
-
-def reopen(conn: sqlite3.Connection, draft_id: int, note: str | None = None) -> int:
-    """Move an approved draft back to pending, so a reviewer may edit or reject it again.
-    Nothing is un-posted here: this only changes the draft's status and logs the decision.
-    The caller refuses a draft that is posted or already claimed by step 3."""
-    row = _require(conn, draft_id)
-    _set_status(conn, draft_id, STATUS_PENDING)
-    did = _record_decision(
-        conn, draft_id, ACTION_REOPEN, _serialise_text(row.draft.thread), None, note
     )
     conn.commit()
     return did

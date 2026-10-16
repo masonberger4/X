@@ -5,7 +5,7 @@
 {% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
 <p class="meta">Each piece is one {{ cfg.model }} session at {{ cfg.effort }} effort: it researches
 the topic, writes the fact base, the post and the cards, fact-checks itself through a fresh
-sub-agent, and lands in the <a href="/queue">pending queue</a> with its cards. Nothing posts
+sub-agent, and lands on the <a href="/status/approved">approved</a> page with its cards. Nothing posts
 from here. <a href="/studio/playbook">The playbook</a> every session reads,
 <a href="/studio/radar">the radar</a> (today's scan topics, the feed's top stories and the catalyst
 calendar, each one click from a piece) and <a href="/studio/performance">what X says</a> about the
@@ -29,7 +29,7 @@ pieces already posted: their numbers, what has done well, and the playbook's his
         {% for key, a in angles.items() %}<option value="{{ key }}">{{ a.name }}</option>{% endfor %}
       </select>
     </label>
-    <label><input type="checkbox" name="checkpoint" value="1" {% if cfg.manual.checkpoint %}checked{% endif %}> stop after research so I can read the fact base (off: it runs through to a pending draft)</label>
+    <label><input type="checkbox" name="checkpoint" value="1" {% if cfg.manual.checkpoint %}checked{% endif %}> stop after research so I can read the fact base (off: it runs through to an approved draft)</label>
   </p>
   <p><button type="submit">Write it</button></p>
 </form>

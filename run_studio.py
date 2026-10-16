@@ -29,7 +29,7 @@ writes factbase.md; then (straight away, or after the editor presses Continue wh
 piece stops at the research checkpoint) it writes the post, designs the cards as HTML and
 runs its own cold fact-check through a sub-agent; the app draws the cards, counts
 characters the way X does, runs the safety checks and hands any problems back to the same
-session; the finished piece goes into the approval queue as a pending draft with its
+session; the finished piece goes into the approval queue as an approved draft with its
 cards attached. Nothing here posts. Requests from the studio page (Continue, Revise,
 Resume) are picked up by the next run; `--resume-only` is the studio page's button.
 

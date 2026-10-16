@@ -46,7 +46,7 @@ from studio import store as S
 from studio import topics as T
 from studio import voices as V
 from studio.settings import DEFAULT_PLAYBOOK, EXEMPLARS_DIR, load_studio_config
-from tests.conftest import ABSTRACT, URL, seed_item
+from tests.conftest import ABSTRACT, URL, claim_for_publishing, seed_item
 
 T0 = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 ZONE = "America/Los_Angeles"
@@ -589,24 +589,23 @@ def test_a_request_that_does_not_fit_the_stage_is_cleared_and_ignored(
     assert S.pending_requests(sconn) == []
 
 
-def test_a_revision_is_not_run_once_its_draft_is_approved(sconn, cfg, stages):
-    """The editor asked for a revision, then approved the draft before a studio run picked
-    the request up: the queue would refuse the revised text, so no session is spent and the
-    finished piece stays ready, saying why."""
+def test_a_revision_is_not_run_once_publishing_holds_its_draft(sconn, cfg, stages):
+    """The editor asked for a revision, then a publish run claimed the draft before a studio
+    run picked the request up: the queue would refuse the revised text, so no session is
+    spent and the finished piece stays ready, saying why."""
     piece = make_piece(sconn, stage=S.STAGE_READY)
     draft_id = studio_draft(sconn, piece)
     S.request(sconn, piece.id, S.REQUEST_REVISE, NOTE)
     queue_store.approve(sconn, draft_id)
-    status = queue_store.get_draft(sconn, draft_id).status
+    claim_for_publishing(sconn, draft_id)
 
     assert runner.act_on_requests(bare_context(sconn, cfg)) == 0
 
     assert stages == []
     after = get(sconn, piece.id)
     assert (after.stage, after.request, after.request_note) == (S.STAGE_READY, "", "")
-    assert after.error == (
-        f"not revised: draft {draft_id} is {status}, not pending; reopen it in the queue "
-        "before revising"
+    assert after.error.startswith(
+        f"not revised: draft {draft_id} cannot be revised now: publishing has already claimed"
     )
 
 
@@ -708,7 +707,7 @@ def test_continue_writes_the_piece_in_its_own_session_with_the_editors_note(
     assert after.stage == S.STAGE_READY and after.request == ""
     draft = queue_store.find_by_item(sconn, queue_store.studio_item_id(piece.id))
     assert draft is not None and draft.id == after.draft_id
-    assert draft.status == queue_store.STATUS_PENDING and draft.draft.thread == [POST]
+    assert draft.status == queue_store.STATUS_APPROVED and draft.draft.thread == [POST]
 
 
 # ---- new_piece -----------------------------------------------------------------------
@@ -1176,7 +1175,7 @@ def test_an_explicit_topic_without_the_checkpoint_goes_into_the_queue(rig, sconn
     )
     draft = queue_store.get_draft(sconn, piece.draft_id)
     assert draft.item_id == queue_store.studio_item_id(piece.id)
-    assert draft.status == queue_store.STATUS_PENDING and draft.draft.thread == [POST]
+    assert draft.status == queue_store.STATUS_APPROVED and draft.draft.thread == [POST]
 
 
 def test_a_story_from_the_feed_starts_a_piece_on_that_story(rig, sconn):
@@ -1406,11 +1405,11 @@ def test_resume_only_acts_on_requests_and_starts_nothing(rig, sconn, cfg, tmp_pa
     assert [t.id for t in S.queued_topics(sconn)] == [queued]
 
 
-@pytest.mark.parametrize("decide", [queue_store.approve])
-def test_a_resumed_revision_is_not_run_once_its_draft_has_left_pending(
+@pytest.mark.parametrize("decide", [claim_for_publishing])
+def test_a_resumed_revision_is_not_run_once_publishing_holds_its_draft(
     rig, sconn, tmp_path, decide
 ):
-    """A revision was interrupted, then the editor decided the draft in the queue and
+    """A revision was interrupted, then a publish run claimed the draft and the editor
     pressed Resume. The context hands the session the queue's own rule, so no session is
     spent on a revision the queue would refuse; the piece says why."""
     ws = tmp_path / "studio_pieces" / "revised"
@@ -1423,8 +1422,8 @@ def test_a_resumed_revision_is_not_run_once_its_draft_has_left_pending(
         meta={"failed_stage": "revise", "revise_note": NOTE},
     )
     draft_id = studio_draft(sconn, piece)
+    queue_store.approve(sconn, draft_id)
     decide(sconn, draft_id)
-    status = queue_store.get_draft(sconn, draft_id).status
     S.request(sconn, piece.id, S.REQUEST_CONTINUE, "")
 
     assert runner.run(resume_only=True) == 0
@@ -1432,8 +1431,8 @@ def test_a_resumed_revision_is_not_run_once_its_draft_has_left_pending(
     assert rig.cli.stages() == []
     after = get(sconn, piece.id)
     assert (after.stage, after.request) == (S.STAGE_INTERRUPTED, "")
-    assert after.error == (
-        f"draft {draft_id} is {status}, not pending; reopen it in the queue before revising"
+    assert after.error.startswith(
+        f"draft {draft_id} cannot be revised now: publishing has already claimed"
     )
     assert queue_store.get_draft(sconn, draft_id).draft.thread == [POST]
 

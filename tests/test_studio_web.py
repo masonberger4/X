@@ -429,27 +429,50 @@ def test_revise_is_only_for_a_finished_piece(client, sconn, started, live_run, s
     assert get(sconn, piece.id).request == "" and started == []
 
 
-def not_revisable(draft_id: int, status: str) -> str:
-    return (
-        f"not revised: draft {draft_id} is {status}, not pending; reopen it in the queue "
-        "before revising"
+def _post_on_x(conn, draft_id: int) -> None:
+    """What step 3 writes once a draft is live: a claim and a posted first post."""
+    from publish import store as pstore
+
+    pstore.connect(conn.execute("PRAGMA database_list").fetchone()[2]).close()
+    pstore.claim(conn, draft_id, "08:30")
+    pstore.record_post(
+        conn,
+        draft_id=draft_id,
+        text="one",
+        kind="thread",
+        position=1,
+        slot="08:30",
+        tweet_id="555",
+        posted_at=None,
+        error=None,
     )
+    pstore.finish(conn, draft_id, "posted", None)
 
 
-def test_revise_is_refused_once_the_draft_is_approved(client, sconn, started):
-    """The revised piece could not replace an approved draft; the queue's reopen, with its
-    publishing checks, comes first."""
+def test_an_approved_draft_can_be_revised(client, sconn, started):
+    """A finished piece lands approved, so Revise works on an approved draft (it stays
+    approved), as long as publishing does not hold it."""
     piece = make_piece(sconn, stage=S.STAGE_READY)
     draft_id = studio_draft(sconn, piece)
     queue_store.approve(sconn, draft_id)
     r = client.post(f"/studio/{piece.id}/revise", data={"note": NOTE})
-    assert flash_of(r) == not_revisable(draft_id, queue_store.STATUS_APPROVED)
+    assert flash_of(r) == started_message(1, "studio_resume")
+    assert get(sconn, piece.id).request == S.REQUEST_REVISE
+
+
+def test_revise_is_refused_once_the_draft_is_on_x(client, sconn, started):
+    piece = make_piece(sconn, stage=S.STAGE_READY)
+    draft_id = studio_draft(sconn, piece)
+    queue_store.approve(sconn, draft_id)
+    _post_on_x(sconn, draft_id)
+    r = client.post(f"/studio/{piece.id}/revise", data={"note": NOTE})
+    assert "already live on X" in flash_of(r)
     assert get(sconn, piece.id).request == "" and started == []
 
 
 def test_a_rejected_draft_can_be_revised(client, sconn, started):
     """Asking for a revision after rejecting the draft is asking for it back: the revised
-    piece returns to the queue as pending."""
+    piece returns to the queue approved."""
     piece = make_piece(sconn, stage=S.STAGE_READY)
     queue_store.reject(sconn, studio_draft(sconn, piece))
     r = client.post(f"/studio/{piece.id}/revise", data={"note": NOTE})
@@ -459,16 +482,6 @@ def test_a_rejected_draft_can_be_revised(client, sconn, started):
 
 def test_a_piece_whose_draft_is_gone_is_revised_into_a_new_one(client, sconn, started):
     piece = make_piece(sconn, stage=S.STAGE_READY)
-    r = client.post(f"/studio/{piece.id}/revise", data={"note": NOTE})
-    assert flash_of(r) == started_message(1, "studio_resume")
-    assert get(sconn, piece.id).request == S.REQUEST_REVISE
-
-
-def test_a_reopened_draft_can_be_revised_again(client, sconn, started):
-    piece = make_piece(sconn, stage=S.STAGE_READY)
-    draft_id = studio_draft(sconn, piece)
-    queue_store.approve(sconn, draft_id)
-    queue_store.reopen(sconn, draft_id)
     r = client.post(f"/studio/{piece.id}/revise", data={"note": NOTE})
     assert flash_of(r) == started_message(1, "studio_resume")
     assert get(sconn, piece.id).request == S.REQUEST_REVISE
@@ -639,25 +652,29 @@ def test_the_page_shows_only_the_cards_piece_json_lists(tmp_path):
     assert [c["n"] for c in web._cards(ws)] == [1, 3]  # card 2 was dropped in a revision
 
 
-def test_discarding_a_finished_piece_rejects_its_pending_draft(client, sconn, tmp_path):
+@pytest.mark.parametrize("approved", [False, True])
+def test_discarding_a_finished_piece_rejects_its_waiting_draft(client, sconn, tmp_path, approved):
     ws = tmp_path / "studio_pieces" / "piece"
     ws.mkdir(parents=True)
     piece = make_piece(sconn, stage=S.STAGE_READY, workspace=ws)
     draft_id = studio_draft(sconn, piece)
+    if approved:
+        queue_store.approve(sconn, draft_id)
     r = client.post(f"/studio/{piece.id}/discard")
     assert flash_of(r) == (
-        f"piece {piece.id} discarded (its files stay in {ws}); its pending draft {draft_id} "
+        f"piece {piece.id} discarded (its files stay in {ws}); its draft {draft_id} "
         "is rejected in the queue"
     )
     assert queue_store.get_draft(sconn, draft_id).status == queue_store.STATUS_REJECTED
 
 
-def test_discarding_leaves_an_approved_draft_alone(client, sconn, tmp_path):
+def test_discarding_leaves_a_draft_on_x_alone(client, sconn, tmp_path):
     ws = tmp_path / "studio_pieces" / "piece"
     ws.mkdir(parents=True)
     piece = make_piece(sconn, stage=S.STAGE_READY, workspace=ws)
     draft_id = studio_draft(sconn, piece)
     queue_store.approve(sconn, draft_id)
+    _post_on_x(sconn, draft_id)
     r = client.post(f"/studio/{piece.id}/discard")
     assert flash_of(r) == f"piece {piece.id} discarded (its files stay in {ws})"
     assert queue_store.get_draft(sconn, draft_id).status == queue_store.STATUS_APPROVED
@@ -1080,7 +1097,7 @@ def test_another_site_cannot_ask_for_a_revision(client, sconn, started):
 
 
 def test_the_nav_links_the_studio_on_every_kind_of_page(client, sconn):
-    for path in ("/", "/feed", "/queue", "/studio", "/studio/playbook"):
+    for path in ("/", "/feed", "/status/approved", "/studio", "/studio/playbook"):
         body = client.get(path).text
         assert '<a href="/studio">Studio</a>' in body, path
 

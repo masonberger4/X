@@ -39,8 +39,8 @@ See [PLAN.md](PLAN.md) for the full design, principles, and build order, and
 | `/replies` | paste screenshots of a post you found on X, get one checked reply, copy it, post it by hand and log its link ("I posted it") so feedback tracks it |
 | `/feedback` | follower trend, per-post metrics, and the latest report's proposals |
 | `/runs` | the automatic runs (switch and times of day, next run, what happened at each time), every run's log (whichever page started it) and the checkboxes to run any enabled step; stop any run in progress |
-| `/queue`, `/drafts/{id}` | the step 2 approval queue: approve, edit, reject, drop pictures (a studio piece is revised on its `/studio` page) |
-| `/status/approved` | the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`), "Set schedule" to number the order the slots post them (`schedule.position`), and "Reopen" to send a draft that has not gone out back to pending (`POST /drafts/{id}/reopen`; refused for a posted, partial or claimed draft) |
+| `/drafts/{id}` | one draft: edit by hand (it stays approved), reject, drop pictures; edits and drops are refused once it is posted, partial or claimed (a studio piece is revised on its `/studio` page). `/queue`, the old pending page, redirects to `/status/approved` |
+| `/status/approved` | where a finished studio piece lands: the waiting list with "Publish now" per draft (`run_publish.py --live --now --draft ID`, still gated by `PUBLISH_ENABLED=1`) and "Set schedule" to number the order the slots post them (`schedule.position`) |
 
 `panel/` owns no tables. Every number comes from the read-only adapters in
 `ops/store.py`, the pure checks in `ops/health.py`, and (for the feed page's ratings)
@@ -258,11 +258,11 @@ Safety gates, all of which must hold before a single tweet is sent:
 - The human's order from the panel's approved page (`schedule.position`,
   `publish/store.py:set_order`) is honoured before breaking and score;
   `--draft ID` considers one approved draft only (the panel's "Publish now"
-  runs `--live --now --draft ID`). Reopening a draft in the queue deletes its
-  `schedule` row when nothing of it went live — never claimed, or claimed and
-  failed or refused (`publish/store.py:forget`) — so a saved order never comes
-  back with it; a posted or partial row is left alone, and a draft with a tweet
-  to its name cannot be reopened at all.
+  runs `--live --now --draft ID`). A studio revision that brings a rejected
+  draft back deletes its `schedule` row when nothing of it went live — never
+  claimed, or claimed and failed or refused (`publish/store.py:forget`) — so a
+  saved order never comes back with it; a posted or partial row is left alone,
+  and a draft with a tweet to its name is never changed.
 - A thread that fails at post k keeps posts 1..k-1 live, records the error on
   post k, marks the draft `partial`, and stops. It is not retried; a human
   finishes or deletes it.
@@ -497,7 +497,8 @@ everything it read):
    the same session for up to `max_polish_rounds`; at least one round always shows
    the session its rendered cards. A piece that still has a blocking problem ends
    `failed`; one with only fixable leftovers goes to the queue with them listed.
-4. *Queue*: `studio/ingest.py` inserts a pending draft (`item_id` `studio:<id>`,
+4. *Queue*: `studio/ingest.py` inserts an approved draft (`item_id` `studio:<id>`,
+   with an `approve` decision "finished in the studio",
    shape `long` at the studio's `x.long_post_max`, every card copied to `<db folder>/images/` and anchored to its
    post, each `recheck_before_posting` fact a `Re-check before posting:` line of
    `why_it_matters` that the copy-paste posting page lists, plus one naming the
@@ -508,9 +509,9 @@ everything it read):
    program holds open) fails the piece without its own revision ever reading as the
    editor's hand edit, and Resume polishes again and attaches the rest.
 5. *Revise*: the studio page's Revise resumes the session with the editor's notes,
-   re-checks and replaces the queue draft: a pending one, or a rejected one that
-   comes back to pending (never one live on X; its old publishing order is
-   forgotten, as the queue's Reopen does). The editor's own changes in the queue
+   re-checks and replaces the queue draft: an approved one, which stays approved,
+   or a rejected one that comes back approved (never one live on X or claimed by a
+   publish run; a rejected one's old publishing order is forgotten). The editor's own changes in the queue
    since the last ingest (`studio/ingest.py:hand_edits`: text edited by hand, cards
    dropped) are written into the session's files first and named in the revise
    prompt, and the queue door refuses to replace a draft whose changes the session

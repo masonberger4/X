@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Draft {{ d.id }}{% endblock %}
 {% block content %}
-<p class="meta"><a href="/queue">&larr; back to pending</a></p>
+<p class="meta"><a href="/status/approved">&larr; back to approved</a></p>
 {% if d.studio_piece %}
 <h1>Studio piece {{ d.studio_piece }}</h1>
 <p class="banner ok">Written in the {% if HAS_PANEL %}<a href="/studio/{{ d.studio_piece }}">studio</a>{% else %}studio (open the control panel, run_app.py, for its page){% endif %} by one {{ d.model }} session: its fact base, fact-check log and session log are on the studio page, and so is Revise, which resumes that session.</p>
@@ -37,6 +37,7 @@
 {% if d.draft.shape != 'thread' or d.draft.wanted_visuals == 0 or d.draft.wanted_visuals == 2 %}
 <p class="meta">Format: <strong>{{ 'single post' if d.draft.shape == 'single' else (('long post' if d.draft.thread|length == 1 else d.draft.thread|length ~ ' long posts, each') ~ ' up to ' ~ d.draft.max_chars ~ ' chars' if d.draft.shape == 'long' else 'thread') }}</strong>{% if d.draft.wanted_visuals is not none %}, {{ d.draft.wanted_visuals }} picture{{ 's' if d.draft.wanted_visuals != 1 else '' }}{% endif %}.</p>
 {% endif %}
+{% if publish_block %}<p class="banner warn">This draft can no longer be changed: {{ publish_block }}.</p>{% endif %}
 {% if image_url %}
 <h2>Image</h2>
 {% if d.studio_piece %}
@@ -46,7 +47,7 @@
 {% endif %}
 <p><img src="{{ image_url }}" alt="{{ image_alt }}" style="max-width:100%;border:1px solid var(--border, #ccc)"></p>
 <p class="meta">{{ image_alt }}</p>
-{% if extra_images %}
+{% if extra_images and not publish_block %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/0/drop">
   <input name="note" placeholder="why (optional)">
   <button>Drop this picture</button> <span class="meta">the other picture stays</span>
@@ -56,15 +57,19 @@
 <p class="meta">{{ 'Second picture' if extra_images|length == 1 else 'Picture ' ~ (loop.index + 1) }}, attached to post {{ im.anchor }} when published.</p>
 <p><img src="{{ im.url }}" alt="{{ im.alt }}" style="max-width:100%;border:1px solid var(--border, #ccc)"></p>
 <p class="meta">{{ im.alt }}</p>
+{% if not publish_block %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/{{ im.index }}/drop">
   <input name="note" placeholder="why (optional)">
   <button>Drop this picture</button> <span class="meta">the first picture stays</span>
 </form>
+{% endif %}
 {% endfor %}
+{% if not publish_block %}
 <form class="inline" method="post" action="/drafts/{{ d.id }}/image/drop">
   <input name="note" placeholder="why (optional)">
   <button>Drop {{ ('both images' if extra_images|length == 1 else 'all pictures') if extra_images else 'image' }}</button> <span class="meta">the post goes out text-only</span>
 </form>
+{% endif %}
 
 {% endif %}
 
@@ -82,19 +87,15 @@
 
 <h2>Actions</h2>
 <div class="actions">
+  {% if d.status != "approved" %}
   <form class="inline" method="post" action="/drafts/{{ d.id }}/approve">
     <button>Approve</button>
   </form>
+  {% endif %}
   {% if d.status == "approved" and releasable %}
   <form class="inline" method="post" action="/drafts/{{ d.id }}/release"
         onsubmit="return confirm('Put this draft back in line for the next publish run?')">
     <button title="the last attempt posted nothing: drop it and let the next run try again">Release</button>
-  </form>
-  {% endif %}
-  {% if d.status == "approved" and (not publish or publish.reopenable) %}
-  <form class="inline" method="post" action="/drafts/{{ d.id }}/reopen">
-    <input name="note" placeholder="why reopen (optional)">
-    <button>Reopen</button>
   </form>
   {% endif %}
   <form class="inline" method="post" action="/drafts/{{ d.id }}/reject">
@@ -112,6 +113,7 @@
 <p>Revise this piece on {% if HAS_PANEL %}<a href="/studio/{{ d.studio_piece }}">its studio page</a>{% else %}its studio page in the control panel (run_app.py){% endif %}: the session that researched and wrote it rewrites it from your note and fact-checks what changed.</p>
 {% endif %}
 
+{% if not publish_block %}
 <details{% if edit_open %} open{% endif %}>
 <summary>Edit by hand</summary>
 <form method="post" action="/drafts/{{ d.id }}/edit">
@@ -125,11 +127,11 @@
     </select>
   </label>
   <p>
-    <button>Save &amp; approve</button>
-    <button name="keep_pending" value="1">Save, keep pending</button>
+    <button>{{ 'Save' if d.status == 'approved' else 'Save & approve' }}</button>
   </p>
 </form>
 </details>
+{% endif %}
 
 {% if decisions %}
 <h2>Decision history</h2>

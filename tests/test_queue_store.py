@@ -143,25 +143,8 @@ def test_reject(conn):
     assert store.list_drafts(conn) == []
 
 
-def test_reopen_moves_an_approved_draft_back_to_pending(conn):
-    seed_item(conn, "i1")
-    did = store.insert_draft(conn, item_id="i1", model="m", draft=make_draft())
-    store.approve(conn, did, note="ok")
-    assert store.list_drafts(conn) == []
-    store.reopen(conn, did, note="second thoughts")
-    row = store.get_draft(conn, did)
-    assert row.status == store.STATUS_PENDING
-    assert [r.id for r in store.list_drafts(conn)] == [did]
-    dec = store.list_decisions(conn, did)[-1]
-    assert dec["action"] == "reopen"
-    assert dec["original_text"] == store._serialise_text(make_draft().thread)
-    # edited_text stays NULL: a reopen is not an edit and must never be taught as one
-    assert dec["edited_text"] is None
-    assert dec["note"] == "second thoughts" and dec["category"] is None
-
-
 def test_actions_on_missing_draft_raise(conn):
-    for fn in (store.approve, store.reject, store.reopen):
+    for fn in (store.approve, store.reject):
         with pytest.raises(KeyError):
             fn(conn, 42)
     with pytest.raises(KeyError):
@@ -222,7 +205,10 @@ def test_connect_migrates_old_decisions_schema_and_keeps_rows(tmp_path):
         r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     old = store.list_decisions(conn)
-    assert len(old) == 1 and old[0]["category"] is None and old[0]["action"] == "approve"
+    # the old row, then the approval the removed pending page's one-time move adds
+    assert old[0]["category"] is None and old[0]["action"] == "approve"
+    assert [r["note"] for r in old[1:]] == ["moved to approved: the pending page was removed"]
+    assert store.get_draft(conn, 1).status == store.STATUS_APPROVED
     # old-style callers (steps 4 and 5 select named columns) still work
     assert conn.execute("SELECT edited_text, original_text FROM decisions").fetchone()[1] == "s"
     conn.close()
@@ -268,8 +254,39 @@ def test_connect_turns_a_snoozed_draft_back_into_a_pending_one(tmp_path):
     conn.close()
 
 
+def test_connect_approves_a_leftover_pending_draft_once_and_says_why(tmp_path):
+    path = tmp_path / "pending.db"
+    conn = store.connect(path)
+    did = store.insert_draft(conn, item_id="studio:7", model="m", draft=make_draft())
+    reply = store.insert_draft(conn, item_id="reply:req1", model="m", draft=make_draft())
+    conn.close()
+    conn = store.connect(path)
+    # done once, when the database was first opened: a draft inserted since stays put
+    assert store.get_draft(conn, did).status == store.STATUS_PENDING
+    conn.execute("DELETE FROM queue_migrations")  # an older version's database
+    conn.commit()
+    conn.close()
+
+    conn = store.connect(path)
+    assert store.get_draft(conn, did).status == store.STATUS_APPROVED
+    dec = store.list_decisions(conn, did)
+    assert [(d["action"], d["note"]) for d in dec] == [
+        ("approve", "moved to approved: the pending page was removed")
+    ]
+    assert dec[0]["original_text"] == store._serialise_text(make_draft().thread)
+    # a reply draft is approved by its own page in the same request, never here
+    assert store.get_draft(conn, reply).status == store.STATUS_PENDING
+    conn.execute("UPDATE drafts SET status = 'pending' WHERE id = ?", (did,))
+    conn.commit()
+    conn.close()
+    conn = store.connect(path)  # once only: no second move, no second decision
+    assert store.get_draft(conn, did).status == store.STATUS_PENDING
+    assert len(store.list_decisions(conn, did)) == 1
+    conn.close()
+
+
 def test_the_snooze_migration_moves_nothing_else(tmp_path):
-    """It runs on every connect, so a WHERE clause lost here would quietly un-approve and
+    """They run on every connect, so a WHERE clause lost here would quietly un-approve and
     un-reject every draft in a live database."""
     path = tmp_path / "mixed.db"
     conn = store.connect(path)
@@ -333,7 +350,7 @@ def test_edit_with_category_and_blank_category_is_none(conn):
 
 
 def test_actions_without_category_still_work(conn):
-    for i, fn in enumerate((store.approve, store.reject, store.reopen)):
+    for i, fn in enumerate((store.approve, store.reject)):
         seed_item(conn, f"i{i}")
         did = store.insert_draft(conn, item_id=f"i{i}", model="m", draft=make_draft())
         fn(conn, did)

@@ -1,13 +1,13 @@
 """Server-rendered approval queue: FastAPI + Jinja2, no JavaScript framework.
 
 Routes:
-  GET  /queue                 pending drafts (source, score, rationale); / redirects here
+  GET  /queue                 redirects to /status/approved (the pending page is gone: a
+                              finished studio piece lands approved); / redirects there too
   GET  /drafts/{id}           detail: posts, pictures, edit form
-  POST /drafts/{id}/approve
-  POST /drafts/{id}/edit      saves edited text (+ approves unless 'keep_pending' is set)
+  POST /drafts/{id}/approve   (a rejected draft brought back)
+  POST /drafts/{id}/edit      saves edited text; the draft is approved. On an approved draft
+                              it is refused once step 3 has claimed or posted it
   POST /drafts/{id}/reject
-  POST /drafts/{id}/reopen    sends an approved draft back to pending, unless step 3 has
-                              already claimed or posted it
   POST /drafts/{id}/release   drops the dead schedule row of an approved draft whose
                               publish attempt posted nothing (failed, refused, or a claim
                               left behind by a run that died), so the next run tries it
@@ -22,7 +22,9 @@ revised from its studio page, which resumes the session that wrote it.
 
 A studio draft (step 10) is held while the studio works on its piece or a run of it waits
 (store.studio_hold): approve, edit, reject and the picture drops answer 409 with the reason,
-since the revision replaces the draft's text and cards when it lands.
+since the revision replaces the draft's text and cards when it lands. An approved draft is
+edited in place, so the edit and the picture drops also answer 409 when step 3 holds it
+(`publishing.block_reason`: live on X, or claimed by a publish run).
 
 A reply draft (reply/web.py, item_id `reply:`) shows the post it answers and stays one
 post when edited; it is logged from the panel's reply page once posted by hand.
@@ -262,22 +264,11 @@ def root() -> RedirectResponse:
     return _redirect_home()
 
 
-@app.get("/queue", response_class=HTMLResponse)
-def index(request: Request, conn: Conn, notice: str = ""):
-    drafts = store.list_drafts(conn, store.STATUS_PENDING)
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {
-            "drafts": drafts,
-            "status": "pending",
-            "studio_holds": _studio_holds(conn, drafts),
-            "publish": {},
-            "hidden_posted": 0,
-            "show_posted": False,
-            "notice": notice,
-        },
-    )
+@app.get("/queue", include_in_schema=False)
+def index(notice: str = "") -> RedirectResponse:
+    """The old pending page's address: a finished studio piece lands approved now, so an
+    old bookmark (or the phone's home-screen app) opens the approved page."""
+    return _redirect_home(notice=notice)
 
 
 def _studio_holds(conn, drafts) -> dict[int, str]:
@@ -287,7 +278,7 @@ def _studio_holds(conn, drafts) -> dict[int, str]:
 
 
 @app.get("/status/{status}", response_class=HTMLResponse)
-def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
+def by_status(status: str, request: Request, conn: Conn, posted: int = 0, notice: str = ""):
     """On the approved list each row carries what step 3 did with it (read-only), and drafts
     already posted are hidden unless ?posted=1: the approved page is the waiting list."""
     if status not in store.STATUSES:
@@ -312,6 +303,7 @@ def by_status(status: str, request: Request, conn: Conn, posted: int = 0):
             "releasable": _releasable(conn, drafts, publish),
             "hidden_posted": hidden,
             "show_posted": bool(posted),
+            "notice": notice,
         },
     )
 
@@ -358,6 +350,12 @@ def _render_detail(
     has_image = image_file is not None
     publish_states = store.publish_states(conn, [draft_id])
     publish_info = publish_states.get(draft_id)
+    # An approved draft is changed in place, until step 3 holds it (the routes ask again).
+    publish_block = (
+        publishing.block_reason(conn, draft_id, publish_info)
+        if row.status == store.STATUS_APPROVED
+        else ""
+    )
     edit_form = edit_form or {}
     return templates.TemplateResponse(
         request,
@@ -366,6 +364,7 @@ def _render_detail(
             "d": row,
             "studio_hold": store.studio_hold(conn, row),
             "publish": publish_info,
+            "publish_block": publish_block,
             "releasable": _releasable(conn, [row], publish_states).get(draft_id, False),
             "image_url": f"/drafts/{draft_id}/image?v={_stamp(image_file)}" if has_image else "",
             "image_alt": row.image_alt
@@ -404,8 +403,22 @@ def _studio_held(request: Request, conn, draft_id: int) -> HTMLResponse | None:
     return _render_detail(request, conn, draft_id, error=f"Not done: {hold}.", status_code=409)
 
 
+def _publish_held(request: Request, conn, draft_id: int) -> HTMLResponse | None:
+    """The detail page with a 409 when an approved draft may no longer change: it is live
+    on X, or a publish run has claimed it (run_publish.py never re-reads the text after
+    claiming). None when the edit or the picture drop may go ahead."""
+    row = store.get_draft(conn, draft_id)
+    if row is None or row.status != store.STATUS_APPROVED:
+        return None
+    info = store.publish_states(conn, [draft_id]).get(draft_id)
+    blocked = publishing.block_reason(conn, draft_id, info)
+    if not blocked:
+        return None
+    return _render_detail(request, conn, draft_id, error=f"Not done: {blocked}.", status_code=409)
+
+
 def _redirect_home(*, notice: str = "") -> RedirectResponse:
-    url = "/queue"
+    url = f"/status/{store.STATUS_APPROVED}"
     if notice:
         url += f"?notice={quote(notice)}"
     return RedirectResponse(url, status_code=303)
@@ -443,7 +456,7 @@ def _edit_problem(thread: list[str], limit: int = MAX_POST_CHARS) -> str | None:
 @app.post("/drafts/{draft_id}/edit")
 async def edit(draft_id: int, request: Request, conn: Conn):
     form = await read_form(request)
-    held = _studio_held(request, conn, draft_id)
+    held = _studio_held(request, conn, draft_id) or _publish_held(request, conn, draft_id)
     if held is not None:
         return held
     thread = _split_thread(form.get("thread", ""))
@@ -473,15 +486,12 @@ async def edit(draft_id: int, request: Request, conn: Conn):
             draft_id,
             thread=thread,
             note=_note(form),
-            approve_after="keep_pending" not in form,
             category=category,
         )
     except KeyError as exc:
         raise HTTPException(404, "no such draft") from exc
     log.info("draft %d edited", draft_id)
-    if "keep_pending" in form:
-        return RedirectResponse(f"/drafts/{draft_id}", status_code=303)
-    return _redirect_home()
+    return _detail_redirect(draft_id)
 
 
 def _detail_redirect(draft_id: int, *, error: str = "") -> RedirectResponse:
@@ -537,7 +547,7 @@ def image_at(draft_id: int, index: int, conn: Conn):
 async def drop_image(draft_id: int, request: Request, conn: Conn):
     """Post the text without pictures: deletes every PNG, logs a decision."""
     form = await read_form(request)
-    held = _studio_held(request, conn, draft_id)
+    held = _studio_held(request, conn, draft_id) or _publish_held(request, conn, draft_id)
     if held is not None:
         return held
     try:
@@ -552,7 +562,7 @@ async def drop_image(draft_id: int, request: Request, conn: Conn):
 async def drop_one_image(draft_id: int, index: int, request: Request, conn: Conn):
     """Drop just this picture, keeping the others; the ones after it move down a place."""
     form = await read_form(request)
-    held = _studio_held(request, conn, draft_id)
+    held = _studio_held(request, conn, draft_id) or _publish_held(request, conn, draft_id)
     if held is not None:
         return held
     try:
@@ -577,41 +587,6 @@ async def reject(draft_id: int, request: Request, conn: Conn):
         raise HTTPException(404, "no such draft") from exc
     log.info("draft %d rejected", draft_id)
     return _redirect_home()
-
-
-@app.post("/drafts/{draft_id}/reopen")
-async def reopen(draft_id: int, request: Request, conn: Conn):
-    """Send an approved draft back to the pending queue so it can be edited or revised
-    again. Refused once step 3 has claimed it (run_publish.py never re-reads the status
-    after claiming) or already put it on X."""
-    form = await read_form(request)
-
-    def work() -> RedirectResponse:
-        row = store.get_draft(conn, draft_id)
-        if row is None:
-            raise HTTPException(404, "no such draft")
-        if row.status != store.STATUS_APPROVED:
-            return _detail_redirect(
-                draft_id, error=f"only an approved draft can be reopened (this one is {row.status})"
-            )
-        info = store.publish_states(conn, [draft_id]).get(draft_id)
-        blocked = publishing.block_reason(conn, draft_id, info)
-        if blocked:
-            return _detail_redirect(draft_id, error=blocked)
-        # The status goes first: a pending draft is invisible to fetch_approved, so no run
-        # can claim it while we let go of its schedule row. The other order would leave the
-        # row deleted and the draft still approved if this raised.
-        try:
-            store.reopen(conn, draft_id, note=_note(form))
-        except KeyError as exc:
-            raise HTTPException(404, "no such draft") from exc
-        released = publishing.forget(conn, draft_id)
-        log.info(
-            "draft %d reopened for review (%d schedule row(s) released)", draft_id, len(released)
-        )
-        return RedirectResponse("/status/approved", status_code=303)
-
-    return await run_in_threadpool(work)
 
 
 @app.post("/drafts/{draft_id}/release")

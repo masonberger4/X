@@ -775,7 +775,7 @@ def studio_discard(piece_id: int, conn: Conn):
     withdrawn = _queue(lambda qconn: ingest.withdraw(qconn, piece))
     message = f"piece {piece_id} discarded (its files stay in {piece.workspace})"
     if withdrawn is not None:
-        message += f"; its pending draft {withdrawn} is rejected in the queue"
+        message += f"; its draft {withdrawn} is rejected in the queue"
     return _redirect("/studio", message)
 
 

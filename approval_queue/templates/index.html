@@ -3,7 +3,7 @@
 {% block content %}
 <h1>{{ status|capitalize }} drafts <span class="meta">({{ drafts|length }})</span></h1>
 {% if notice %}<p class="flash">{{ notice }}</p>{% endif %}
-<p class="meta">Open a draft for the full text, its cards and the approve buttons. A studio piece is revised from its studio page. A reply is posted by hand under the post it answers.</p>
+<p class="meta">{% if status == "approved" %}A finished studio piece lands here, approved. {% endif %}Open a draft for the full text, its cards, the hand-edit form and Reject. A studio piece is revised from its studio page. A reply is posted by hand under the post it answers.</p>
 {% if status == "approved" %}
   <p class="meta">Waiting to be published by <code>run_publish.py</code> at the next slot, in the order below.
   {% if hidden_posted %}{{ hidden_posted }} already posted, hidden. <a href="/status/approved?posted=1">Show posted</a>.
@@ -54,12 +54,6 @@
             <button type="submit" title="the last attempt posted nothing: drop it and let the next run try again">Release</button>
           </form>
           {% endif %}
-          {% if not p or p.reopenable %}
-          <form method="post" action="/drafts/{{ d.id }}/reopen" class="order-hide" style="margin-top:.3rem">
-            <input name="note" placeholder="why (optional)" size="14">
-            <button type="submit">Reopen</button>
-          </form>
-          {% endif %}
         {% endif %}</td>
       <td>
         <a href="/drafts/{{ d.id }}"><strong>{% if d.studio_piece %}Studio piece {{ d.studio_piece }}{% elif d.reply_to %}Reply to @{{ d.reply_to.author }}{% else %}{{ d.title or d.item_id }}{% endif %}</strong></a>
@@ -69,7 +63,7 @@
         <div class="meta">{{ first[:400] }}{% if first|length > 400 %}…{% endif %}</div>
         {% if d.rejection_reason %}<div class="meta over">{{ d.rejection_reason }}</div>{% endif %}
         {% if studio_holds is defined and studio_holds.get(d.id) %}<div class="meta"><span class="pill warn">on hold</span> {{ studio_holds[d.id] }}</div>{% endif %}
-        {% if status == "pending" and d.studio_piece and HAS_PANEL %}
+        {% if status == "approved" and d.studio_piece and HAS_PANEL %}
         <div class="meta"><a href="/studio/{{ d.studio_piece }}">fact base, fact-check log and Revise in the studio</a></div>
         {% endif %}
       </td>
