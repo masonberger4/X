@@ -73,6 +73,9 @@ bar tips in the text colours.
 5. Footer: caveats that change the reading (n, stage, cross-trial), sources, and
    "Not investment advice" (plus "or medical advice" when the card shows clinical
    data). Muted, 13 to 15 px.
+The voice guide's colon rule holds on cards too: a headline, subtitle, panel sentence
+or footer has a colon only when a list follows it. A label in a table, a tile or on an
+axis stands on its own without one ("Median PFS", not "Median PFS:").
 
 ## Card types the angles ask for
 - headline_stat: hero headline, the one result as a two-bar comparison with the gap

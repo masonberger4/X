@@ -2,7 +2,8 @@
 
 The same blocks the studio holds a post to (studio/safety.py: investment or medical advice,
 a price target of the account's own, a link or a bare domain), plus: one post within the
-X-weighted limit (studio/xcount.py), and no @handle that is not known. Known handles are
+X-weighted limit (studio/xcount.py), no colon that no list follows (studio/colons.py), and
+no @handle that is not known. Known handles are
 the ones config.yaml gives (draft/tags.py:load_handles), the KOL list's `kol.handles` and
 the author of the post being answered, as the writer read it off the screenshot. Handles
 are never guessed.
@@ -14,7 +15,7 @@ import re
 from typing import Any
 
 from draft.tags import load_handles
-from studio import safety
+from studio import colons, safety
 from studio.xcount import x_length
 
 LABEL = "the reply"
@@ -56,6 +57,7 @@ def problems(text: str, *, allowed: list[str] | set[str], max_chars: int) -> lis
     if n > max_chars:
         out.append(f"{LABEL} is {n} characters as X counts them; the limit is {max_chars}")
     out += safety.blocking_problems(text, LABEL)
+    out += colons.colon_problems(text, LABEL)
     ok = {h.lower() for h in allowed}
     unknown = [h for h in safety.handles_in(text) if h.lower() not in ok]
     if unknown:

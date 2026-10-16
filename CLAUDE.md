@@ -456,7 +456,9 @@ hand under the post it answers.
   medical advice and a price target of the account's own, on the cards and their alt text
   too; links incl. bare domains), an @handle without a verifying page, an analyst target
   cited with no entry or with a `post_says` the posts do not contain
-  (`check_price_targets`, the voice guide's "Analyst price targets"), cards
+  (`check_price_targets`, the voice guide's "Analyst price targets"), a colon no list
+  follows (`studio/colons.py:colon_problems`, fixable, posts only; the voice guide's
+  "Sentences", which cards.md and the reply prompt repeat), cards
   drawn by `studio/render.py`; blocking problems keep a piece out of the queue, fixable ones
   go back to the session up to `max_polish_rounds` and then ride along as warnings, and one
   review round always shows the session its PNGs), then `studio/ingest.py`: a pending draft
@@ -663,7 +665,7 @@ hand under the post it answers.
   `replies.tools` beside it; `reply/prompt.py` (pure) treats them as data and takes JSON
   `author`, `post_text`, then `reply`+`why` or `skip`. `reply/checks.py` (pure) blocks
   what `studio/safety.py:blocking_problems` blocks, more than one post, over
-  `replies.max_chars` by `studio/xcount.py`, and any @handle outside `known_handles`
+  `replies.max_chars` by `studio/xcount.py`, a colon no list follows (`studio/colons.py`), and any @handle outside `known_handles`
   (`draft/tags.py:load_handles`, `kol.handles`, the author as read); a failing reply goes
   back with its problems up to `max_attempts`, then is `blocked`. "I posted it" re-checks
   the text as posted (280), inserts a single-post draft, item_id `reply:req<id>`
@@ -734,7 +736,7 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           session.py (stages), steps.py (the app's own calls of a step-by-step piece:
           gather, claim list, claim checks), runner.py (one run: stale pieces, requests,
           new piece),
-          qa.py + xcount.py + safety.py (the checks), render.py (cards via headless browser),
+          qa.py + xcount.py + safety.py + colons.py (the checks), render.py (cards via headless browser),
           ingest.py (into the queue), topics.py (feed stories), store.py (studio_pieces,
           studio_runs, studio_topics, studio_scans, studio_radar_topics,
           studio_catalysts, studio_playbook_versions, studio_manual_metrics, the

@@ -10,7 +10,9 @@ anywhere or contact anyone.
 The bar is the reference pieces in the reference folder (its path is in each stage's
 instructions): read their handoff docs and look at their cards before you write. They
 are the standard for depth, sourcing, voice and design. Do not copy their structure
-blindly; the angle decides the structure.
+blindly; the angle decides the structure. They were written before the colon rule in
+the voice guide ("Sentences") and use colons it no longer allows: follow the rule, not
+them.
 
 The voice guide and the card spec follow below. Each stage's instructions add the
 angles you may choose from and the account's playbook (what has worked on this account

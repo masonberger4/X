@@ -43,7 +43,7 @@ class FakeCall:
         return answer
 
 
-def _answer(reply="My read: the control arm decides this one.", author="drZ", **extra):
+def _answer(reply="My read is that the control arm decides this one.", author="drZ", **extra):
     import json
 
     return json.dumps(
@@ -95,10 +95,10 @@ def test_the_checks_block_advice_links_unknown_handles_and_length():
 def test_write_reads_the_screenshots_and_returns_a_checked_reply(tmp_path):
     shot = tmp_path / "s.png"
     shot.write_bytes(PNG)
-    call = FakeCall(_answer(reply="@drZ My read: the control arm decides it.", why="adds"))
+    call = FakeCall(_answer(reply="@drZ My read is that the control arm decides it.", why="adds"))
     out = writer.write([shot], _cfg(), note="be brief", call=call)
     assert out.kind == writer.OUTCOME_REPLY and out.attempts == 1 and out.author == "drZ"
-    assert out.text == "My read: the control arm decides it." and out.why == "adds"
+    assert out.text == "My read is that the control arm decides it." and out.why == "adds"
     assert call.kw["attachments"] == {"screenshot_1.png": PNG}
     assert call.kw["tools"] == ["Read", "WebSearch"] and "be brief" in call.users[0]
 
@@ -176,7 +176,7 @@ def test_paste_screenshots_and_get_a_reply(client, db_file):
 
     assert _write(rid, _answer(why="adds the comparator")) == S.READY
     body = client.get(f"/replies/{rid}").text
-    assert "My read: the control arm decides this one." in body and "I posted it" in body
+    assert "My read is that the control arm decides this one." in body and "I posted it" in body
     assert "adds the comparator" in body and "ORR 80% with CAR-T" in body
     conn.close()
 
@@ -234,7 +234,7 @@ def test_i_posted_it_logs_the_reply_as_posted_for_tracking(client, db_file):
     assert "investment" in client.get(r.headers["location"]).text
     assert queue_store.find_by_item(conn, "reply:req1") is None
 
-    edited = "My read: the control arm decides it, and I'd want 12-month data."
+    edited = "My read is that the control arm decides it, and I'd want 12-month data."
     r = client.post(
         f"/replies/{rid}/posted",
         data={"text": edited, "url": "https://x.com/me/status/222222"},
