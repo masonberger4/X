@@ -59,7 +59,7 @@ FACTCHECK = "| post | claim | problem | source | change |\n|---|---|---|---|---|
 POST_1 = (
     "A second-line phase 2 readout put a response rate of 41% on the table for a "
     "bispecific most of the field had written off.\n\n"
-    "The part that matters is durability: the median response duration was not reached "
+    "The part that matters is durability. The median response duration was not reached "
     "at 14 months of follow-up. I didn't expect that from this class."
 )
 POST_2 = (

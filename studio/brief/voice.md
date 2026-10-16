@@ -33,7 +33,7 @@ all the way through the piece, not only in the bottom line:
 - Doubt: "This deal doesn't make any sense to me." "I can't make these numbers add up."
 - Curiosity: "I wonder why they didn't include another dose." "What I keep coming back
   to is the control arm."
-- Conviction, labelled as yours: "My read: the market is pricing the wrong risk." "I'd
+- Conviction, labelled as yours: "My read is that the market is pricing the wrong risk." "I'd
   want the 12-month data before I believed it."
 - Admitting what you don't know: "I'm not sure yet, and I don't think anyone is."
 Each reaction sits next to the fact that caused it (a number, a design choice, a deal
@@ -78,6 +78,14 @@ alone.
 - Write like a person explaining the story to a colleague over a drink: connected
   sentences that carry cause to consequence, varied in length, with the short
   sentence saved for the line that matters.
+- A colon only when a list follows it: bullets or numbered lines on the lines below,
+  or a run of items in the same sentence ("three risks: dose, durability and price").
+  Anywhere else, end the sentence or use a comma. So no "My read: ...", no "The
+  catch: ...", no header ending in a colon over a paragraph, no "• Drug, $TICK: what it
+  is" or "• Mid-2027: the readout" bullet labels (write "• Drug ($TICK), what it is",
+  "• Mid-2027, the readout"). The app counts the colons that break this and sends the
+  piece back. This holds even where the playbook or the reference pieces use colons.
+  Times and ratios (8:30, 1:1, 4:5) are not colons in this sense.
 - Concrete over abstract. "13.2 months vs 6.7 on chemo" over "a substantial benefit".
 - No hype adjectives (game-changer, breakthrough unless it is the FDA designation,
   paradigm shift, stunning, massive, exciting, cure, miracle).

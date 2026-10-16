@@ -24,8 +24,8 @@ from draft.targets import (
     target_figures,
     target_mentions,
 )
+from studio import colons, safety
 from studio import render as render_mod
-from studio import safety
 from studio.angles import HOOK_STYLES, SHAPES, load_angles
 from studio.prompt import FACTBASE_FILE, FACTCHECK_FILE, PIECE_FILE
 from studio.xcount import x_length
@@ -249,6 +249,7 @@ def check_text(piece: PieceFiles, xcfg: dict[str, Any], known_handles: set[str])
                 f"{label} is {n} characters as X counts them; keep it under {limit - headroom}"
             )
         report.blocking += safety.blocking_problems(text, label)
+        report.fixable += colons.colon_problems(text, label)
         if any(line.strip() == "---" for line in text.splitlines()):
             # The approval queue's hand-edit form splits posts on such a line, so an edit
             # there would cut this post in two.
