@@ -592,6 +592,7 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
         {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=taken_stories(conn)
     )
     topic_est, catalyst_est, newness, topics = _radar_ranking(conn, cfg, topics, rows, today)
+    sections = radar_sections(topics, topic_repeats, topic_est)
     return templates.TemplateResponse(
         request,
         "studio_radar.html",
@@ -600,6 +601,7 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
             "scan": S.last_scan(conn),
             "done": S.last_scan(conn, S.SCAN_DONE),
             "topics": topics,
+            "sections": sections,
             "feed": feed,
             "calendar": calendar,
             "suggested": suggested,
@@ -617,6 +619,31 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
             "S": S,
         },
     )
+
+
+RADAR_SECTIONS = ("repeat", "new_company", "fresh", "taken")
+
+
+def radar_sections(
+    topics: list[Any], repeats: dict[int, Any], estimates: dict[int, Any]
+) -> dict[str, list[Any]]:
+    """The scan's topics as the radar page groups them, each in the order given: `repeat`
+    (untaken and flagged as maybe repeating a piece), `new_company` (untaken, not flagged,
+    on a company the account has not written about lately), `fresh` (untaken, not flagged,
+    the rest: a new story on a company covered before, or on no one company) and `taken`
+    (queued or written)."""
+    out: dict[str, list[Any]] = {key: [] for key in RADAR_SECTIONS}
+    for t in topics:
+        if t.status != S.RADAR_NEW:
+            key = "taken"
+        elif repeats.get(t.id):
+            key = "repeat"
+        elif (est := estimates.get(t.id)) is not None and est.new_company:
+            key = "new_company"
+        else:
+            key = "fresh"
+        out[key].append(t)
+    return out
 
 
 def _radar_ranking(

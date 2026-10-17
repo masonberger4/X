@@ -381,6 +381,10 @@
     summary::marker { color: var(--accent); }
     summary:hover { color: #fff; }
     details { margin: .5rem 0; }
+    /* the radar's groups: a heading-sized summary with its count, a rule between groups */
+    details.radar-section { margin: 1rem 0; padding-top: .6rem; border-top: 1px solid var(--border); }
+    details.radar-section > summary { padding: .2rem 0; }
+    details.radar-section > summary .section-title { font-size: 1.2rem; color: var(--text); }
 
     blockquote { color: var(--text-soft); }
 
