@@ -607,7 +607,7 @@ hand under the post it answers.
   (new/queued/used/dismissed, `topic_id` of the queued topic, `piece_id`) and
   `studio_catalysts` (unique `key`, open/dismissed, `origin` scan:<id> or piece:<id>);
   `claim_topic` marks the radar topic or catalyst a queued topic came from with the piece,
-  `drop_topic` puts it back. `/studio/radar` (studio/web.py) queues them through
+  `drop_topic` puts it back. `/studio/radar` (studio/web.py; its groups, `web.radar_sections`: new company, completely new, the catalysts, possible repeats, queued or written, the feed) queues them through
   `queue_topic` and starts `studio_now`. **Repeats are flagged, never blocked**: `studio/repeats.py` is pure
   (`marks`: source URLs, drug names via `draft/tags.py`, development codes, trial names, NCT
   numbers, companies and tickers, title words; `reasons`: a shared source, drug or trial, or
