@@ -335,7 +335,20 @@ class Database:
         ).fetchall()
         return [self._row_to_cluster(r) for r in rows]
 
-    def unscored_clusters(self, model: str, prompt_version: str) -> list[Cluster]:
+    def unscored_clusters(
+        self, model: str, prompt_version: str, *, rescore: bool = True
+    ) -> list[Cluster]:
+        """Passed clusters to score. With `rescore`, every one without a score from this
+        model and prompt version (a new rubric re-scores the old stories); without it,
+        only those with no score at all (a new rubric applies to new stories only)."""
+        if not rescore:
+            rows = self.conn.execute(
+                """SELECT c.* FROM clusters c
+                   WHERE c.prefilter_status = 'pass'
+                     AND NOT EXISTS (SELECT 1 FROM scores s WHERE s.cluster_id = c.id)
+                   ORDER BY c.id"""
+            ).fetchall()
+            return [self._row_to_cluster(r) for r in rows]
         rows = self.conn.execute(
             """SELECT c.* FROM clusters c
                WHERE c.prefilter_status = 'pass'

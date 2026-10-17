@@ -50,7 +50,9 @@ def main(argv: list[str] | None = None) -> int:
             link.link_recent(db, cfg)
         scorer = Scorer(cfg)
         if args.dry_run:
-            pending = db.unscored_clusters(scorer.model, rubric.PROMPT_VERSION)
+            pending = db.unscored_clusters(
+                scorer.model, rubric.PROMPT_VERSION, rescore=scorer.rescore_on_change
+            )
             log.info("%d clusters pending scoring", len(pending))
             for cl in pending[: args.limit or len(pending)]:
                 print(f"[{cl.id}] {cl.title[:100]}")

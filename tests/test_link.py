@@ -147,6 +147,7 @@ def test_run_score_links_before_scoring_unless_told_not_to(db, monkeypatch, tmp_
             {
                 "score_unscored": lambda self, db, limit=None: [],
                 "model": "m",
+                "rescore_on_change": False,
             },
         )(),
     )

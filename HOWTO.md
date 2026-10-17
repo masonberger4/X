@@ -74,6 +74,13 @@ source only when it is due, and score only scores what is new.
    Prints a start and a finish line per batch of ten. Up to 150 stories a day
    are scored; the rest wait for tomorrow. Do not click inside the window
    while it runs (see "Fixing things").
+   When the scoring rubric changes, only stories never scored get the new
+   rubric; old scores stay as they were and cost nothing more
+   (`scoring: rescore_on_change: false` in `config.yaml`; `true` scores every
+   passed story again). The current rubric weighs how much investors would
+   argue about a story twice as much as the rest, since that is what the
+   account's posts drew replies and follows on, so totals from before and after
+   a change are not on quite the same scale for a few days.
 4. Read the top stories with the model's decision beside each, and add yours.
    ```
    python digest.py --auto-rate --rate

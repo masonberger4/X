@@ -123,8 +123,12 @@ hand under the post it answers.
   ratings. It never raises: a failed call is logged and scoring proceeds.
 - **Every score row stores** `model`, `prompt_version`
   (`score/rubric.py:PROMPT_VERSION`), and the raw CLI reply (`raw_response`). Bump
-  `PROMPT_VERSION` whenever the prompt, few-shot examples, or tool schema
-  change; `run_score.py` then re-scores automatically.
+  `PROMPT_VERSION` whenever the prompt, few-shot examples, tool schema or
+  `rubric.WEIGHTS` change. With `scoring.rescore_on_change: true` `run_score.py` then
+  re-scores every passed story; the shipped `false` scores only stories never scored
+  (`db.unscored_clusters(rescore=False)`), so old scores stay and cost nothing. v5 weights
+  audience_interest x2 and clinical_significance and timeliness x0.5 (the account's posts
+  showed v4's total did not predict reach).
 - **Scoring answers a strict JSON schema** (`score/rubric.py:TOOL`). The CLI's print
   mode has no tool calling, so `Scorer.headless_system_prompt` puts the schema in the
   system prompt and `Scorer.create_message` checks the reply in code (not a JSON object
