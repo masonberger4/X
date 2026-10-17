@@ -20,6 +20,7 @@ from typing import Any
 from feedback.models import METRICS
 from studio import learn as L
 from studio import store as S
+from studio import traits as TR
 from studio.angles import HOOK_STYLES, SHAPES
 from studio.evidence import Evidence, Posted, parse_when
 from studio.voices import Voice
@@ -183,6 +184,7 @@ def arm_tables(
         "shape": list(SHAPES),
         "hook_style": list(HOOK_STYLES),
         "voice": list(voices),
+        **{arm: list(values) for arm, values in TR.VALUES.items()},
     }
     enough = len(ev.scored) >= max(1, int(lcfg["lean_min_measured"]))
     tables = []
@@ -191,7 +193,7 @@ def arm_tables(
         candidates = offer.get(arm, [])
         if arm == "voice":
             shares = _voice_shares(ev, cfg, candidates)
-        elif enough and candidates:
+        elif enough and candidates and arm not in TR.ARMS:  # traits are not leaned on
             shares = L.lean_shares(
                 ev.measured,
                 arm,

@@ -202,4 +202,8 @@ def test_an_automatic_piece_is_told_which_radar_topic_may_repeat(sconn, cfg):
 
     text = P._topic_block(brief)
     assert f"MAY REPEAT piece {earlier.id}" in text
-    assert text.index("MAY REPEAT") < text.index(f"[radar {fresh}]")
+    # the flag sits in that topic's own lines, whichever order the ranking put them in
+    start = text.index(f"[radar {rid}]")
+    end = text.find("- [radar", start + 1)
+    assert "MAY REPEAT" in text[start : end if end > 0 else len(text)]
+    assert f"[radar {fresh}]" in text

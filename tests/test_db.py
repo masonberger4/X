@@ -79,6 +79,9 @@ def test_scores_ratings_and_top(db):
         )
     assert db.unscored_clusters("m", "v1") == []
     assert len(db.unscored_clusters("m", "v2")) == 3
+    # a new rubric for new stories only: a story scored under any version is left alone
+    assert db.unscored_clusters("m", "v2", rescore=False) == []
+    assert db.unscored_clusters("other-model", "v2", rescore=False) == []
     top = db.top_scored_clusters(now - timedelta(hours=1), limit=2, min_total=20)
     assert [s.total for _, s in top] == [50, 30]
     db.insert_rating(cids[1], 4, "good")

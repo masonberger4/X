@@ -363,7 +363,7 @@ def cfg(monkeypatch) -> dict[str, Any]:
 def scanner(monkeypatch) -> Scanner:
     fake = Scanner()
     monkeypatch.setattr(SC, "call_scanner", fake)
-    monkeypatch.setattr(runner, "feed_lines", lambda cfg, conn: ["A feed story (biorxiv)"])
+    monkeypatch.setattr(runner, "feed_leads", lambda cfg, conn: (["A feed story (biorxiv)"], [77]))
     monkeypatch.setattr(runner, "_today", lambda: (TODAY.isoformat(), "America/Los_Angeles"))
     return fake
 

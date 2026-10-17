@@ -102,6 +102,10 @@ def entry_problem(entry: Any) -> str:
 class Scorer:
     def __init__(self, cfg: dict[str, Any]):
         self.cfg = cfg
+        # scoring.rescore_on_change: a new model or PROMPT_VERSION re-scores every passed
+        # story (true) or only the stories never scored (false, shipped: no Claude usage
+        # spent on old news).
+        self.rescore_on_change = bool((cfg.get("scoring") or {}).get("rescore_on_change", True))
         self.model: str = cfg["models"]["scorer"]
         self.effort: str | None = (
             str(cfg["models"].get("scorer_effort") or "").strip().lower() or None
@@ -270,7 +274,9 @@ class Scorer:
             return out
 
     def score_unscored(self, db: Database, limit: int | None = None) -> list[Score]:
-        clusters = db.unscored_clusters(self.model, rubric.PROMPT_VERSION)
+        clusters = db.unscored_clusters(
+            self.model, rubric.PROMPT_VERSION, rescore=self.rescore_on_change
+        )
         if limit is not None:
             clusters = clusters[:limit]
         log.info(

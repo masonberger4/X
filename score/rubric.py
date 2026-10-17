@@ -1,7 +1,15 @@
 """Scoring rubric: system prompt, few-shot examples, and the tool JSON schema.
 
-Bump PROMPT_VERSION whenever the prompt, examples, or schema change so that
-old score rows can be told apart from new ones.
+Bump PROMPT_VERSION whenever the prompt, examples, schema or the total's weights change
+so that old score rows can be told apart from new ones. Whether old stories are then
+scored again is `scoring.rescore_on_change` in config.yaml (shipped false: a new rubric
+applies to new stories only).
+
+v5 (2026-10-17): the account's own posts showed the v4 total did not predict reach
+(Spearman about 0 with impressions, -0.31 with replies over 108 posts) and that phase 3 and
+approval stories, which v4 ranked highest, drew the least. audience_interest now asks
+whether investors disagree and whether a retail crowd follows the ticker, and counts
+double in the total; clinical_significance and timeliness count half.
 """
 
 from __future__ import annotations
@@ -9,7 +17,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 TOOL_NAME = "score_items"
 
 EVIDENCE_LEVELS = ["preclinical", "preprint", "phase1", "phase2", "phase3", "approval", "other"]
@@ -62,11 +70,21 @@ TOOL: dict[str, Any] = {
 }
 
 
+# Each dimension's weight in the total (they sum to 5, so the total stays 0-50).
+WEIGHTS = {
+    "novelty": 1.0,
+    "clinical_significance": 0.5,
+    "audience_interest": 2.0,
+    "expertise_fit": 1.0,
+    "timeliness": 0.5,
+}
+
+
 def compute_total(s: dict[str, Any]) -> int:
-    """Deterministic total: sum of the five 0-10 dimensions minus half the hype risk.
-    Range 0-50 (hype can only subtract)."""
-    base = sum(int(s[d]) for d in DIMENSIONS)
-    return max(0, base - int(s.get("hype_risk", 0)) // 2)
+    """Deterministic total: the weighted sum of the five 0-10 dimensions (WEIGHTS) minus
+    half the hype risk, rounded down. Range 0-50 (hype can only subtract)."""
+    halves = sum(round(2 * WEIGHTS[d]) * int(s[d]) for d in DIMENSIONS)
+    return max(0, (halves - 2 * (int(s.get("hype_risk", 0)) // 2)) // 2)
 
 
 FEW_SHOT: list[dict[str, Any]] = [
@@ -104,6 +122,24 @@ FEW_SHOT: list[dict[str, Any]] = [
             "hype_risk": 3,
             "rationale": "M&A in the core beat with a disclosed price and CVR; clinical value rests on phase 2 data the release does not restate.",
             "suggested_angle": "What the price says about how pharma values mid-stage T-cell engagers versus CAR-T, who the comparable public companies are, and what the CVR structure says about the acquirer's confidence in approval.",
+        },
+    },
+    {
+        "item": {
+            "source": "company_pr",
+            "title": "Commercial-stage cell therapy company prices an underwritten offering after a launch quarter below consensus",
+            "abstract": "The company raised $200 million at a discount to the last close. Product revenue for the quarter grew 20% sequentially but came in below analyst estimates; the company reaffirmed full-year guidance and said treatment-center onboarding is on track.",
+        },
+        "score": {
+            "novelty": 5,
+            "clinical_significance": 3,
+            "audience_interest": 10,
+            "expertise_fit": 10,
+            "timeliness": 9,
+            "evidence_level": "other",
+            "hype_risk": 2,
+            "rationale": "A dilutive raise after a soft launch quarter at a cell-therapy small cap splits holders; bull and bear both have numbers to argue with.",
+            "suggested_angle": "Lay out the bull and bear case on the launch curve: what the onboarding numbers imply for the next quarters, how long the cash now lasts, and what would settle the argument. Never a buy/sell call.",
         },
     },
     {
@@ -160,7 +196,7 @@ Score each item on the rubric below. Use the full 0-10 range; most routine items
 Dimensions (0-10 each):
 - novelty: how new is the finding, mechanism, or deal relative to what the field and the market already know? First-in-class, new modality, a surprising result, or an unexpected acquirer scores high; incremental confirmations and expected follow-ups score low.
 - clinical_significance: would this change practice or patient outcomes if it holds? Randomized phase 3 data, approvals, and label changes score high; single cell-line studies score near zero. For pure business news (a financing, a licensing deal) score the clinical significance of the underlying asset, not the deal.
-- audience_interest: would a biotech investor or analyst stop scrolling? Score high when the item moves or tests a company's thesis: pivotal readouts, approvals or CRLs, M&A and licensing, trial holds or discontinuations, competitor data that reads across, dilutive financings after data. Public-company involvement raises this; a named ticker or acquirer raises it further. A DATED upcoming catalyst for a public company (a scheduled presentation, a PDUFA, a readout window) scores 8-10 even before any data exist, because the post can set up what success or failure would change. Items with no business or investment implication at all (guidelines, grading criteria, consensus statements, reviews, methods papers) score at most 3 here however strong the science. Conference logistics, investor-meeting notices, inducement grants, and routine hiring news score 0-1.
+- audience_interest: would a biotech investor or analyst stop scrolling? Score high when the item moves or tests a company's thesis: pivotal readouts, approvals or CRLs, M&A and licensing, trial holds or discontinuations, competitor data that reads across, dilutive financings after data. Public-company involvement raises this; a named ticker or acquirer raises it further. A DATED upcoming catalyst for a public company (a scheduled presentation, a PDUFA, a readout window) scores 8-10 even before any data exist, because the post can set up what success or failure would change. What this account's readers reply to and follow most is a live debate: score highest when investors openly disagree about the company (a loud bull and bear case, a contested readout, a dilutive raise or a slow launch that splits holders, heavy short interest) and when the company is a small or mid-cap with a retail following that searches its ticker. An expected result from a large company (a label expansion the market already priced, a big pharma's routine phase 3) scores in the middle however important it is clinically. A micro-cap or private company nobody follows scores low unless the item is really about a class or a modality. Items with no business or investment implication at all (guidelines, grading criteria, consensus statements, reviews, methods papers) score at most 3 here however strong the science. Conference logistics, investor-meeting notices, inducement grants, and routine hiring news score 0-1.
 - expertise_fit: how well does this fit the account's beat? Apply a bonus (+2 to +4, capped at 10) when the item is primarily about any of:
 {topics_txt}
   Items about other oncology topics score on plain relevance; non-oncology items score 0-1.

@@ -466,6 +466,11 @@ def studio_performance(request: Request, conn: Conn, flash: str = ""):
     except Exception:  # the rest of the page still shows
         log.exception("could not read what the editor did with each voice")
     last = S.last_learned(conn)
+    newness = None
+    try:
+        newness = E.newness(conn, cfg)
+    except Exception:
+        log.exception("could not work out the newness rule")
     return templates.TemplateResponse(
         request,
         "studio_performance.html",
@@ -480,6 +485,7 @@ def studio_performance(request: Request, conn: Conn, flash: str = ""):
             "state": D.learn_state(ev, cfg, last, now),
             "versions": D.version_rows(S.playbook_versions(conn, 200), S.open_proposal(conn)),
             "said": E.block(ev, cfg, voices=False),
+            "newness": newness,
             "metrics": S.MANUAL_METRICS,
             "small": len(ev.scored) < L.SMALL_SAMPLE,
             "error": error,
@@ -585,6 +591,7 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
     feed = T.fetch_shortlist(
         {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=taken_stories(conn)
     )
+    topic_est, catalyst_est, newness, topics = _radar_ranking(conn, cfg, topics, rows, today)
     return templates.TemplateResponse(
         request,
         "studio_radar.html",
@@ -598,6 +605,10 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
             "suggested": suggested,
             "topic_repeats": topic_repeats,
             "catalyst_repeats": catalyst_repeats,
+            "topic_est": topic_est,
+            "catalyst_est": catalyst_est,
+            "newness": newness,
+            "crowd": S.crowd(conn),
             "angles": library,
             "kinds": R.KIND_LABELS,
             "today": today.isoformat(),
@@ -606,6 +617,46 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
             "S": S,
         },
     )
+
+
+def _radar_ranking(
+    conn: Any, cfg: dict[str, Any], topics: list[Any], catalysts: list[Any], today: date
+) -> tuple[dict[int, Any], dict[int, Any], Any, list[Any]]:
+    """The radar's ranking (studio/rank.py): an estimate per untaken topic and catalyst,
+    the newness rule, and the topics with the untaken ones best first. Nothing when the
+    ranking is off or cannot be worked out; the page shows the radar as it is then."""
+    from studio import evidence as E
+    from studio import rank as RK
+
+    if not (cfg.get("ranking") or {}).get("enabled", True):
+        return {}, {}, None, topics
+    try:
+        ev = E.measure(conn, cfg)
+        fresh = [t for t in topics if t.status == S.RADAR_NEW]
+        topic_est = E.estimates(
+            conn,
+            cfg,
+            [(t.id, [(c["name"], c["ticker"]) for c in t.companies], t.traits) for t in fresh],
+            ev,
+            explore_seed=today.isoformat(),
+        )
+        catalyst_est = E.estimates(
+            conn,
+            cfg,
+            [
+                (c.id, [(c.company, c.ticker)], {})
+                for c in catalysts
+                if c.topic_id is None and c.piece_id is None
+            ],
+            ev,
+        )
+        newness = E.newness(conn, cfg)
+    except Exception:
+        log.warning("could not rank the radar", exc_info=True)
+        return {}, {}, None, topics
+    place = {tid: i for i, tid in enumerate(RK.order(topic_est))}
+    ordered = sorted(topics, key=lambda t: (0, place[t.id]) if t.id in place else (1, 0))
+    return topic_est, catalyst_est, newness, ordered
 
 
 def _radar_topic_or_404(conn: Any, radar_id: int) -> S.RadarTopic:

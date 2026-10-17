@@ -58,6 +58,7 @@ approved page), it shows here.</p>
 {% endif %}
 
 <h2>What has done well</h2>
+{% if newness and newness.line() %}<p class="meta">{% if newness.due %}<span class="pill warn">new company next</span> {% endif %}{{ newness.line() }}</p>{% endif %}
 {% if ev.scored %}
 {% if small %}<p class="caveats">{{ ev.scored|length }} scored piece{{ "s" if ev.scored|length != 1 }}: too few to be sure of anything.
 One post's numbers are mostly the story and the day; read these as hints. The lean still tries what has
@@ -65,7 +66,7 @@ little evidence, so the sample grows evenly.</p>{% endif %}
 <p class="meta">"Suggested" is how often the lean offers it to a session (its chance of being the best on the
 evidence so far); an untried value starts at the account's median and keeps a real chance.</p>
 {% for t in arms %}
-<details {% if t.arm in ("angle", "voice") %}open{% endif %}><summary><strong>{{ t.label }}</strong></summary>
+<details {% if t.arm in ("angle", "voice", "crowd", "cap") %}open{% endif %}><summary><strong>{{ t.label }}</strong></summary>
 {% if t.note %}<p class="meta">{{ t.note }}</p>{% endif %}
 <table>
   <tr><th>{{ t.label }}</th><th>Pieces</th><th>&times; median</th><th>{{ t.share_label }}</th></tr>

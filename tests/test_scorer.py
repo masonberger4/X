@@ -66,8 +66,11 @@ def _unscored(db):
 
 
 def test_rubric_total_and_prompt():
-    assert rubric.compute_total(_entry(0)) == 35 - 2
-    assert rubric.compute_total(_entry(0, hype_risk=10, novelty=0)) == 30 - 5
+    # 5 + 6/2 + 7*2 + 8 + 9/2 = 34.5, less half the hype (2), rounded down
+    assert rubric.compute_total(_entry(0)) == 32
+    assert rubric.compute_total(_entry(0, hype_risk=10, novelty=0)) == 24
+    top = {d: 10 for d in rubric.DIMENSIONS} | {"hype_risk": 0}
+    assert rubric.compute_total(top) == 50 and sum(rubric.WEIGHTS.values()) == 5
     sp = rubric.build_system_prompt(CFG["expertise"])
     assert "CAR-T cell therapy" in sp and "CRISPR" in sp and rubric.TOOL_NAME in sp
     assert rubric.TOOL["input_schema"]["properties"]["scores"]["items"]["required"][0] == "index"
@@ -91,7 +94,7 @@ def test_scores_batches_and_stores_metadata(db, monkeypatch):
     s = db.latest_score(1)
     assert s.model == "test-model-from-config"
     assert s.prompt_version == rubric.PROMPT_VERSION
-    assert s.total == 33 and s.evidence_level == "phase2"
+    assert s.total == 32 and s.evidence_level == "phase2"
     raw = json.loads(s.raw_response)  # the verbatim CLI reply of cluster 1's batch
     assert raw["text"] == replies[0] and raw["model"] == "test-model-from-config"
     assert "A" * 100 in sent[0] and "A" * 101 not in sent[0]  # abstract truncated
@@ -119,7 +122,7 @@ def test_cli_request_uses_config_model_effort_and_inlined_schema(db, monkeypatch
     assert "ONLY a JSON object" in system and f"`{rubric.TOOL_NAME}` tool" in system
     assert json.dumps(rubric.TOOL["input_schema"]) in system  # the schema travels in the prompt
     assert "### Item 0" in call["user"] and "Cancer story number 0" in call["user"]
-    assert db.latest_score(1).total == 33  # the JSON inside the prose was parsed and stored
+    assert db.latest_score(1).total == 32  # the JSON inside the prose was parsed and stored
 
     calls.clear()
     Scorer(dict(cfg, models=dict(cfg["models"], scorer_effort=" High "))).create_message("U")

@@ -56,6 +56,10 @@ scoring:
   max_retries: 5
   backoff_seconds: 2              # base for exponential backoff
   abstract_max_chars: 2500        # truncate abstracts sent to the model
+  # A new scoring model or rubric (score/rubric.py:PROMPT_VERSION) re-scores every passed
+  # story when true. false: only stories never scored get the new rubric, and the old
+  # scores stay as they were, so a rubric change spends no Claude usage on old news.
+  rescore_on_change: false
 
 prefilter:
   require_abstract: true
