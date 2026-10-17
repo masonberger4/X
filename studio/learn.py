@@ -40,15 +40,21 @@ from statistics import median, stdev
 from typing import Any
 
 from feedback.models import CONVERSATION, CONVERSATION_WEIGHTS, METRICS, Metrics
+from studio import traits as TR
 from studio import voices as V
 
-ARMS = ("angle", "shape", "hook_style", "cards", "voice")
+# How a piece was written (the lean draws among these), then what it was about: the
+# story's traits (studio/traits.py), learned so the radar can rank topics by kind of story,
+# never by company (studio/rank.py).
+STYLE_ARMS = ("angle", "shape", "hook_style", "cards", "voice")
+ARMS = STYLE_ARMS + TR.ARMS
 ARM_LABELS = {
     "angle": "Angles",
     "shape": "Shapes",
     "hook_style": "Hook styles",
     "cards": "Cards per piece",
     "voice": "Voices",
+    **TR.LABELS,
 }
 # A relative of 0 has no logarithm; it counts as this (a post with nothing against a
 # baseline with something, and no smoothing).
@@ -122,6 +128,7 @@ class Measured:
     hook_style: str = ""
     cards: int = 0
     voice: str = ""  # the playbook voice it was written in ('' for none)
+    traits: dict[str, str] = field(default_factory=dict)  # studio/traits.py, as known
     source: str = "x"  # "x": step 4's snapshot; "manual": typed in by the editor
     url: str = ""
     baseline: float | None = None
@@ -136,6 +143,8 @@ class Measured:
     def arm(self, arm: str) -> str:
         if arm == "cards":
             return card_bucket(self.cards)
+        if arm in TR.ARMS:
+            return self.traits.get(arm, "")
         return str(getattr(self, arm) or "")
 
 

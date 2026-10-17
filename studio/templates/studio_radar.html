@@ -24,12 +24,20 @@ before the first automatic studio run.</p>
 {% if done and done.summary %}<p class="proposal">{{ done.summary }}</p>{% endif %}
 
 <h2>Topics from the scan</h2>
+{% if newness and newness.line() %}<p class="{{ 'proposal' if newness.due else 'meta' }}">{% if newness.due %}<span class="pill warn">new company next</span> {% endif %}{{ newness.line() }}</p>{% endif %}
+{% if topic_est %}<p class="meta">Untaken topics are in order of what topics like them have done for the account:
+the estimate learns kinds of story (company size, stage, beat, whether investors disagree, the
+Stocktwits crowd, a company new to the account), never companies, and each recent piece on the same
+company lowers it. One topic a day is the <em>try something new</em> pick, whatever its estimate.
+With few measured pieces the estimates are rough.</p>{% endif %}
 {% if topics %}
 {% for t in topics %}
 <div class="entry">
   <p><strong>{{ t.title }}</strong>
     {% if t.status == "queued" %}<span class="pill warn">queued</span>{% elif t.status == "used" %}<span class="pill ok">written</span>{% if t.piece_id %} <a href="/studio/{{ t.piece_id }}">piece {{ t.piece_id }}</a>{% endif %}{% endif %}
     <span class="meta">· {{ t.created_at|localtime }}</span></p>
+  {% set est = topic_est.get(t.id) %}
+  {% if est %}<p class="meta">{% if est.explore %}<span class="pill ok">try something new</span> {% endif %}{% if est.times is not none %}<strong>Estimate {{ "%.1f"|format(est.times) }}x</strong> the account's median{% else %}No estimate yet (no measured piece shares its traits){% endif %}{% if est.new_company %} · <span class="pill ok">new company</span>{% elif est.repeats %} · {{ est.repeats }} recent piece{{ "s" if est.repeats != 1 }} on its company{% endif %}{% if est.tags() %} · {{ est.tags()|join(", ") }}{% endif %}</p>{% endif %}
   {% set reps = topic_repeats.get(t.id) %}
   {% if reps %}<p class="meta"><span class="pill warn">may repeat</span>
     {% for r in reps %}{% if r.covered.kind == "piece" %}<a href="/studio/{{ r.covered.id }}">piece {{ r.covered.id }}</a>{% else %}a queued topic{% endif %}
@@ -86,7 +94,8 @@ Dates are as precise as the source was; a quarter counts until it ends.</p>
   {% for c in rows %}
   <tr>
     <td class="when">{{ c.when_text }}</td>
-    <td>{{ c.company }}{% if c.ticker %} <span class="meta">({{ c.ticker }})</span>{% endif %}</td>
+    <td>{{ c.company }}{% if c.ticker %} <span class="meta">({{ c.ticker }})</span>{% endif %}
+      {% set est = catalyst_est.get(c.id) %}{% if est %}{% if est.new_company %}<br><span class="pill ok">new company</span>{% endif %}{% set w = crowd.get(c.ticker|upper) %}{% if w and w.watchers is not none %}<br><span class="meta">{{ "{:,}".format(w.watchers) }} watchers</span>{% endif %}{% endif %}</td>
     <td>{{ kinds.get(c.kind, c.kind) }}{% if c.drug %}: {{ c.drug }}{% endif %}{% if c.detail %}<br><span class="meta">{{ c.detail }}</span>{% endif %}
       {% set reps = catalyst_repeats.get(c.id) %}
       {% if reps %}<br><span class="pill warn">may repeat</span> <span class="meta">{% for r in reps %}{% if r.covered.kind == "piece" %}<a href="/studio/{{ r.covered.id }}">piece {{ r.covered.id }}</a>{% else %}a queued topic{% endif %} ({{ r.covered.status }}{% if r.covered.angle %}, {{ angles[r.covered.angle].name if r.covered.angle in angles else r.covered.angle }}{% endif %}): shares {{ r.reasons|join("; ") }}{{ "; " if not loop.last }}{% endfor %}</span>{% endif %}

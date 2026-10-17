@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -179,6 +180,14 @@ CREATE TABLE IF NOT EXISTS studio_manual_metrics (
     bookmarks   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_studio_manual_metrics_piece ON studio_manual_metrics(piece_id);
+
+-- The retail crowd around a ticker (studio/crowd.py): people watching it on Stocktwits.
+CREATE TABLE IF NOT EXISTS studio_crowd (
+    ticker     TEXT PRIMARY KEY,
+    watchers   INTEGER,
+    fetched_at TEXT NOT NULL,
+    error      TEXT NOT NULL DEFAULT ''
+);
 """
 
 # Where a playbook version came from. `proposal` is a learned rewrite kept for the editor
@@ -206,12 +215,16 @@ MANUAL_METRICS = ("impressions", "likes", "reposts", "replies", "quotes", "bookm
 # a piece from before voices or with voices off.
 # model, effort: what one run ran on (a step-by-step piece's steps differ; studio/steps.py),
 # '' for a run from before they were recorded.
+# traits, feed_cluster: a radar topic's traits as the scan judged them (studio/traits.py)
+# and the feed story it started from, when the scan says it took one of the feed's leads.
 _MIGRATIONS = (
     ("studio_pieces", "story_item", "TEXT NOT NULL DEFAULT ''"),
     ("studio_topics", "story_item", "TEXT NOT NULL DEFAULT ''"),
     ("studio_pieces", "voice", "TEXT NOT NULL DEFAULT ''"),
     ("studio_runs", "model", "TEXT NOT NULL DEFAULT ''"),
     ("studio_runs", "effort", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_radar_topics", "traits", "TEXT NOT NULL DEFAULT '{}'"),
+    ("studio_radar_topics", "feed_cluster", "INTEGER"),
 )
 
 
@@ -1108,6 +1121,8 @@ class RadarTopic:
     status: str
     topic_id: int | None
     piece_id: int | None
+    traits: dict[str, str] = field(default_factory=dict)
+    feed_cluster: int | None = None
 
     def to_topic(self) -> Any:
         from studio import radar
@@ -1122,6 +1137,7 @@ class RadarTopic:
                 if c.get("name")
             ),
             sources=tuple(self.sources),
+            traits=dict(self.traits),
         )
 
 
@@ -1143,16 +1159,33 @@ def _radar_topic(r: sqlite3.Row) -> RadarTopic:
         status=r["status"],
         topic_id=r["topic_id"],
         piece_id=r["piece_id"],
+        traits=_json_traits(r["traits"]),
+        feed_cluster=r["feed_cluster"],
     )
 
 
-def add_radar_topics(conn: sqlite3.Connection, scan_id: int, topics: list[Any]) -> list[int]:
-    """A scan's topics (studio/radar.py:Topic), best first."""
+def _json_traits(text: str | None) -> dict[str, str]:
+    try:
+        raw = json.loads(text or "{}")
+    except ValueError:
+        return {}
+    return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+
+def add_radar_topics(
+    conn: sqlite3.Connection,
+    scan_id: int,
+    topics: list[Any],
+    feed_clusters: Sequence[int | None] = (),
+) -> list[int]:
+    """A scan's topics (studio/radar.py:Topic), best first; `feed_clusters` the feed story
+    each started from (None for none), in the same order."""
     now, ids = _now(), []
     for rank, t in enumerate(topics, 1):
+        feed = feed_clusters[rank - 1] if rank - 1 < len(feed_clusters) else None
         cur = conn.execute(
             "INSERT INTO studio_radar_topics (scan_id, created_at, rank, title, why_now, angle,"
-            " companies, sources) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " companies, sources, traits, feed_cluster) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 scan_id,
                 now,
@@ -1162,6 +1195,8 @@ def add_radar_topics(conn: sqlite3.Connection, scan_id: int, topics: list[Any]) 
                 t.angle,
                 json.dumps([{"name": c.name, "ticker": c.ticker} for c in t.companies]),
                 json.dumps(list(t.sources)),
+                json.dumps(dict(getattr(t, "traits", {}) or {})),
+                feed,
             ),
         )
         ids.append(int(cur.lastrowid))
@@ -1396,3 +1431,52 @@ def covered_since(conn: sqlite3.Connection, since_iso: str) -> list[Any]:
         angle = p.angle or p.requested_angle
         out.append(covered("piece", p.id, p.label, angle, p.stage, f"{p.title}\n{p.topic}"))
     return out
+
+
+# --- the retail crowd (studio/crowd.py) ------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CrowdRow:
+    ticker: str
+    watchers: int | None
+    fetched_at: str
+    error: str
+
+
+def crowd(conn: sqlite3.Connection) -> dict[str, CrowdRow]:
+    """Every ticker's last Stocktwits lookup, by ticker."""
+    rows = conn.execute("SELECT * FROM studio_crowd").fetchall()
+    return {
+        r["ticker"]: CrowdRow(r["ticker"], r["watchers"], r["fetched_at"], r["error"]) for r in rows
+    }
+
+
+def set_crowd(
+    conn: sqlite3.Connection, ticker: str, watchers: int | None, *, error: str = ""
+) -> None:
+    """One lookup. A failed one keeps the last good count and records why."""
+    conn.execute(
+        "INSERT INTO studio_crowd (ticker, watchers, fetched_at, error) VALUES (?, ?, ?, ?)"
+        " ON CONFLICT(ticker) DO UPDATE SET fetched_at = excluded.fetched_at,"
+        " error = excluded.error,"
+        " watchers = COALESCE(excluded.watchers, studio_crowd.watchers)",
+        (ticker, watchers, _now(), error[:300]),
+    )
+    conn.commit()
+
+
+def piece_companies(piece: Piece) -> list[tuple[str, str]]:
+    """The (name, ticker) pairs a piece's research named (research.json's companies)."""
+    from studio import traits as TR
+
+    research = piece.meta.get("research") if isinstance(piece.meta, dict) else None
+    return TR.companies_of(research.get("companies") if isinstance(research, dict) else None)
+
+
+def piece_traits(piece: Piece) -> dict[str, str]:
+    """The traits a piece's research judged (research.json's traits)."""
+    from studio import traits as TR
+
+    research = piece.meta.get("research") if isinstance(piece.meta, dict) else None
+    return TR.read_traits(research.get("traits") if isinstance(research, dict) else None)

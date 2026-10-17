@@ -171,6 +171,18 @@ def conn(db_file):
 
 
 @pytest.fixture(autouse=True)
+def _no_crowd_lookups(monkeypatch):
+    """No test reaches Stocktwits: every crowd lookup fails as a refused page would (a
+    test that wants counts passes its own `fetch` to studio/crowd.py:refresh)."""
+    from studio import crowd
+
+    def refused(ticker, rcfg):
+        raise crowd.CrowdError("tests never look up the crowd")
+
+    monkeypatch.setattr(crowd, "fetch_watchers", refused)
+
+
+@pytest.fixture(autouse=True)
 def _queue_template_globals():
     """Importing panel.app installs HAS_PANEL and friends on the approval queue's own Jinja
     environment for the rest of the process. Restore them around every test, so a test that

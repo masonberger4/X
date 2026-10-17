@@ -23,6 +23,7 @@ from studio import playbook as PB
 from studio import prompt as P
 from studio import qa
 from studio import radar as R
+from studio import rank as RK
 from studio import render as render_mod
 from studio import repeats as RP
 from studio import session as SS
@@ -243,6 +244,8 @@ def build_brief(
     radar: list[tuple[int, R.Topic]] = []
     coming: list[R.Catalyst] = []
     radar_repeats: dict[int, list[str]] = {}
+    radar_notes: dict[int, str] = {}
+    newness = ""
     if story is None and not piece.topic and piece.stage == S.STAGE_RESEARCHING:
         # Only the research stage chooses a story; later stages have one.
         # Nor a story offered to a piece researching beside this one.
@@ -252,6 +255,7 @@ def build_brief(
         covered = covered_for_repeats(conn, cfg, exclude_piece=piece.id)
         repeats = {rid: [r.line() for r in RP.find(RP.topic_marks(t), covered)] for rid, t in radar}
         radar_repeats = {rid: lines for rid, lines in repeats.items() if lines}
+        radar, radar_notes, newness = rank_for_brief(conn, cfg, radar, evidence, today=today)
     said, lean = "", None
     if evidence is not None:
         said = E.block(evidence, cfg, voices=False)
@@ -283,6 +287,8 @@ def build_brief(
         shortlist=shortlist,
         radar=radar,
         radar_repeats=radar_repeats,
+        radar_notes=radar_notes,
+        newness=newness,
         coming_up=coming,
         offer=offer,
         hooks_to_avoid=hooks,
@@ -338,6 +344,41 @@ def assign_voice(
     )
     log.info("piece %s: written in the voice %s (%s)", piece.id, voice.key, draw.how)
     return voice
+
+
+def rank_for_brief(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    radar: list[tuple[int, R.Topic]],
+    evidence: E.Evidence | None,
+    *,
+    today: str,
+) -> tuple[list[tuple[int, R.Topic]], dict[int, str], str]:
+    """The radar topics an automatic piece is offered, best first by their estimate
+    (studio/rank.py), a line on each, and the newness rule's line. A failure leaves the
+    radar as it was: the ranking never holds a brief back."""
+    try:
+        est = E.estimates(
+            conn,
+            cfg,
+            [(rid, [(c.name, c.ticker) for c in t.companies], t.traits) for rid, t in radar],
+            evidence,
+            explore_seed=today,
+        )
+        newness = E.newness(conn, cfg).line() if est else ""
+    except Exception:
+        log.warning("could not rank the radar for the brief", exc_info=True)
+        return radar, {}, ""
+    place = {rid: i for i, rid in enumerate(RK.order(est))}
+    ranked = sorted(radar, key=lambda pair: place.get(pair[0], len(place)))
+    notes = {}
+    for rid, e in est.items():
+        line = e.line()
+        if e.explore:
+            line = (line + "; " if line else "") + "today's pick to try something new"
+        if line:
+            notes[rid] = line
+    return ranked, notes, newness
 
 
 def radar_for_brief(
@@ -1106,15 +1147,52 @@ def print_list() -> int:
 # --- the radar's scan (run_studio.py --scan) ----------------------------------------------
 
 
+def refresh_crowd(conn: sqlite3.Connection, cfg: dict[str, Any], *, today: date) -> None:
+    """Count the retail crowd (studio/crowd.py) around the tickers of the radar's recent
+    topics, of its calendar and of the recent pieces, so the radar and the learning loop
+    can tell a company people follow from one nobody does. Never raises."""
+    from studio import crowd as CR
+    from studio import scan as SC
+
+    rcfg = cfg.get("ranking") or {}
+    if not rcfg.get("enabled", True):
+        return
+    try:
+        since = datetime.now(UTC) - timedelta(days=float(cfg["radar"]["topic_days"]))
+        tickers = [
+            c.get("ticker", "")
+            for t in S.radar_topics(conn, since_iso=since.isoformat(timespec="seconds"))
+            for c in t.companies
+        ]
+        tickers += [
+            p_t
+            for _, p_t in (
+                pair for piece in S.list_pieces(conn, 60) for pair in S.piece_companies(piece)
+            )
+        ]
+        tickers += [c.ticker for c in SC.known_catalysts(conn, cfg["radar"], today)]
+    except (sqlite3.Error, KeyError, ValueError):
+        log.warning("could not list the tickers to count", exc_info=True)
+        return
+    CR.refresh(conn, rcfg, tickers)
+
+
 def feed_lines(cfg: dict[str, Any], conn: sqlite3.Connection) -> list[str]:
     """The feed's top stories nobody has written about (taken_stories), one line each, as
     leads for the scan."""
+    return feed_leads(cfg, conn)[0]
+
+
+def feed_leads(cfg: dict[str, Any], conn: sqlite3.Connection) -> tuple[list[str], list[int]]:
+    """feed_lines and, in the same order, each story's cluster id: the scan numbers the
+    leads F1, F2, ... and a topic that grew out of one names it (radar.Topic.feed_lead)."""
     stories = T.fetch_shortlist(cfg["topics"], exclude=taken_stories(conn))
-    return [
+    lines = [
         f"{s.title} ({', '.join(x for x in (s.source, s.published) if x)})"
         + (f" [feed score {s.score}/50]" if s.score is not None else "")
         for s in stories
     ]
+    return lines, [s.cluster_id for s in stories]
 
 
 def scan(*, dry_run: bool = False, force: bool = False) -> int:
@@ -1156,15 +1234,21 @@ def scan(*, dry_run: bool = False, force: bool = False) -> int:
             return 0
         try:
             S.close_running_scans(conn, "the run stopped before the scan finished")
+            lines, ids = feed_leads(cfg, conn)
             out = SC.run_scan(
                 conn,
                 cfg,
                 today=today,
                 tzname=tzname,
                 angles=angles,
-                feed=feed_lines(cfg, conn),
+                feed=lines,
+                feed_ids=ids,
                 root_cfg=_root_config(),
             )
+            if out.ok:
+                # The crowd around the tickers the radar now shows (studio/crowd.py); never
+                # fails the scan.
+                refresh_crowd(conn, cfg, today=today)
         finally:
             held.release()
         (log.info if out.ok else log.error)("%s", out.message)

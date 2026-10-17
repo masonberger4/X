@@ -80,7 +80,9 @@ hand under the post it answers.
   `PubMedSource.esearch/efetch` (Entrez), and `Scorer.create_message`
   (Claude), `score/rater.py:call_model`
   (the `digest.py --auto-rate` second-opinion rater, and the call behind
-  `filter/link.py` story linking), `studio/scan.py:call_scanner`
+  `filter/link.py` story linking), `studio/crowd.py:fetch_watchers` (a ticker's Stocktwits
+  watcher count from its free public page, `ranking.crowd_url`, through `ingest/http.get_json`;
+  tests get a refusal from `tests/conftest.py`), `studio/scan.py:call_scanner`
   (the radar's daily scan: the CLI with `tools=["WebSearch","WebFetch"]`, its own time
   limit), `studio/playbook.py:call_rewriter` (the studio's learning loop: one playbook
   rewrite, no tools, its own time limit), `reply/writer.py:call_replier` (one reply from
@@ -613,6 +615,23 @@ hand under the post it answers.
   `Brief.radar_repeats` as a MAY REPEAT line under that radar topic. `ops/config.yaml` has the automatic
   `studio_scan` step (right before `studio`) and the manual `studio_scan_now`, both under
   the `studio_scan` lock.
+  **What to write next is ranked by kind of story, never by company** (`ranking:` in
+  `studio/config.yaml`): `studio/traits.py` (pure) names the traits (`cap`, `stage`, `beat`,
+  `debate` as the scan judges each topic and research each piece, `traits` in their JSON and
+  `studio_radar_topics.traits`, guarded migration; `crowd` from `studio_crowd`, the
+  Stocktwits watcher counts `runner.refresh_crowd` -> `studio/crowd.py:refresh` takes after a
+  good scan; `new_company`, no piece on its companies (`traits.company_keys`) in
+  `novelty_days`, from `evidence.coverage`). They are arms of the learning loop
+  (`learn.ARMS` = `STYLE_ARMS` + `traits.ARMS`, `Measured.traits` from
+  `evidence.piece_traits`; never in the lean). `studio/rank.py` (pure): `estimate` (the
+  shrunk mean log score of each known trait value, summed, times `repeat_penalty` per recent
+  piece on the same company), `Newness` (at least `new_need` of every `new_every` pieces on a
+  new company), `explore_pick` (one new-company topic a day at random) and `order`.
+  `evidence.estimates` / `newness` read them from the DB; the radar page orders untaken
+  topics by them and tags catalysts, `runner.rank_for_brief` orders an automatic piece's
+  radar topics (`Brief.radar_notes`, `Brief.newness`), the performance page shows the trait
+  tables and the newness line. The scan numbers the feed's leads F1.. (`runner.feed_leads`)
+  and a topic that grew from one keeps its cluster (`studio_radar_topics.feed_cluster`).
   **The studio learns from X** (`studio/config.yaml` `learn:`). `studio/learn.py` is pure
   (no DB, network or clock): `pick_snapshot` (a typed-in snapshot as it is, else the
   first at `horizon_hours`), `score` (relative = (value + smoothing) / (median of the
@@ -754,7 +773,8 @@ studio/   config.yaml, settings.py, angles.yaml + angles.py (the angle library, 
           (pure: scores, arms, the lean, the evidence text, the rewrite's prompt and
           checks, the voice draw, the editor's edits by voice), voices.py (pure: the
           playbook's Voices section), repeats.py (pure: does a radar topic or catalyst
-          repeat a piece),
+          repeat a piece), traits.py + rank.py (pure: a story's traits, the radar's
+          ranking, the newness rule), crowd.py (Stocktwits watcher counts),
           evidence.py (what X says, from the DB), playbook.py (the file, its
           versions, the rewrite), dashboard.py (pure views of /studio/performance),
           web.py + templates/ (/studio pages, /studio/radar)

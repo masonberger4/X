@@ -16,11 +16,13 @@ import random
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from studio import learn as L
+from studio import rank as RK
 from studio import store as S
+from studio import traits as TR
 
 POST_URL = "https://x.com/i/web/status/{}"
 
@@ -84,6 +86,7 @@ def measure(conn: sqlite3.Connection, cfg: dict[str, Any]) -> Evidence:
     by_id = {p.id: p for p in pieces}
     by_draft = {p.draft_id: p for p in pieces if p.draft_id is not None}
     typed = S.manual_metrics(conn)
+    traits = piece_traits(conn, cfg, pieces)
     heads: list[L.Head] = []
     measured: list[L.Measured] = []
     posted: list[Posted] = []
@@ -127,6 +130,7 @@ def measure(conn: sqlite3.Connection, cfg: dict[str, Any]) -> Evidence:
             hook_style=piece.hook_style,
             cards=ingest.draft_cards(conn, head.draft_id),
             voice=piece.voice,
+            traits=traits.get(piece.id, {}),
             source="manual" if snap.get("manual") else "x",
             url=row.url,
         )
@@ -234,3 +238,147 @@ def edits(conn: sqlite3.Connection, limit: int = 12) -> list[L.Edit]:
         L.Edit(piece_id=pid, before=before, after=after)
         for pid, before, after in S.fetch_studio_edits(conn, limit)
     ]
+
+
+# --- what each piece was about (studio/traits.py) ---------------------------------------------
+
+# A piece that never made it (discarded, failed) covered nothing.
+_NOT_COVERED = frozenset({S.STAGE_DISCARDED, S.STAGE_FAILED})
+
+
+@dataclass(frozen=True)
+class Coverage:
+    piece_id: int
+    created_at: datetime
+    keys: frozenset[str]  # its companies (traits.company_keys)
+
+
+def coverage(pieces: Sequence[S.Piece]) -> list[Coverage]:
+    """Every piece that covered its companies (not discarded, not failed, and research
+    named them), newest first."""
+    out = []
+    for p in pieces:
+        when = parse_when(p.created_at)
+        keys = TR.company_keys(S.piece_companies(p))
+        if p.stage not in _NOT_COVERED and when is not None and keys:
+            out.append(Coverage(p.id, when, frozenset(keys)))
+    return sorted(out, key=lambda c: (c.created_at, c.piece_id), reverse=True)
+
+
+def recent_keys(
+    covered: Sequence[Coverage], *, before: datetime, days: float, exclude: int | None = None
+) -> list[set[str]]:
+    """The companies of each piece started in the `days` before `before`. With `exclude`
+    (the piece being judged), a piece started in the same second counts as before it when
+    its id is lower."""
+    start = before - timedelta(days=days)
+
+    def earlier(c: Coverage) -> bool:
+        if c.created_at == before:
+            return exclude is not None and c.piece_id < exclude
+        return start <= c.created_at < before
+
+    return [set(c.keys) for c in covered if earlier(c) and c.piece_id != exclude]
+
+
+def crowd_traits(
+    companies: Sequence[tuple[str, str]], counts: dict[str, S.CrowdRow], rcfg: dict[str, Any]
+) -> str:
+    """The crowd bucket of the best-watched of a story's tickers; '' when none is known."""
+    watchers = [
+        counts[t].watchers
+        for _, ticker in companies
+        if (t := TR.crowd_ticker(ticker)) in counts and counts[t].watchers is not None
+    ]
+    return TR.crowd_bucket(
+        max(watchers) if watchers else None,  # type: ignore[type-var]
+        large=int(rcfg.get("crowd_large") or 20000),
+        medium=int(rcfg.get("crowd_medium") or 5000),
+    )
+
+
+def piece_traits(
+    conn: sqlite3.Connection, cfg: dict[str, Any], pieces: Sequence[S.Piece]
+) -> dict[int, dict[str, str]]:
+    """Each piece's traits: what research judged, the crowd around its tickers, and whether
+    none of its companies had a piece in the `ranking.novelty_days` before it."""
+    rcfg = cfg.get("ranking") or {}
+    days = float(rcfg.get("novelty_days") or 30)
+    counts = S.crowd(conn)
+    covered = coverage(pieces)
+    out: dict[int, dict[str, str]] = {}
+    for p in pieces:
+        found = S.piece_traits(p)
+        companies = S.piece_companies(p)
+        crowd = crowd_traits(companies, counts, rcfg)
+        if crowd:
+            found["crowd"] = crowd
+        when = parse_when(p.created_at)
+        keys = TR.company_keys(companies)
+        if keys and when is not None:
+            earlier = recent_keys(covered, before=when, days=days, exclude=p.id)
+            found["new_company"] = "no" if RK.repeats_of(keys, earlier) else "yes"
+        out[p.id] = found
+    return out
+
+
+def newness(conn: sqlite3.Connection, cfg: dict[str, Any]) -> RK.Newness:
+    """The account's newness rule and how its recent pieces stand against it."""
+    rcfg = cfg.get("ranking") or {}
+    pieces = S.list_pieces(conn, 200)
+    traits = piece_traits(conn, cfg, pieces)
+    flags = [
+        traits[c.piece_id].get("new_company") == "yes"
+        for c in coverage(pieces)
+        if traits.get(c.piece_id, {}).get("new_company")
+    ]
+    return RK.Newness(
+        recent=flags,
+        every=int(rcfg.get("new_every") or 0),
+        need=int(rcfg.get("new_need") or 0),
+    )
+
+
+def estimates(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    items: Sequence[tuple[int, Sequence[tuple[str, str]], dict[str, str]]],
+    evidence: Evidence | None,
+    *,
+    explore_seed: str = "",
+) -> dict[int, RK.Estimate]:
+    """An estimate per (id, companies, judged traits): a radar topic or a catalyst. The
+    explore pick, when `explore_seed` is given, is drawn among the ones on new companies."""
+    rcfg, lcfg = cfg.get("ranking") or {}, cfg["learn"]
+    if not rcfg.get("enabled", True):
+        return {}
+    days = float(rcfg.get("novelty_days") or 30)
+    counts = S.crowd(conn)
+    recent = recent_keys(
+        coverage(S.list_pieces(conn, 500)), before=datetime.now().astimezone(), days=days
+    )
+    measured = evidence.measured if evidence is not None else []
+    out: dict[int, RK.Estimate] = {}
+    for item_id, companies, judged in items:
+        found = dict(judged)
+        crowd = crowd_traits(companies, counts, rcfg)
+        if crowd:
+            found["crowd"] = crowd
+        keys = TR.company_keys(companies)
+        repeats = RK.repeats_of(keys, recent)
+        if keys:
+            found["new_company"] = "no" if repeats else "yes"
+        out[item_id] = RK.estimate(
+            found,
+            measured,
+            repeats=repeats,
+            repeat_penalty=float(rcfg.get("repeat_penalty") or 1.0),
+            prior_sd=float(lcfg["prior_sd"]),
+            post_sd=float(lcfg["post_sd"]),
+        )
+    if explore_seed and rcfg.get("explore", True):
+        pick = RK.explore_pick([i for i, e in out.items() if e.new_company], seed=explore_seed)
+        if pick is not None:
+            e = out[pick]
+            out[pick] = RK.Estimate(e.traits, e.times, e.repeats, e.measured, explore=True)
+    return out

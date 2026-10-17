@@ -130,6 +130,22 @@ DEFAULTS: dict[str, Any] = {
         "max_words": 900,
         "timeout_minutes": 30,
     },
+    "ranking": {
+        "enabled": True,
+        "novelty_days": 30,
+        "repeat_penalty": 0.6,
+        "new_every": 3,
+        "new_need": 2,
+        "explore": True,
+        "crowd_enabled": True,
+        "crowd_url": "",  # studio/config.yaml gives it (no URL in code)
+        "crowd_user_agent": "python-httpx/0.27",
+        "crowd_refresh_hours": 24,
+        "crowd_max_lookups": 40,
+        "crowd_delay_seconds": 1.0,
+        "crowd_large": 20000,
+        "crowd_medium": 5000,
+    },
 }
 
 _SECTIONS = (
@@ -144,6 +160,7 @@ _SECTIONS = (
     "render",
     "radar",
     "learn",
+    "ranking",
 )
 # learn.playbook: what a learned rewrite does. propose (shipped): it waits on the
 # performance page for the editor to apply; auto: the sessions read it at once; off: the

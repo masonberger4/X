@@ -925,6 +925,28 @@ Opus session again, with its own fact-checker.
      real news is worth a second piece. An automatic piece sees the same flag on
      that topic in its brief and is told to take it only with news the earlier
      piece did not have. `repeat_days: 0` turns the flag off.
+   - **The ranking.** Untaken topics are in order of what topics like them have
+     done for the account. The scan judges each topic's main company (size,
+     commercial or clinical, immuno-oncology core or off the beat, whether
+     investors openly disagree), every piece's research does the same, and after
+     each scan the app counts how many people watch each ticker on Stocktwits
+     (its free public page, no key, each ticker once a day). The learning loop
+     learns which of those traits did well on X, never which companies, so a
+     company the account has never covered with the traits of a winner ranks just
+     as high. Each piece on the same company in the last `ranking: novelty_days`
+     (30) multiplies a topic's estimate by `repeat_penalty` (0.6), so a past win
+     counts against going back. A topic shows **new company** when none of its
+     companies had a piece in that time, and the page says **new company next**
+     when fewer than `new_need` (2) of the last `new_every` (3) pieces were on one.
+     One topic a day is the **try something new** pick, chosen at random whatever
+     its estimate, so the account keeps testing kinds of stories it has little
+     evidence on. The catalyst calendar shows the watcher count and **new
+     company** beside each company. An automatic piece's brief gets the same
+     order, a line per topic and the newness rule. With few measured pieces the
+     estimates are rough; the performance page shows the trait tables beside the
+     angle and voice ones. The settings are `ranking:` in `studio\config.yaml`
+     (`enabled: false` turns the ranking off, `crowd_enabled: false` the
+     Stocktwits lookups).
    A failed scan changes nothing: the page says why, and the next run tries
    again. The settings are `radar:` in `studio\config.yaml`.
 11. From a command prompt (the same thing the buttons do):

@@ -119,6 +119,7 @@ def run_scan(
     angles: Mapping[str, str],
     feed: Sequence[str],
     root_cfg: dict[str, Any],
+    feed_ids: Sequence[int] = (),
     call: Callable[..., str] | None = None,
 ) -> ScanOutcome:
     """One scan, recorded in studio_scans whatever happens. Never raises for a failed call
@@ -156,7 +157,12 @@ def run_scan(
         why = f"the scan's answer was not used: {exc}"
         S.finish_scan(conn, scan_id, status=S.SCAN_FAILED, detail=why)
         return ScanOutcome(False, f"scan {scan_id}: {why}", scan_id)
-    S.add_radar_topics(conn, scan_id, result.topics)
+    # The feed story each topic grew out of, when it names a lead the scan was given.
+    clusters = [
+        feed_ids[t.feed_lead - 1] if t.feed_lead and t.feed_lead <= len(feed_ids) else None
+        for t in result.topics
+    ]
+    S.add_radar_topics(conn, scan_id, result.topics, clusters)
     added, again = S.upsert_catalysts(conn, result.catalysts, origin=f"scan:{scan_id}")
     left_out = "; ".join(result.dropped[:20])
     S.finish_scan(

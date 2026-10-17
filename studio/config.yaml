@@ -230,3 +230,32 @@ learn:
   effort: ""                    # blank = the writer's effort above
   max_words: 900                # the playbook's length limit
   timeout_minutes: 30
+
+# What to write next (studio/traits.py, studio/rank.py, studio/crowd.py). The learning loop
+# above also learns the KIND of story each posted piece was about (company size, stage,
+# beat, whether investors disagree, the retail crowd, whether the company was new to the
+# account), never the companies themselves, and the radar page ranks its topics by what
+# those traits have done for the account. A piece on a company the account wrote about in
+# the last `novelty_days` costs a topic `repeat_penalty` (x0.6 per piece): a past win counts
+# against going back. The page and an automatic piece's brief say when the next piece
+# should be on a new company (at least `new_need` of every `new_every` pieces), and one
+# topic a day is picked at random whatever its estimate (`explore`), so the loop keeps
+# trying kinds of stories it has little evidence on.
+ranking:
+  enabled: true
+  novelty_days: 30
+  repeat_penalty: 0.6
+  new_every: 3
+  new_need: 2
+  explore: true
+  # The retail crowd: people watching a ticker on Stocktwits, from its free public symbol
+  # page (no key). Looked up after each scan for the tickers on the radar and in recent
+  # pieces, each at most once a day; a failed lookup keeps the last count.
+  crowd_enabled: true
+  crowd_url: "https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
+  crowd_user_agent: "python-httpx/0.27"
+  crowd_refresh_hours: 24
+  crowd_max_lookups: 40
+  crowd_delay_seconds: 1.0
+  crowd_large: 20000        # watchers for a large crowd (Iovance had about 21,000)
+  crowd_medium: 5000

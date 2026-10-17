@@ -19,6 +19,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from studio import traits as TR
 from studio.angles import HOOK_STYLES, SHAPES, AngleOffer
 from studio.learn import Lean
 from studio.radar import KINDS, Catalyst, Topic
@@ -155,6 +156,10 @@ class Brief:
     # A radar topic that looks like a piece the account has (studio/repeats.py): radar id
     # -> one line per piece or queued topic it may repeat.
     radar_repeats: dict[int, list[str]] = field(default_factory=dict)
+    # Each radar topic's estimate and traits (studio/rank.py), radar id -> one line, and
+    # the account's newness rule as it stands ('' when off).
+    radar_notes: dict[int, str] = field(default_factory=dict)
+    newness: str = ""
     coming_up: list[Catalyst] = field(default_factory=list)
     # What X says about the account's earlier pieces (studio/evidence.py): the evidence
     # text and this piece's lean, both empty until enough pieces are measured.
@@ -263,7 +268,17 @@ def _topic_block(b: Brief) -> str:
             "THE RADAR: topics today's scan of the news proposed (no piece has used them). "
             "Check its facts yourself; its why-now is a lead, not a source."
         )
-        lines += [_radar_line(rid, t, b.radar_repeats.get(rid, [])) for rid, t in b.radar]
+        if b.radar_notes:
+            lines.append(
+                "They are in order of what topics like them have done for this account (the "
+                "estimate learns kinds of story, never companies)."
+            )
+        lines += [
+            _radar_line(rid, t, b.radar_repeats.get(rid, []), b.radar_notes.get(rid, ""))
+            for rid, t in b.radar
+        ]
+    if b.newness:
+        lines.append(f"NEW COMPANIES: {b.newness}")
     if b.coming_up:
         lines.append(
             "COMING UP: dated catalysts on the account's calendar. A preview before an "
@@ -286,8 +301,10 @@ def _topic_block(b: Brief) -> str:
     return "\n".join(lines)
 
 
-def _radar_line(radar_id: int, t: Topic, repeats: Sequence[str] = ()) -> str:
+def _radar_line(radar_id: int, t: Topic, repeats: Sequence[str] = (), note: str = "") -> str:
     lines = [f"- [radar {radar_id}] {t.title}"]
+    if note:
+        lines.append(f"  The app's ranking: {note}")
     if t.why_now:
         lines.append(f"  Why now: {t.why_now}")
     tags = []
@@ -376,12 +393,13 @@ def _research_files(b: Brief) -> str:
     "radar_topic": <the radar number if you used one of the radar's topics, else null>,
     "why_now": "one sentence",
     "companies": [{{"name": "...", "ticker": "MRK or 9926.HK or null"}}],
+    "traits": {TR.SCHEMA},
     "candidate_angles": [{{"angle": "<angle key from the list below>", "why": "..."}}],
     "catalysts": [{{"date": "2026-11-14 or 2026-11 or Q4 2026", "company": "...",
                    "ticker": "...", "drug": "...", "kind": "{" | ".join(KINDS)}",
                    "detail": "one sentence", "source": "https://..."}}],
     "summary": "two or three sentences for the editor"}}
-   Give two or three candidate angles, best first. Under "catalysts" list every dated
+   The {TR.GUIDE} Give two or three candidate angles, best first. Under "catalysts" list every dated
    upcoming event you confirmed (PDUFA dates, readouts, conference presentations,
    advisory committees) with its source: the account keeps a catalyst calendar from them.
 
