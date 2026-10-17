@@ -1,37 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Studio · radar{% endblock %}
 {% block content %}
-<p><a href="/studio">&larr; Studio</a></p>
-<h1>Radar</h1>
-{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
-<p class="meta">Where the studio's topics come from: the daily scan of the news, the feed's top
-stories and the catalyst calendar. <strong>Write it</strong> queues a piece and starts the studio (a
-piece you start stops after research when the box is ticked). An automatic piece is offered the same
-list and picks one itself. {% if not cfg.radar.enabled %}<strong>The radar is off</strong>
-(<code>radar.enabled</code> in studio/config.yaml): no scan runs and pieces are offered only the
-feed.{% endif %}</p>
-
-{% if cfg.radar.enabled %}
-{% with buttons=[{"label": "Scan now", "steps": [step_scan], "title": "one call on " ~ cfg.radar.model ~ " at " ~ cfg.radar.effort ~ " effort with web search: today's topics and the catalysts coming up"}], back="/studio/radar" %}
-{% include "_run.html" %}
-{% endwith %}
-{% endif %}
-<p class="meta">{% if scan %}Last scan: {{ scan.started_at|localtime }}, {{ scan.status }}{% if scan.status == "done" %}: {{ scan.topics }} topic{{ "s" if scan.topics != 1 }}, {{ scan.catalysts }} new catalyst{{ "s" if scan.catalysts != 1 }}{% endif %}.
-{% if scan.status == "failed" %}<span class="pill fail">failed</span> {{ scan.detail }}{% endif %}
-{% if done and done.id != scan.id %}The last good one: {{ done.started_at|localtime }}.{% endif %}
-{% else %}No scan yet.{% endif %} One scan runs a day at most ({{ cfg.radar.scan_every_hours }}h apart),
-before the first automatic studio run.</p>
-{% if done and done.summary %}<p class="proposal">{{ done.summary }}</p>{% endif %}
-
-<h2>Topics from the scan</h2>
-{% if newness and newness.line() %}<p class="{{ 'proposal' if newness.due else 'meta' }}">{% if newness.due %}<span class="pill warn">new company next</span> {% endif %}{{ newness.line() }}</p>{% endif %}
-{% if topic_est %}<p class="meta">Untaken topics are in order of what topics like them have done for the account:
-the estimate learns kinds of story (company size, stage, beat, whether investors disagree, the
-Stocktwits crowd, a company new to the account), never companies, and each recent piece on the same
-company lowers it. One topic a day is the <em>try something new</em> pick, whatever its estimate.
-With few measured pieces the estimates are rough.</p>{% endif %}
-{% if topics %}
-{% for t in topics %}
+{% macro topic_entry(t) %}
 <div class="entry">
   <p><strong>{{ t.title }}</strong>
     {% if t.status == "queued" %}<span class="pill warn">queued</span>{% elif t.status == "used" %}<span class="pill ok">written</span>{% if t.piece_id %} <a href="/studio/{{ t.piece_id }}">piece {{ t.piece_id }}</a>{% endif %}{% endif %}
@@ -60,28 +30,40 @@ With few measured pieces the estimates are rough.</p>{% endif %}
   <form method="post" action="/studio/radar/topics/{{ t.id }}/dismiss" class="inline"><button class="link" type="submit">dismiss</button></form>
   {% endif %}
 </div>
-{% endfor %}
-{% else %}
-<p class="meta">No topics from the last {{ cfg.radar.topic_days }} days. {% if cfg.radar.enabled %}Press <em>Scan now</em>, or wait for the next automatic run.{% endif %}</p>
-{% endif %}
+{% endmacro %}
+{% macro topic_section(key, title, help, empty) %}
+{% set items = sections[key] %}
+<details class="radar-section" id="{{ key }}" open>
+<summary><h2>{{ title }} <span class="meta">({{ items|length }})</span></h2></summary>
+<p class="meta">{{ help }}</p>
+{% for t in items %}{{ topic_entry(t) }}{% else %}<p class="meta">{{ empty }}</p>{% endfor %}
+</details>
+{% endmacro %}
 
-<h2>From the feeds</h2>
-{% if feed %}
-<table>
-  <tr><th>Story</th><th>Score</th><th></th></tr>
-  {% for s in feed %}
-  <tr><td>{{ s.title }}<br><span class="meta">{{ s.source }}{% if s.published %} · {{ s.published }}{% endif %}{% if s.why %} · {{ s.why }}{% endif %}</span></td>
-      <td>{{ s.score if s.score is not none else "-" }}</td>
-      <td><form method="post" action="/studio/topics" class="inline">
-        <input type="hidden" name="story" value="{{ s.cluster_id }}">
-        <button type="submit">Write it</button></form></td></tr>
-  {% endfor %}
-</table>
-{% else %}
-<p class="meta">No scored story of the last {{ cfg.topics.lookback_hours }} hours that no piece has used (the <a href="/feed">feed</a> has the rest).</p>
-{% endif %}
+<p><a href="/studio">&larr; Studio</a></p>
+<h1>Radar</h1>
+{% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+<p class="meta">Where the studio's topics come from: the daily scan of the news, the feed's top
+stories and the catalyst calendar. <strong>Write it</strong> queues a piece and starts the studio (a
+piece you start stops after research when the box is ticked). An automatic piece is offered the same
+list and picks one itself. {% if not cfg.radar.enabled %}<strong>The radar is off</strong>
+(<code>radar.enabled</code> in studio/config.yaml): no scan runs and pieces are offered only the
+feed.{% endif %}</p>
 
-<h2 id="calendar">Catalyst calendar</h2>
+{% if cfg.radar.enabled %}
+{% with buttons=[{"label": "Scan now", "steps": [step_scan], "title": "one call on " ~ cfg.radar.model ~ " at " ~ cfg.radar.effort ~ " effort with web search: today's topics and the catalysts coming up"}], back="/studio/radar" %}
+{% include "_run.html" %}
+{% endwith %}
+{% endif %}
+<p class="meta">{% if scan %}Last scan: {{ scan.started_at|localtime }}, {{ scan.status }}{% if scan.status == "done" %}: {{ scan.topics }} topic{{ "s" if scan.topics != 1 }}, {{ scan.catalysts }} new catalyst{{ "s" if scan.catalysts != 1 }}{% endif %}.
+{% if scan.status == "failed" %}<span class="pill fail">failed</span> {{ scan.detail }}{% endif %}
+{% if done and done.id != scan.id %}The last good one: {{ done.started_at|localtime }}.{% endif %}
+{% else %}No scan yet.{% endif %} One scan runs a day at most ({{ cfg.radar.scan_every_hours }}h apart),
+before the first automatic studio run.</p>
+{% if done and done.summary %}<p class="proposal">{{ done.summary }}</p>{% endif %}
+
+<details class="radar-section" id="calendar" open>
+<summary><h2>Catalysts <span class="meta">({{ calendar.passed|length + calendar.soon|length + calendar.later|length }})</span></h2></summary>
 <p class="meta">Dated events from the scans and from every piece's research: PDUFA dates, readouts,
 conference slots. A preview before an event or a reaction just after one makes a strong piece.
 Dates are as precise as the source was; a quarter counts until it ends.</p>
@@ -118,4 +100,36 @@ Dates are as precise as the source was; a quarter counts until it ends.</p>
 {% if not (calendar.passed or calendar.soon or calendar.later) %}
 <p class="meta">Nothing on the calendar yet. The scan and every piece's research add the dated catalysts they find.</p>
 {% endif %}
+</details>
+
+<h2 class="radar-topics">Topics from the scan</h2>
+{% if newness and newness.line() %}<p class="{{ 'proposal' if newness.due else 'meta' }}">{% if newness.due %}<span class="pill warn">new company next</span> {% endif %}{{ newness.line() }}</p>{% endif %}
+{% if topic_est %}<p class="meta">Untaken topics are in order of what topics like them have done for the account:
+the estimate learns kinds of story (company size, stage, beat, whether investors disagree, the
+Stocktwits crowd, a company new to the account), never companies, and each recent piece on the same
+company lowers it. One topic a day is the <em>try something new</em> pick, whatever its estimate.
+With few measured pieces the estimates are rough.</p>{% endif %}
+{% if not topics %}<p class="meta">No topics from the last {{ cfg.radar.topic_days }} days. {% if cfg.radar.enabled %}Press <em>Scan now</em>, or wait for the next automatic run.{% endif %}</p>{% endif %}
+{{ topic_section("repeat", "May repeat", "Topics that share a source, drug, trial or company and title with a recent piece or a queued topic. Write one only if there is news that piece did not have.", "No topic looks like a recent piece.") }}
+{{ topic_section("new_company", "New company", "Topics on a company the account has never covered.", "No topic on a company new to the account.") }}
+{{ topic_section("fresh", "Completely new", "Topics no recent piece has told, on companies the account has covered before.", "No other untaken topic.") }}
+{% if sections.taken %}{{ topic_section("taken", "Queued or written", "Topics already taken by a piece.", "") }}{% endif %}
+<details class="radar-section" id="feeds" open>
+<summary><h2>From the feeds <span class="meta">({{ feed|length }})</span></h2></summary>
+{% if feed %}
+<table>
+  <tr><th>Story</th><th>Score</th><th></th></tr>
+  {% for s in feed %}
+  <tr><td>{{ s.title }}<br><span class="meta">{{ s.source }}{% if s.published %} · {{ s.published }}{% endif %}{% if s.why %} · {{ s.why }}{% endif %}</span></td>
+      <td>{{ s.score if s.score is not none else "-" }}</td>
+      <td><form method="post" action="/studio/topics" class="inline">
+        <input type="hidden" name="story" value="{{ s.cluster_id }}">
+        <button type="submit">Write it</button></form></td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No scored story of the last {{ cfg.topics.lookback_hours }} hours that no piece has used (the <a href="/feed">feed</a> has the rest).</p>
+{% endif %}
+
+</details>
 {% endblock %}

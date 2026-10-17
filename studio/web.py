@@ -592,6 +592,7 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
         {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=taken_stories(conn)
     )
     topic_est, catalyst_est, newness, topics = _radar_ranking(conn, cfg, topics, rows, today)
+    sections = radar_sections(topics, topic_repeats, topic_est)
     return templates.TemplateResponse(
         request,
         "studio_radar.html",
@@ -600,6 +601,7 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
             "scan": S.last_scan(conn),
             "done": S.last_scan(conn, S.SCAN_DONE),
             "topics": topics,
+            "sections": sections,
             "feed": feed,
             "calendar": calendar,
             "suggested": suggested,
@@ -657,6 +659,27 @@ def _radar_ranking(
     place = {tid: i for i, tid in enumerate(RK.order(topic_est))}
     ordered = sorted(topics, key=lambda t: (0, place[t.id]) if t.id in place else (1, 0))
     return topic_est, catalyst_est, newness, ordered
+
+
+def radar_sections(
+    topics: list[Any], repeats: dict[int, Any], estimates: dict[int, Any]
+) -> dict[str, list[Any]]:
+    """The radar page's topic sections, each in the ranking's order: an untaken topic
+    flagged as a possible repeat goes under `repeat`; else one on a company the account has
+    never covered under `new_company`; else (a story no piece has told, on a company the
+    account knows) under `fresh`; a queued or written topic under `taken`."""
+    out: dict[str, list[Any]] = {"repeat": [], "new_company": [], "fresh": [], "taken": []}
+    for t in topics:
+        est = estimates.get(t.id)
+        if t.status != S.RADAR_NEW:
+            out["taken"].append(t)
+        elif repeats.get(t.id):
+            out["repeat"].append(t)
+        elif est is not None and est.new_company:
+            out["new_company"].append(t)
+        else:
+            out["fresh"].append(t)
+    return out
 
 
 def _radar_topic_or_404(conn: Any, radar_id: int) -> S.RadarTopic:

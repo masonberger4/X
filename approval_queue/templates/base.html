@@ -381,6 +381,9 @@
     summary::marker { color: var(--accent); }
     summary:hover { color: #fff; }
     details { margin: .5rem 0; }
+    /* a page section that folds (the radar's): its heading sits beside the caret */
+    summary > h2 { display: inline; margin: 0; }
+    details.radar-section { margin-top: 1.4rem; }
 
     blockquote { color: var(--text-soft); }
 

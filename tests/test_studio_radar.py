@@ -768,3 +768,33 @@ def test_a_failed_scan_says_why_on_the_page(client, sconn):
     )
     body = client.get("/studio/radar").text
     assert "the scan call failed: Not logged in" in body and "failed" in body
+
+
+def test_radar_sections_split_topics_by_repeat_new_company_and_new():
+    from types import SimpleNamespace as NS
+
+    from studio.web import radar_sections
+
+    def t(i, status=S.RADAR_NEW):
+        return NS(id=i, status=status)
+
+    topics = [t(1), t(2), t(3), t(4), t(5, S.RADAR_USED)]
+    est = {1: NS(new_company=True), 2: NS(new_company=True), 3: NS(new_company=False)}
+    out = radar_sections(topics, {1: ["a match"]}, est)
+    assert [[x.id for x in out[k]] for k in ("repeat", "new_company", "fresh", "taken")] == [
+        [1],
+        [2],
+        [3, 4],
+        [5],
+    ]
+
+
+def test_the_radar_page_folds_into_sections(client, sconn):
+    seed_radar(sconn)
+    body = client.get("/studio/radar").text
+    heads = [
+        body.index(f'<details class="radar-section" id="{k}" open>')
+        for k in ("calendar", "repeat", "new_company", "fresh", "feeds")
+    ]
+    assert heads == sorted(heads)
+    assert "<summary><h2>May repeat" in body and "Completely new" in body

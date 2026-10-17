@@ -906,7 +906,11 @@ Opus session again, with its own fact-checker.
    are kept by key), and a heading with no voice under it turns voices off
    (`voices: enabled: false` in `studio\config.yaml` does too).
 10. The radar. **Radar** in the top bar (`/studio/radar`) is where topics come
-   from, and the same list is offered to every automatic piece:
+   from, and the same list is offered to every automatic piece The page folds into
+   sections, each opened or closed by its caret: **Catalysts** (the calendar) first, then the
+   scan's untaken topics split three ways, **May repeat** (flagged as like a recent piece),
+   **New company** (a company the account never covered) and **Completely new** (a story no
+   piece told, on a company it knows), then **Queued or written** and **From the feeds**:
    - **Topics from the scan.** Once a day, before the first automatic studio run,
      one call on the writer's model (Opus 5.5 at max, with web search) reads the
      last few days of immuno-oncology news and proposes 3 to 5 topics. Each says
