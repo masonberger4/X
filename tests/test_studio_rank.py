@@ -300,3 +300,45 @@ def test_the_radar_page_shows_estimates_and_the_newness_rule(client, sconn):  # 
     assert "new company" in body and "try something new" in body
     assert "company size: small" in body
     assert "should be on a company" in body
+
+
+def test_radar_sections_group_the_topics_in_order():
+    from types import SimpleNamespace as NS
+
+    from studio import web
+
+    t = [NS(id=i, status=S.RADAR_NEW) for i in range(1, 6)]
+    t[4].status = S.RADAR_QUEUED
+    new_co = RK.Estimate({"new_company": "yes"}, 1.0, 0, 3)
+    covered = RK.Estimate({"new_company": "no"}, 2.0, 1, 3)
+    got = web.radar_sections(t, {1: ["flag"], 2: []}, {1: new_co, 2: new_co, 3: covered, 5: new_co})
+    assert {k: [x.id for x in v] for k, v in got.items()} == {
+        "repeat": [1],
+        "new_company": [2],
+        "fresh": [3, 4],
+        "taken": [5],
+    }
+
+
+def test_the_radar_page_shows_its_groups_in_the_editors_order(client, sconn):  # noqa: F811
+    research_piece(sconn, [("Iovance", "IOVA")])
+    scan_id = S.start_scan(sconn, model="m", effort="max")
+    got = R.parse_scan(
+        answer(
+            topics=[
+                {**topic("Kyverna in MS"), "companies": [{"name": "Kyverna", "ticker": "KYTX"}]},
+                {**topic("Iovance again"), "companies": [{"name": "Iovance", "ticker": "IOVA"}]},
+            ],
+            catalysts=[],
+        ),
+        **KW,
+    )
+    S.add_radar_topics(sconn, scan_id, got.topics)
+    body = client.get("/studio/radar").text
+    heads = ["New company", "Completely new", "Catalysts", "Possible repeats", "Queued or written"]
+    places = [body.index(f'<strong class="section-title">{h}</strong>') for h in heads]
+    assert places == sorted(places)
+    new_group = body[places[0] : places[1]]
+    assert "Kyverna in MS" in new_group and "Iovance again" not in new_group
+    assert "Iovance again" in body[places[1] : places[2]]
+    assert body.count('<details class="radar-section"') == 6
