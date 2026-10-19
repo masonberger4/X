@@ -191,7 +191,7 @@ radar:
   max_catalysts: 40             # per scan
   topic_days: 3                 # a scan's topics stay on the radar this long
   calendar_days: 180            # catalysts further out are left off the calendar
-  past_days: 14                 # catalysts that passed stay this long, for reaction pieces
+  past_days: 7                  # catalysts that passed stay this long (days), for reaction pieces
   brief_upcoming_days: 21       # what an open piece is shown as coming up
   brief_recent_days: 3          # and as just passed
   feed_stories: 10              # the feed's top stories on the radar page

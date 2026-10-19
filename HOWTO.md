@@ -929,6 +929,8 @@ Opus session again, with its own fact-checker.
      A date is as precise as its source (a day, a month, a quarter). **Write the
      preview** queues a piece on an event coming up, and **Write the reaction**
      one on an event that just passed, each with a fitting angle selected.
+     An event that passed more than `radar: past_days` days ago (7) leaves the
+     calendar, and scans and research no longer add it.
      **Dismiss** takes an event off (for instance an old date after it moved).
    - **May repeat.** A topic or a catalyst that looks like a piece started in the
      last `radar: repeat_days` days (30), or a topic still in the queue, carries a
