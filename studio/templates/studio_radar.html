@@ -75,7 +75,7 @@ With few measured pieces the estimates are rough.</p>{% endif %}
 {% if key == "catalysts" %}
 <details class="radar-section" id="calendar">
 {{ section_head("Catalysts", (calendar.passed|length) + (calendar.soon|length) + (calendar.later|length), "Dated events from the scans and from every piece's research: PDUFA dates, readouts, conference slots. A preview before an event or a reaction just after one makes a strong piece. Dates are as precise as the source was; a quarter counts until it ends.") }}
-{% for section, label in [("passed", "Just passed: react to it"), ("soon", "Coming up in the next 30 days"), ("later", "Later")] %}
+{% for section, label in [("passed", "Just passed (the last " ~ cfg.radar.past_days ~ " days): react to it"), ("soon", "Coming up in the next 30 days"), ("later", "Later")] %}
 {% set rows = calendar[section] %}
 {% if rows %}
 <h3>{{ label }}</h3>

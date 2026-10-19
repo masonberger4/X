@@ -106,7 +106,7 @@ DEFAULTS: dict[str, Any] = {
         "max_catalysts": 40,
         "topic_days": 3,
         "calendar_days": 180,
-        "past_days": 14,
+        "past_days": 7,
         "brief_upcoming_days": 21,
         "brief_recent_days": 3,
         "feed_stories": 10,
