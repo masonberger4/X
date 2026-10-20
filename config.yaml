@@ -200,6 +200,9 @@ sources:
   - name: fierce_biotech
     type: rss
     url: https://www.fiercebiotech.com/rss/xml
+    # 403 to the default browser-like agent from the laptop's network (Oct 2026);
+    # the feed itself is live, so ask as a feed reader.
+    user_agent: "Feedly/1.0 (+http://www.feedly.com/fetcher.html)"
     cadence_minutes: 120
     min_abstract_chars: 60
   - name: stat_biotech                # articles are STAT+ (paywalled); the feed
@@ -222,9 +225,8 @@ sources:
     enabled: false
   - name: globenewswire_biotech
     type: rss
-    url: https://www.globenewswire.com/RssFeed/subjectcode/22-Biotechnology/feedTitle/GlobeNewswire%20-%20Biotechnology
+    url: https://www.globenewswire.com/RssFeed/industry/4573-Biotechnology/feedTitle/GlobeNewswire%20-%20Industry%20News%20on%20Biotechnology
     cadence_minutes: 60
-    enabled: false
   # Checked and not usable (Sept 2026): Endpoints (403 to feed readers),
   # BioSpace (no feed), PR Newswire topic feeds (return the unfiltered wire),
   # OncLive / Targeted Oncology (403), Evaluate Vantage (no feed).
@@ -304,7 +306,7 @@ companies:
     # Verified working RSS 2.0 feeds (Sept 2026). Big-pharma newsrooms (BMS,
     # Pfizer, Gilead, J&J, AstraZeneca, Roche, Novartis) sit behind bot
     # protection or have no feed; add them here if you find a working URL.
-    - {key: merck,        name: Merck,                   url: https://www.merck.com/media/news/feed/, ticker: MRK, x: Merck}
+    - {key: merck,        name: Merck,                   url: https://www.merck.com/news-archive/feed/, ticker: MRK, x: Merck}
     - {key: regeneron,    name: Regeneron,               url: https://investor.regeneron.com/rss/news-releases.xml, ticker: REGN, x: Regeneron}
     - {key: amgen,        name: Amgen,                   url: https://investors.amgen.com/rss/news-releases.xml, ticker: AMGN, x: Amgen}
     - {key: abbvie,       name: AbbVie,                  url: https://investors.abbvie.com/rss/news-releases.xml, ticker: ABBV, x: abbvie}
