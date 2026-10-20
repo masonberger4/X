@@ -185,7 +185,8 @@ radar:
   enabled: true
   scan_every_hours: 20          # one scan a day at most; "Scan now" ignores it
   model: ""                     # blank = the writer's model above
-  effort: ""                    # blank = the writer's effort above
+  effort: high                  # blank = the writer's effort; high, not max: picking topics
+                                # is triage, and max on a daily web-search call was waste
   timeout_minutes: 40           # one scan's limit
   max_topics: 5
   max_catalysts: 40             # per scan
@@ -227,7 +228,8 @@ learn:
   rewrite_min_new: 3
   rewrite_min_hours: 24
   model: ""                     # blank = the writer's model above
-  effort: ""                    # blank = the writer's effort above
+  effort: high                  # blank = the writer's effort; high is enough for a proposal
+                                # you read before applying (playbook: propose)
   max_words: 900                # the playbook's length limit
   timeout_minutes: 30
 
