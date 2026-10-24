@@ -381,6 +381,7 @@ def scan_prompt(
     feed: Sequence[str],
     known: Sequence[Catalyst],
     max_topics: int,
+    already: Sequence[str] = (),
 ) -> tuple[str, str]:
     """(system, user) for the daily scan. `angles` maps each key to its question; `recent`
     and `feed` are one line each; `known` is what the calendar already holds."""
@@ -402,8 +403,16 @@ def scan_prompt(
         + ("\n".join(f"- F{i} {line}" for i, line in enumerate(feed, 1)) or "(none)"),
         "KNOWN CATALYSTS (already on the calendar)\n"
         + ("\n".join(f"- {c.line()}" for c in known) or "(none yet)"),
-        "Find today's topics and the catalysts coming up. Reply with the JSON object only.",
     ]
+    if already:
+        parts.append(
+            "ALREADY FOUND TODAY (an earlier pass of this scan; propose none of these again, and"
+            " look at other companies and other kinds of story)\n"
+            + "\n".join(f"- {line}" for line in already)
+        )
+    parts.append(
+        "Find today's topics and the catalysts coming up. Reply with the JSON object only."
+    )
     return system, "\n\n".join(parts)
 
 

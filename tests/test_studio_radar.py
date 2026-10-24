@@ -179,6 +179,40 @@ def test_the_limits_keep_the_best_first():
     assert "5 topic(s) over the limit" in got.dropped
 
 
+def _topic_named(title: str, company: str) -> dict[str, Any]:
+    return topic() | {"title": title, "companies": [{"name": company, "ticker": None}]}
+
+
+def test_a_scan_repeats_until_enough_new_topics_and_stops_at_the_cap(
+    sconn, cfg, scanner, monkeypatch
+):
+    cfg["radar"].update(min_new_topics=3, extra_scans=2)
+    replies = iter(
+        [
+            answer([_topic_named("Alpha deal", "Alphaco")]),
+            answer([_topic_named("Beta readout", "Betaco")]),
+            answer([_topic_named("Gamma filing", "Gammaco")]),
+            answer([_topic_named("Delta data", "Deltaco")]),
+        ]
+    )
+
+    def several(system: str, user: str, **kw: Any) -> str:
+        scanner.calls.append((system, user, kw))
+        return next(replies)
+
+    monkeypatch.setattr(SC, "call_scanner", several)
+    assert run_studio.main(["--scan-now"]) == 0
+    assert len(scanner.calls) == 3  # first pass plus the two extras, never a fourth
+    assert "ALREADY FOUND TODAY" not in scanner.calls[0][1]
+    assert "Alpha deal (Alphaco)" in scanner.calls[1][1]
+    assert "Beta readout (Betaco)" in scanner.calls[2][1]
+
+
+def test_a_scan_with_enough_new_topics_makes_one_call(sconn, cfg, scanner):
+    cfg["radar"].update(min_new_topics=1, extra_scans=2)
+    assert run_studio.main(["--scan-now"]) == 0 and len(scanner.calls) == 1
+
+
 @pytest.mark.parametrize(
     "reply, why",
     [
@@ -354,7 +388,9 @@ def cfg(monkeypatch) -> dict[str, Any]:
     c = load_studio_config()
     c["steps"]["enabled"] = False  # one session per piece (the steps: test_studio_session.py)
     c["model"], c["effort"] = "writer-model", "max"
-    c["radar"].update(enabled=True, model="writer-model", effort="max", scan_every_hours=20)
+    c["radar"].update(
+        enabled=True, model="writer-model", effort="max", scan_every_hours=20, min_new_topics=0
+    )
     monkeypatch.setattr(runner, "load_studio_config", lambda *a, **k: c)
     return c
 
