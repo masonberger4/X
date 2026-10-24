@@ -87,6 +87,7 @@ def prompt_for(
     tzname: str,
     angles: Mapping[str, str],
     feed: Sequence[str],
+    already: Sequence[str] = (),
 ) -> tuple[str, str]:
     from timeutil import fmt_date
 
@@ -100,6 +101,7 @@ def prompt_for(
         feed=feed,
         known=known_catalysts(conn, rcfg, today)[:KNOWN_SHOWN],
         max_topics=int(rcfg["max_topics"]),
+        already=already,
     )
 
 
@@ -120,6 +122,7 @@ def run_scan(
     feed: Sequence[str],
     root_cfg: dict[str, Any],
     feed_ids: Sequence[int] = (),
+    already: Sequence[str] = (),
     call: Callable[..., str] | None = None,
 ) -> ScanOutcome:
     """One scan, recorded in studio_scans whatever happens. Never raises for a failed call
@@ -127,7 +130,9 @@ def run_scan(
     import claude_cli
 
     rcfg = cfg["radar"]
-    system, user = prompt_for(conn, cfg, today=today, tzname=tzname, angles=angles, feed=feed)
+    system, user = prompt_for(
+        conn, cfg, today=today, tzname=tzname, angles=angles, feed=feed, already=already
+    )
     scan_id = S.start_scan(conn, model=str(rcfg["model"]), effort=str(rcfg["effort"]))
     timeout = float(rcfg.get("timeout_minutes") or 0) * 60 or 2400.0
     try:

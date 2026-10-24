@@ -179,6 +179,17 @@ def test_the_limits_keep_the_best_first():
     assert "5 topic(s) over the limit" in got.dropped
 
 
+def test_a_scan_with_too_few_new_topics_scans_again_up_to_the_extra_passes(sconn, cfg, scanner):
+    cfg["radar"].update(want_new_topics=3, extra_scans=2)
+    assert run_studio.main(["--scan-now"]) == 0
+    # one topic a pass, never three: the first pass plus the two extra ones
+    assert len(scanner.calls) == 3
+    assert "ALREADY PROPOSED" not in scanner.calls[0][1]
+    assert "ALREADY PROPOSED" in scanner.calls[1][1] and "Merck pays" in scanner.calls[1][1]
+    cfg["radar"].update(extra_scans=0)
+    assert run_studio.main(["--scan-now"]) == 0 and len(scanner.calls) == 4
+
+
 @pytest.mark.parametrize(
     "reply, why",
     [
@@ -355,6 +366,7 @@ def cfg(monkeypatch) -> dict[str, Any]:
     c["steps"]["enabled"] = False  # one session per piece (the steps: test_studio_session.py)
     c["model"], c["effort"] = "writer-model", "max"
     c["radar"].update(enabled=True, model="writer-model", effort="max", scan_every_hours=20)
+    c["radar"].update(want_new_topics=0)  # one pass (the extra passes: their own tests)
     monkeypatch.setattr(runner, "load_studio_config", lambda *a, **k: c)
     return c
 

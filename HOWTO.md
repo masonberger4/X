@@ -963,6 +963,10 @@ Opus session again, with its own fact-checker.
      angle and voice ones. The settings are `ranking:` in `studio\config.yaml`
      (`enabled: false` turns the ranking off, `crowd_enabled: false` the
      Stocktwits lookups).
+   A scan that leaves fewer than `radar: want_new_topics` (3) untaken topics the
+   page would not flag as a possible repeat scans again, up to `radar: extra_scans`
+   (2) more times, telling each pass what the earlier ones proposed (each pass is
+   its own scan row). `want_new_topics: 0` keeps it to one pass.
    A failed scan changes nothing: the page says why, and the next run tries
    again. The settings are `radar:` in `studio\config.yaml`.
 11. From a command prompt (the same thing the buttons do):

@@ -188,6 +188,8 @@ radar:
   effort: ""                    # blank = the writer's effort above
   timeout_minutes: 40           # one scan's limit
   max_topics: 5
+  want_new_topics: 3            # a scan with fewer untaken, non-repeat topics than this scans again
+  extra_scans: 2                # at most this many more passes (each excludes what was found)
   max_catalysts: 40             # per scan
   topic_days: 3                 # a scan's topics stay on the radar this long
   calendar_days: 180            # catalysts further out are left off the calendar
