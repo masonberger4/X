@@ -931,6 +931,10 @@ Opus session again, with its own fact-checker.
      one on an event that just passed, each with a fitting angle selected.
      An event that passed more than `radar: past_days` days ago (7) leaves the
      calendar, and scans and research no longer add it.
+     A scan run repeats (at most `radar: extra_scans` times, 2) until it has
+     `radar: min_new_topics` (3) untaken topics not flagged "may repeat"; each repeat is told
+     what the earlier passes found and costs a full scan. `max_topics` is 8. Set
+     `min_new_topics: 0` for one scan only.
      **Dismiss** takes an event off (for instance an old date after it moved).
    - **May repeat.** A topic or a catalyst that looks like a piece started in the
      last `radar: repeat_days` days (30), or a topic still in the queue, carries a

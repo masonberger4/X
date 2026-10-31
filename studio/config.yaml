@@ -187,7 +187,10 @@ radar:
   model: ""                     # blank = the writer's model above
   effort: ""                    # blank = the writer's effort above
   timeout_minutes: 40           # one scan's limit
-  max_topics: 5
+  max_topics: 8
+  min_new_topics: 3             # a scan run is repeated until this many untaken topics are not
+                                # flagged "may repeat" (0 = one scan only)
+  extra_scans: 2                # at most this many repeats after the first scan
   max_catalysts: 40             # per scan
   topic_days: 3                 # a scan's topics stay on the radar this long
   calendar_days: 180            # catalysts further out are left off the calendar
