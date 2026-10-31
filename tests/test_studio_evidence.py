@@ -405,7 +405,7 @@ def test_learn_rewrites_the_playbook_once_enough_pieces_are_new(lconn, rewriter,
     assert "at most 900 words" in system
     assert "WHAT X SAYS" in user and "EVERY MEASURED PIECE" in user
     assert (kw["model"], kw["effort"]) == ("writer-model", "max")
-    assert kw["timeout"] == 30 * 60
+    assert kw["timeout"] == 60 * 60
     assert (tmp_path / PLAYBOOK_NAME).read_text(encoding="utf-8") == GOOD_PLAYBOOK + "\n"
     first, learned = sorted(S.playbook_versions(lconn), key=lambda v: v.id)
     assert first.source == S.PLAYBOOK_SEED  # what it replaced, recorded first
