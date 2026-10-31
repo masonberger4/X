@@ -591,6 +591,13 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
     feed = T.fetch_shortlist(
         {**cfg["topics"], "shortlist": int(rcfg["feed_stories"])}, exclude=taken_stories(conn)
     )
+    feed_repeats = {
+        s.cluster_id: RP.find(
+            RP.marks(f"{s.title}\n{s.summary}", title=s.title, sources=[s.url] if s.url else []),
+            covered,
+        )
+        for s in feed
+    }
     topic_est, catalyst_est, newness, topics = _radar_ranking(conn, cfg, topics, rows, today)
     sections = radar_sections(topics, topic_repeats, topic_est)
     return templates.TemplateResponse(
@@ -606,6 +613,7 @@ def studio_radar(request: Request, conn: Conn, flash: str = ""):
             "calendar": calendar,
             "suggested": suggested,
             "topic_repeats": topic_repeats,
+            "feed_repeats": feed_repeats,
             "catalyst_repeats": catalyst_repeats,
             "topic_est": topic_est,
             "catalyst_est": catalyst_est,

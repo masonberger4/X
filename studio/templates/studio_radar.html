@@ -125,7 +125,9 @@ With few measured pieces the estimates are rough.</p>{% endif %}
 <table>
   <tr><th>Story</th><th>Score</th><th></th></tr>
   {% for s in feed %}
-  <tr><td>{{ s.title }}<br><span class="meta">{{ s.source }}{% if s.published %} · {{ s.published }}{% endif %}{% if s.why %} · {{ s.why }}{% endif %}</span></td>
+  <tr><td>{{ s.title }}<br><span class="meta">{{ s.source }}{% if s.published %} · {{ s.published }}{% endif %}{% if s.why %} · {{ s.why }}{% endif %}</span>
+      {% set reps = feed_repeats.get(s.cluster_id) %}
+      {% if reps %}<br><span class="pill warn">may repeat</span> <span class="meta">{% for r in reps %}{% if r.covered.kind == "piece" %}<a href="/studio/{{ r.covered.id }}">piece {{ r.covered.id }}</a>{% else %}a queued topic{% endif %} ({{ r.covered.status }}): shares {{ r.reasons|join("; ") }}{{ "; " if not loop.last }}{% endfor %}</span>{% endif %}</td>
       <td>{{ s.score if s.score is not none else "-" }}</td>
       <td><form method="post" action="/studio/topics" class="inline">
         <input type="hidden" name="story" value="{{ s.cluster_id }}">

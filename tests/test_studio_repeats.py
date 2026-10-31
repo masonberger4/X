@@ -207,3 +207,12 @@ def test_an_automatic_piece_is_told_which_radar_topic_may_repeat(sconn, cfg):
     end = text.find("- [radar", start + 1)
     assert "MAY REPEAT" in text[start : end if end > 0 else len(text)]
     assert f"[radar {fresh}]" in text
+
+
+def test_a_feed_story_on_a_covered_drug_is_flagged():
+    from studio.prompt import Story
+
+    earlier = "Iovance lifileucel NSCLC TIL data at the lung meeting"
+    s = Story(cluster_id=1, title="Iovance lifileucel lung data", summary="lifileucel NSCLC TIL")
+    m = RP.marks(f"{s.title}\n{s.summary}", title=s.title)
+    assert RP.find(m, [covered(earlier)])

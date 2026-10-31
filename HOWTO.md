@@ -922,7 +922,9 @@ Opus session again, with its own fact-checker.
      leave selected ("the session chooses" works too), then starts the studio.
      **Dismiss** takes a topic off. **Scan now** runs a scan at once.
    - **From the feeds.** The top scored stories the account has not written
-     about (no piece and no draft), each with **Write it**.
+     about (no piece and no draft), each with **Write it**. A story that shares a
+     source, drug, trial or company and headline words with a recent piece or a queued
+     topic carries the same "may repeat" flag (a check in code, no Claude call).
    - **The catalyst calendar.** Dated events: PDUFA dates, readouts, conference
      presentations, advisory committees. Each scan reports the ones it finds, and
      every piece's research adds the ones its session confirmed, with the source.
