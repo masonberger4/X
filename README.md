@@ -621,7 +621,7 @@ Tables: `studio_pieces`, `studio_runs`, `studio_topics`, `studio_scans`,
 `studio/scan.py:call_scanner` (`claude_cli.run_claude` with WebSearch and WebFetch only and
 `radar.timeout_minutes`), is given the angle library, the account's recent pieces, the
 feed's top stories and the catalysts already on the calendar, and answers in JSON: 3 to
-`max_topics` topics (title, why now, a suggested angle key, companies with tickers, the
+`max_topics` (8) topics (title, why now, a suggested angle key, companies with tickers, the
 sources it opened) and the dated catalysts coming up (date as precise as the source: a
 day, a month, a quarter or a half; company, ticker, drug, kind, detail, source).
 `radar.parse_scan` keeps what checks out (an unknown angle becomes blank, sources must be

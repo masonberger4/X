@@ -9,7 +9,7 @@ import re
 import sqlite3
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
@@ -416,6 +416,23 @@ def covered_for_repeats(
         for c in S.covered_since(conn, since.isoformat(timespec="seconds"))
         if not (c.kind == "piece" and c.id == exclude_piece)
     ]
+
+
+def scan_new_topics(
+    conn: sqlite3.Connection, cfg: dict[str, Any], scan_ids: Sequence[int]
+) -> tuple[int, list[str]]:
+    """(how many untaken topics of these scans are not flagged as a possible repeat, a line
+    for each untaken topic they stored)."""
+    since = datetime.now(UTC) - timedelta(days=float(cfg["radar"]["topic_days"]))
+    topics = [
+        t
+        for t in S.radar_topics(conn, since_iso=since.isoformat(timespec="seconds"))
+        if t.scan_id in scan_ids
+    ]
+    covered = covered_for_repeats(conn, cfg)
+    fresh = sum(1 for t in topics if not RP.find(RP.topic_marks(t), covered))
+    lines = [f"{t.title} ({', '.join(c['name'] for c in t.companies)})" for t in topics]
+    return fresh, lines
 
 
 def _today() -> tuple[str, str]:
@@ -1235,16 +1252,36 @@ def scan(*, dry_run: bool = False, force: bool = False) -> int:
         try:
             S.close_running_scans(conn, "the run stopped before the scan finished")
             lines, ids = feed_leads(cfg, conn)
-            out = SC.run_scan(
-                conn,
-                cfg,
-                today=today,
-                tzname=tzname,
-                angles=angles,
-                feed=lines,
-                feed_ids=ids,
-                root_cfg=_root_config(),
-            )
+            found: list[str] = []
+            run_scans: list[int] = []
+            extra = max(0, int(rcfg.get("extra_scans") or 0))
+            for round_no in range(1 + extra):
+                out = SC.run_scan(
+                    conn,
+                    cfg,
+                    today=today,
+                    tzname=tzname,
+                    angles=angles,
+                    feed=lines,
+                    feed_ids=ids,
+                    already=found,
+                    root_cfg=_root_config(),
+                )
+                if not out.ok:
+                    break
+                run_scans.append(out.scan_id)
+                fresh, found = scan_new_topics(conn, cfg, run_scans)
+                if fresh >= int(rcfg.get("min_new_topics") or 0):
+                    break
+                log.info(
+                    "scan %s: %s new topic(s), want %s; %s",
+                    out.scan_id,
+                    fresh,
+                    rcfg.get("min_new_topics"),
+                    "scanning again"
+                    if round_no < int(rcfg.get("extra_scans") or 0)
+                    else "stopping",
+                )
             if out.ok:
                 # The crowd around the tickers the radar now shows (studio/crowd.py); never
                 # fails the scan.
