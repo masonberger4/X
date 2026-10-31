@@ -226,7 +226,7 @@ learn:
   playbook: propose
   rewrite_min_new: 3
   rewrite_min_hours: 24
-  model: claude-sonnet-5-5      # blank = the writer's model; Opus at max effort timed out at 30 min
+  model: claude-opus-5-5        # blank = the writer's model
   effort: high                  # blank = the writer's effort
   max_words: 900                # the playbook's length limit
   timeout_minutes: 60
