@@ -229,10 +229,10 @@ learn:
   playbook: propose
   rewrite_min_new: 3
   rewrite_min_hours: 24
-  model: ""                     # blank = the writer's model above
-  effort: ""                    # blank = the writer's effort above
+  model: claude-opus-5-5        # blank = the writer's model
+  effort: max                   # blank = the writer's effort
   max_words: 900                # the playbook's length limit
-  timeout_minutes: 30
+  timeout_minutes: 60
 
 # What to write next (studio/traits.py, studio/rank.py, studio/crowd.py). The learning loop
 # above also learns the KIND of story each posted piece was about (company size, stage,
